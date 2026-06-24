@@ -45,10 +45,15 @@ def extract_external_links(cooked_html: str) -> list[str]:
 def extract_attachment_links(cooked_html: str) -> list[dict]:
     """从帖子 HTML 中提取附件链接（ZIP/HTML）"""
     from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
     soup = BeautifulSoup(cooked_html, 'lxml')
     attachments = []
+    base_url = 'https://forum.trae.cn'
     for a in soup.find_all('a', href=True):
         href = a['href']
+        # 修复相对路径 URL
+        if href.startswith('/'):
+            href = urljoin(base_url, href)
         text = a.get_text(strip=True).lower()
         if href.endswith('.zip') or '.zip?' in href:
             attachments.append({'url': href, 'type': 'zip', 'name': text})

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>研易记 - 公式提取</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 30px 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      color: #0D9488;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 0.95rem;
+    }
+
+    .shortcut-hint {
+      background: #e6f7f5;
+      border-radius: 8px;
+      padding: 10px 16px;
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: #0D9488;
+    }
+
+    .result-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.3s ease;
+    }
+
+    .result-card.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .result-header h3 {
+      font-size: 1.1rem;
+      color: #333;
+    }
+
+    .confidence {
+      font-size: 0.85rem;
+      color: #fff;
+      background: #10b981;
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+
+    .confidence.low {
+      background: #f59e0b;
+    }
+
+    .latex-code {
+      background: #1e293b;
+      color: #5eead4;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: "Geist Mono", monospace;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      word-break: break-all;
+      white-space: pre-wrap;
+      max-height: 250px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn.primary {
+      background: #0D9488;
+      color: #fff;
+    }
+
+    .btn.primary:hover {
+      background: #0b7a70;
+    }
+
+    .btn.secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .btn.secondary:hover {
+      background: #d1d5db;
+    }
+
+    .status-info {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #999;
+    }
+
+    .empty-state-icon {
+      font-size: 4rem;
+      margin-bottom: 15px;
+    }
+
+    .validation-errors {
+      background: #fef2f2;
+      border-left: 4px solid #dc2626;
+      padding: 12px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 10px;
+    }
+
+    .validation-errors ul {
+      margin: 5px 0 0 20px;
+      font-size: 0.85rem;
+      color: #7f1d1d;
+    }
+
+    .copy-toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #333;
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: all 0.3s ease;
+    }
+
+    .copy-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>研易记</h1>
+      <p>基于大模型的沉浸式论文公式提取与复刻助手</p>
+      <div class="shortcut-hint">📌 快捷键 Ctrl+Shift+Y 唤起截图</div>
+    </div>
+
+    <div id="empty-state" class="empty-state">
+      <div class="empty-state-icon">📸</div>
+      <p>按下 Ctrl+Shift+Y 选择要识别的公式区域</p>
+      <p>识别结果自动复制到剪贴板</p>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <div id="copy-toast" class="copy-toast">已复制到剪贴板</div>
+
+  <script>
+    const { ipcRenderer, clipboard } = require('electron');
+
+    const resultsContainer = document.getElementById('results');
+    const emptyState = document.getElementById('empty-state');
+    const copyToast = document.getElementById('copy-toast');
+
+    let resultCount = 0;
+
+    // 接收识别结果
+    ipcRenderer.on('recognize-result', (event, result) => {
+      emptyState.style.display = 'none';
+      addResultCard(result);
+      resultCount++;
+    });
+
+    // 识别错误
+    ipcRenderer.on('recognize-error', (event, error) => {
+      showCopyToast('识别失败: ' + error, true);
+    });
+
+    function addResultCard(result) {
+      const card = document.createElement('div');
+      card.className = 'result-card';
+
+      const confidenceClass = result.confidence >= 0.9 ? 'confidence' : 'confidence low';
+      const confidenceText = (result.confidence * 100).toFixed(0) + '%';
+
+      let errorsHtml = '';
+      if (result.validation && !result.validation.is_valid) {
+        errorsHtml = `
+          <div class="validation-errors">
+            <strong>验证提示：</strong>
+            <ul>
+              ${result.validation.errors.map(e => `<li>${e}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
+      card.innerHTML = `
+        <div class="result-header">
+          <h3>识别结果 #${++resultCount}</h3>
+          <span class="${confidenceClass}">置信度 ${confidenceText}</span>
+        </div>
+        <div class="latex-code">${escapeHtml(result.latex)}</div>
+        ${errorsHtml}
+        <div class="actions">
+          <button class="btn primary" onclick="copyResult('${escapeAttr(result.latex)}')">📋 复制</button>
+          <button class="btn secondary" onclick="saveToLibrary('${escapeAttr(result.latex)}')">💾 保存到公式库</button>
+        </div>
+        <div class="status-info">
+          <span>耗时 ${result.processing_time_ms} ms</span>
+          <span>识别码长 ${result.latex.length} 字符</span>
+        </div>
+      `;
+
+      resultsContainer.insertBefore(card, resultsContainer.firstChild);
+
+      // 添加动画
+      setTimeout(() => card.classList.add('show'), 10);
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function escapeAttr(text) {
+      return text
+        .replace(/'/g, '\\\'')
+        .replace(/"/g, '\\"');
+    }
+
+    function copyResult(latex) {
+      clipboard.writeText(latex);
+      showCopyToast('LaTeX 已复制到剪贴板');
+    }
+
+    function saveToLibrary(latex) {
+      // TODO: 调用 API 保存到公式库
+      showCopyToast('保存功能开发中...');
+    }
+
+    function showCopyToast(text, isError = false) {
+      copyToast.textContent = text;
+      copyToast.style.background = isError ? '#dc2626' : '#333';
+      copyToast.classList.add('show');
+      setTimeout(() => copyToast.classList.remove('show'), 2000);
+    }
+  </script>
+</body>
+</html>

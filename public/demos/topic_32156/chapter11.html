@@ -1,0 +1,102 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第11章：为 PTX 支持 mad 指令</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="grid-bg"></div>
+    <div class="container">
+        <nav class="navbar">
+            <a href="index.html" class="navbar-brand">
+                <img src="images/llvm-dragon.svg" alt="LLVM">
+                <span>SelectionDAG</span>
+            </a>
+            <div class="navbar-links">
+                <a href="chapter10.html">上一章</a>
+                <a href="chapter12.html">下一章</a>
+            </div>
+        </nav>
+
+        <header class="blog-header">
+            <h1>第11章：示例：为 PTX 支持 mad 指令</h1>
+            <p class="subtitle">LLVM SelectionDAG 入门系列</p>
+        </header>
+
+        <div class="blog-content">
+            <div class="section">
+                <h2>11. 示例：为 PTX 支持 mad 指令</h2>
+                <p>本节用一个完整实战示例，演示如何为 PTX 目标添加对 mad 指令的支持。</p>
+
+                <h3>11.1 什么是 MAD？</h3>
+                <p>MAD（全称 multiply-add）是一条指令同时完成乘法和加法：</p>
+                <div class="flow-chart">
+                    <pre>mad(a, b, c) = a * b + c</pre>
+                </div>
+                <p>在 GPU 上，mad 是很重要的指令，因为：</p>
+                <ul>
+                    <li>单条指令完成乘加，延迟更低</li>
+                    <li>适合 many-core 并行执行</li>
+                    <li>广泛用于矩阵运算、向量运算</li>
+                </ul>
+                <img src="images/mad-optimization.svg" alt="MAD 优化流程图" class="section-image">
+                <p class="image-caption">配图：MAD 优化流程图</p>
+
+                <h3>11.2 从 IR 到 PTX</h3>
+                <p>假设有如下 LLVM IR：</p>
+                <div class="code-block" data-lang="llvm">
+                    <pre>%mul = mul i32 %a, %b
+%add = add i32 %mul, %c</pre>
+                </div>
+                <p>经过 SelectionDAG 优化后，可能变成一条 MAD 指令：</p>
+                <div class="code-block" data-lang="ptx">
+                    <pre>mad.lo.s32 %rd, %r1, %r2, %r3;  // %rd = %r1 * %r2 + %r3</pre>
+                </div>
+
+                <h3>11.3 实现步骤</h3>
+                <p>要支持 MAD，需要：</p>
+                <ol>
+                    <li><strong>定义 ISD 节点</strong>：在 NVPTX ISD 命名空间定义 IMAD 节点</li>
+                    <li><strong>注册模式</strong>：在 TableGen 中定义 mul+add → imad 的匹配模式</li>
+                    <li><strong>实现 Lower</strong>：实现 LowerOperation hook，处理 Custom 情况</li>
+                    <li><strong>DAG Combine</strong>：实现 PerformADDCombine，把 mul+add 合并成 IMAD</li>
+                </ol>
+
+                <h3>11.4 核心代码</h3>
+                <p>关键是在 DAG Combine 阶段识别模式：</p>
+                <div class="code-block" data-lang="cpp">
+                    <pre>static SDValue PerformADDCombine(SDNode *N, ...){
+  // 检查是否是 add(mul(a,b), c)
+  if (N.getOpcode() == ISD::ADD &&
+      N.getOperand(0).getOpcode() == ISD::MUL) {
+    // 检查是否可以用 MAD 指令
+    if (TLI.isOperationLegal(ISD::IMAD, VT))
+      return DAG.getNode(NVPTXISD::IMAD, dl, VT,
+                         N.getOperand(0).getOperand(0),
+                         N.getOperand(0).getOperand(1),
+                         N.getOperand(1));
+  }
+  return SDValue();
+}</pre>
+                </div>
+
+                <h3>11.5 PTX 代码生成</h3>
+                <p>TableGen pattern 看起来像：</p>
+                <div class="code-block" data-lang="tablegen">
+                    <pre>def IMAD : Pat<(add (mul i32:$a, i32:$b), i32:$c),
+                    (MAD32rrr $a, $b, $c)>;</pre>
+                </div>
+            </div>
+
+            <div class="nav-links">
+                <a href="chapter10.html">← 上一章</a>
+                <a href="index.html">返回首页</a>
+                <a href="chapter12.html">下一章 →</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

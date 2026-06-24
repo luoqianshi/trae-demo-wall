@@ -1,0 +1,3141 @@
+<!-- ================================================================
+  【小白导语】这是一个FAI(首件检验)工具的网页文件。
+  
+  作用就像"电子放大镜 + 自动记账本"：
+  1. 把工程图纸(PDF/图片)拖进来
+  2. 软件自动识别图纸上的尺寸数字
+  3. 给每个尺寸标上带编号的气泡(小红圈)
+  4. 导出成Excel表格，方便检验员填写实测值
+  
+  文件三大块：
+  - <style>：定义页面的"衣服"（颜色、大小、位置）
+  - HTML：搭好页面的"骨架"（按钮、面板、画布）
+  - <script>：页面的"大脑"（识别图纸、拖动气泡、导出表格）
+  ================================================================ -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIGIT FAI v5.4</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* ================================================================
+   【CSS样式区 - 小白指南】
+   这一大段代码就像"服装设计图"，定义了页面长什么样。
+   不需要读懂每一行，只要知道：
+   - :root{...} 是"调色盘"，定义了整页用到的颜色
+   - .app{...} 是"整体布局"，把页面分成上/左/中/右/下几块
+   - .b{...} 是"按钮样式"，让所有按钮长得一样
+   - .dt{...} 是"表格样式"，让下面的尺寸表整齐好看
+   ================================================================ */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+/* ---- 调色盘：整页颜色都从这里取，改一处全局变 ---- */
+:root{
+  /* --bg: 页面最底层背景色。改浅(如#ffffff)会变白底，改#000000会变纯黑 */
+  --bg:#0b0d13;
+  /* --s1: 一级面板背景(顶部栏/左右侧边栏)。改亮会让面板变灰白 */
+  --s1:#12151e;
+  /* --s2: 二级面板背景(按钮/输入框默认态)。改亮会让按钮变灰 */
+  --s2:#191d2a;
+  /* --s3: 三级面板背景(悬浮/选中态)。改亮会改变悬停底色 */
+  --s3:#1f2436;
+  /* --bd: 边框和分割线颜色。改亮(如#888)会让边框更明显 */
+  --bd:#282e42;
+  /* --ac: 主题强调色(红色)，用于气泡/选中/主要按钮。改#00ff00会变成绿色主题 */
+  --ac:#ff3c3c;
+  /* --ac2: 强调色悬停态，比ac稍亮。改大差值会让悬停更明显 */
+  --ac2:#ff5555;
+  /* --acd: 暗红色，用于边框和点缀。改深会让红色边框更暗 */
+  --acd:#8b1a1a;
+  /* --acg: 半透明红色背景，用于选中项底色。改透明度(如.2)会让选中底色更浓 */
+  --acg:rgba(255,60,60,.08);
+  /* --ok: 合格/通过色(青绿色)。改#00ff00会变亮绿，改#008000会变深绿 */
+  --ok:#4af0c0;
+  /* --okd: 深绿色，用于OK状态边框。改亮会让OK标识更醒目 */
+  --okd:#1e6b52;
+  /* --okg: 半透明绿色背景。改透明度会让OK底色浓淡变化 */
+  --okg:rgba(74,240,192,.08);
+  /* --warn: 警告色(橙色)。改#ff0000会变红色警告 */
+  --warn:#f0a04a;
+  /* --info: 信息提示色(蓝色)。改#00ffff会变青色提示 */
+  --info:#5b9aff;
+  /* --t1: 主文字颜色(近白)。改黑(如#000)会导致黑字黑底看不清 */
+  --t1:#e2e5ed;
+  /* --t2: 次要文字颜色(灰)。改亮会让次要文字更醒目 */
+  --t2:#a0a6b8;
+  /* --t3: 三级文字/禁用态颜色(深灰)。改亮会让提示文字更明显 */
+  --t3:#5c6380;
+}
+/* 全局重置：让所有元素默认无外边距、无内边距；box-sizing让宽高计算包含边框 */
+*{margin:0;padding:0;box-sizing:border-box}
+/* body: 页面根节点样式。font-family改其他字体(如'微软雅黑')会改变全局字体；font-size改大(如16px)会让全局字变大；overflow:hidden禁止滚动条出现 */
+body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--t1);height:100vh;overflow:hidden;user-select:none;font-size:13px}
+/* .app: 整体网格布局容器。grid-template-rows第1项44px是顶部标题栏高度，改大(如60px)会让标题栏变高；第3项0px是底部表格收起高度，改大(如200px)会让默认展开表格；grid-template-columns第1项188px是左侧面板宽，改大(如250px)让左栏更宽；第3项272px是右侧面板宽 */
+.app{display:grid;grid-template-rows:44px 1fr 0px 24px;grid-template-columns:188px 1fr 272px;height:100vh}
+/* .app.open: 展开底部表格时的布局。grid-template-rows第3项170px是表格展开高度，改大(如250px)会让表格区域更高；改小(如100px)会让表格更矮 */
+.app.open{grid-template-rows:44px 1fr 170px 24px}
+/* .hdr: 顶部标题栏。grid-column:1/-1让它横跨整行；padding改大(如0 20px)会让左右留白更多；gap改大(如10px)会让按钮间距更大；z-index:50确保标题栏浮在最上层 */
+.hdr{grid-column:1/-1;background:var(--s1);border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 10px;gap:6px;z-index:50}
+/* .brand: Logo文字样式。font-size改大(如14px)会让Logo更大；padding改大(如4px 10px)会让红色背景块更大；border-radius改大(如6px)会让圆角更明显 */
+.brand{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:11px;color:var(--bg);background:var(--ac);padding:2px 7px;border-radius:3px}
+/* .bsub: Logo右侧小字(如版本号)。font-size改大(如13px)会变大；margin-left改大(如6px)会离Logo更远 */
+.bsub{font-size:11px;color:var(--t3);margin-left:2px}
+/* .tbar: 顶部按钮工具栏容器。gap改大(如6px)会让按钮间距变大；margin-left改大(如20px)会让工具栏离Logo更远 */
+.tbar{display:flex;gap:3px;align-items:center;flex:1;margin-left:10px}
+/* .sep: 按钮组之间的竖分割线。height改大(如30px)会让线更长；margin改大(如0 6px)会让左右间距更大 */
+.sep{width:1px;height:20px;background:var(--bd);margin:0 3px}
+/* .b: 通用按钮基础样式。font-size改大(如13px)字变大；padding改大(如6px 14px)按钮变肥；border-radius改大(如6px)更圆；gap改大(如6px)图标和文字间距变大；transition时间改长(如.3s)悬停动画更慢 */
+.b{font-family:'Noto Sans SC',sans-serif;font-size:11px;font-weight:500;padding:4px 10px;border:1px solid var(--bd);border-radius:4px;background:var(--s2);color:var(--t1);cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+/* .b:hover: 鼠标悬停时按钮样式。border-color改亮会让边框更红；background改深会让悬停底色更浓 */
+.b:hover{border-color:var(--acd);background:var(--acg)}
+/* .b:active: 鼠标按下时按钮缩小到97%。scale改小(如.9)按下时缩小更明显；改大(如1.0)则无缩小效果 */
+.b:active{transform:scale(.97)}
+/* .b:disabled: 禁用态按钮。opacity改大(如.6)会让禁用按钮更不明显；pointer-events:none确保点不到 */
+.b:disabled{opacity:.3;pointer-events:none}
+/* .ba: 主操作按钮(红色实心)。background用var(--ac)红色；color:#fff白色文字；font-weight:600半粗体 */
+.ba{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600}
+/* .ba:hover: 主按钮悬停时用更亮的ac2红色 */
+.ba:hover{background:var(--ac2)}
+/* .bs: 小尺寸按钮。padding改小(如2px 5px)会更迷你；font-size改大(如11px)字变大 */
+.bs{padding:3px 7px;font-size:10px}
+/* .bd: 危险/删除按钮(红色边框)。border-color用var(--ac)红色边框；color用var(--ac)红色文字 */
+.bd{border-color:var(--ac);color:var(--ac)}
+/* .bd:hover: 危险按钮悬停时加半透明红色背景 */
+.bd:hover{background:var(--acg)}
+/* .bok: 通过/确认按钮(绿色实心)。background用var(--ok)绿色；color用var(--bg)深色文字确保对比度 */
+.bok{background:var(--ok);color:var(--bg);border-color:var(--ok);font-weight:600}
+/* #fileInput,#projectInput: 隐藏原生文件选择框。display:none让它不可见；改block会露出丑丑的系统文件框 */
+#fileInput,#projectInput{display:none}
+/* .lp: 左侧面板容器。background用s1暗色背景；border-right右侧边框分隔左右；flex-direction:column让内容垂直排列 */
+.lp{background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;overflow:hidden}
+/* .lps: 左侧面板的一个区块(如页面列表/工具区)。padding改大(如12px 14px)会让内边距更大；border-bottom底边框分隔各个区块 */
+.lps{padding:8px 10px;border-bottom:1px solid var(--bd)}
+/* .lpt: 区块小标题(如"PAGES""TOOLS")。font-size改大(如11px)字变大；letter-spacing改大(如.2em)字母间距更宽；color用t3灰色 */
+.lpt{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:6px}
+/* .lpsc: 区块内容区(可滚动)。flex:1占满剩余高度；overflow-y:auto超出时显示滚动条；padding控制内边距 */
+.lpsc{flex:1;overflow-y:auto;padding:8px 10px}
+/* .pg-item: 页面列表项。padding改大(如6px 10px)会让每项更高；border-radius改大(如5px)圆角更大；gap改大(如8px)图标和文字间距更大；transition时间改长(如.3s)悬停动画更慢 */
+.pg-item{padding:4px 7px;border:1px solid transparent;border-radius:3px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;color:var(--t2);transition:all .12s}
+/* .pg-item:hover: 页面项悬停态。border-color改亮会让悬停边框更明显；color改亮文字变白 */
+.pg-item:hover{border-color:var(--bd);color:var(--t1)}
+/* .pg-item.on: 当前选中的页面项。border-color用acd暗红边框；background用acg半透明红底；color用ac红色文字 */
+.pg-item.on{border-color:var(--acd);background:var(--acg);color:var(--ac)}
+/* .pg-n: 页面编号数字。font-family用等宽字体；font-size改大(如11px)字变大；min-width改大(如20px)编号框更宽 */
+.pg-n{font-family:'JetBrains Mono',monospace;font-size:9px;min-width:16px}
+/* .tl-item: 工具列表项(如选择/框选)。参数同pg-item，gap稍大(6px)因为工具图标更大 */
+.tl-item{padding:5px 7px;border:1px solid transparent;border-radius:3px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--t2);transition:all .12s}
+/* .tl-item:hover: 工具项悬停态 */
+.tl-item:hover{border-color:var(--bd);color:var(--t1)}
+/* .tl-item.on: 当前选中的工具项 */
+.tl-item.on{border-color:var(--acd);background:var(--acg);color:var(--ac)}
+/* .tl-i: 工具图标。font-size改大(如16px)图标更大；width改大(如22px)图标区更宽 */
+.tl-i{font-size:14px;width:18px;text-align:center}
+/* .region-item: 识别区域列表项。padding改大(如5px 8px)更高；margin-bottom改大(如5px)间距更大；font-size改大(如11px)字更大 */
+.region-item{display:flex;align-items:center;justify-content:space-between;padding:3px 6px;background:var(--bg);border:1px solid var(--bd);border-radius:3px;margin-bottom:3px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--info)}
+/* .region-item .rdel: 区域删除按钮。font-size改大(如14px)叉号更大；padding改大(如0 4px)点击区域更大 */
+.region-item .rdel{cursor:pointer;color:var(--t3);font-size:12px;background:none;border:none;padding:0 2px}
+/* .rdel:hover: 删除按钮悬停变红色 */
+.rdel:hover{color:var(--ac)}
+/* .va: 中间视图区(画布容器)。position:relative为内部绝对定位做参考；overflow:hidden隐藏溢出；background用bg背景色 */
+.va{position:relative;overflow:hidden;background:var(--bg)}
+/* .vs: 滚动视图容器。width/height100%填满父容器；overflow:auto允许滚动查看大图 */
+.vs{width:100%;height:100%;overflow:auto;position:relative}
+/* .vw: 图纸包装器(画布+气泡的外框)。box-shadow改大(如0 4px 50px...)阴影更深更扩散；margin改大(如30px)图纸离边缘更远 */
+.vw{position:relative;display:inline-block;box-shadow:0 2px 30px rgba(0,0,0,.5);flex-shrink:0;margin:20px}
+/* #pdfCanvas: PDF渲染画布。display:block消除图片底部空隙 */
+#pdfCanvas{display:block}
+/* #bubbleSvg: 气泡SVG图层。position:absolute覆盖在画布上方；pointer-events:none默认不拦截鼠标(子元素可单独开启) */
+#bubbleSvg{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
+/* #bubbleSvg .bg: 单个气泡组。pointer-events:none让鼠标穿透到下方画布 */
+#bubbleSvg .bg{pointer-events:none}
+/* #bubbleSvg .sf: 选框矩形(红色虚线框)。pointer-events:all开启鼠标交互；cursor:move显示移动光标；transition时间改长(如.3s)悬停动画更慢 */
+#bubbleSvg .sf{pointer-events:all;cursor:move;transition:stroke-width .1s}
+/* #bubbleSvg .sf:hover: 选框悬停态。stroke-width改大(如4)悬停时边框更粗；fill透明度改大(如.2)悬停底色更浓 */
+#bubbleSvg .sf:hover{stroke-width:2.5;fill:rgba(255,60,60,.1)}
+/* #bubbleSvg .sf-handle: 选框四角调整手柄。opacity:0默认隐藏；transition时间改长(如.3s)显隐动画更慢 */
+#bubbleSvg .sf-handle{pointer-events:all;opacity:0;transition:opacity .15s}
+/* #bubbleSvg .sf-handle.show: 选中气泡时显示手柄。opacity:1完全显示 */
+#bubbleSvg .sf-handle.show{opacity:1}
+/* #bubbleSvg .sf-handle:hover: 手柄悬停变亮红。fill改其他色(如#ff0000)会变纯红 */
+#bubbleSvg .sf-handle:hover{fill:#ff5555}
+/* #bubbleSvg .ll,#bubbleSvg .cd: 连线和角点。pointer-events:none不拦截鼠标 */
+#bubbleSvg .ll,#bubbleSvg .cd{pointer-events:none}
+/* #bubbleSvg .bc: 气泡圆圈。pointer-events:all可拖动；cursor:move显示移动光标 */
+#bubbleSvg .bc{pointer-events:all;cursor:move}
+/* #bubbleSvg .bc:hover: 气泡悬停时边框加粗。stroke-width改大(如4)更粗 */
+#bubbleSvg .bc:hover{stroke-width:2.5}
+/* #bubbleSvg .region-rect: 识别区域框。pointer-events:none不拦截鼠标 */
+#bubbleSvg .region-rect{pointer-events:none}
+/* #bubbleSvg .mark-rect: 标记框矩形。同sf，可拖动 */
+#bubbleSvg .mark-rect{pointer-events:all;cursor:move;transition:stroke-width .1s}
+/* #bubbleSvg .mark-rect:hover: 标记框悬停加粗 */
+#bubbleSvg .mark-rect:hover{stroke-width:2.5}
+/* #bubbleSvg .mark-handle: 标记框手柄。默认隐藏 */
+#bubbleSvg .mark-handle{pointer-events:all;cursor:move;opacity:0;transition:opacity .15s}
+/* #bubbleSvg .mark-handle.show: 显示手柄 */
+#bubbleSvg .mark-handle.show{opacity:1}
+/* #bubbleSvg .mark-handle:hover: 手柄悬停变亮红 */
+#bubbleSvg .mark-handle:hover{fill:#ff5555}
+/* #bubbleSvg .mark-rotate: 标记旋转按钮。cursor:grab显示抓取手势 */
+#bubbleSvg .mark-rotate{pointer-events:all;cursor:grab;opacity:0;transition:opacity .15s}
+/* #bubbleSvg .mark-rotate.show: 显示旋转按钮 */
+#bubbleSvg .mark-rotate.show{opacity:1}
+/* #bubbleSvg .mark-rotate:hover: 旋转按钮悬停变橙色。fill改其他色(如#ff0000)会变红 */
+#bubbleSvg .mark-rotate:hover{fill:#ff8c00}
+/* .sel-rect: 鼠标框选时的动态矩形。border改粗(如3px)框线更粗；background透明度改大(如.15)底色更浓；z-index:10确保浮在画布之上 */
+.sel-rect{position:absolute;border:1.5px solid var(--ac);background:rgba(255,60,60,.06);pointer-events:none;display:none;z-index:10}
+/* .sel-rect.on: 显示框选矩形。display:block可见 */
+.sel-rect.on{display:block}
+/* .sel-rect .sh: 框选矩形四角的小方块手柄。width/height改大(如8px)手柄更大；border-radius改大(如2px)更圆 */
+.sel-rect .sh{position:absolute;width:6px;height:6px;background:var(--ac);border:1px solid var(--bg);border-radius:1px}
+/* .sel-rect .sh.tl: 左上角手柄。top/left负值让它居中在角上 */
+.sel-rect .sh.tl{top:-3px;left:-3px}
+/* .sel-rect .sh.tr: 右上角手柄 */
+.sel-rect .sh.tr{top:-3px;right:-3px}
+/* .sel-rect .sh.bl: 左下角手柄 */
+.sel-rect .sh.bl{bottom:-3px;left:-3px}
+/* .sel-rect .sh.br: 右下角手柄 */
+.sel-rect .sh.br{bottom:-3px;right:-3px}
+/* .zb: 缩放控制条(画布左下角)。bottom/left改大(如20px)离边缘更远；border-radius改大(如8px)更圆；padding改大(如4px)内边距更大 */
+.zb{position:absolute;bottom:10px;left:10px;display:none;gap:2px;background:var(--s1);border:1px solid var(--bd);border-radius:5px;padding:2px;z-index:20}
+/* .zb.show: 显示缩放条。display:flex水平排列 */
+.zb.show{display:flex}
+/* .zb button: 缩放条里的加减按钮。width/height改大(如32px)按钮更大；font-size改大(如15px)符号更大；border-radius改大(如5px)更圆 */
+.zb button{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--t1);cursor:pointer;border-radius:3px;font-size:13px;font-family:'JetBrains Mono',monospace}
+/* .zb button:hover: 缩放按钮悬停变色底 */
+.zb button:hover{background:var(--s2)}
+/* .zb span: 缩放比例显示文字(如"100%")。font-size改大(如12px)字更大；min-width改大(如50px)显示区更宽 */
+.zb span{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t3);padding:0 5px;display:flex;align-items:center;min-width:36px;justify-content:center}
+/* .drop-ov: 拖放文件时的遮罩层。background透明度改大(如.1)遮罩更深；border改粗(如3px)虚线边框更粗；z-index:100确保在最上层 */
+.drop-ov{position:absolute;inset:0;background:rgba(255,60,60,.04);border:2px dashed var(--ac);display:none;align-items:center;justify-content:center;z-index:100}
+/* .drop-ov.on: 显示拖放遮罩。display:flex居中显示提示文字 */
+.drop-ov.on{display:flex}
+/* .drop-ov span: 拖放提示文字。font-size改大(如18px)字更大；font-weight改小(如400)变细 */
+.drop-ov span{font-size:14px;color:var(--ac);font-weight:500}
+/* .emp: 空白状态提示(未加载图纸时)。inset:0填满整个视图区；z-index:5在画布之下 */
+.emp{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--t3);text-align:center;z-index:5}
+/* .emp.hid: 隐藏空白提示。display:none不可见 */
+.emp.hid{display:none}
+/* .emp .ei: 空白状态的虚线框图标。width/height改大(如70px)图标更大；border改粗(如3px)边框更粗；opacity改大(如.8)更明显 */
+.emp .ei{width:50px;height:50px;border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:14px;opacity:.4}
+/* .emp h2: 空白状态主标题。font-size改大(如16px)更大；margin-bottom改大(如10px)离副标题更远 */
+.emp h2{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--t1)}
+/* .emp p: 空白状态说明文字。font-size改大(如13px)更大；line-height改大(如2)行间距更宽 */
+.emp p{font-size:11px;line-height:1.6}
+/* .rp: 右侧面板容器。同lp但border-left左侧边框分隔 */
+.rp{background:var(--s1);border-left:1px solid var(--bd);display:flex;flex-direction:column;overflow:hidden}
+/* .rps: 右侧信息区块。max-height改大(如300px)显示更多内容；overflow-y:auto超出可滚动 */
+.rps{padding:8px 10px;border-bottom:1px solid var(--bd);max-height:220px;overflow-y:auto}
+/* .rpt: 右侧区块小标题。同lpt */
+.rpt{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--t3);margin-bottom:6px}
+/* .pr: 右侧属性行(如零件名称输入框)。padding改大(如4px 0)行间距更大；gap改大(如6px)标签和输入框间距更大 */
+.pr{display:flex;align-items:center;justify-content:space-between;padding:2px 0;gap:3px}
+/* .pr label: 属性标签。font-size改大(如11px)字更大；min-width改大(如60px)标签区更宽 */
+.pr label{font-size:10px;color:var(--t3);flex-shrink:0;min-width:48px}
+/* .pr input,.pr select: 输入框和下拉框。font-size改大(如11px)字更大；padding改大(如4px 8px)内边距更大；border-radius改大(如5px)更圆 */
+.pr input,.pr select{font-family:'JetBrains Mono',monospace;font-size:10px;background:var(--bg);border:1px solid var(--bd);color:var(--t1);padding:2px 5px;border-radius:3px;outline:none}
+/* .pr input.custom-tol: 自定义公差输入框。width改大(如80px)输入框更宽；border-color用acd暗红边框提示特殊 */
+.pr input.custom-tol{width:60px;border-color:var(--acd)}
+/* .pr input:focus,.pr select:focus: 输入框聚焦态。border-color改其他色(如var(--info))会变蓝边框 */
+.pr input:focus,.pr select:focus{border-color:var(--acd)}
+/* .pr .ocr-btn: OCR设置小按钮(如方向/语言)。width/height改大(如26px)按钮更大；font-size改大(如13px)图标更大 */
+.pr .ocr-btn{width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;border:1px solid var(--bd);border-radius:3px;background:var(--s2);color:var(--t3);cursor:pointer;font-size:11px;flex-shrink:0}
+/* .pr .ocr-btn:hover: OCR按钮悬停变绿色。border-color改其他色会变其他颜色 */
+.pr .ocr-btn:hover{border-color:var(--ok);color:var(--ok);background:var(--okg)}
+/* .pr .ocr-btn.active: OCR按钮激活态(当前选中)。border-color用ac红色；color用ac红色文字；background用acg红底 */
+.pr .ocr-btn.active{border-color:var(--ac);color:var(--ac);background:var(--acg)}
+/* .opv: OCR预览图容器。min-height改大(如80px)最小高度更大；max-height改大(如180px)预览图更大；border-radius改大(如6px)更圆 */
+.opv{width:100%;min-height:50px;max-height:120px;background:var(--bg);border:1px solid var(--bd);border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+/* .opv img: 预览图本身。max-height改大(如180px)限制更大；object-fit:cover会让图填满裁剪，contain保持比例 */
+.opv img{max-width:100%;max-height:120px;object-fit:contain;display:block}
+/* .opv .ph: OCR预览区的占位文字(如"No Preview")。font-size改大(如12px)更大；opacity改大(如.8)更明显 */
+.opv .ph{font-size:10px;color:var(--t3);opacity:.5}
+/* .ocr-val: OCR识别结果大数字显示。font-size改大(如24px)数字更大；color改var(--info)会变蓝色；min-height改大(如28px)行高更大 */
+.ocr-val{font-family:'JetBrains Mono',monospace;font-size:18px;color:var(--ok);min-height:22px;font-weight:700;margin-top:4px}
+/* .ocr-meta: OCR元信息(如置信度)。font-size改大(如11px)更大；color改亮会更容易看清 */
+.ocr-meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t3);margin-top:2px}
+/* .rg: 正则表达式选择按钮网格。grid-template-columns:repeat(3,1fr)表示3列等宽；gap改大(如6px)按钮间距更大；margin-top改大(如8px)离上方更远 */
+.rg{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:5px}
+/* .rb: 正则选择按钮。font-size改大(如11px)字更大；padding改大(如5px 0)按钮更高；border-radius改大(如5px)更圆；transition时间改长(如.3s)动画更慢 */
+.rb{font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 0;border:1px solid var(--bd);border-radius:3px;background:var(--bg);color:var(--t3);cursor:pointer;text-align:center;transition:all .12s;line-height:1.2}
+/* .rb:hover: 正则按钮悬停态。border-color改亮边框更明显；color改亮文字变白 */
+.rb:hover{border-color:var(--acd);color:var(--t1)}
+/* .rb.on: 当前选中的正则按钮。border-color用ok绿色；background用okg绿底；color用ok绿色文字 */
+.rb.on{border-color:var(--ok);background:var(--okg);color:var(--ok)}
+/* .rb .ri: 正则按钮内的图标。font-size改大(如14px)图标更大；margin-bottom改大(如3px)图标和文字间距更大 */
+.rb .ri{display:block;font-size:12px;margin-bottom:1px}
+/* .bt: 底部尺寸表格容器。grid-column:1/-1横跨整行；border-top顶边框分隔上方内容 */
+.bt{grid-column:1/-1;background:var(--s1);border-top:1px solid var(--bd);overflow:hidden;display:flex;flex-direction:column}
+/* .dth: 表格头部栏。padding改大(如8px 14px)头部更高；flex-shrink:0防止头部被压缩 */
+.dth{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border-bottom:1px solid var(--bd);flex-shrink:0}
+/* .dth .dtt: 表格标题文字(如"DIMENSIONS")。font-size改大(如12px)更大；gap改大(如10px)图标和文字间距更大 */
+.dth .dtt{font-size:10px;font-weight:600;color:var(--t2);display:flex;align-items:center;gap:6px}
+/* .dtc: 表格内的计数标签(如"12 OK")。font-size改大(如11px)更大；padding改大(如3px 8px)标签更宽 */
+.dtc{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ok);background:var(--okg);border:1px solid var(--okd);padding:1px 5px;border-radius:2px}
+/* .dta: 表格操作按钮组(如导出CSV)。gap改大(如6px)按钮间距更大 */
+.dta{display:flex;gap:3px}
+/* .dts: 表格滚动区。flex:1占满剩余高度；overflow:auto超出可滚动 */
+.dts{flex:1;overflow:auto}
+/* table.dt: 尺寸数据表格。width:100%填满容器；border-collapse:collapse合并边框；font-size改大(如13px)字更大 */
+table.dt{width:100%;border-collapse:collapse;font-size:11px}
+/* table.dt th: 表头单元格。position:sticky+top:0让表头滚动时固定；font-size改大(如11px)更大；padding改大(如6px 10px)更宽；z-index:2确保表头浮在数据之上 */
+table.dt th{position:sticky;top:0;background:var(--s2);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--t3);padding:4px 6px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap;z-index:2}
+/* table.dt td: 数据单元格。padding改大(如5px 10px)更宽；font-size改大(如13px)更大；white-space:nowrap防止文字换行 */
+table.dt td{padding:3px 6px;border-bottom:1px solid var(--bd);font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap;cursor:pointer}
+/* table.dt tr:hover td: 数据行悬停态。background改其他色(如var(--okg))会变绿底 */
+table.dt tr:hover td{background:var(--acg)}
+/* table.dt tr.sel td: 当前选中行。background透明度改大(如.15)底色更浓 */
+table.dt tr.sel td{background:rgba(255,60,60,.08)}
+/* table.dt td[contenteditable]: 可编辑单元格。outline:none去掉聚焦时的蓝色轮廓 */
+table.dt td[contenteditable]{outline:none}
+/* table.dt td[contenteditable]:focus: 编辑单元格聚焦态。box-shadow改大(如inset 0 0 0 2px...)边框更粗 */
+table.dt td[contenteditable]:focus{background:var(--s3);box-shadow:inset 0 0 0 1px var(--acd)}
+/* .dn: 序号列样式。color用ac红色；font-weight:700粗体；min-width改大(如30px)更宽 */
+.dn{color:var(--ac);font-weight:700;text-align:center;min-width:24px}
+/* .dv: 数值列样式。color用t1主白色；font-weight:600半粗体 */
+.dv{color:var(--t1);font-weight:600}
+/* .dt2: 公差列样式。color用warn橙色 */
+.dt2{color:var(--warn)}
+/* .dte: 表格空状态。padding改大(如30px)空白更大；font-size改大(如13px)更大 */
+.dte{text-align:center;padding:20px;color:var(--t3);font-size:11px}
+/* table.dt td.locked: 锁定单元格。cursor:default去掉手型；opacity改大(如1)完全不透明 */
+table.dt td.locked{color:var(--t2);cursor:default;opacity:.85}
+/* table.dt tr.drag-over td: 行拖拽悬停态。background透明度改大(如.3)蓝底更浓 */
+table.dt tr.drag-over td{background:rgba(91,154,255,.15)}
+/* table.dt tr.dragging: 正在拖拽的行。opacity改大(如.7)更明显 */
+table.dt tr.dragging{opacity:.4}
+/* .sbar: 底部状态栏。grid-column:1/-1横跨整行；gap改大(如20px)状态项间距更大；font-size改大(如11px)更大 */
+.sbar{grid-column:1/-1;background:var(--s2);border-top:1px solid var(--bd);display:flex;align-items:center;padding:0 10px;gap:12px;font-size:10px;color:var(--t3);font-family:'JetBrains Mono',monospace}
+/* .sd: 状态指示灯小圆点。width/height改大(如8px)灯更大；border-radius:50%让它变圆形 */
+.sd{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:3px;vertical-align:middle}
+/* .sd.g: 绿色指示灯(正常)。background用ok绿色 */
+.sd.g{background:var(--ok)}
+/* .sd.y: 黄色指示灯(处理中)。background用warn橙色；animation:bl 1s infinite让灯闪烁，改2s会让闪烁更慢 */
+.sd.y{background:var(--warn);animation:bl 1s infinite}
+/* .sd.r: 红色指示灯(错误)。background用ac红色 */
+.sd.r{background:var(--ac)}
+/* @keyframes bl: 闪烁动画。0%和100% opacity:1全亮；50% opacity:.3变暗。改.1会更暗 */
+@keyframes bl{0%,100%{opacity:1}50%{opacity:.3}}
+/* ::-webkit-scrollbar: 自定义滚动条。width/height改大(如8px)滚动条更粗 */
+::-webkit-scrollbar{width:5px;height:5px}
+/* ::-webkit-scrollbar-track: 滚动条轨道背景。改#333会变深灰轨道 */
+::-webkit-scrollbar-track{background:transparent}
+/* ::-webkit-scrollbar-thumb: 滚动条滑块。background改亮(如#666)滑块更明显；border-radius改大(如5px)更圆 */
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:3px}
+/* .toast: 顶部提示条(如"识别完成")。top改大(如80px)离顶部更远；font-size改大(如13px)更大；padding改大(如8px 20px)更宽；z-index:300确保浮在大部分内容之上；transition时间改长(如.4s)动画更慢 */
+.toast{position:fixed;top:56px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--s2);border:1px solid var(--okd);color:var(--ok);font-size:11px;padding:6px 16px;border-radius:5px;z-index:300;opacity:0;transition:all .2s;pointer-events:none;font-family:'JetBrains Mono',monospace}
+/* .toast.show: 显示提示条。opacity:1完全可见；translateY(0)从上方滑入到原位 */
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* .modal-bg: 弹窗遮罩层。background透明度改大(如.8)遮罩更深；z-index:500确保在最上层 */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;display:none;align-items:center;justify-content:center}
+/* .modal-bg.show: 显示弹窗遮罩。display:flex居中弹窗 */
+.modal-bg.show{display:flex}
+/* .modal: 弹窗本体。border-radius改大(如12px)更圆；padding改大(如24px)内边距更大；min-width改大(如400px)弹窗更宽；box-shadow改大(如0 12px 60px...)阴影更深 */
+.modal{background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:18px;min-width:340px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+/* .modal h3: 弹窗标题。font-size改大(如15px)更大；margin-bottom改大(如16px)离内容更远 */
+.modal h3{font-size:13px;font-weight:600;margin-bottom:12px}
+/* .modal .mr: 弹窗内一行设置。padding改大(如8px 0)行间距更大；gap改大(如12px)标签和选择框间距更大 */
+.modal .mr{display:flex;align-items:center;justify-content:space-between;padding:5px 0;gap:8px}
+/* .modal .mr label: 弹窗标签。font-size改大(如13px)更大 */
+.modal .mr label{font-size:12px;color:var(--t2)}
+/* .modal .mr select: 弹窗下拉框。font-size改大(如13px)更大；padding改大(如6px 10px)更宽；width改大(如200px)更宽 */
+.modal .mr select{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--bd);color:var(--t1);padding:4px 8px;border-radius:3px;width:160px}
+/* .modal .ma: 弹窗底部按钮区。gap改大(如10px)按钮间距更大；margin-top改大(如20px)离内容更远 */
+.modal .ma{display:flex;gap:6px;justify-content:flex-end;margin-top:14px}
+/* .corr-bar: 修正输入条。gap改大(如8px)间距更大；margin-top改大(如8px)离上方更远 */
+.corr-bar{display:flex;gap:4px;margin-top:4px;align-items:center}
+/* .corr-bar input: 修正值输入框。font-size改大(如14px)更大；width改大(如100px)更宽；color改var(--warn)会变橙色文字 */
+.corr-bar input{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg);border:1px solid var(--bd);color:var(--ok);padding:3px 6px;border-radius:3px;width:80px;outline:none}
+/* .corr-bar .b: 修正条内的按钮。padding改大(如5px 12px)更宽；font-size改大(如11px)更大 */
+.corr-bar .b{padding:3px 8px;font-size:10px}
+</style>
+</head>
+<!-- ================================================================
+  【HTML骨架区 - 小白指南】
+  下面的代码像"乐高积木说明书"，一块块搭出页面结构：
+  - header(顶部)：放logo、打开文件按钮、自动识别按钮
+  - aside.lp(左侧面板)：放页面列表、工具选择、OCR设置
+  - div.va(中间画布)：显示图纸，可以框选、拖放
+  - aside.rp(右侧面板)：放零件信息、气泡属性、日志
+  - div.bt(底部表格)：显示所有识别到的尺寸列表
+  - footer(底部状态栏)：显示当前页码、缩放比例、尺寸数量
+  ================================================================ -->
+<body>
+<!-- .app: 最外层应用容器。id="app"让JS可以通过document.getElementById找到它；class="app"对应CSS网格布局 -->
+<div class="app" id="app">
+  <!-- header.hdr: 顶部标题栏。class="hdr"对应CSS顶部栏样式；里面是logo和操作按钮 -->
+  <header class="hdr">
+    <!-- span.brand: Logo文字。class="brand"让它有红色背景和等宽字体；文字内容"DIGIT FAI"可改成你的品牌名 -->
+    <span class="brand">DIGIT FAI</span>
+    <!-- span.bsub: 版本号。class="bsub"让它变灰色小字；改成"v6.0"会显示新版本号 -->
+    <span class="bsub">v5.4</span>
+    <!-- .tbar: 顶部按钮工具栏容器。class="tbar"让它水平排列按钮 -->
+    <div class="tbar">
+      <!-- button#btnOpen: 打开文件按钮。id="btnOpen"让JS能找到它；class="b"是普通按钮样式；disabled去掉后按钮默认可点击 -->
+      <button class="b" id="btnOpen">
+        <!-- svg: 按钮左侧的文件图标。width/height改大(如16)图标更大；stroke-width改大(如2.5)线条更粗 -->
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> 打开
+      </button>
+      <!-- input#fileInput: 隐藏的文件选择框。type="file"表示选文件；accept限定可选.pdf/.png等格式；加.gif可让选动图 -->
+      <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp"/>
+      <!-- .sep: 按钮组之间的竖分割线 -->
+      <div class="sep"></div>
+      <!-- button#btnAuto: 自动气泡按钮。class="b ba"是红色主按钮样式；disabled表示初始禁用，有图纸后JS会启用 -->
+      <button class="b ba" id="btnAuto" disabled>&#9889; 自动气泡</button>
+      <!-- button#btnFixBox: 矫正选框按钮。disabled初始禁用 -->
+      <button class="b" id="btnFixBox" disabled>&#128207; 矫正选框</button>
+      <!-- .sep: 分割线 -->
+      <div class="sep"></div>
+      <!-- button#btnTable: 尺寸表按钮。控制底部表格显隐 -->
+      <button class="b" id="btnTable" disabled>&#128202; 尺寸表</button>
+      <!-- button#btnExport: 导出按钮。disabled初始禁用 -->
+      <button class="b" id="btnExport" disabled>&#8595; 导出</button>
+      <!-- .sep: 分割线 -->
+      <div class="sep"></div>
+      <!-- button#btnSave: 保存项目按钮。&#128190;是软盘图标 -->
+      <button class="b" id="btnSave">&#128190;</button>
+      <!-- button#btnLoad: 加载项目按钮。&#128194;是文件夹图标 -->
+      <button class="b" id="btnLoad">&#128194;</button>
+      <!-- input#projectInput: 隐藏的项目文件选择框。accept=".json"只让选JSON格式的项目文件 -->
+      <input type="file" id="projectInput" accept=".json"/>
+    </div>
+  </header>
+  <!-- aside.lp: 左侧面板。class="lp"对应CSS左侧面板样式 -->
+  <aside class="lp">
+    <!-- .lps: 左侧面板第一个区块(页面列表) -->
+    <div class="lps">
+      <!-- .lpt: 区块标题"页面" -->
+      <div class="lpt">页面</div>
+      <!-- #pgList: 页面列表容器。JS会把加载的PDF页码动态插入这里 -->
+      <div id="pgList">
+        <!-- 默认显示"未加载"。改文字内容可换成"请先打开文件"等提示 -->
+        <div style="color:var(--t3);font-size:10px;padding:4px 0">未加载</div>
+      </div>
+    </div>
+    <!-- .lpsc: 左侧面板可滚动内容区 -->
+    <div class="lpsc">
+      <!-- .lpt: 区块标题"工具" -->
+      <div class="lpt">工具</div>
+      <!-- #tlList: 工具列表容器 -->
+      <div id="tlList">
+        <!-- .tl-item.on: 当前默认选中的"选择/移动"工具。data-t="select"是JS识别的工具类型；去掉class="on"会让它默认不选中 -->
+        <div class="tl-item on" data-t="select"><span class="tl-i">&#8598;</span>选择/移动</div>
+        <!-- .tl-item: "框选识别+气泡"工具。data-t="ocr"让JS知道点击后切换到OCR模式 -->
+        <div class="tl-item" data-t="ocr"><span class="tl-i">&#128269;</span>框选识别+气泡</div>
+        <!-- .tl-item: "识别区域"工具。data-t="region"用于框选大面积识别区 -->
+        <div class="tl-item" data-t="region"><span class="tl-i">&#9645;</span>识别区域</div>
+        <!-- .tl-item: "手动添加气泡"工具。data-t="manual"用于不识别直接放气泡 -->
+        <div class="tl-item" data-t="manual"><span class="tl-i">&#9998;</span>手动添加气泡</div>
+      </div>
+      <!-- margin-top:10px让识别区域区块与上方工具列表有间距 -->
+      <div style="margin-top:10px">
+        <!-- .lpt: 区块标题"识别区域" -->
+        <div class="lpt">识别区域</div>
+        <!-- #regionList: 识别区域列表容器。JS会在这里插入框选的区域 -->
+        <div id="regionList">
+          <!-- 默认提示文字。改内容可换成其他语言提示 -->
+          <div style="color:var(--t3);font-size:10px">使用「识别区域」工具框选</div>
+        </div>
+      </div>
+      <!-- margin-top:10px让OCR预览区与上方有间距 -->
+      <div style="margin-top:10px">
+        <!-- .lpt: 区块标题"OCR 预览" -->
+        <div class="lpt">OCR 预览</div>
+        <!-- #ocrPrev: OCR预览图容器。class="opv"对应预览区样式 -->
+        <div class="opv" id="ocrPrev">
+          <!-- .ph: 默认占位文字。改成"请框选尺寸"可换提示语 -->
+          <span class="ph">框选后显示</span>
+        </div>
+        <!-- #ocrVal: OCR识别出的数值大字体显示区。JS会把识别到的数字填到这里 -->
+        <div class="ocr-val" id="ocrVal"></div>
+        <!-- #ocrMeta: OCR元信息显示区。如置信度、耗时等 -->
+        <div class="ocr-meta" id="ocrMeta"></div>
+        <!-- #corrBar: 修正输入条。style="display:none"默认隐藏，识别结果不理想时JS显示它 -->
+        <div class="corr-bar" id="corrBar" style="display:none">
+          <!-- 修正标签文字 -->
+          <span style="font-size:10px;color:var(--t3)">修正:</span>
+          <!-- #corrInput: 修正值输入框。placeholder改文字可换提示语 -->
+          <input id="corrInput" placeholder="正确值"/>
+          <!-- 确认修正按钮。onclick="A.applyCorrection()"点击时调用JS的applyCorrection函数 -->
+          <button class="b bs ba" onclick="A.applyCorrection()">确认</button>
+        </div>
+      </div>
+      <!-- margin-top:10px让OCR设置区与上方有间距 -->
+      <div style="margin-top:10px">
+        <!-- .lpt: 区块标题"OCR 设置"；里面span是重置按钮，点击后恢复默认设置 -->
+        <div class="lpt">OCR 设置 <span style="color:var(--ok);cursor:pointer;margin-left:4px" id="btnResetSet">&#8635;</span></div>
+        <!-- .pr: PSM分段模式设置行 -->
+        <div class="pr">
+          <!-- label: 左侧标签文字。改文字可换成"PSM"等其他名称 -->
+          <label>分段</label>
+          <!-- #sPSM: PSM下拉框。value="13"默认原始行；改value="7"默认单行模式 -->
+          <select id="sPSM"><option value="7">单行</option><option value="8">单词</option><option value="13" selected>原始行</option></select>
+        </div>
+        <!-- .pr: 放大倍数设置行 -->
+        <div class="pr">
+          <label>放大</label>
+          <!-- #sScale: 放大下拉框。value="2"默认2倍放大；改value="4"会默认4倍放大提高识别率但变慢 -->
+          <select id="sScale"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option><option value="4">4x</option></select>
+        </div>
+        <!-- .pr: 二值化阈值设置行 -->
+        <div class="pr">
+          <label>二值化</label>
+          <!-- #sThresh: 阈值数字输入。value="200"默认阈值200；改value="180"会让更多灰度像素变黑；min/max限定范围0-255 -->
+          <input type="number" id="sThresh" value="200" min="0" max="255" step="5" style="width:50px"/>
+        </div>
+        <!-- .pr: 反色设置行 -->
+        <div class="pr">
+          <label>反色</label>
+          <!-- #sInvert: 反色下拉框。value="0"默认关闭；改selected到value="1"会默认开启反色(白底黑字变黑底白字) -->
+          <select id="sInvert"><option value="0" selected>关</option><option value="1">开</option></select>
+        </div>
+        <!-- .pr: 多通道设置行 -->
+        <div class="pr">
+          <label>多通道</label>
+          <!-- #sMulti: 多通道下拉框。value="1"默认开启，同时尝试多种预处理方式提高识别率 -->
+          <select id="sMulti"><option value="1" selected>开</option><option value="0">关</option></select>
+        </div>
+        <!-- .pr: 自适应阈值设置行 -->
+        <div class="pr">
+          <label>自适应</label>
+          <!-- #sAdapt: 自适应阈值下拉框。value="1"默认开启，根据局部亮度自动调整阈值 -->
+          <select id="sAdapt"><option value="1" selected>开</option><option value="0">关</option></select>
+        </div>
+        <!-- .pr: 混淆处理设置行 -->
+        <div class="pr">
+          <label>混淆</label>
+          <!-- #sConfuse: 混淆下拉框。value="1"默认开启，处理手写体或模糊文字 -->
+          <select id="sConfuse"><option value="1" selected>开</option><option value="0">关</option></select>
+        </div>
+        <!-- .pr: 缓存设置行 -->
+        <div class="pr">
+          <label>缓存</label>
+          <!-- #sCache: 缓存下拉框。value="1"默认开启，加速重复识别；value="0"每次重新识别 -->
+          <select id="sCache"><option value="1" selected>开</option><option value="0">关</option></select>
+          <!-- 缓存清除按钮。onclick直接调用A.ocrCache.invalidate()清空缓存并提示 -->
+          <span style="font-size:8px;color:var(--t3);cursor:pointer;margin-left:3px" onclick="A.ocrCache.invalidate();A.toast('缓存已清')">&#8635;</span>
+        </div>
+        <!-- margin-top:4px让自动模式标题与上方有间距 -->
+        <div style="margin-top:4px"><div class="lpt">自动模式</div></div>
+        <!-- .pr: 自动扫描模式设置行 -->
+        <div class="pr">
+          <label>扫描</label>
+          <!-- #sAutoMode: 扫描模式下拉框。value="quick"默认快捷模式(只扫0和90度)；改value="pro"默认专业模式(0-270度全扫) -->
+          <select id="sAutoMode"><option value="quick" selected>快捷0+90</option><option value="pro">专业0~270</option></select>
+        </div>
+        <!-- margin-top:4px让方向标题与上方有间距 -->
+        <div style="margin-top:4px"><div class="lpt">方向</div></div>
+        <!-- #rotG: 方向选择按钮网格。class="rg"对应3列网格布局 -->
+        <div class="rg" id="rotG">
+          <!-- .rb.on: 默认选中的"自动"方向。data-r="auto"让JS知道自动检测旋转角度 -->
+          <div class="rb on" data-r="auto"><span class="ri">&#9678;</span>自动</div>
+          <!-- .rb: 0度方向(横向)。data-r="0"固定不旋转 -->
+          <div class="rb" data-r="0"><span class="ri">&#8594;</span>0</div>
+          <!-- .rb: 90度方向(竖向向上)。data-r="90"顺时针旋转90度 -->
+          <div class="rb" data-r="90"><span class="ri">&#8593;</span>90</div>
+          <!-- .rb: 180度方向(横向倒置)。data-r="180"旋转180度 -->
+          <div class="rb" data-r="180"><span class="ri">&#8592;</span>180</div>
+          <!-- .rb: 270度方向(竖向向下)。data-r="270"顺时针旋转270度 -->
+          <div class="rb" data-r="270"><span class="ri">&#8595;</span>270</div>
+          <!-- .rb: 自定义角度。data-r="custom"让JS弹出输入框让用户填角度 -->
+          <div class="rb" data-r="custom"><span class="ri">&#8635;</span>自定义</div>
+        </div>
+        <!-- margin-top:4px让语言标题与上方有间距 -->
+        <div style="margin-top:4px"><div class="lpt">语言</div></div>
+        <!-- .pr: OCR语言设置行 -->
+        <div class="pr">
+          <label>语言</label>
+          <!-- #sLang: 语言下拉框。value="eng"默认英文；改selected到chi_sim会默认中文，但需下载对应语言包 -->
+          <select id="sLang"><option value="eng" selected>English</option><option value="chi_sim">中文</option><option value="jpn">日本語</option><option value="deu">Deutsch</option></select>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <!-- #dropZone: 中间视图区(拖放区域)。class="va"对应画布容器样式；id让JS能找到它监听拖放事件 -->
+  <div class="va" id="dropZone">
+    <!-- #dropOv: 拖放文件时的红色虚线遮罩。class="drop-ov"对应遮罩样式；默认隐藏，拖文件时JS显示它 -->
+    <div class="drop-ov" id="dropOv"><span>释放文件</span></div>
+    <!-- #empSt: 空白状态提示(未加载图纸时显示)。class="emp"对应居中提示样式 -->
+    <div class="emp" id="empSt">
+      <!-- .ei: 虚线框图标。&#128208;是图纸emoji；改其他emoji(如&#128200;)可换图标 -->
+      <div class="ei">&#128208;</div>
+      <!-- h2: 主标题文字。改内容可换成"请拖入图纸"等 -->
+      <h2>打开工程图纸</h2>
+      <!-- p: 副标题说明。改内容可添加支持格式说明 -->
+      <p>拖放 PDF / 图片到此处</p>
+    </div>
+    <!-- #vs: 图纸滚动视图区。class="vs"对应滚动容器；style="display:none"默认隐藏，有图纸后JS显示 -->
+    <div class="vs" id="vs" style="display:none">
+      <!-- #vw: 图纸包装器。class="vw"对应画布+气泡的外框；包含canvas和svg -->
+      <div class="vw" id="vw">
+        <!-- #pdfCanvas: PDF/图片渲染画布。JS会把图纸画在这个canvas上；id让JS能找到它 -->
+        <canvas id="pdfCanvas"></canvas>
+        <!-- #bubbleSvg: 气泡SVG图层。xmlns声明SVG命名空间；JS会动态添加气泡图形到这里 -->
+        <svg id="bubbleSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <!-- #selRect: 鼠标框选时的动态矩形。class="sel-rect"对应红色虚线框样式；默认隐藏 -->
+        <div class="sel-rect" id="selRect">
+          <!-- 四个角的小方块手柄。class sh+tl/tr/bl/br对应四个角的位置 -->
+          <div class="sh tl"></div><div class="sh tr"></div><div class="sh bl"></div><div class="sh br"></div>
+        </div>
+      </div>
+    </div>
+    <!-- #zBar: 缩放控制条。class="zb"对应左下角缩放条样式；默认隐藏，有图纸后显示 -->
+    <div class="zb" id="zBar">
+      <!-- 缩小按钮。onclick="A.zoomBy(-.15)"点击时调用zoomBy缩小15%；-.15改-.25会每次缩小更多 -->
+      <button onclick="A.zoomBy(-.15)">-</button>
+      <!-- #zLv: 缩放比例显示(如"100%")。JS会实时更新这里的文字 -->
+      <span id="zLv">100%</span>
+      <!-- 放大按钮。onclick="A.zoomBy(.15)"点击时放大15%；.15改.25会每次放大更多 -->
+      <button onclick="A.zoomBy(.15)">+</button>
+      <!-- 自适应按钮。onclick="A.zoomFit()"点击时让图纸刚好填满视图区 -->
+      <button onclick="A.zoomFit()">[ ]</button>
+    </div>
+  </div>
+  <!-- aside.rp: 右侧面板。class="rp"对应CSS右侧面板样式 -->
+  <aside class="rp">
+    <!-- .rps: 右侧第一个区块(零件信息) -->
+    <div class="rps">
+      <!-- .rpt: 区块标题"零件信息" -->
+      <div class="rpt">零件信息</div>
+      <!-- .pr: 供方输入行 -->
+      <div class="pr">
+        <label>供方</label>
+        <!-- #iSupplier: 供方输入框。list="supplierList"关联下拉建议列表；value改文字可换默认供方名 -->
+        <input id="iSupplier" list="supplierList" value="青岛海立泰新型复合材料有限公司" style="width:130px;font-size:9px"/>
+        <!-- #supplierList: 供方建议列表。datalist提供输入时的自动补全选项 -->
+        <datalist id="supplierList"><option value="青岛海立泰新型复合材料有限公司"/></datalist>
+      </div>
+      <!-- .pr: 产品名输入行 -->
+      <div class="pr">
+        <label>产品名</label>
+        <!-- #iProdName: 产品名输入框。style="width:90px"限定宽度；改大(如120px)输入框更宽 -->
+        <input id="iProdName" style="width:90px"/>
+        <!-- OCR识别按钮。onclick="A.startTextOCR('iProdName')"点击后进入框选模式，识别到的文字填入产品名 -->
+        <button class="ocr-btn" onclick="A.startTextOCR('iProdName')" title="框选识别中文">&#128269;</button>
+      </div>
+      <!-- .pr: 图号输入行 -->
+      <div class="pr">
+        <label>图号</label>
+        <input id="iDW" style="width:90px"/>
+        <!-- OCR识别按钮。onclick="A.startTextOCR('iDW')"识别到的文字填入图号 -->
+        <button class="ocr-btn" onclick="A.startTextOCR('iDW')" title="框选识别文字">&#128269;</button>
+      </div>
+      <!-- .pr: 版本输入行 -->
+      <div class="pr">
+        <label>版本</label>
+        <!-- #iRV: 版本输入框。width改大(如80px)更宽 -->
+        <input id="iRV" style="width:50px"/>
+      </div>
+      <!-- .pr: 未注公差输入行 -->
+      <div class="pr">
+        <label>未注公差</label>
+        <!-- #iTolStd: 未注公差输入框。value="GB/T 1804-m"是默认值；改其他标准(如"ISO 2768-m")可换默认公差 -->
+        <input id="iTolStd" value="GB/T 1804-m" style="width:110px;font-size:9px"/>
+      </div>
+      <!-- .pr: 重要度选择行 -->
+      <div class="pr">
+        <label>重要度</label>
+        <!-- #iImportance: 重要度下拉框。value="B"默认B级一般；改selected到A会默认A级重要 -->
+        <select id="iImportance" style="width:110px"><option value="A">A级(重要)</option><option value="B" selected>B级(一般)</option><option value="C">C级(次要)</option></select>
+      </div>
+    </div>
+    <!-- #bpPanel: 气泡属性面板。class="rps"对应右侧区块；style="display:none"默认隐藏，选中气泡后显示 -->
+    <div class="rps" id="bpPanel" style="display:none">
+      <!-- .rpt: 区块标题"气泡属性" -->
+      <div class="rpt">气泡属性</div>
+      <!-- .pr: 编号输入行 -->
+      <div class="pr"><label>编号</label><input id="bpN" type="number" style="width:46px"/></div>
+      <!-- .pr: 标准尺寸输入行 -->
+      <div class="pr"><label>标准尺寸</label><input id="bpV" style="width:90px"/></div>
+      <!-- .pr: 公差选择行 -->
+      <div class="pr">
+        <label>公差</label>
+        <!-- #bpTol: 公差等级下拉框。value=""默认无公差；选m会按中等精度自动计算上下差 -->
+        <select id="bpTol" style="width:90px"><option value="">无</option><option value="f">f精密</option><option value="m">m中等</option><option value="c">c粗糙</option><option value="v">v最粗</option><option value="diam">直径公差</option><option value="cham">倒角公差</option><option value="custom">自定义</option></select>
+      </div>
+      <!-- #bpURow: 上差输入行。id让JS能单独控制显隐(选"无公差"时隐藏) -->
+      <div class="pr" id="bpURow"><label>上差</label><input id="bpU" style="width:60px"/></div>
+      <!-- #bpLRow: 下差输入行。id让JS能单独控制显隐 -->
+      <div class="pr" id="bpLRow"><label>下差</label><input id="bpL" style="width:60px"/></div>
+      <!-- .pr: 类型选择行 -->
+      <div class="pr">
+        <label>类型</label>
+        <!-- #bpT: 尺寸类型下拉框。value="linear"默认线性尺寸；选diameter会在前面加直径符号 -->
+        <select id="bpT" style="width:90px"><option value="linear">线性</option><option value="diameter">直径</option><option value="radius">半径R</option><option value="chamfer">倒角C</option><option value="angle">角度</option><option value="gdt">GD&T</option></select>
+      </div>
+      <!-- .pr: GD&T符号选择行 -->
+      <div class="pr">
+        <label>GD&T</label>
+        <!-- #bpG: GD&T符号下拉框。选不同符号会在气泡里显示对应几何公差符号 -->
+        <select id="bpG" style="width:90px"><option value="">-</option><option value="&#8960;">直径</option><option value="&#8853;">位置度</option><option value="&#8869;">垂直度</option><option value="&#8741;">平行度</option><option value="&#8736;">角度</option><option value="&#9675;">圆度</option><option value="&#9678;">同轴度</option></select>
+      </div>
+      <!-- .pr: 检测设备选择行 -->
+      <div class="pr">
+        <label>检测设备</label>
+        <!-- #bpEquip: 检测设备下拉框。可增删option来定制你们工厂常用的量具列表 -->
+        <select id="bpEquip" style="width:90px"><option value="">-</option><option value="游标卡尺">游标卡尺</option><option value="卷尺">卷尺</option><option value="角度尺">角度尺</option><option value="R规">R规</option><option value="千分尺">千分尺</option><option value="其他">其他</option></select>
+      </div>
+      <!-- .pr: 备注输入行 -->
+      <div class="pr"><label>备注</label><input id="bpNo" style="width:110px"/></div>
+      <!-- 保存和删除按钮行。margin-top:6px让按钮离上方输入框有间距；gap:4px控制按钮间距 -->
+      <div style="margin-top:6px;display:flex;gap:4px">
+        <!-- 保存按钮。class="b bs bok"是绿色小按钮；style="flex:1"让按钮占满宽度；onclick调用A.saveBubble()保存属性 -->
+        <button class="b bs bok" style="flex:1;justify-content:center" onclick="A.saveBubble()">保存</button>
+        <!-- 删除按钮。class="b bs bd"是红色边框小按钮；onclick调用A.delSel()删除选中气泡 -->
+        <button class="b bs bd" style="flex:1;justify-content:center" onclick="A.delSel()">删除</button>
+      </div>
+    </div>
+    <!-- #logPanel: 日志面板。style="flex:1;overflow-y:auto;max-height:160px"让日志区可滚动且最高160px -->
+    <div class="rps" id="logPanel" style="flex:1;overflow-y:auto;max-height:160px">
+      <!-- .rpt: 区块标题"日志" -->
+      <div class="rpt">日志</div>
+      <!-- #logA: 日志内容容器。JS会把操作记录插到这里；font-size:9px改大(如11px)字更大 -->
+      <div id="logA" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--t3);line-height:1.7"></div>
+    </div>
+  </aside>
+  <!-- #btPanel: 底部尺寸表格容器。class="bt"对应底部表格区样式；id让JS能控制显隐 -->
+  <div class="bt" id="btPanel">
+    <!-- .dth: 表格头部栏 -->
+    <div class="dth">
+      <!-- .dtt: 表格标题。里面#dtC是尺寸计数标签，JS会更新数字 -->
+      <div class="dtt">尺寸列表 <span class="dtc" id="dtC">0</span></div>
+      <!-- .dta: 表格操作按钮组 -->
+      <div class="dta">
+        <!-- +按钮。onclick="A.addEmpty()"添加一行空尺寸 -->
+        <button class="b bs" onclick="A.addEmpty()">+</button>
+        <!-- 全部模拟按钮。onclick="A.simAll()"给所有尺寸生成随机模拟实测值 -->
+        <button class="b bs" onclick="A.simAll()">全部模拟</button>
+        <!-- 删除模拟按钮。class="b bs bd"红色边框；onclick="A.delSim()"删除所有模拟数据 -->
+        <button class="b bs bd" onclick="A.delSim()">删除模拟</button>
+        <!-- CSV导出按钮。onclick="A.expCSV()"导出逗号分隔文本文件 -->
+        <button class="b bs" onclick="A.expCSV()">CSV</button>
+        <!-- Excel导出按钮。class="b bs bok"绿色；onclick="A.expXLS()"导出.xlsx文件 -->
+        <button class="b bs bok" onclick="A.expXLS()">Excel</button>
+        <!-- PDF导出按钮。class="b bs ba"红色主按钮；onclick="A.expPDF()"导出带气泡标记的PDF -->
+        <button class="b bs ba" onclick="A.expPDF()">PDF</button>
+        <!-- 图片导出按钮。onclick="A.expImg()"导出PNG/JPG图片 -->
+        <button class="b bs" onclick="A.expImg()">图片</button>
+      </div>
+    </div>
+    <!-- .dts: 表格数据滚动区 -->
+    <div class="dts">
+      <!-- table.dt: 尺寸数据表格。class="dt"对应表格样式 -->
+      <table class="dt">
+        <!-- thead: 表头区域。position:sticky让表头滚动时固定 -->
+        <thead>
+          <tr>
+            <!-- th: 各列标题。style="width:30px"限定序号列宽；改大(如40px)更宽 -->
+            <th style="width:30px">#</th><th>标准尺寸</th><th>标准公差</th><th>上差</th><th>下差</th><th>类型</th><th>实测值</th><th>判定</th><th>备注</th><th>检测设备</th><th style="width:26px"></th>
+          </tr>
+        </thead>
+        <!-- #dtB: 表格数据tbody。JS会动态插入尺寸行到这里 -->
+        <tbody id="dtB"></tbody>
+      </table>
+      <!-- #dtE: 表格空状态提示。默认显示"框选识别或自动气泡添加尺寸"；有数据后JS隐藏它 -->
+      <div class="dte" id="dtE">框选识别或自动气泡添加尺寸</div>
+    </div>
+  </div>
+  <!-- footer.sbar: 底部状态栏。class="sbar"对应状态栏样式 -->
+  <footer class="sbar">
+    <!-- 状态指示灯和文字。id="sDot"是红绿灯；id="sTxt"是状态文字(如"就绪""处理中") -->
+    <span><span class="sd g" id="sDot"></span><span id="sTxt">就绪</span></span>
+    <!-- #stP: 当前页码显示。默认"-"；有PDF后显示如"1/5" -->
+    <span id="stP">-</span>
+    <!-- #stZ: 缩放比例显示。默认"-"；有图纸后显示如"120%" -->
+    <span id="stZ">-</span>
+    <!-- #stD: 尺寸数量显示。JS实时更新冒号后的数字 -->
+    <span id="stD">尺寸:0</span>
+    <!-- #stB: 气泡数量显示。JS实时更新 -->
+    <span id="stB">气泡:0</span>
+    <!-- margin-left:auto让版本号靠右显示。改"v5.4"可换版本号 -->
+    <span style="margin-left:auto">v5.4</span>
+  </footer>
+</div>
+<!-- #expM: 导出弹窗遮罩层。class="modal-bg"对应半透明黑底；id让JS能控制显隐 -->
+<div class="modal-bg" id="expM">
+  <!-- .modal: 弹窗本体 -->
+  <div class="modal">
+    <!-- h3: 弹窗标题"导出" -->
+    <h3>导出</h3>
+    <!-- .mr: 图片格式选择行 -->
+    <div class="mr">
+      <label>图片格式</label>
+      <!-- #eFmt: 导出图片格式下拉框。value="png"默认PNG；改selected到jpeg会默认JPEG -->
+      <select id="eFmt"><option value="png">PNG</option><option value="jpeg">JPEG</option></select>
+    </div>
+    <!-- .ma: 弹窗底部按钮区。justify-content:flex-end让按钮靠右 -->
+    <div class="ma">
+      <!-- 取消按钮。onclick移除show类关闭弹窗 -->
+      <button class="b" onclick="E('expM').classList.remove('show')">取消</button>
+      <!-- CSV按钮。onclick="A.expCSV()"直接导出CSV并关闭弹窗 -->
+      <button class="b" onclick="A.expCSV()">CSV</button>
+      <!-- Excel按钮 -->
+      <button class="b" onclick="A.expXLS()">Excel</button>
+      <!-- PDF按钮。class="b ba"红色主按钮 -->
+      <button class="b ba" onclick="A.expPDF()">PDF</button>
+      <!-- 图片按钮 -->
+      <button class="b" onclick="A.expImg()">图片</button>
+    </div>
+  </div>
+</div>
+<!-- #toast: 顶部提示条。class="toast"对应提示条样式；默认隐藏，JS显示时加show类 -->
+<div class="toast" id="toast"></div>
+<script>
+/* ================================================================
+   【JavaScript大脑区 - 小白指南】
+   从这里开始是程序的真正"大脑"。前面的HTML只是搭了个空架子，
+   下面的代码才让页面"活"起来，能识别图纸、能拖动气泡、能导出表格。
+   
+   阅读小贴士：
+   - var 是"定义一个变量/盒子"，用来装数据
+   - function 是"定义一个功能/动作"，告诉电脑遇到什么情况该做什么
+   - A.xxx 表示"A这个对象里的xxx功能"，A是整个程序的总管家
+   - E('xxx') 是偷懒写法，等于 document.getElementById('xxx')，
+     用来快速找到页面上 id=xxx 的元素
+   ================================================================ */
+'use strict';
+/* ---- E()：偷懒小工具，用 E('abc') 代替 document.getElementById('abc') ---- */
+// E函数：传入id字符串，返回对应的DOM元素。改document.querySelector可实现CSS选择器查找
+var E=function(id){return document.getElementById(id);};
+// NS：SVG命名空间常量。必须是这个固定值，不能改，否则SVG元素创建会失效
+var NS='http://www.w3.org/2000/svg';
+/* svgEl()：创建SVG元素的工厂函数
+   t=标签名(如'circle')；a=属性对象(如{r:10})；txt=文字内容 */
+function svgEl(t,a,txt){
+  // 用SVG命名空间创建元素。不用createElement而要用createElementNS，否则SVG不认
+  var e=document.createElementNS(NS,t);
+  // 如果传了属性对象，遍历每个属性并设置。Object.keys获取对象的所有键名
+  if(a) Object.keys(a).forEach(function(k){e.setAttribute(k,a[k]);});
+  // 如果传了文字内容，设置textContent。undefined判断确保空字符串也能正常设置
+  if(txt!==undefined) e.textContent=txt;
+  // 返回创建好的SVG元素，方便链式调用或插入DOM
+  return e;
+}
+
+/* ================================================================
+   【公差表 TOL_GB】
+   这是机械制图里的"国家标准公差表"(GB/T 1804)。
+   就像查字典一样，输入一个尺寸和精度等级(f/m/c/v)，
+   就能查到允许的误差范围。
+   
+   精度等级含义：
+   - f = 精密级（要求很高，误差很小）
+   - m = 中等级（一般零件用这级）
+   - c = 粗糙级（要求不高）
+   - v = 最粗级（差不多就行）
+   ================================================================ */
+// TOL_GB：国标GB/T 1804公差表。linear是线性尺寸公差，radius是圆角公差
+// 每个精度等级(f/m/c/v)是一个数组，每项[最小尺寸,最大尺寸,公差值]
+// 改这里的数值会改变自动计算上下差的结果；增删数组项可扩展尺寸范围
+var TOL_GB={
+  linear:{
+    // f精密级：尺寸0.5-3mm公差0.05，3-6mm公差0.05...改.05为.02会让精密级更严格
+    f:[[.5,3,.05],[3,6,.05],[6,30,.1],[30,120,.15],[120,400,.2],[400,1e3,.3],[1e3,2e3,.5]],
+    // m中等级：最常用的精度。改1.2为1.5会让中等精度更宽松
+    m:[[.5,3,.1],[3,6,.1],[6,30,.2],[30,120,.3],[120,400,.5],[400,1e3,.8],[1e3,2e3,1.2],[2e3,4e3,2]],
+    // c粗糙级：要求不高的零件。改4为5会让大尺寸的粗糙公差更大
+    c:[[.5,3,.2],[3,6,.3],[6,30,.5],[30,120,.8],[120,400,1.2],[400,1e3,2],[1e3,2e3,3],[2e3,4e3,4]],
+    // v最粗级：差不多就行。改8为10会让最粗级公差更大
+    v:[[3,6,.5],[6,30,1],[30,120,1.5],[120,400,2.5],[400,1e3,4],[1e3,2e3,6],[2e3,4e3,8]]
+  },
+  radius:{
+    // f精密圆角：0.5-3mm公差0.2。改0.2为0.1会让圆角更精确
+    f:[[.5,3,.2],[3,6,.5],[6,30,1],[30,1e4,2]],
+    // m中等圆角：改4为5会让大圆角公差更宽松
+    m:[[.5,3,.4],[3,6,1],[6,30,2],[30,1e4,4]]
+  }
+};
+/* lookupGB()：根据标称尺寸和精度等级查公差表
+   nom=标称尺寸字符串；grade=精度(f/m/c/v)；isR=是否圆角 */
+function lookupGB(nom,grade,isR){
+  // parseFloat把字符串转成数字。如果转失败或<=0返回null表示查不到
+  var n=parseFloat(nom);if(isNaN(n)||n<=0)return null;
+  // 根据isR选择圆角表或线性表，再根据grade选对应精度数组
+  var tbl=isR?TOL_GB.radius[grade]:TOL_GB.linear[grade];
+  // 如果精度等级不存在(如传了'x')返回null
+  if(!tbl)return null;
+  // 遍历公差表的每个区间，找到尺寸落在哪个范围(>min且<=max)
+  for(var i=0;i<tbl.length;i++)if(n>tbl[i][0]&&n<=tbl[i][1])return tbl[i][2];
+  // 没找到对应区间返回null
+  return null;
+}
+/* parseStdGrade()：从"未注公差"输入框解析出精度等级
+   如输入"GB/T 1804-m"返回'm'；匹配不到默认返回'm' */
+function parseStdGrade(){
+  // E('iTolStd').value获取输入框文字；match用正则匹配1804后面的f/m/v/c字母
+  var m=E('iTolStd').value.match(/1804[-\s]*([fmvc])/i);
+  // 如果匹配到返回小写字母，否则默认'm'中等精度。改'm'为'f'会让默认更精密
+  return m?m[1].toLowerCase():'m';
+}
+/* fmtLim()：计算极限尺寸(标称+公差)
+   nomS=标称尺寸；tolS=公差值。返回字符串 */
+function fmtLim(nomS,tolS){
+  // 如果没公差或公差为0，直接返回标称值
+  if(!tolS||tolS==='0')return nomS;
+  // 把标称和公差都转成浮点数
+  var n=parseFloat(nomS),t=parseFloat(tolS);
+  // 如果转失败返回原始公差字符串
+  if(isNaN(n)||isNaN(t))return tolS;
+  // 计算和并保留4位小数，再去掉末尾多余的0。toFixed(4)改(6)保留更多小数位
+  return parseFloat((n+t).toFixed(4)).toString();
+}
+/* getEquip()：根据尺寸类型和大小推荐检测设备
+   type=类型(linear/diameter等)；nom=标称尺寸 */
+function getEquip(type,nom){
+  // 把标称尺寸转浮点数
+  var n=parseFloat(nom);
+  // 角度类推荐角度尺。改'角度尺'为'万能角度尺'可换推荐
+  if(type==='angle')return '角度尺';
+  // 圆角和倒角推荐R规
+  if(type==='radius'||type==='chamfer')return 'R规';
+  // 线性和直径大于30mm推荐卷尺。改30为50会让更大尺寸才推荐卷尺
+  if((type==='linear'||type==='diameter')&&!isNaN(n)&&n>30)return '卷尺';
+  // 默认推荐游标卡尺
+  return '游标卡尺';
+}
+/* nomDisplay()：生成尺寸显示字符串(如"⌀20""R5""C1")
+   dim=尺寸对象，含type/nominal/gdt等属性 */
+function nomDisplay(dim){
+  // pre是前缀：直径加⌀，半径加R，倒角加C。改'⌀'为'Φ'会换符号
+  var pre='';if(dim.type==='diameter')pre='⌀';else if(dim.type==='radius')pre='R';else if(dim.type==='chamfer')pre='C';
+  // suf是后缀：角度加°
+  var suf=dim.type==='angle'?'°':'';
+  // gdt是GD&T符号，有的话前面加空格
+  var g=dim.gdt?' '+dim.gdt:'';
+  // 拼接前缀+标称值+后缀+GD&T符号。改拼接顺序可调整显示格式
+  return pre+(dim.nominal||'')+suf+g;
+}
+// DIM_SYMBOLS：直径符号正则(匹配单个)。用于检测文字里是否含直径符号
+var DIM_SYMBOLS=/[ΦφϕøØ⌀]/;
+// DIM_SYMBOLS_GLOBAL：直径符号正则(匹配全部，带g全局标志)。用于replace替换所有
+var DIM_SYMBOLS_GLOBAL=/[ΦφϕøØ⌀]/g;
+/* normalizeDimText()：标准化尺寸文字，把各种直径写法统一成⌀
+   t=原始OCR识别出的文字字符串 */
+function normalizeDimText(t){
+  // 把各种直径符号(ØøΦφϕ)统一替换成⌀。增删replace可处理更多变体
+  t=t.replace(/Ø/g,'⌀').replace(/ø/g,'⌀').replace(/Φ/g,'⌀').replace(/φ/g,'⌀').replace(/ϕ/g,'⌀');
+  // 把o/O后面紧跟数字的情况也替换成⌀(如o20→⌀20)。[oO]改[oO0]会把0也当成直径符号
+  t=t.replace(/[oO]\s*(?=\d)/g,function(){return'⌀';});
+  // 把英文直径缩写(DIA/Diam/Phi/PHI)替换成⌀。增删缩写可处理更多写法
+  t=t.replace(/\bDIA\b/gi,'⌀').replace(/\bDiam\.?\b/gi,'⌀').replace(/\bPhi\b/gi,'⌀').replace(/\bPHI\b/g,'⌀');
+  // 把中文"直径"替换成⌀；把多个空格合并成一个；去掉首尾空格
+  t=t.replace(/直径/g,'⌀').replace(/\bSR\b/gi,'SR').replace(/\s+/g,' ').trim();
+  // 返回清洗后的文字
+  return t;
+}
+
+/* ================================================================
+   【程序总管家 A】
+   这是一个超级大的"对象"（可以理解为一个大工具箱），
+   里面装着程序运行需要的所有数据和功能。
+   
+   重要数据字段（小白版）：
+   - pdf / isImg / imgEl：记录当前打开的是PDF还是图片
+   - pg / total：当前第几页 / 总共几页
+   - scale：缩放比例（1.0 = 100%，2.0 = 200%）
+   - tool：当前选中的工具（select选择/ocr框选识别/region识别区域/manual手动）
+   - regions[]：用户框选的"识别区域"列表
+   - dims[]：识别出来的所有尺寸列表（这是核心数据！）
+   - marks[]：图纸上的临时标记框列表
+   - ocrBusy：OCR是否正在忙（防止重复点击）
+   
+   坐标系统小贴士：
+   程序内部用"文档坐标"(scale=1时的原始大小)，
+   显示时再乘以 scale 变成屏幕上的像素。
+   这样无论放大缩小，数据本身不会乱。
+   ================================================================ */
+/*==================================================================
+ v5.4 修复列表(基于v5.3的问题分析):
+  P0-1: autoFromOCR deduped排序: 升序 -> 降序(大块先入集, 碎片被吞并)
+  P0-2: correctAllBoxes 3x 过滤 -> 0.3x 单向过滤(可放大,禁止过度缩小)
+  P0-3: autoBubble 取消 text layer 短路(并行运行, 结果合并去重)
+  P1-4: correctAllBoxes 扩展 2x -> 3x + 最小值(40/15 CSS px)
+  P1-5: mapBoundsToDoc pad 固定2 -> 按字号15%自适应
+  P1-6: 新增 groupRowsByLine + 行级 OCR(避免"2540"被切成4块)
+  P2-7: parseDim 增加公差括号解析 (0,-1) (+0.1,-0.2) (0~-1)
+  P2-8: correctAllBoxes 增加 OCR 验证(二次确认)
+  P2-9: autoMode=pro UI 已在 v5.2 存在, v5.4 加强其作用
+  保留v5.2全部改进(连通域检测/智能气泡/多维投票)
+==================================================================*/
+// A：程序总管家对象，包含所有状态数据和功能方法
+var A={
+  // pdf: PDF文档对象。null表示还没加载；有值后存pdfjs的PDFDocumentProxy
+  pdf:null,
+  // isImg: 当前是否是图片模式(非PDF)。false表示默认PDF模式；true表示打开的是图片
+  isImg:false,
+  // imgEl: 图片DOM元素。图片模式下存<img>元素，PDF模式下为null
+  imgEl:null,
+  // pg: 当前页码。默认1表示第一页；改默认值为2会打开时显示第二页
+  pg:1,
+  // total: 总页数。0表示未加载；加载PDF后JS会更新为实际页数
+  total:0,
+  // scale: 缩放比例。1.0=100%；改默认1.5会让打开时默认放大150%
+  scale:1.0,
+  // tool: 当前工具。'select'选择工具；改默认'ocr'会让打开时默认是框选识别模式
+  tool:'select',
+  // rot: OCR旋转方向。'auto'自动检测；改'0'会让默认不旋转，只识别横向文字
+  rot:'auto',
+  // autoMode: 自动扫描模式。'quick'快捷(0+90度)；改'pro'默认专业模式(0-270全扫)
+  autoMode:'quick',
+  // ocrBusy: OCR是否正在工作中。true时会禁用相关按钮防止重复点击
+  ocrBusy:false,
+  // selecting: 是否正在鼠标框选。true表示鼠标按下未释放，正在画选框
+  selecting:false,
+  // selS: 框选起点坐标对象{x,y}。记录鼠标按下时的位置
+  selS:null,
+  // selE: 框选终点坐标对象{x,y}。记录鼠标移动时的实时位置
+  selE:null,
+  // debugCoords: 调试坐标模式。true会在控制台输出详细坐标信息用于排错
+  debugCoords:false,
+  // regions: 识别区域数组。每个元素是一个区域对象{x,y,w,h}；空数组表示没有识别区
+  regions:[],
+  // dims: 尺寸数据数组。这是核心数据！每个元素是一个尺寸对象含编号/标称值/公差等
+  dims:[],
+  // selId: 当前选中的尺寸ID。null表示没选中；有值时右侧面板显示对应属性
+  selId:null,
+  // nextN: 下一个自动编号。默认1；改100会让新气泡从100开始编号
+  nextN:1,
+  // recycled: 回收的编号数组。删除气泡后编号回收到这里，下次优先复用
+  recycled:[],
+  // textItems: PDF文字元素数组。存PDF.js解析出的文字块用于辅助识别
+  textItems:[],
+  // lastOCR: 最后一次OCR结果。用于修正功能记住上次识别内容
+  lastOCR:null,
+  // lastDimId: 最后一次操作的尺寸ID。用于修正功能定位要修改的尺寸
+  lastDimId:null,
+  // panSt: 拖拽平移状态对象。记录中键/空格拖拽时的起始位置和滚动位置
+  panSt:null,
+  // cv: 画布元素。init时赋值指向#pdfCanvas
+  cv:null,
+  // cx: 画布2D上下文。init时赋值；willReadFrequently:true优化频繁读取像素性能
+  cx:null,
+  // sr: 框选矩形元素。init时赋值指向#selRect
+  sr:null,
+  // textOcrTarget: 文字识别目标输入框ID。startTextOCR时设置，识别后填入该框
+  textOcrTarget:null,
+  // dragSt: 气泡拖拽状态对象。记录拖拽气泡时的起始位置和气泡原始位置
+  dragSt:null,
+  // justDraggedBub: 刚刚拖拽过气泡。防止拖拽结束后误触发点击事件
+  justDraggedBub:false,
+  // marks: 临时标记框数组。用于显示识别区域或临时高亮；不含持久数据
+  marks:[],
+  // selMarkId: 当前选中的标记框ID。null表示没选中
+  selMarkId:null,
+  // markDragSt: 标记框拖拽状态对象。类似dragSt但用于标记框
+  markDragSt:null,
+  // selAngle: 当前选中项的角度。默认0表示不旋转；用于标记框旋转功能
+  selAngle:0,
+
+  /*----- 坐标系统: 所有内部计算用图纸坐标(scale=1空间), 渲染时乘以scale -----*/
+  // docToScreen: 图纸坐标转屏幕坐标。v是图纸坐标值；乘scale得到屏幕像素
+  docToScreen:function(v){return v*this.scale;},
+  // screenToDoc: 屏幕坐标转图纸坐标。v是屏幕像素值；除scale得到原始图纸坐标
+  screenToDoc:function(v){return v/this.scale;},
+
+  /* ---- init：程序启动时的"开机自检"，做4件事 ---- */
+  /* 1.拿到画布 2.设置PDF worker地址 3.加载用户设置 4.绑定按钮事件 */
+  init:function(){
+    // 获取画布元素并保存到cv；getContext('2d')获取2D绘图上下文
+    this.cv=E('pdfCanvas');this.cx=this.cv.getContext('2d',{willReadFrequently:true});
+    // 获取框选矩形元素保存到sr
+    this.sr=E('selRect');
+    // 设置PDF.js的Web Worker路径。改URL可换其他CDN或本地路径
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // 依次调用：加载设置->绑定事件->记录日志。顺序不能乱，先加载设置再绑事件
+    this.loadSets();this.bindEvts();this.log('v5.4 就绪','ok');
+  },
+  // loadSets：从浏览器本地存储(localStorage)读取用户上次的设置
+  loadSets:function(){
+    // s存读取到的设置对象；try-catch防止localStorage数据损坏导致崩溃
+    var s={};try{s=JSON.parse(localStorage.getItem('digiFAI_v54')||'{}');}catch(e){}
+    // v是取值辅助函数：如果设置存在用设置值，否则用空字符串
+    var v=function(k){return s[k]!==undefined?s[k]:'';};
+    // 依次把设置值填回各个下拉框/输入框。改digiFAI_v54为其他键名会换存储位置
+    if(v('psm'))E('sPSM').value=v('psm');
+    if(v('scale'))E('sScale').value=v('scale');
+    if(v('thresh'))E('sThresh').value=v('thresh');
+    if(v('invert'))E('sInvert').value=v('invert');
+    if(v('multi'))E('sMulti').value=v('multi');
+    if(v('adapt'))E('sAdapt').value=v('adapt');
+    if(v('confuse'))E('sConfuse').value=v('confuse');
+    // cache特殊处理：undefined也更新，因为0/false是合法值
+    if(v('cache')!==undefined)E('sCache').value=v('cache');
+    if(v('lang'))E('sLang').value=v('lang');
+    if(v('autoMode'))E('sAutoMode').value=v('autoMode');
+    // 恢复旋转和自动模式状态；||'auto'是默认值，如果localStorage没存就用auto
+    this.rot=v('rot')||'auto';this.autoMode=v('autoMode')||'quick';
+    E('rotG').querySelectorAll('.rb').forEach(function(b){b.classList.toggle('on',b.dataset.r===A.rot);});
+    if(v('supplier'))E('iSupplier').value=v('supplier');
+    if(v('tolStd'))E('iTolStd').value=v('tolStd');
+  },
+  // saveSets：把当前设置保存到浏览器本地存储，下次打开自动恢复
+  saveSets:function(){
+    // s是设置对象，包含所有需要记住的选项值。增删字段可保存更多设置
+    var s={
+      // psm: 分段模式；scale: 放大倍数；thresh: 二值化阈值
+      psm:E('sPSM').value,scale:E('sScale').value,thresh:E('sThresh').value,
+      // invert: 反色；multi: 多通道；adapt: 自适应；confuse: 混淆
+      invert:E('sInvert').value,multi:E('sMulti').value,adapt:E('sAdapt').value,
+      // cache: 缓存开关；lang: 语言；rot: 旋转方向；autoMode: 自动模式
+      confuse:E('sConfuse').value,cache:E('sCache').value,lang:E('sLang').value,rot:this.rot,
+      autoMode:this.autoMode,
+      // supplier: 供方名；tolStd: 未注公差标准
+      supplier:E('iSupplier').value,tolStd:E('iTolStd').value
+    };
+    // JSON.stringify把对象转成字符串；localStorage.setItem存到浏览器本地。改digiFAI_v54会换存储键名
+    localStorage.setItem('digiFAI_v54',JSON.stringify(s));
+  },
+
+  /* ================================================================
+     【bindEvts：给所有按钮和画布"装上开关"】
+     这个函数就像"电工接线"，把页面上的每个按钮、每个操作区域
+     都连接到对应的处理函数上。如果没有这个函数，按钮点了也没反应。
+     
+     主要接线内容：
+     - 打开文件按钮 -> 弹出文件选择框
+     - 画布鼠标操作 -> 框选/拖动/缩放
+     - 键盘快捷键 -> Delete删除、+/-缩放、Esc取消
+     - 拖放文件 -> 直接加载图纸
+     ================================================================ */
+  // bindEvts：给所有按钮和交互元素绑定事件处理函数
+  bindEvts:function(){
+    // self保存A对象的引用，因为事件回调里的this会指向其他对象
+    var self=this;
+    // 打开按钮：点击时触发隐藏的文件选择框
+    E('btnOpen').onclick=function(){E('fileInput').click();};
+    // 文件选择框：选文件后调用loadFile加载。e.target.files[0]取第一个文件
+    E('fileInput').addEventListener('change',function(e){if(e.target.files[0])self.loadFile(e.target.files[0]);});
+    // 自动气泡按钮：点击调用autoBubble开始自动识别
+    E('btnAuto').onclick=function(){self.autoBubble();};
+    // 矫正选框按钮：点击调用correctAllBoxes矫正所有气泡位置
+    E('btnFixBox').onclick=function(){self.correctAllBoxes();};
+    // 尺寸表按钮：点击切换.app的open类，展开/收起底部表格
+    E('btnTable').onclick=function(){E('app').classList.toggle('open');};
+    // 导出按钮：点击显示导出弹窗(加show类)
+    E('btnExport').onclick=function(){E('expM').classList.add('show');};
+    // 保存按钮：点击调用saveProj保存项目为JSON文件
+    E('btnSave').onclick=function(){self.saveProj();};
+    // 加载按钮：点击触发隐藏的项目文件选择框
+    E('btnLoad').onclick=function(){E('projectInput').click();};
+    // 项目文件选择框：选文件后调用loadProj加载项目
+    E('projectInput').addEventListener('change',function(e){if(e.target.files[0])self.loadProj(e.target.files[0]);});
+    // 重置设置按钮：清除localStorage里的设置，重新加载默认值
+    E('btnResetSet').onclick=function(){localStorage.removeItem('digiFAI_v54');self.loadSets();self.toast('已恢复默认');};
+    // sids：所有需要自动保存的设置控件ID数组。增删ID可让更多设置自动记忆
+    var sids=['sPSM','sScale','sThresh','sInvert','sMulti','sAdapt','sConfuse','sCache','sLang','sAutoMode'];
+    // 遍历每个设置控件，绑定change事件：值改变时自动保存到localStorage
+    sids.forEach(function(id){
+      E(id).addEventListener('change',function(){if(id==='sAutoMode')self.autoMode=E('sAutoMode').value;self.saveSets();});
+    });
+    // 供方输入框：值改变时自动保存设置
+    E('iSupplier').addEventListener('change',function(){self.saveSets();});
+    // 未注公差输入框：值改变时自动保存设置
+    E('iTolStd').addEventListener('change',function(){self.saveSets();});
+    // 公差等级下拉框：值改变时控制上下差输入框的读写状态
+    E('bpTol').addEventListener('change',function(){
+      // 获取当前选中的公差等级值
+      var grade=E('bpTol').value;
+      // 只有自定义或无公差时，上下差输入框才可编辑；否则只读
+      E('bpU').readOnly=!(grade==='custom'||grade==='');
+      E('bpL').readOnly=!(grade==='custom'||grade==='');
+      // 自定义时加custom-tol类让边框变红色提示；否则移除
+      if(grade==='custom'){E('bpU').classList.add('custom-tol');E('bpL').classList.add('custom-tol');}
+      else{E('bpU').classList.remove('custom-tol');E('bpL').classList.remove('custom-tol');}
+      // 直径公差或倒角公差时自动保存气泡(因为会触发自动计算)
+      if(grade==='diam'||grade==='cham')self.saveBubble();
+    });
+    // dz是拖放区域；dc是dragenter计数器(防止子元素触发dragleave导致闪烁)
+    var dz=E('dropZone'),dc=0;
+    // dragenter：鼠标拖文件进入区域时。preventDefault阻止浏览器默认行为(如打开文件)
+    dz.addEventListener('dragenter',function(e){e.preventDefault();dc++;E('dropOv').classList.add('on');});
+    // dragleave：鼠标拖文件离开区域时。dc减到0才隐藏遮罩，防止子元素闪烁
+    dz.addEventListener('dragleave',function(e){e.preventDefault();dc--;if(dc<=0){dc=0;E('dropOv').classList.remove('on');}});
+    // dragover：鼠标在区域上方移动时。必须preventDefault否则drop事件不触发
+    dz.addEventListener('dragover',function(e){e.preventDefault();});
+    // drop：释放文件时。隐藏遮罩并调用loadFile加载第一个文件
+    dz.addEventListener('drop',function(e){e.preventDefault();dc=0;E('dropOv').classList.remove('on');if(e.dataTransfer.files[0])self.loadFile(e.dataTransfer.files[0]);});
+    // 工具列表点击事件：点击某个工具项时切换到对应工具
+    E('tlList').addEventListener('click',function(e){var el=e.target.closest('.tl-item');if(el)self.setTool(el.dataset.t);});
+    // 方向按钮组点击事件：点击某个方向按钮时更新旋转设置
+    E('rotG').addEventListener('click',function(e){
+      // closest('.rb')找到被点击的方向按钮；如果点的是空白处直接返回
+      var b=e.target.closest('.rb');if(!b)return;
+      // 移除所有按钮的on类，再给当前按钮加上
+      E('rotG').querySelectorAll('.rb').forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on');self.rot=b.dataset.r;self.saveSets();
+    });
+    // 画布鼠标按下：进入框选或拖拽逻辑
+    this.cv.addEventListener('mousedown',function(e){self.onCvDown(e);});
+    // 画布鼠标移动：更新框选矩形或拖拽位置
+    this.cv.addEventListener('mousemove',function(e){self.onCvMove(e);});
+    // 画布鼠标释放：结束框选或拖拽
+    this.cv.addEventListener('mouseup',function(e){self.onCvUp(e);});
+    // 画布右键菜单：阻止默认菜单，调用cancelSel取消当前选中
+    this.cv.addEventListener('contextmenu',function(e){e.preventDefault();self.cancelSel();});
+    // 气泡SVG图层鼠标按下：判断是点击标记框还是气泡
+    document.getElementById('bubbleSvg').addEventListener('mousedown',function(e){
+      // 如果点击的是标记框(mark-g)内部，走标记框拖拽逻辑；否则走气泡拖拽逻辑
+      var t=e.target;if(t.closest('.mark-g')){self.onMarkDown(e);return;}self.onBubDown(e);
+    });
+    // SVG图层双击事件：双击标记框时调用onMarkDblClick编辑标记
+    document.getElementById('bubbleSvg').addEventListener('dblclick',function(e){var t=e.target;var g=t.closest('.mark-g');if(g)self.onMarkDblClick(g);});
+    // 全局鼠标移动：优先处理标记框拖拽，其次处理气泡拖拽
+    document.addEventListener('mousemove',function(e){if(A.markDragSt){A.onMarkMove(e);return;}A.onBubMove(e);});
+    // 全局鼠标释放：优先结束标记框拖拽，其次结束气泡拖拽
+    document.addEventListener('mouseup',function(e){if(A.markDragSt){A.onMarkUp();return;}A.onBubUp(e);});
+    // vs是可视区域容器，绑定滚轮缩放
+    var vs=E('vs');
+    vs.addEventListener('wheel',function(e){
+      // preventDefault阻止页面滚动；如果没加载文件直接返回
+      e.preventDefault();if(!self.pdf&&!self.isImg)return;
+      // o记录缩放前的比例；根据滚轮方向(deltaY)增减0.12
+      var o=self.scale;
+      // Math.max(.15,Math.min(8,...))限制缩放范围15%-800%。改.15和8可调整最小/最大缩放
+      self.scale=Math.max(.15,Math.min(8,self.scale+(e.deltaY>0?-.12:.12)));
+      // r是缩放比例；rt是可视区相对于视口的位置
+      var r=self.scale/o,rt=vs.getBoundingClientRect();
+      // mx/my是鼠标在画布内容中的坐标(考虑滚动偏移)
+      var mx=e.clientX-rt.left+vs.scrollLeft,my=e.clientY-rt.top+vs.scrollTop;
+      // 渲染新比例后，调整滚动位置让鼠标指向的图纸位置保持不变(实现以鼠标为中心缩放)
+      self.renderPage().then(function(){
+        vs.scrollLeft=mx*r-(e.clientX-rt.left);vs.scrollTop=my*r-(e.clientY-rt.top);
+      });
+    // passive:false必须设置，否则preventDefault在部分浏览器无效
+    },{passive:false});
+    // 可视区鼠标按下：中键(button===1)或左键+Alt键时进入平移模式
+    vs.addEventListener('mousedown',function(e){
+      if(e.button===1||(e.button===0&&e.altKey)){
+        // 阻止默认行为；panSt记录起始鼠标位置和当前滚动位置
+        e.preventDefault();self.panSt={x:e.clientX,y:e.clientY,sl:vs.scrollLeft,st:vs.scrollTop};vs.style.cursor='grabbing';
+      }
+    });
+    // 全局鼠标移动：如果处于平移模式，根据鼠标移动量更新滚动位置
+    document.addEventListener('mousemove',function(e){if(!self.panSt)return;vs.scrollLeft=self.panSt.sl-(e.clientX-self.panSt.x);vs.scrollTop=self.panSt.st-(e.clientY-self.panSt.y);});
+    // 全局鼠标释放：退出平移模式，恢复鼠标样式
+    document.addEventListener('mouseup',function(){if(self.panSt){self.panSt=null;E('vs').style.cursor='';}});
+    // 全局键盘快捷键
+    document.addEventListener('keydown',function(e){
+      // 如果在输入框/下拉框/可编辑元素内，不拦截快捷键(让用户正常打字)
+      if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.isContentEditable)return;
+      // Escape键：取消所有选中状态(框选/气泡/文字识别/标记框)
+      if(e.key==='Escape'){self.cancelSel();self.deselBub();self.cancelTextOCR();self.deselMark();}
+      // Delete/Backspace键：如果有选中的尺寸气泡，删除它
+      if((e.key==='Backspace'||e.key==='Delete')&&self.selId!==null){e.preventDefault();self.delSel();}
+      // Delete/Backspace键：如果有选中的标记框，删除它
+      if((e.key==='Backspace'||e.key==='Delete')&&self.selMarkId!==null){e.preventDefault();self.delMark();}
+      // +/-键：放大/缩小。改.15为.2会让每次缩放幅度更大
+      if(e.key==='+'||e.key==='='){e.preventDefault();self.zoomBy(.15);}
+      if(e.key==='-'){e.preventDefault();self.zoomBy(-.15);}
+    });
+    // 全局dragover/drop：阻止默认拖放行为(防止浏览器打开拖放的文件)
+    document.addEventListener('dragover',function(e){e.preventDefault();});
+    document.addEventListener('drop',function(e){e.preventDefault();});
+  },
+  // startTextOCR：启动文字识别模式，让用户在图纸上框选文字
+  startTextOCR:function(fieldId){
+    // textOcrTarget记录识别结果要填入哪个输入框；切换工具为textocr
+    this.textOcrTarget=fieldId;this.setTool('textocr');this.toast('在图纸上框选文字');
+    // 移除所有OCR按钮的active高亮
+    document.querySelectorAll('.ocr-btn').forEach(function(b){b.classList.remove('active');});
+    // 找到对应输入框旁边的OCR按钮并高亮，提示用户当前在给哪个字段识别
+    var btn=E(fieldId).parentElement.querySelector('.ocr-btn');if(btn)btn.classList.add('active');
+  },
+  // cancelTextOCR：取消文字识别模式，清除目标字段和高亮
+  cancelTextOCR:function(){this.textOcrTarget=null;document.querySelectorAll('.ocr-btn').forEach(function(b){b.classList.remove('active');});},
+  // performTextOCR：执行文字OCR识别，把框选区域的文字识别到目标输入框
+  performTextOCR:function(){
+    // 如果没目标或OCR正忙直接返回，防止重复执行
+    if(!this.textOcrTarget||this.ocrBusy)return;
+    // self保留引用；target是目标输入框ID；设置状态为忙碌
+    var self=this,target=self.textOcrTarget;self.ocrBusy=true;self.setStatus('y','文字识别...');
+    // cropAndProc裁剪并预处理画布区域；'global'表示用全局OCR配置
+    var proc=self.cropAndProc(0,undefined,'global');
+    // 判断是否是中文字段(产品名称用中文识别，其他用英文)
+    var isCN=(target==='iProdName');
+    // opts传给Tesseract的配置：pageseg_mode 6=统一文本块，7=单行文本
+    var opts={tessedit_pageseg_mode:isCN?'6':'7'};
+    // 非中文时限制字符白名单，提高识别准确率。增删字符可调整允许识别的字符集
+    if(!isCN)opts.tessedit_char_whitelist='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_. /()°±⌀Rrc半直径';
+    // Tesseract.recognize进行OCR；语言包：中文用chi_sim+eng，其他用eng
+    Tesseract.recognize(proc,isCN?'chi_sim+eng':'eng',opts).then(function(res){
+      // 获取识别结果，trim去首尾空格，把换行符替换成空格
+      var text=(res.data.text||'').trim().replace(/[\n\r]+/g,' ');
+      // 正则去掉中文字符之间的多余空格(如"中 国"->"中国")，执行两次确保干净
+      text=text.replace(/([一-鿿])\s+([一-鿿])/g,'$1$2');
+      text=text.replace(/([一-鿿])\s+([一-鿿])/g,'$1$2');
+      // 把识别结果填入目标输入框；记录日志并提示用户
+      E(target).value=text;self.log('文字: "'+text+'"','ok');self.toast('已识别: '+text);
+      // 设置完成状态；解除忙碌；取消选中并切回选择工具
+      self.setStatus('g','完成');self.ocrBusy=false;
+      self.cancelSel();self.cancelTextOCR();self.setTool('select');
+    // 识别出错时：解除忙碌；显示错误状态；取消文字识别模式
+    }).catch(function(){self.ocrBusy=false;self.setStatus('r','错误');self.cancelTextOCR();});
+  },
+
+  /* ================================================================
+     【文件加载三人组：loadFile / loadPDF / loadImg】
+     这三个函数负责"开门迎客"——把用户的图纸请进页面。
+     
+     - loadFile：看门大爷，先判断文件类型，再交给对应专员
+     - loadPDF：PDF专员，用 pdf.js 库把PDF逐页转成画布上的图
+     - loadImg：图片专员，用浏览器自带的 Image 对象加载图片
+     ================================================================ */
+  // loadFile：根据文件扩展名判断类型，交给对应加载函数
+  loadFile:function(f){
+    // 转小写确保判断不区分大小写(PDF/pdf都能识别)
+    var n=f.name.toLowerCase();
+    // 以.pdf结尾的调用loadPDF。改endsWith('.pdf')可支持其他PDF扩展名
+    if(n.endsWith('.pdf'))this.loadPDF(f);
+    // 匹配.png/.jpg/.jpeg/.tif/.tiff/.bmp的图片调用loadImg。增删扩展名可支持更多格式
+    else if(/\.(png|jpe?g|tif{1,2}|bmp)$/.test(n))this.loadImg(f);
+    // 不支持的格式提示用户
+    else this.toast('不支持的格式');
+  },
+  // loadPDF：加载PDF文件，用pdf.js解析并显示第一页
+  loadPDF:function(f){
+    var self=this;self.setStatus('y','加载中...');
+    // arrayBuffer()读取文件二进制数据；pdfjsLib.getDocument创建PDF文档对象
+    f.arrayBuffer().then(function(b){return pdfjsLib.getDocument({data:b}).promise;}).then(function(p){
+      // p是PDF文档对象；numPages获取总页数；初始化当前页为1；标记非图片模式
+      self.pdf=p;self.total=p.numPages;self.pg=1;self.isImg=false;self.showView();self.renderPgList();
+      // 渲染第一页
+      return self.renderPage();
+    // 加载完成后记录日志、更新状态、启用按钮
+    }).then(function(){self.log(self.total+'页加载完成','ok');self.setStatus('g','就绪');self.enableBtns();}).catch(function(){self.log('加载失败','err');self.setStatus('r','错误');});
+  },
+  // loadImg：加载图片文件，用Image对象显示
+  loadImg:function(f){
+    var self=this,img=new Image(),url=URL.createObjectURL(f);
+    // onload：图片加载完成后设置状态。URL.createObjectURL创建临时图片URL
+    img.onload=function(){self.pdf=null;self.isImg=true;self.imgEl=img;self.total=1;self.pg=1;self.showView();self.renderPgList();self.renderPage().then(function(){self.setStatus('g','就绪');self.enableBtns();URL.revokeObjectURL(url);});};
+    // src赋值触发图片加载
+    img.src=url;
+  },
+  // showView：隐藏空状态，显示画布、缩放条、底部表格
+  showView:function(){
+    // hid类让空状态隐藏；vs.style.display=''让画布显示；show类让缩放条和表格显示
+    E('empSt').classList.add('hid');E('vs').style.display='';E('zBar').classList.add('show');E('app').classList.add('open');
+  },
+  // enableBtns：启用需要文件加载后才能用的按钮
+  enableBtns:function(){
+    // disabled=false让按钮可点击。增删按钮ID可控制更多按钮的启用
+    E('btnAuto').disabled=false;E('btnFixBox').disabled=false;E('btnTable').disabled=false;E('btnExport').disabled=false;
+  },
+
+  /* ================================================================
+     【渲染二人组：renderPage / renderImgPage】
+     这两个函数负责"画画"——把PDF或图片画到中间的画布上。
+     
+     renderPage 的工作流程：
+     1. 向PDF库要当前页的数据
+     2. 按当前缩放比例(scale)计算画布该多大
+     3. 调用PDF库的 render 方法把内容画上去
+     4. 画完后更新覆盖层（气泡、选框等）
+     
+     小贴士：dpr 是设备像素比，高清屏(如Retina)上dpr=2，
+     这样画出来的文字和线条才不会模糊。
+     ================================================================ */
+  // renderPage：渲染当前页(PDF或图片)到画布
+  renderPage:function(){
+    var self=this;
+    // 如果是图片模式，调用renderImgPage；如果PDF未加载，返回空Promise
+    if(self.isImg)return self.renderImgPage();if(!self.pdf)return Promise.resolve();
+    // getPage获取当前页对象；then异步处理
+    return self.pdf.getPage(self.pg).then(function(page){
+      // getViewport计算当前缩放比例下的视口大小
+      var vp=page.getViewport({scale:self.scale});
+      // dpr设备像素比，Retina屏为2，让画布用更多物理像素保持清晰
+      var dpr=window.devicePixelRatio||1;
+      // 画布实际像素=视口大小*dpr；style宽高=视口CSS像素
+      self.cv.width=vp.width*dpr;self.cv.height=vp.height*dpr;
+      self.cv.style.width=vp.width+'px';self.cv.style.height=vp.height+'px';
+      // setTransform设置缩放矩阵(dpr,0,0,dpr,0,0)，让PDF渲染在高清屏上不模糊
+      self.cx.setTransform(dpr,0,0,dpr,0,0);
+      // page.render把PDF内容画到画布；完成后重置变换矩阵并更新覆盖层
+      return page.render({canvasContext:self.cx,viewport:vp}).promise.then(function(){
+        self.cx.setTransform(1,0,0,1,0,0);self.updOverlay(vp.width,vp.height);return self.extractText();
+      });
+    });
+  },
+  // renderImgPage：渲染图片到画布(图片模式专用)
+  renderImgPage:function(){
+    var self=this,img=self.imgEl;
+    // w/h是图片在当前缩放比例下的显示尺寸
+    var w=img.width*self.scale,h=img.height*self.scale;
+    // dpr设备像素比，高清屏需要更多像素保持清晰
+    var dpr=window.devicePixelRatio||1;
+    // 设置画布实际像素和CSS显示尺寸
+    self.cv.width=w*dpr;self.cv.height=h*dpr;
+    self.cv.style.width=w+'px';self.cv.style.height=h+'px';
+    // 设置缩放矩阵适配高清屏
+    self.cx.setTransform(dpr,0,0,dpr,0,0);
+    // 开启图像平滑和高质量缩放。改'high'为'medium'会降低质量但可能更快
+    self.cx.imageSmoothingEnabled=true;self.cx.imageSmoothingQuality='high';
+    // drawImage把图片画到画布(0,0起点，w/h目标尺寸)
+    self.cx.drawImage(img,0,0,w,h);self.cx.setTransform(1,0,0,1,0,0);
+    // 更新覆盖层；清空PDF文字项(图片模式没有PDF文字)；返回空Promise保持接口一致
+    self.updOverlay(w,h);self.textItems=[];return Promise.resolve();
+  },
+  // updOverlay：更新SVG覆盖层尺寸并重绘所有叠加元素
+  updOverlay:function(w,h){
+    // 获取气泡SVG元素并设置宽高和viewBox
+    var svg=document.getElementById('bubbleSvg');
+    svg.setAttribute('width',w);svg.setAttribute('height',h);
+    svg.setAttribute('viewBox','0 0 '+w+' '+h);
+    // 取消选中气泡；重绘识别区域、标记框、气泡。顺序很重要：先区域再气泡
+    this.deselBub();this.renderRegions();this.renderMarks();this.renderBubbles();
+    this.cancelSel();E('zLv').textContent=Math.round(this.scale*100)+'%';this.updStatus();
+  },
+  // renderPgList：渲染左侧页码列表
+  renderPgList:function(){
+    var el=E('pgList'),self=this;el.innerHTML='';
+    // 遍历1到总页数，为每页创建一个列表项
+    for(var i=1;i<=self.total;i++)(function(p){
+      // 创建div元素；on类给当前页加高亮背景
+      var d=document.createElement('div');
+      d.className='pg-item'+(p===self.pg?' on':'');
+      // 内HTML：页码数字+"第X页"文字
+      d.innerHTML='<span class="pg-n">'+p+'</span>第'+p+'页';
+      // 点击切换当前页并重新渲染
+      d.onclick=function(){self.pg=p;self.renderPage();self.renderPgList();};el.appendChild(d);
+    })(i);
+  },
+  // extractText：提取当前PDF页的文字内容，用于辅助识别
+  extractText:function(){
+    var self=this;self.textItems=[];if(!self.pdf)return Promise.resolve();
+    return self.pdf.getPage(self.pg).then(function(page){
+      return page.getTextContent().then(function(tc){
+        // s是当前缩放比例；vp是scale=1时的视口(用于计算Y坐标翻转)
+        var s=self.scale,vp=page.getViewport({scale:1});
+        // filter过滤掉空字符串；map把PDF文字项转成简化对象{text,x,y,w,h}
+        self.textItems=tc.items.filter(function(i){return i.str.trim();}).map(function(item){
+          // transform[4]是X坐标；transform[5]是Y坐标(PDF坐标原点在左下，需翻转)
+          return{text:item.str.trim(),x:item.transform[4]*s,y:(vp.height-item.transform[5])*s,w:item.width*s,h:(item.height||Math.abs(item.transform[3]))*s};
+        });
+      });
+    // 出错时静默处理(文字提取失败不影响主功能)
+    }).catch(function(){});
+  },
+  // zoomBy：按增量缩放。参数d>0放大，d<0缩小
+  zoomBy:function(d){this.scale=Math.max(.15,Math.min(8,this.scale+d));this.renderPage();},
+  // zoomFit：自适应缩放，让图纸刚好填满可视区(留40px边距)
+  zoomFit:function(){
+    var self=this,vs=E('vs');
+    // 没加载文件直接返回
+    if(!self.pdf&&!self.isImg)return;
+    // 图片模式：取宽/高两个方向缩放比例的较小值，最大不超过4倍
+    if(self.isImg){var s=Math.min((vs.clientWidth-40)/self.imgEl.width,(vs.clientHeight-40)/self.imgEl.height,4);self.scale=s;self.renderPage();}
+    // PDF模式：先获取页面原始尺寸，再计算自适应缩放
+    else{self.pdf.getPage(self.pg).then(function(p){var vp=p.getViewport({scale:1});var s=Math.min((vs.clientWidth-40)/vp.width,(vs.clientHeight-40)/vp.height,4);self.scale=s;self.renderPage();});}
+  },
+  // setTool：切换当前工具
+  setTool:function(t){
+    // 更新tool状态；给对应工具项加on高亮；选择工具用默认光标，其他用十字准星
+    this.tool=t;
+    E('tlList').querySelectorAll('.tl-item').forEach(function(el){el.classList.toggle('on',el.dataset.t===t);});
+    this.cv.style.cursor=(t==='select')?'default':'crosshair';
+  },
+
+  /*----- 区域管理 -----*/
+  // addRegion：添加识别区域
+  addRegion:function(x,y,w,h){
+    // id用时间戳+随机数确保唯一；x/y/w/h转成图纸坐标(除以scale)
+    var r={id:Date.now()+Math.random(),x:x/this.scale,y:y/this.scale,w:w/this.scale,h:h/this.scale,pg:this.pg};
+    // 加入区域数组；重绘区域图形和列表；扫描区域内的数字
+    this.regions.push(r);this.renderRegions();this.renderRegionList();this.scanRegionDigits(r);
+    this.log('区域#'+this.regions.length,'ok');
+  },
+  // delRegion：删除指定ID的区域
+  delRegion:function(id){
+    // filter过滤掉要删除的区域；重绘区域图形和列表
+    this.regions=this.regions.filter(function(r){return r.id!==id;});
+    this.renderRegions();this.renderRegionList();this.toast('区域已删除');
+    // 同时删除当前页的所有标记框(区域和标记联动)
+    this.marks=this.marks.filter(function(m){return m.pg!==A.pg;});this.renderMarks();
+  },
+  // renderRegions：重绘所有识别区域矩形
+  renderRegions:function(){
+    var svg=document.getElementById('bubbleSvg');
+    // 先清除旧的区域矩形，避免重复绘制
+    svg.querySelectorAll('.region-rect').forEach(function(e){e.remove();});
+    var s=this.scale,self=this;
+    this.regions.filter(function(r){return r.pg===self.pg;}).forEach(function(r){
+      svg.insertBefore(svgEl('rect',{class:'region-rect',x:r.x*s,y:r.y*s,width:r.w*s,height:r.h*s,fill:'rgba(91,154,255,.06)',stroke:'#5b9aff','stroke-width':'1.5','stroke-dasharray':'6,3',rx:'2'}),svg.firstChild);
+    });
+  },
+  // renderRegionList：渲染左侧区域列表
+  renderRegionList:function(){
+    var el=E('regionList'),self=this;
+    // 过滤出当前页的区域
+    var pgR=this.regions.filter(function(r){return r.pg===self.pg;});
+    // 如果没有区域，显示提示文字
+    if(!pgR.length){el.innerHTML='<div style="color:var(--t3);font-size:10px">使用「识别区域」工具框选</div>';return;}
+    // map生成每个区域的HTML：显示区域序号和尺寸，带删除按钮。改10px可调整提示文字大小
+    el.innerHTML=pgR.map(function(r,i){return'<div class="region-item"><span>区域'+(i+1)+': '+Math.round(r.w)+'x'+Math.round(r.h)+'</span><button class="rdel" onclick="A.delRegion('+r.id+')">x</button></div>';}).join('');
+  },
+
+  /*----- 选择交互 -----*/
+  // getPos：获取鼠标在画布上的坐标，限制在画布范围内
+  getPos:function(e){var r=this.cv.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))};},
+  // onCvDown：画布鼠标按下事件
+  onCvDown:function(e){
+    // 如果没文件/OCR忙/平移中/不是左键/刚拖完气泡，都不处理
+    if((!this.pdf&&!this.isImg)||this.ocrBusy||this.panSt||e.button!==0||this.justDraggedBub)return;
+    // 获取鼠标位置；取消标记框选中
+    var p=this.getPos(e);this.deselMark();
+    // 如果是区域/OCR/文字识别/手动工具，开始框选
+    if(this.tool==='region'||this.tool==='ocr'||this.tool==='textocr'||this.tool==='manual'){
+      this.selecting=true;this.selS=p;this.selE={x:p.x,y:p.y};this.sr.classList.add('on');this.updSelUI();
+    }
+  },
+  // onCvMove：画布鼠标移动事件，更新框选矩形
+  onCvMove:function(e){if(!this.selecting)return;this.selE=this.getPos(e);this.updSelUI();},
+  // onCvUp：画布鼠标释放事件，根据当前工具执行对应操作
+  onCvUp:function(){
+    if(!this.selecting)return;this.selecting=false;
+    // 计算框选宽高；如果太小(<4px)视为误触，取消
+    var w=Math.abs(this.selE.x-this.selS.x),h=Math.abs(this.selE.y-this.selS.y);
+    if(w<4||h<4){this.cancelSel();return;}
+    // 区域工具：添加识别区域
+    if(this.tool==='region'){this.addRegion(Math.min(this.selS.x,this.selE.x),Math.min(this.selS.y,this.selE.y),w,h);this.cancelSel();}
+    // OCR工具：自定义旋转时添加标记框；否则直接识别
+    else if(this.tool==='ocr'){
+      if(this.rot==='custom'){
+        // 把屏幕坐标转成图纸坐标
+        var sx=Math.min(this.selS.x,this.selE.x)/this.scale,sy=Math.min(this.selS.y,this.selE.y)/this.scale,sw=w/this.scale,sh=h/this.scale;
+        // 添加空白标记框，让用户调整后再识别
+        this.addMark(sx,sy,sw,sh,'',{nom:'',type:'linear',up:'',lo:''});this.cancelSel();this.toast('调整选框后双击选框识别');
+      }else{this.performOCR();}
+    // 文字识别工具：执行文字OCR
+    }else if(this.tool==='textocr'){this.performTextOCR();}
+    // 手动工具：弹出输入框让用户手动输入尺寸
+    else if(this.tool==='manual'){this.addManualBubble();}
+  },
+  // updSelUI：更新框选矩形DOM的位置和尺寸
+  updSelUI:function(){
+    var x=Math.min(this.selS.x,this.selE.x),y=Math.min(this.selS.y,this.selE.y);
+    this.sr.style.left=x+'px';this.sr.style.top=y+'px';
+    this.sr.style.width=Math.abs(this.selE.x-this.selS.x)+'px';this.sr.style.height=Math.abs(this.selE.y-this.selS.y)+'px';
+  },
+  // cancelSel：取消框选状态，隐藏选框矩形
+  cancelSel:function(){this.sr.classList.remove('on');this.selS=this.selE=null;},
+
+  // addManualBubble：手动添加气泡（用户输入尺寸值）
+  addManualBubble:function(){
+    // prompt弹出输入框让用户输入尺寸。改提示文字可引导用户输入其他格式
+    var val=prompt('输入尺寸值 (如: 20, 10.6, R1, 90, ⌀10):');if(!val){this.cancelSel();return;}
+    // 计算框选区域在图纸坐标系中的位置和尺寸
+    var sx=Math.min(this.selS.x,this.selE.x)/this.scale,sy=Math.min(this.selS.y,this.selE.y)/this.scale;
+    var sw=Math.abs(this.selE.x-this.selS.x)/this.scale,sh=Math.abs(this.selE.y-this.selS.y)/this.scale;
+    // parseDim解析用户输入的尺寸字符串；getNextNum获取下一个编号；findBubblePos找气泡位置
+    var parsed=this.parseDim(val);var num=this.getNextNum();var pos=this.findBubblePos(sx,sy,sw,sh);
+    // 创建尺寸数据对象，包含所有属性。增删字段可扩展数据结构
+    var dim={id:Date.now()+Math.random(),num:num,nominal:parsed.nom,upperTol:parsed.up,lowerTol:parsed.lo,tolValue:0,tolDisplay:'',tolGrade:'',type:parsed.type,gdt:'',measured:'',result:'',notes:'',equipment:getEquip(parsed.type,parsed.nom),ocrRaw:val,ocrAngle:0,pg:this.pg,saved:false,selX:sx,selY:sy,selW:sw,selH:sh,bubX:pos.x,bubY:pos.y};
+    // 自动计算公差；按位置排序插入；添加SVG气泡；刷新表格；提示用户；取消框选
+    this.autoTol(dim);this.insertDimSorted(dim);this.addBubSVG(dim);this.renderTable();this.toast('#'+num+' '+nomDisplay(dim));this.cancelSel();
+  },
+
+  /* ================================================================
+     【findTextRegions：像"扫雷"一样找出图上的文字区域】
+     这是v5.2最厉害的改进之一。以前靠OCR库自己找文字，
+     现在程序先自己"看"一遍图，把可能是文字的地方圈出来，
+     再交给OCR逐个识别，准确率大幅提高。
+     
+     工作流程（六步走）：
+     1. Otsu自动算阈值：把图纸变成黑白两色
+     2. 形态学闭运算：把断开的笔画连起来（比如"口"字缺了一笔也能连上）
+     3. 连通域标记：像涂色游戏，把连在一起的黑色像素涂成同一个颜色
+     4. 过滤候选：去掉太大（整张图）或太小（噪点）的斑块
+     5. 邻近合并：把同一行/同一列的小斑块合并成一块
+     6. 坐标转换：把在"放大图"上找到的位置，换算回原始图纸坐标
+     
+     参数：
+     - canvas：放大的图纸图像（OCR专用画布）
+     - regionRect：用户框选的区域信息
+     - isVertical：是否竖排文字（true=竖排，false=横排）
+     ================================================================ */
+  // findTextRegions：图像处理函数，自动找出图纸上的文字区域
+  findTextRegions:function(canvas,regionRect,isVertical){
+    // 获取画布2D上下文；willReadFrequently优化频繁读取像素
+    var ctx=canvas.getContext('2d',{willReadFrequently:true});
+    // w/h是整个放大后画布的宽高
+    var w=canvas.width,h=canvas.height;
+    // lx/ly是区域左上角在放大画布上的偏移；lw/lh是区域宽高。没regionRect则用全图
+    var lx=regionRect?regionRect.lx:0,ly=regionRect?regionRect.ly:0;
+    var lw=regionRect?regionRect.lw:w,lh=regionRect?regionRect.lh:h;
+    // getImageData获取区域像素数据；d是Uint8ClampedArray，每4字节代表一个像素的RGBA
+    var id=ctx.getImageData(lx,ly,lw,lh);var d=id.data;
+    // s是当前缩放比例；osc是OCR放大倍数(来自设置)
+    var s=this.scale,osc=parseInt(E('sScale').value)||2;
+    // dpr设备像素比，用于坐标换算
+    var dpr=window.devicePixelRatio||1;
+    // 区域原点在文档坐标系中的位置(用于最后把找到的位置转回文档坐标)
+    var docOrgX=regionRect&&regionRect.docX!==undefined?regionRect.docX:0;
+    var docOrgY=regionRect&&regionRect.docY!==undefined?regionRect.docY:0;
+    /* ---- 1. Otsu自动阈值：计算最佳黑白分界值 ----
+       Otsu算法自动找出一个阈值，让黑色(文字)和白色(背景)分得最开 */
+    // hist是灰度直方图，256个桶，统计每个灰度级有多少像素
+    var hist=new Array(256).fill(0);
+    // 遍历所有像素，每4字节一个像素，取RGB按人眼敏感度加权算灰度(.299R+.587G+.114B)
+    for(var i=0;i<d.length;i+=4)hist[Math.round(d[i]*.299+d[i+1]*.587+d[i+2]*.114)]++;
+    // total总像素数；sum是所有像素的灰度总和
+    var total=d.length/4,sum=0;for(var i=0;i<256;i++)sum+=i*hist[i];
+    // sB累计灰度和；wB累计像素数；mxV最大类间方差；th最终阈值
+    var sB=0,wB=0,mxV=0,th=0;
+    // Otsu核心算法：遍历每个可能的阈值，计算类间方差，找最大的
+    for(var i=0;i<256;i++){wB+=hist[i];if(!wB)continue;var wF=total-wB;if(!wF)break;sB+=i*hist[i];var mB=sB/wB,mF=(sum-sB)/wF,vb=wB*wF*(mB-mF)*(mB-mF);if(vb>mxV){mxV=vb;th=i;}}
+    // 工程图纸淡色笔划多，阈值乘0.9保留浅色文字；同时不低于80防止过黑
+    th=Math.max(80,Math.round(th*0.9));
+    /* ---- 2. 二值化 + 形态学闭运算 ----
+       闭运算=先膨胀后腐蚀，能把断开的笔画连起来 */
+    // bin存二值化结果(0或1)；morph是形态学运算临时数组
+    var bin=new Uint8Array(lw*lh);var morph=new Uint8Array(lw*lh);
+    // 结构元素大小，取区域短边的1/100，至少2像素。改100为50会让结构元素更大
+    var seSize=Math.max(2,Math.round(Math.min(lw,lh)/100));
+    // 二值化：把每个像素转成0(背景)或1(前景/文字)
+    for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){var idx=y*lw+x,di=idx*4;var rr=d[di],gg=d[di+1],bb=d[di+2],mx=Math.max(rr,gg,bb),mn=Math.min(rr,gg,bb);var g=rr*.299+gg*.587+bb*.114;var neutral=(mx-mn)<70||mx<90;bin[idx]=(g<th&&neutral)?1:0;}
+    // 形态学闭运算：竖排和横排用不同方向的膨胀/腐蚀
+    if(isVertical){
+      // 竖排膨胀：上下方向。只要有上下seSize范围内的像素为1，结果就为1
+      for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){var mx=0;for(var dy=-seSize;dy<=seSize;dy++){var cy=y+dy;if(cy>=0&&cy<lh&&bin[cy*lw+x]){mx=1;break;}}morph[y*lw+x]=mx;}
+      // 竖排腐蚀：上下方向。只有上下seSize范围内全为1，结果才为1
+      for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){if(!morph[y*lw+x])continue;var all=1;for(var dy=-seSize;dy<=seSize;dy++){var cy=y+dy;if(cy<0||cy>=lh||!morph[cy*lw+x]){all=0;break;}}bin[y*lw+x]=all;}
+    }else{
+      // 横排膨胀：左右方向。只要有左右seSize范围内的像素为1，结果就为1
+      for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){var mx=0;for(var dx=-seSize;dx<=seSize;dx++){var cx=x+dx;if(cx>=0&&cx<lw&&bin[y*lw+cx]){mx=1;break;}}morph[y*lw+x]=mx;}
+      // 横排腐蚀：左右方向。只有左右seSize范围内全为1，结果才为1
+      for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){if(!morph[y*lw+x])continue;var all=1;for(var dx=-seSize;dx<=seSize;dx++){var cx=x+dx;if(cx<0||cx>=lw||!morph[y*lw+cx]){all=0;break;}}bin[y*lw+x]=all;}
+    }
+    /* ---- 3. 连通域标记：给连在一起的像素块标同一个编号 ----
+       两遍扫描+并查集(union-find)处理8邻域连接 */
+    // labels存每个像素属于哪个连通域；nextL是下一个新标签编号
+    var labels=new Int32Array(lw*lh);labels.fill(0);var nextL=1;var eq={};
+    // union：记录两个标签是等价的(属于同一个连通域)
+    function union(a,b){if(a===b)return;if(!eq[a])eq[a]=new Set();if(!eq[b])eq[b]=new Set();eq[a].add(b);eq[b].add(a);}
+    // 第一遍扫描：给每个前景像素分配临时标签，记录等价关系
+    for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){var idx=y*lw+x;if(!bin[idx])continue;var left=x>0?labels[idx-1]:0,up=y>0?labels[idx-lw]:0,ul=(x>0&&y>0)?labels[idx-lw-1]:0,ur=(x<lw-1&&y>0)?labels[idx-lw+1]:0;var ns=[];if(left)ns.push(left);if(up)ns.push(up);if(ul)ns.push(ul);if(ur)ns.push(ur);if(!ns.length)labels[idx]=nextL++;else{var ml=Math.min.apply(null,ns);labels[idx]=ml;ns.forEach(function(n){if(n!==ml)union(ml,n);});}}
+    // comps统计每个连通域的边界框和像素数
+    var comps={};
+    // 第二遍扫描：把等价标签合并，计算每个连通域的x1/y1/x2/y2/px
+    for(var y=0;y<lh;y++)for(var x=0;x<lw;x++){var idx=y*lw+x;if(!bin[idx])continue;var l=labels[idx];if(eq[l]){var visited=new Set(),stack=[l];while(stack.length){var n=stack.pop();if(visited.has(n))continue;visited.add(n);if(eq[n])eq[n].forEach(function(c){if(!visited.has(c))stack.push(c);});}l=Math.min.apply(null,[...visited]);}if(!comps[l])comps[l]={x1:lw,y1:lh,x2:0,y2:0,px:0};comps[l].x1=Math.min(comps[l].x1,x);comps[l].y1=Math.min(comps[l].y1,y);comps[l].x2=Math.max(comps[l].x2,x);comps[l].y2=Math.max(comps[l].y2,y);comps[l].px++;}
+    /* ---- 4. 过滤文本候选：去掉明显不是文字的连通域 ---- */
+    // area是区域总面积；minArea最小面积(至少6像素或总面积的0.02%)；maxArea最大面积(总面积的12%)
+    var area=lw*lh;var minArea=Math.max(6,area*0.0002);var maxArea=area*0.12;var cands=[];
+    // 遍历每个连通域，过滤掉太大/太小/太扁/填充率异常的
+    Object.keys(comps).forEach(function(k){var c=comps[k];if(!c||!c.px)return;var cw=c.x2-c.x1+1,ch=c.y2-c.y1+1,ca=c.px,fill=ca/(cw*ch||1);if(ca<minArea||ca>maxArea)return;if(cw<2||ch<2)return;if(cw>lw*0.7||ch>lh*0.7)return;var ar=cw/ch;if(ar>20||ar<0.05)return;if(fill<0.03||fill>0.90)return;cands.push({x1:c.x1,y1:c.y1,x2:c.x2,y2:c.y2,w:cw,h:ch,area:ca,fill:fill});});
+    /* ---- 5. 邻近合并：把同一行/列的小块合并成文字行 ---- */
+    // 先按Y坐标排序，Y相近的再按X排序
+    cands.sort(function(a,b){var dy=a.y1-b.y1;if(Math.abs(dy)>Math.min(a.h,b.h)*0.5)return dy;return a.x1-b.x1;});
+    var groups=[],used=new Set();
+    // 遍历每个候选，尝试和已有的组合并
+    cands.forEach(function(c,i){if(used.has(i))return;var g={x1:c.x1,y1:c.y1,x2:c.x2,y2:c.y2,members:[i]};used.add(i);var avgH=Math.max(c.h,6),avgW=Math.max(c.w,6);
+    cands.forEach(function(d,j){if(used.has(j))return;var yGap=Math.max(0,Math.max(g.y1,d.y1)-Math.min(g.y2,d.y2));var xGap=Math.max(0,Math.max(g.x1,d.x1)-Math.min(g.x2,d.x2));var yOverlap=Math.min(g.y2,d.y2)-Math.max(g.y1,d.y1);var xOverlap=Math.min(g.x2,d.x2)-Math.max(g.x1,d.x1);var maxDim=Math.max(g.x2-g.x1,g.y2-g.y1,d.x2-d.x1,d.y2-d.y1);
+      // hMerge横向合并条件：Y有重叠，或Y间距小且X间距不大。改0.5/2.5/0.4可调整合并敏感度
+      var hMerge=yOverlap>0||(yGap<avgH*0.5&&xGap<avgW*2.5&&yGap<maxDim*0.4);
+      // vMerge纵向合并条件：X有重叠且Y间距小。竖排时Y间距容忍更大
+      var vMerge=xOverlap>0&&yGap<avgH*(isVertical?3:1.2)&&yGap<maxDim*0.5;
+      // 大小比例检查：避免大小差异过大的块合并(如标题和正文)
+      var gArea=Math.max((g.x2-g.x1+1)*(g.y2-g.y1+1),1),dArea=Math.max(d.w*d.h,1);var sizeRatio=Math.max(gArea,dArea)/Math.min(gArea,dArea);
+      // 满足合并条件且大小比例合理时，扩展组合并框
+      if((hMerge||vMerge)&&sizeRatio<20&&yGap<Math.max(avgH,12)*2.5){
+        g.x1=Math.min(g.x1,d.x1);g.y1=Math.min(g.y1,d.y1);g.x2=Math.max(g.x2,d.x2);g.y2=Math.max(g.y2,d.y2);
+        g.members.push(j);used.add(j);
+        // 移动平均更新平均宽高。0.7/0.3是平滑系数
+        avgH=avgH*0.7+Math.max(d.h,6)*0.3;avgW=avgW*0.7+Math.max(d.w,6)*0.3;
+      }});groups.push(g);});
+    /* ---- 6. 转文档坐标：把放大画布上的坐标转回原始图纸坐标 ---- */
+    // pad是外扩像素，确保文字边缘也被包含。改3为5会让候选区域更大
+    var pad=3;var docCands=[];
+    groups.forEach(function(g){
+      // osc*dpr*s是放大倍数*设备像素比*当前缩放的综合因子，用于坐标还原
+      var gx=docOrgX+(lx+g.x1-pad)/(osc*dpr*s),gy=docOrgY+(ly+g.y1-pad)/(osc*dpr*s),gw=(g.x2-g.x1+pad*2)/(osc*dpr*s),gh=(g.y2-g.y1+pad*2)/(osc*dpr*s);
+      // ms是最小尺寸限制，防止转回后太小
+      var ms=1.5/(osc*dpr*s);gw=Math.max(gw,ms);gh=Math.max(gh,ms);
+      if(gw>0&&gh>0)docCands.push({x:gx,y:gy,w:gw,h:gh,members:g.members.length});
+    });
+    return docCands;
+  },
+
+  /* ================================================================
+     【groupRowsByLine：把散落的文字块排成"队伍"】
+     v5.4新增。以前OCR会把"2540 (0,-1)"切成4块分别识别，
+     现在先把它们在视觉上排成行，一整行一起交给OCR，
+     这样连括号、公差都能一起读出来。
+     
+     判断同行的标准：
+     - 上下中心点差距 < 平均高度×0.7
+     - 左右间距 < 平均高度×5
+     ================================================================ */
+  // groupRowsByLine：把散落的文字候选块按行分组
+  groupRowsByLine:function(cands,region){
+    // 如果没候选或为空数组，返回空
+    if(!cands||!cands.length)return[];
+    // 计算平均高度。改0.6/3可调整行间距判定
+    var avgH=0;cands.forEach(function(c){avgH+=c.h;});avgH/=cands.length;
+    // yGap是行间距阈值，低于此值的视为同一行
+    var yGap=Math.max(avgH*0.6,3);
+    // slice()复制数组；排序：Y相近的按X排，否则按Y排
+    var sorted=cands.slice().sort(function(a,b){
+      if(Math.abs(a.y-b.y)<yGap)return a.x-b.x;
+      return a.y-b.y;
+    });
+    var rows=[];var cur=[];
+    // 遍历排序后的候选，把同一行的放进同一个数组
+    sorted.forEach(function(c){
+      if(!cur.length){cur.push(c);return;}
+      var last=cur[cur.length-1];
+      // 同行判定：Y中心差 < 平均高*0.7 且 X间距 < 平均高*5。改0.7/5可调整同行敏感度
+      var sameLine=Math.abs((c.y+c.h/2)-(last.y+last.h/2))<avgH*0.7;
+      var xClose=(c.x-(last.x+last.w))<avgH*5;
+      if(sameLine&&xClose)cur.push(c);else{rows.push(cur);cur=[c];}
+    });
+    // 把最后一行也加进去
+    if(cur.length)rows.push(cur);
+    return rows;
+  },
+  /* ================================================================
+     【autoFromSparseOCR："先粗后细"找尺寸】
+     这个函数先在区域里做一次快速OCR（把整张大图一起识别），
+     看看大概有哪些文字，再把这些文字的位置和尺寸解析出来。
+     相当于"先航拍再定点"，适合找大段的尺寸标注。
+     ================================================================ */
+  // autoFromSparseOCR："先粗后细"找尺寸，先对整个区域做OCR，再解析结果
+  autoFromSparseOCR:function(region){
+    var self=this,s=this.scale,dpr=window.devicePixelRatio||1,osc=parseInt(E('sScale').value)||2;
+    // 保存当前框选状态，因为cropAndProc会用到selS/selE
+    var oldS=this.selS,oldE=this.selE;
+    // 临时设置selS/selE为区域范围，让cropAndProc裁剪这个区域
+    this.selS={x:region.x*s,y:region.y*s};this.selE={x:(region.x+region.w)*s,y:(region.y+region.h)*s};
+    // proc0是0度(正常方向)的裁剪预处理图；thresh取设置值或默认200
+    var proc0=this.cropAndProc(0,parseInt(E('sThresh').value)||200,'global');
+    // 恢复原始框选状态
+    this.selS=oldS;this.selE=oldE;
+    // opts是Tesseract配置：pageseg_mode=11表示稀疏文本；whitelist限制字符集提高准确率
+    var opts={tessedit_pageseg_mode:'11',tessedit_char_whitelist:'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-+/±⌀ΦφØøRrCcDdIiAaSs径直径半°º×x'};
+    // v5.4 P0-3: 增加90°旋转OCR分支，识别横向尺寸
+    var proc90=this.cropAndProc(90,parseInt(E('sThresh').value)||200,'global');
+    // p0/p90是两个并行的OCR Promise；catch防止单个失败影响另一个
+    var p0=Tesseract.recognize(proc0,E('sLang').value||'eng',opts).catch(function(){return{data:{words:[]}};});
+    var p90=Tesseract.recognize(proc90,E('sLang').value||'eng',opts).catch(function(){return{data:{words:[]}};});
+    // Promise.all等待两个OCR都完成
+    return Promise.all([p0,p90]).then(function(results){
+      var allHits=[];
+      // 遍历两个结果(0度和90度)
+      results.forEach(function(res,idx){
+        var ang=idx===0?0:90;
+        // 过滤掉没有文字或没有边界框的word；map转成简化对象；再过滤空文字
+        var words=(res.data.words||[]).filter(function(w){return w&&w.text&&w.bbox;}).map(function(w,i){return{idx:i,ang:ang,text:normalizeDimText(String(w.text||'').trim()),conf:w.confidence||0,bbox:w.bbox};}).filter(function(w){return w.text;});
+        // 保存0度结果到lastSparseWords供后续修正使用
+        if(idx===0)self.lastSparseWords=words.map(function(w){return{text:w.text,conf:w.conf,bbox:w.bbox};});
+        var hits=[];
+        // boxOf：计算一组word的合并边界框
+        function boxOf(group){var x0=1e9,y0=1e9,x1=0,y1=0;group.forEach(function(w){x0=Math.min(x0,w.bbox.x0);y0=Math.min(y0,w.bbox.y0);x1=Math.max(x1,w.bbox.x1);y1=Math.max(y1,w.bbox.y1);});return{x:x0,y:y0,w:Math.max(1,x1-x0),h:Math.max(1,y1-y0)};}
+        // close：判断两个word是否"接近"(可能属于同一尺寸)。改1.7/3.5可调整接近判定
+        function close(a,b){var ab=boxOf([a]),bb=boxOf([b]);var ah=ab.h,bh=bb.h;var cyA=ab.y+ab.h/2,cyB=bb.y+bb.h/2;var cxA=ab.x+ab.w/2,cxB=bb.x+bb.w/2;var xGap=Math.max(0,Math.max(ab.x,bb.x)-Math.min(ab.x+ab.w,bb.x+bb.w));var yGap=Math.max(0,Math.max(ab.y,bb.y)-Math.min(ab.y+ab.h,bb.y+bb.h));return Math.abs(cyA-cyB)<Math.max(ah,bh)*1.7&&xGap<Math.max(ah,bh)*3.5||Math.abs(cxA-cxB)<Math.max(ab.w,bb.w)*1.7&&yGap<Math.max(ah,bh)*3.5;}
+        // add：把一组word合并成一个尺寸候选。包含解析、过滤、坐标映射
+        function add(group){var raw=group.map(function(w){return w.text;}).join(' ');if(!/\d|[RrCc]|[oO0QnNØøΦφ⌀]/.test(raw))return;var parsed=self.parseDim(raw);if(!parsed.nom||!/\d/.test(parsed.nom)){var cleaned=self.extractDigits(raw);if(cleaned)parsed=self.parseDim(cleaned);}if(!parsed.nom||!/\d/.test(parsed.nom))return;if(self.isBadDimRaw(raw,parsed))return;var b=boxOf(group);var mapped=self.mapBoundsToDoc(b,ang,{x:region.x*s,y:region.y*s},region.w*s,region.h*s,osc,dpr);if(mapped.w<0.5||mapped.h<0.5)return;hits.push({nom:parsed.nom,up:parsed.up,lo:parsed.lo,type:parsed.type,x:mapped.x,y:mapped.y,w:mapped.w,h:mapped.h,angle:ang,conf:group.reduce(function(a,w){return a+w.conf;},0)/group.length,raw:raw});}
+        // v5.4 P1-6: 行级聚合，把同一行的word合并识别
+        var wordCands=words.map(function(w){var b=w.bbox;return{x:b.x0,y:b.y0,w:b.x1-b.x0,h:b.y1-b.y0,text:w.text,conf:w.conf,_w:w};});
+        var rows=self.groupRowsByLine(wordCands,region);
+        // 每行2-6个word时尝试合并识别。改2/6可调整行级合并范围
+        rows.forEach(function(row){if(row.length>=2&&row.length<=6)add(row.map(function(c){return c._w;}));});
+        // 每个word单独识别；再找邻近的1-2个word组合识别
+        words.forEach(function(w,i){add([w]);var near=words.filter(function(o){return o.idx!==w.idx&&Math.abs(o.idx-w.idx)<=3&&close(w,o);}).sort(function(a,b){return a.idx-b.idx;});if(near.length)add([w,near[0]].sort(function(a,b){return a.idx-b.idx;}));if(near.length>1)add([w,near[0],near[1]].sort(function(a,b){return a.idx-b.idx;}));});
+        allHits=allHits.concat(hits);
+      });
+      // dedupeFoundList去重并排序。改dedupe逻辑可调整去重严格度
+      return self.dedupeFoundList(allHits);
+    // 出错时返回空数组
+    }).catch(function(){return[];});
+  },
+
+  /* ================================================================
+     【autoFromOCR："地毯式搜索"找尺寸】
+     这是自动识别的核心函数之一。工作流程：
+     1. 用 findTextRegions 把区域切成很多小方块（连通域）
+     2. 去掉互相重叠太多的方块（去重）
+     3. 对每个小方块做OCR识别（支持旋转0°/90°/180°/270°）
+     4. 把识别结果解析成标准尺寸格式
+     5. 再次去重，按从左到右、从上到下的顺序排列
+     
+     v5.4改进：排序改为"从大到小"，大文字块先入选，
+     避免小碎片（如公差括号）把主尺寸挤掉。
+     ================================================================ */
+  // autoFromOCR："地毯式搜索"找尺寸，核心自动识别函数
+  autoFromOCR:function(region){
+    var self=this,s=this.scale,dpr=window.devicePixelRatio||1,osc=parseInt(E('sScale').value)||2;
+    // rx/ry/rw/rh是区域在屏幕坐标系中的位置和尺寸
+    var rx=region.x*s,ry=region.y*s,rw=region.w*s,rh=region.h*s;
+    // isVertical判断区域是否偏竖向(高>宽)；results存所有识别结果
+    var isVertical=region.w<region.h;var results=[];
+    // 创建离屏画布用于图像处理；尺寸=区域尺寸*dpr*osc(放大)
+    var off=document.createElement('canvas');off.width=Math.max(1,Math.round(rw*dpr*osc));off.height=Math.max(1,Math.round(rh*dpr*osc));
+    var oc=off.getContext('2d',{willReadFrequently:true});oc.fillStyle='#fff';oc.fillRect(0,0,off.width,off.height);
+    // 开启高质量图像平滑
+    oc.imageSmoothingEnabled=true;oc.imageSmoothingQuality='high';
+    // 把画布上对应区域的内容画到离屏画布上
+    oc.drawImage(this.cv,rx*dpr,ry*dpr,rw*dpr,rh*dpr,0,0,off.width,off.height);
+    // roi定义处理区域；docX/docY记录原始文档坐标原点
+    var roi={lx:0,ly:0,lw:off.width,lh:off.height,docX:region.x,docY:region.y};
+    // texts0是横排文字候选；texts90是竖排(90度)文字候选
+    var texts0=this.findTextRegions(off,roi,false),texts90=[];
+    // v5.4 P0-3: 始终扫描垂直方向文本，工程图纸横向尺寸也常需要90度识别
+    texts90=this.findTextRegions(off,roi,true);
+    var psm=E('sPSM').value,lang=E('sLang').value,docCands=[];
+    // 把两个方向的候选合并到docCands数组
+    texts0.forEach(function(t){if(t.w>0&&t.h>0)docCands.push({x:t.x,y:t.y,w:t.w,h:t.h,angle:0});});
+    texts90.forEach(function(t){if(t.w>0&&t.h>0)docCands.push({x:t.x,y:t.y,w:t.w,h:t.h,angle:90});});
+    // v5.4 P0-1: 按面积降序排序，大块先识别，小碎片被吞并。改0.45可调整重叠判定
+    docCands.sort(function(a,b){return(b.w*b.h)-(a.w*a.h);});
+    var deduped=[];
+    // 去重：如果两个候选角度相同且重叠比例>0.45，只保留大的(因为已降序)
+    docCands.forEach(function(c){var dup=deduped.some(function(d){var sameAngle=Math.abs(d.angle-c.angle)<0.5;if(!sameAngle)return false;return self.rectOverlapRatio(c,d)>0.45;});if(!dup)deduped.push(c);});
+    // 保存视觉候选供调试和修正使用
+    self.lastVisionCands=deduped.map(function(c){return{x:c.x,y:c.y,w:c.w,h:c.h,angle:c.angle};});
+    // handleResult：处理单个OCR结果，解析尺寸并加入results
+    var handleResult=function(dc,ang,proc,r){
+      var raw=(r.text||'').trim();var cleaned=self.correctDigits(proc,self.extractDigits(raw));
+      var parsed=self.parseDim(raw);if(!parsed.nom||!/\d/.test(parsed.nom))parsed=self.parseDim(cleaned||raw);if(!parsed.nom||!/\d/.test(parsed.nom))return;
+      if(!cleaned&&(r.confidence||0)<30)return;
+      var bounds=null;
+      // 从word级bbox计算整体边界框
+      if(r.words&&r.words.length){var bbox={x0:1e9,y0:1e9,x1:0,y1:0};r.words.forEach(function(w){if(w.bbox){bbox.x0=Math.min(bbox.x0,w.bbox.x0);bbox.y0=Math.min(bbox.y0,w.bbox.y0);bbox.x1=Math.max(bbox.x1,w.bbox.x1);bbox.y1=Math.max(bbox.y1,w.bbox.y1);}});if(bbox.x0<1e9&&bbox.x1>bbox.x0&&bbox.y1>bbox.y0)bounds={x:bbox.x0,y:bbox.y0,w:bbox.x1-bbox.x0,h:bbox.y1-bbox.y0};}
+      if(!bounds)bounds=self.getContentBounds(proc);if(!bounds)return;
+      // 把处理图像上的坐标映射回文档坐标
+      var mapped=self.mapBoundsToDoc(bounds,ang,{x:dc.x*s,y:dc.y*s},dc.w*s,dc.h*s,osc,dpr);
+      if(mapped.w<0.5||mapped.h<0.5)return;
+      // refineBounds精修边界框
+      var refined=self.refineBounds(proc,mapped,{x:dc.x*s,y:dc.y*s},dc.w*s,dc.h*s,osc,dpr);
+      results.push({nom:parsed.nom,up:parsed.up,lo:parsed.lo,type:parsed.type,x:refined.x,y:refined.y,w:refined.w,h:refined.h,conf:r.confidence||0,angle:ang,raw:raw||cleaned});
+    };
+    // promiseChain串行执行每个候选的OCR，避免同时开太多线程卡死
+    var promiseChain=Promise.resolve();
+    deduped.forEach(function(dc){promiseChain=promiseChain.then(function(){
+      // 如果OCR被取消(ocrBusy=false)，跳过剩余候选
+      if(A.ocrBusy===false)return Promise.resolve();
+      // 设置框选范围为当前候选区域
+      self.selS={x:dc.x*s,y:dc.y*s};self.selE={x:(dc.x+dc.w)*s,y:(dc.y+dc.h)*s};
+      var ang=dc.angle,proc=self.cropAndProc(ang,undefined,'global');
+      // 先做一次OCR
+      return self.ocrPass(proc,psm,lang).then(function(r){
+        var cleaned=self.correctDigits(proc,self.extractDigits(r.text||''));
+        // 如果识别结果干净且置信度>=45，直接处理
+        if(cleaned&&(r.confidence||0)>=45){handleResult(dc,ang,proc,r);return;}
+        // 否则做多通道OCR尝试
+        return self.multiPassOCR(ang).then(function(mr){handleResult(dc,ang,proc,{text:mr.text||r.text,confidence:Math.max(mr.confidence||0,r.confidence||0),words:(mr.words&&mr.words.length)?mr.words:r.words});});
+      }).catch(function(){return Promise.resolve();});
+    });});
+    // 所有候选处理完后去重返回
+    return promiseChain.then(function(){return self.dedupeFoundList(results);});
+  },
+
+  /* ================================================================
+     【autoFromText："薅PDF羊毛"找尺寸】
+     PDF文件内部其实有一份"文字清单"（text layer），
+     这个函数直接读取清单上的文字，不用看图就能知道哪里有字。
+     效率高、速度快，但不是所有PDF都有文字层（扫描件就没有）。
+     
+     工作流程：
+     1. 从PDF文字清单里筛选出落在用户框选区域内的文字
+     2. 把邻近的文字拼成一组（比如"⌀"和"10"拼成"⌀10"）
+     3. 用 parseDim 解析每组文字是不是有效尺寸
+     4. 过滤掉明显不是尺寸的干扰项（如页码、日期、REV版本号）
+     ================================================================ */
+  // autoFromText：直接读取PDF内部文字层找尺寸（非扫描件）
+  autoFromText:function(region){
+    var s=this.scale,self=this,isVertical=region.w<region.h;
+    // 筛选落在区域内的文字项，map成简化对象
+    var items=this.textItems.filter(function(i){var ix=i.x/s,iy=i.y/s,iw=(i.w||0)/s,ih=(i.h||0)/s;return ix+iw>=region.x&&ix<=region.x+region.w&&iy+ih>=region.y&&iy<=region.y+region.h;}).map(function(i){return{text:i.text,x:i.x,y:i.y,w:i.w,h:i.h};});
+    if(!items.length)return[];
+    // baseTokens：把items转为统一坐标系下的token。改10可调整最小宽高
+    var baseTokens=items.map(function(i,idx){return{idx:idx,item:i,text:normalizeDimText(i.text||''),x:i.x/s,y:i.y/s,w:Math.max((i.w||10)/s,1),h:Math.max((i.h||10)/s,1)};}).filter(function(t){return t.text;});
+    // tokenBox：计算一组token的合并边界框，外扩1.5像素
+    function tokenBox(group){var x1=1e9,y1=1e9,x2=0,y2=0;group.forEach(function(t){x1=Math.min(x1,t.x);y1=Math.min(y1,t.y);x2=Math.max(x2,t.x+t.w);y2=Math.max(y2,t.y+t.h);});return{x:x1-1.5,y:y1-1.5,w:Math.max(x2-x1+3,1),h:Math.max(y2-y1+3,1)};}
+    // closeEnough：判断两个token是否足够近可以合并。改1.4/4.5/2.2/3.5可调整合并敏感度
+    function closeEnough(a,b){var avgH=(a.h+b.h)/2,avgW=(a.w+b.w)/2;var sameLine=Math.abs((a.y+a.h/2)-(b.y+b.h/2))<avgH*1.4&&Math.abs(b.x-(a.x+a.w))<avgH*4.5;var sameCol=Math.abs((a.x+a.w/2)-(b.x+b.w/2))<avgW*2.2&&Math.abs(b.y-(a.y+a.h))<avgH*3.5;return isVertical?(sameCol||sameLine):sameLine;}
+    // rawBad：判断原始文字是否是干扰项(如图签、日期、版本号)
+    function rawBad(raw){return /REV|DESIGN|REVIEW|DATE|SIGN|SCALE|PAGE|Creo|CCD/i.test(raw)||/^\d+\s*:\s*\d+/.test(raw)||/^\d{4}[.\/-]/.test(raw)||/[A-Za-z]{3,}.*\d/.test(raw)&&!/(DIA|DIAM|SR)/i.test(raw);}
+    // scoreRaw：给原始文字打分，分高表示更可能是尺寸。改加减分项可调整识别倾向
+    function scoreRaw(raw,parsed){var score=0;if(/[Rr]\s*\d/.test(raw)||/^\s*S\s*R/i.test(raw))score+=90;if(/[Cc]\s*\d/.test(raw))score+=80;if(DIM_SYMBOLS.test(raw)||/(?:^|[×xX]\s*)[oO0QnN]\s*\d/.test(raw)||/DIA|DIAM/i.test(raw))score+=85;if(/[°º]/.test(raw))score+=70;if(/[×xX]/.test(raw))score+=20;if(parsed.type==='diameter'||parsed.type==='radius'||parsed.type==='chamfer'||parsed.type==='angle')score+=30;if(/^\s*[-−]/.test(raw))score-=80;if(rawBad(raw))score-=80;if(/^\s*\d+(?:\.\d+)?\s*$/.test(raw))score+=12;return score;}
+    var cands=[];
+    // 遍历每个token，生成1~4个token的组合候选
+    baseTokens.forEach(function(t){
+      var groups=[[t]];
+      // near是靠近t的其他token，最多取3个。改3可调整组合数量
+      var near=baseTokens.filter(function(o){return o.idx!==t.idx&&closeEnough(t,o);}).sort(function(a,b){return isVertical?(a.y-b.y):(a.x-b.x);}).slice(0,3);
+      if(near.length)groups.push([t,near[0]]);
+      if(near.length>1)groups.push([t,near[0],near[1]]);
+      if(near.length>2)groups.push([t,near[0],near[1],near[2]]);
+      groups.forEach(function(g){
+        // 按阅读顺序排序：竖向从上到下，横向从左到右
+        g=g.slice().sort(function(a,b){return isVertical?(a.y-b.y||a.x-b.x):(a.x-b.x||a.y-b.y);});
+        var raw=g.map(function(x){return x.text;}).join(' ');if(!/\d|[RrCc]|[oO0QnN]|[°º]/.test(raw))return;
+        var parsed=self.parseDim(raw);if((!parsed.nom||!/\d/.test(parsed.nom))&&raw){var cleaned=self.extractDigits(raw);if(cleaned)parsed=self.parseDim(cleaned);}
+        if(!parsed.nom||!/\d/.test(parsed.nom))return;var sc=scoreRaw(raw,parsed);if(sc<10)return;
+        var b=tokenBox(g);cands.push({nom:parsed.nom,up:parsed.up,lo:parsed.lo,type:parsed.type,x:b.x,y:b.y,w:b.w,h:b.h,angle:isVertical?90:0,raw:raw,conf:100,score:sc});
+      });
+    });
+    // 用filterTextCandidates过滤掉明显不是尺寸的候选
+    cands=this.filterTextCandidates(cands,region);
+    // 按分数降序排，分数相同的按面积升序(小面积优先)
+    cands.sort(function(a,b){if(b.score!==a.score)return b.score-a.score;return(a.w*a.h)-(b.w*b.h);});
+    var out=[];
+    // 去重：重叠比例>0.35或sameDimHit时跳过。改0.35可调整去重严格度
+    cands.forEach(function(c){var dup=out.some(function(o){return self.sameDimHit(c,o)||self.rectOverlapRatio(c,o)>0.35;});if(!dup)out.push(c);});
+    // 最终排序：先按行(上下)，同行再按左右。改0.7可调整行判定
+    out.sort(function(a,b){var dy=a.y-b.y;if(Math.abs(dy)>Math.max(a.h,b.h,1)*0.7)return dy;return a.x-b.x;});return out;
+  },
+  // filterTextCandidates：过滤文本候选，去掉表格索引号(如1~12的连续数字)
+  filterTextCandidates:function(cands,region){
+    // 先过滤掉坐标不合法或宽高<=0的
+    cands=(cands||[]).filter(function(c){return c&&isFinite(c.x)&&isFinite(c.y)&&c.w>0&&c.h>0;});
+    // 给每个候选打索引，用于后续标记删除
+    cands.forEach(function(c,i){c._fi=i;});
+    function cx(c){return c.x+c.w/2;}function cy(c){return c.y+c.h/2;}
+    // plainIndex：判断是否是表格索引号(1~12的纯整数且分数低)。改1/12/25可调整过滤范围
+    function plainIndex(c){var raw=String(c.raw||c.nom||'').trim();var n=parseInt(c.nom,10);return c.type==='linear'&&/^\d+$/.test(c.nom)&&n>=1&&n<=12&&/^\d+$/.test(raw)&&(c.score||0)<=25;}
+    // hasConsecutiveRun：判断数组是否有>=4个连续数字。改4可调整连续判定
+    function hasConsecutiveRun(vals){vals=[...new Set(vals)].sort(function(a,b){return a-b;});var run=1,best=1;for(var i=1;i<vals.length;i++){run=vals[i]===vals[i-1]+1?run+1:1;best=Math.max(best,run);}return best>=4;}
+    var small=cands.filter(plainIndex),reject={};
+    // 对每个疑似索引号，如果其所在行/列有>=4个连续数字，则整行/列都标记为删除
+    small.forEach(function(c){
+      var gx=small.filter(function(o){return Math.abs(cx(o)-cx(c))<=Math.max(10,Math.max(o.w,c.w)*1.4);});
+      if(gx.length>=4&&hasConsecutiveRun(gx.map(function(o){return parseInt(o.nom,10);})))gx.forEach(function(o){reject[o._fi]=1;});
+      var gy=small.filter(function(o){return Math.abs(cy(o)-cy(c))<=Math.max(10,Math.max(o.h,c.h)*1.4);});
+      if(gy.length>=4&&hasConsecutiveRun(gy.map(function(o){return parseInt(o.nom,10);})))gy.forEach(function(o){reject[o._fi]=1;});
+    });
+    // 过滤掉被reject的候选，同时清理_fi临时属性
+    return cands.filter(function(c){var keep=!reject[c._fi];delete c._fi;return keep;});
+  },
+
+  /*----- 扫描区域数字(使用文本层) -----*/
+  // scanRegionDigits：对指定区域扫描PDF文字层，把尺寸变成红色标记
+  scanRegionDigits:function(region){
+    var self=this;
+    // 如果没有文字层(textItems为空)，提示并返回
+    if(!self.textItems.length){self.log('无文本层,自动气泡将使用视觉OCR','warn');return;}
+    // 去掉和当前区域重叠>0.2的旧标记(只处理当前页)。改0.2可调整清理范围
+    self.marks=self.marks.filter(function(m){if(m.pg!==self.pg)return true;return self.rectOverlapRatio(region,m)<0.2;});
+    // 调用autoFromText从文字层提取尺寸
+    var found=self.autoFromText(region);
+    // 把每个结果添加为红色标记
+    found.forEach(function(f){self.addMark(f.x,f.y,f.w,f.h,f.nom,{nom:f.nom,type:f.type,up:f.up,lo:f.lo,angle:f.angle||0});});
+    // 重新渲染标记并提示结果
+    self.renderMarks();self.log('扫描到'+found.length+'个数字段','ok');
+  },
+
+  /*----- 标记管理 -----*/
+  // addMark：添加一个红色标记。如果位置重叠太多或内容相同则跳过
+  addMark:function(x,y,w,h,nom,parsed){
+    parsed=parsed||{};var self=this,cand={x:x,y:y,w:w,h:h,nom:nom||parsed.nom||''};
+    // 去重检查：重叠>0.85 或 内容相同且重叠>0.55。改这两个阈值可调整去重严格度
+    var dup=this.marks.some(function(m){if(m.pg!==self.pg)return false;var ov=self.rectOverlapRatio(cand,m);return ov>0.85||((m.nom||'')===(cand.nom||'')&&ov>0.55);});
+    if(dup)return;
+    // 生成唯一id；angle默认0；把标记加入marks数组
+    var id=Date.now()+Math.random();var ag=parsed.angle||0;var mark={id:id,x:x,y:y,w:w,h:h,nom:nom||parsed.nom||'',type:parsed.type||'linear',up:parsed.up||'',lo:parsed.lo||'',angle:ag,pg:this.pg};this.marks.push(mark);this.renderMarks();
+  },
+  // renderMarks：把所有当前页的标记渲染到SVG上
+  renderMarks:function(){
+    var svg=document.getElementById('bubbleSvg'),self=this;svg.querySelectorAll('.mark-g').forEach(function(e){e.remove();});var s=this.scale;
+    // 只渲染当前页的标记
+    this.marks.filter(function(m){return m.pg===self.pg;}).forEach(function(m){
+      // 创建<g>元素包裹整个标记
+      var g=svgEl('g',{class:'mark-g','data-mark-id':m.id});
+      var cxM=(m.x+m.w/2)*s,cyM=(m.y+m.h/2)*s;var outerG=g;
+      // 如果有角度，创建旋转组
+      if(m.angle){var rotG=svgEl('g',{transform:'rotate('+m.angle+' '+cxM+' '+cyM+')'});outerG=rotG;g.appendChild(rotG);}
+      // 绘制虚线矩形框。改stroke-width/颜色可调整外观
+      outerG.appendChild(svgEl('rect',{class:'mark-rect',x:m.x*s,y:m.y*s,width:m.w*s,height:m.h*s,fill:'rgba(255,60,60,.03)',stroke:'#ff3c3c','stroke-width':'1.5','stroke-dasharray':'5,3',rx:'1'}));
+      // 四个角上的拖拽手柄，每个7x7像素
+      var hs=7;[{cn:'nw',x:m.x*s-hs/2,y:m.y*s-hs/2,cur:'nw-resize'},{cn:'ne',x:m.x*s+m.w*s-hs/2,y:m.y*s-hs/2,cur:'ne-resize'},{cn:'sw',x:m.x*s-hs/2,y:m.y*s+m.h*s-hs/2,cur:'sw-resize'},{cn:'se',x:m.x*s+m.w*s-hs/2,y:m.y*s+m.h*s-hs/2,cur:'se-resize'}].forEach(function(h){outerG.appendChild(svgEl('rect',{class:'mark-handle','data-corner':h.cn,x:h.x,y:h.y,width:hs,height:hs,fill:'#ff3c3c',stroke:'#0b0d13','stroke-width':'1',rx:'1',style:'cursor:'+h.cur}));});
+      // 顶部旋转按钮，12x12橙色方块
+      g.appendChild(svgEl('rect',{class:'mark-rotate',x:cxM-6,y:m.y*s-16,width:12,height:12,fill:'#ff8c00',stroke:'#0b0d13','stroke-width':'1',rx:'2',style:'cursor:grab'}));
+      svg.appendChild(g);
+    });this.updStatus();
+  },
+  // hideMarks：隐藏非当前页的标记
+  hideMarks:function(){this.marks=this.marks.filter(function(m){return m.pg!==A.pg;});this.renderMarks();},
+  // onMarkDown：在标记上按下鼠标，进入拖拽/旋转状态
+  onMarkDown:function(e){var target=e.target;var g=target.closest('.mark-g');if(!g||A.ocrBusy)return;e.preventDefault();e.stopPropagation();var id=parseFloat(g.dataset.markId);var mark=A.marks.find(function(m){return m.id===id;});if(!mark)return;A.selMarkId=id;document.querySelectorAll('.mark-g .mark-handle').forEach(function(h){h.classList.remove('show');});document.querySelectorAll('.mark-g .mark-rotate').forEach(function(h){h.classList.remove('show');});g.querySelectorAll('.mark-handle').forEach(function(h){h.classList.add('show');});g.querySelectorAll('.mark-rotate').forEach(function(h){h.classList.add('show');});var pt=A.svgPt(e),sc=A.scale;if(target.classList.contains('mark-handle')){A.markDragSt={type:'resize',id:id,corner:target.dataset.corner,ox:pt.x,oy:pt.y,oX:mark.x,oY:mark.y,oW:mark.w,oH:mark.h};}else if(target.classList.contains('mark-rotate')){var cx=(mark.x+mark.w/2)*sc,cy=(mark.y+mark.h/2)*sc;A.markDragSt={type:'rotate',id:id,ox:pt.x,oy:pt.y,oAng:mark.angle||0,cx:cx,cy:cy};}else if(target.classList.contains('mark-rect')){A.markDragSt={type:'move',id:id,ox:pt.x,oy:pt.y,oX:mark.x,oY:mark.y};}},
+  // onMarkMove：拖拽标记时实时更新位置/大小/角度
+  onMarkMove:function(e){if(!A.markDragSt)return;var pt=A.svgPt(e);var mark=A.marks.find(function(m){return m.id===A.markDragSt.id;});if(!mark)return;var s=A.scale;if(A.markDragSt.type==='move'){mark.x=A.markDragSt.oX+(pt.x-A.markDragSt.ox)/s;mark.y=A.markDragSt.oY+(pt.y-A.markDragSt.oy)/s;}else if(A.markDragSt.type==='resize'){var dx=(pt.x-A.markDragSt.ox)/s,dy=(pt.y-A.markDragSt.oy)/s,ds=A.markDragSt;var nx=ds.oX,ny=ds.oY,nw=ds.oW,nh=ds.oH,c=ds.corner;if(c.indexOf('w')>=0){nx=ds.oX+dx;nw=ds.oW-dx;}if(c.indexOf('e')>=0){nw=ds.oW+dx;}if(c.indexOf('n')>=0){ny=ds.oY+dy;nh=ds.oH-dy;}if(c.indexOf('s')>=0){nh=ds.oH+dy;}var ms=3/s;if(nw<ms){if(c.indexOf('w')>=0)nx=ds.oX+ds.oW-ms;nw=ms;}if(nh<ms){if(c.indexOf('n')>=0)ny=ds.oY+ds.oH-ms;nh=ms;}mark.x=nx;mark.y=ny;mark.w=nw;mark.h=nh;}else if(A.markDragSt.type==='rotate'){var ang=Math.atan2(pt.y-A.markDragSt.cy,pt.x-A.markDragSt.cx)*180/Math.PI;ang=Math.round(ang);if(ang<0)ang+=360;mark.angle=ang;}A.renderMarks();},
+  // onMarkUp：松开鼠标，结束拖拽
+  onMarkUp:function(){A.markDragSt=null;},
+  // deselMark：取消选中标记，隐藏手柄
+  deselMark:function(){A.selMarkId=null;document.querySelectorAll('.mark-g .mark-handle').forEach(function(h){h.classList.remove('show');});document.querySelectorAll('.mark-g .mark-rotate').forEach(function(h){h.classList.remove('show');});document.querySelectorAll('.mark-g .mark-dbl-hint').forEach(function(h){h.classList.remove('show');});},
+  // onMarkDblClick：双击标记，用OCR识别该位置并转为正式尺寸
+  onMarkDblClick:function(g){
+    if(A.ocrBusy)return;var id=parseFloat(g.dataset.markId);var mark=A.marks.find(function(m){return m.id===id;});if(!mark)return;
+    A.ocrBusy=true;A.setStatus('y','OCR...');var self=A;
+    // finish：识别完成后的回调，dim是识别结果，msg是提示信息
+    var finish=function(dim,msg){if(dim){self.renderTable();self.log('双击识别#'+dim.num+' '+nomDisplay(dim),'ok');self.toast('#'+dim.num+' '+nomDisplay(dim));self.marks=self.marks.filter(function(m){return m.id!==mark.id;});self.renderMarks();self.setStatus('g','完成');}else{self.toast(msg||'双击识别无结果');self.setStatus('g','未识别到');}self.ocrBusy=false;};
+    // 如果标记已有数字，直接转为正式尺寸
+    if(mark.nom&&/\d/.test(mark.nom)){finish(self.addDimFromFound({nom:mark.nom,up:mark.up||'',lo:mark.lo||'',type:mark.type||'linear',x:mark.x,y:mark.y,w:mark.w,h:mark.h,angle:mark.angle||0,raw:mark.nom,conf:100}),'该位置已存在尺寸');return;}
+    // 否则用OCR识别。竖向标记尝试两个角度，横向只试一个
+    var s=self.scale,psm=E('sPSM').value,lang=E('sLang').value,baseAngle=mark.angle||0,isVertical=mark.w<mark.h;var tryAngles=isVertical?[baseAngle,(baseAngle+90)%360]:[baseAngle];var ti=0;
+    // to：递归尝试每个角度
+    var to=function(){if(ti>=tryAngles.length){finish(null);return;}var ang=tryAngles[ti++];self.selS={x:mark.x*s,y:mark.y*s};self.selE={x:(mark.x+mark.w)*s,y:(mark.y+mark.h)*s};var proc=self.cropAndProc(ang,undefined,'global');self.ocrPass(proc,psm,lang).then(function(r){var cleaned=self.correctDigits(proc,self.extractDigits(r.text||''));var parsed=self.parseDim(r.text);if(!parsed.nom||!/\d/.test(parsed.nom))parsed=self.parseDim(cleaned||r.text);if(parsed.nom&&/\d/.test(parsed.nom)&&((r.confidence||0)>=45||cleaned)){finish(self.addDimFromFound({nom:parsed.nom,up:parsed.up,lo:parsed.lo,type:parsed.type,x:mark.x,y:mark.y,w:mark.w,h:mark.h,angle:ang,raw:r.text,conf:r.confidence}),'该位置已存在尺寸');return;}self.multiPassOCR(ang).then(function(mr){var p2=self.parseDim(mr.text||'');if(p2.nom&&/\d/.test(p2.nom))finish(self.addDimFromFound({nom:p2.nom,up:p2.up,lo:p2.lo,type:p2.type,x:mark.x,y:mark.y,w:mark.w,h:mark.h,angle:ang,raw:mr.text,conf:mr.confidence}),'该位置已存在尺寸');else to();}).catch(function(){to();});}).catch(function(){to();});};to();
+  },
+  // delMark：删除当前选中的标记
+  delMark:function(){if(!A.selMarkId)return;A.marks=A.marks.filter(function(m){return m.id!==A.selMarkId;});A.selMarkId=null;A.renderMarks();A.toast('标记已删除');A.updStatus();},
+
+  /* ================================================================
+     【cropAndProc：给OCR准备"高清特写照片"】
+     这是v5.2核心改进。直接把原图送给OCR，效果往往不好，
+     因为图纸线条细、背景灰。这个函数就像"修图师"，
+     在送给OCR之前，先把小区域裁剪出来、放大、旋转、调对比度。
+     
+     修图流程：
+     1. 裁剪：把用户框选的区域切下来
+     2. 放大：按设置里的倍数放大（默认2倍，让细线条变粗）
+     3. 旋转：如果文字是斜的或竖的，先转成正的
+     4. 去彩色标记：把红色的批注、高亮变成白色（防止干扰OCR）
+     5. 二值化/自适应阈值：把灰色图纸变成纯黑白的"铅笔画"
+     6. 锐化（可选）：让模糊的边缘变清晰
+     
+     参数：
+     - angle：旋转角度（0/90/180/270/自定义）
+     - thresh：二值化阈值（0-255，越大越黑）
+     - mode：处理模式（global全局/adaptive自适应/sharpen锐化）
+     ================================================================ */
+  // cropAndProc：给OCR准备"高清特写照片"，裁剪、放大、旋转、二值化
+  cropAndProc:function(angle,thresh,mode){
+    // angle归一化到0~360度
+    angle=parseFloat(angle)||0;angle=((angle%360)+360)%360;
+    // dpr是设备像素比；sc是OCR放大倍数(设置里可调，默认2倍)
+    var dpr=window.devicePixelRatio||1,sc=parseInt(E('sScale').value)||2;
+    // 如果未传入thresh，取设置里的阈值
+    if(thresh===undefined)thresh=parseInt(E('sThresh').value);
+    // inv是否反色；useAdapt是否用自适应阈值
+    var inv=E('sInvert').value==='1',useAdapt=E('sAdapt').value==='1';
+    // sx/sy/sw/sh是框选区域在画布像素坐标系中的位置和尺寸
+    var sx=Math.min(this.selS.x,this.selE.x)*dpr,sy=Math.min(this.selS.y,this.selE.y)*dpr;
+    var sw=Math.abs(this.selE.x-this.selS.x)*dpr,sh=Math.abs(this.selE.y-this.selS.y)*dpr;
+    // 判断是否是直角(0/90/180/270)，直角用特殊处理避免浮点误差
+    var rightAngle=(Math.round(angle/90)*90)%360,isRight=Math.abs(angle-rightAngle)<.001;
+    if(isRight)angle=rightAngle;
+    // swap表示宽高是否需要互换(90度和270度时)
+    var swap=(angle===90||angle===270),outW,outH;
+    // 计算输出画布尺寸，至少1像素。改sc可调整放大倍数
+    if(isRight){outW=Math.max(1,Math.round((swap?sh:sw)*sc));outH=Math.max(1,Math.round((swap?sw:sh)*sc));}
+    else{var rad=angle*Math.PI/180,ca=Math.abs(Math.cos(rad)),sa=Math.abs(Math.sin(rad));outW=Math.max(1,Math.round((sw*ca+sh*sa)*sc));outH=Math.max(1,Math.round((sw*sa+sh*ca)*sc));}
+    // 创建离屏画布
+    var off=document.createElement('canvas');off.width=outW;off.height=outH;
+    var oc=off.getContext('2d',{willReadFrequently:true});
+    // 白色背景填充
+    oc.fillStyle='#fff';oc.fillRect(0,0,outW,outH);oc.save();
+    // 开启高质量图像平滑
+    oc.imageSmoothingEnabled=true;oc.imageSmoothingQuality='high';
+    // 根据角度把原图内容画到离屏画布上
+    if(angle===0)oc.drawImage(this.cv,sx,sy,sw,sh,0,0,outW,outH);
+    else if(angle===90){oc.translate(outW,0);oc.rotate(Math.PI/2);oc.drawImage(this.cv,sx,sy,sw,sh,0,0,outH,outW);}
+    else if(angle===180){oc.translate(outW,outH);oc.rotate(Math.PI);oc.drawImage(this.cv,sx,sy,sw,sh,0,0,outW,outH);}
+    else if(angle===270){oc.translate(0,outH);oc.rotate(-Math.PI/2);oc.drawImage(this.cv,sx,sy,sw,sh,0,0,outH,outW);}
+    else{var rad2=angle*Math.PI/180;oc.translate(outW/2,outH/2);oc.rotate(rad2);oc.drawImage(this.cv,sx,sy,sw,sh,-sw*sc/2,-sh*sc/2,sw*sc,sh*sc);}
+    oc.restore();
+    // 去除彩色批注标记(变成白色)
+    this.suppressColorMarkup(off);
+    // 如果需要锐化模式
+    if(mode==='sharpen')this.sharpenCanvas(off);
+    // 如果使用自适应阈值(且不是全局模式)
+    if(useAdapt&&mode!=='global'){
+      // bs是块大小，取短边的1/8至少15像素；C是常数减项，aggressive模式用15否则8
+      var bs=Math.max(15,Math.round(Math.min(outW,outH)/8)|1);var C=mode==='aggressive'?15:8;
+      oc.putImageData(this.adaptiveThresh(off,bs|1,C),0,0);
+    }else{
+      // 全局阈值：把灰度图按thresh二值化(0或255)
+      var imgData=oc.getImageData(0,0,outW,outH),d=imgData.data;
+      for(var i=0;i<d.length;i+=4){var g=d[i]*.299+d[i+1]*.587+d[i+2]*.114;if(inv)g=255-g;var v=g<thresh?0:255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;}
+      oc.putImageData(imgData,0,0);
+    }
+    return off;
+  },
+  // suppressColorMarkup：把彩色批注/高亮变成白色，避免干扰OCR
+  suppressColorMarkup:function(cv){var cx=cv.getContext('2d',{willReadFrequently:true});var id=cx.getImageData(0,0,cv.width,cv.height),d=id.data;for(var i=0;i<d.length;i+=4){var r=d[i],g=d[i+1],b=d[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);if(mx-mn>70&&mx>120){d[i]=d[i+1]=d[i+2]=255;d[i+3]=255;}}cx.putImageData(id,0,0);return cv;},
+  // adaptiveThresh：自适应阈值(Bradley/Rosten风格)。bs是块大小，C是常数减项
+  adaptiveThresh:function(cv,bs,C){var w=cv.width,h=cv.height;var src=cv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h);var dst=new ImageData(w,h);var gray=new Uint8Array(w*h);for(var i=0;i<w*h;i++)gray[i]=Math.round(src.data[i*4]*.299+src.data[i*4+1]*.587+src.data[i*4+2]*.114);var integ=new Float64Array(w*h);for(var y=0;y<h;y++){var rs=0;for(var x=0;x<w;x++){rs+=gray[y*w+x];integ[y*w+x]=rs+(y>0?integ[(y-1)*w+x]:0);}}var half=Math.floor(bs/2);for(var y=0;y<h;y++)for(var x=0;x<w;x++){var x1=Math.max(0,x-half),y1=Math.max(0,y-half),x2=Math.min(w-1,x+half),y2=Math.min(h-1,y+half);var cnt=(x2-x1+1)*(y2-y1+1);var sum=integ[y2*w+x2];if(x1>0)sum-=integ[y2*w+(x1-1)];if(y1>0)sum-=integ[(y1-1)*w+x2];if(x1>0&&y1>0)sum+=integ[(y1-1)*w+(x1-1)];var idx=(y*w+x)*4;var v=gray[y*w+x]>sum/cnt-C?255:0;dst.data[idx]=dst.data[idx+1]=dst.data[idx+2]=v;dst.data[idx+3]=255;}return dst;},
+  // sharpenCanvas：拉普拉斯锐化，让模糊边缘变清晰
+  sharpenCanvas:function(cv){var w=cv.width,h=cv.height,cx=cv.getContext('2d',{willReadFrequently:true});var src=cx.getImageData(0,0,w,h),dst=cx.createImageData(w,h);for(var y=1;y<h-1;y++)for(var x=1;x<w-1;x++)for(var c=0;c<3;c++){var i=(y*w+x)*4+c;dst.data[i]=Math.max(0,Math.min(255,5*src.data[i]-src.data[((y-1)*w+x)*4+c]-src.data[((y+1)*w+x)*4+c]-src.data[(y*w+(x-1))*4+c]-src.data[(y*w+(x+1))*4+c]));}for(var y=0;y<h;y++)for(var x=0;x<w;x++)dst.data[(y*w+x)*4+3]=255;cx.putImageData(dst,0,0);return cv;},
+  // otsuThresh：Otsu自动计算最佳全局阈值
+  otsuThresh:function(cv){var cx=cv.getContext('2d',{willReadFrequently:true});var id=cx.getImageData(0,0,cv.width,cv.height),d=id.data;var hist=new Array(256).fill(0);for(var i=0;i<d.length;i+=4)hist[Math.round(d[i]*.299+d[i+1]*.587+d[i+2]*.114)]++;var total=d.length/4,sum=0;for(var i=0;i<256;i++)sum+=i*hist[i];var sB=0,wB=0,mxV=0,th=0;for(var i=0;i<256;i++){wB+=hist[i];if(!wB)continue;var wF=total-wB;if(!wF)break;sB+=i*hist[i];var mB=sB/wB,mF=(sum-sB)/wF,vb=wB*wF*(mB-mF)*(mB-mF);if(vb>mxV){mxV=vb;th=i;}}return th;},
+  // autoCrop：自动裁剪掉四周白色边距，p是外扩像素数。改6可调整外扩量
+  autoCrop:function(cv){var cx=cv.getContext('2d',{willReadFrequently:true});var id=cx.getImageData(0,0,cv.width,cv.height),d=id.data;var x1=cv.width,y1=cv.height,x2=0,y2=0;for(var y=0;y<cv.height;y++)for(var x=0;x<cv.width;x++){var i=(y*cv.width+x)*4;if(d[i]<250){x1=Math.min(x1,x);y1=Math.min(y1,y);x2=Math.max(x2,x);y2=Math.max(y2,y);}}if(x1>x2)return cv;var p=6;var cx0=Math.max(0,x1-p),cy0=Math.max(0,y1-p),cw=Math.min(cv.width-cx0,x2-x1+2*p),ch=Math.min(cv.height-cy0,y2-y1+2*p);var out=document.createElement('canvas');out.width=cw;out.height=ch;out.getContext('2d').drawImage(cv,cx0,cy0,cw,ch,0,0,cw,ch);return out;},
+  // getContentBounds：获取图像内容的精确边界(非白色区域的包围盒)
+  getContentBounds:function(cv){var cx=cv.getContext('2d',{willReadFrequently:true});var id=cx.getImageData(0,0,cv.width,cv.height),d=id.data;var x1=cv.width,y1=cv.height,x2=0,y2=0;for(var y=0;y<cv.height;y++)for(var x=0;x<cv.width;x++){var i=(y*cv.width+x)*4;if(d[i]<250){x1=Math.min(x1,x);y1=Math.min(y1,y);x2=Math.max(x2,x);y2=Math.max(y2,y);}}if(x1>x2)return null;return{x:x1,y:y1,w:x2-x1+1,h:y2-y1+1};},
+
+  /*================================================================
+    v5.4 修复mapBoundsToDoc:
+      P1-5: pad 固定2 → 按字号15%自适应(小字多加padding,大字少加)
+    映射: OCR图像坐标 / sc → 画布像素 / dpr → CSS像素 / scale → 文档坐标
+  ================================================================*/
+  // mapBoundsToDoc：把OCR图像上的坐标映射回文档坐标
+  mapBoundsToDoc:function(bounds,angle,cell,cellW,cellH,sc,dpr){
+    angle=parseFloat(angle)||0;angle=((angle%360)+360)%360;
+    // f是像素缩放因子(设备像素比*OCR放大倍数)；s是文档缩放比例
+    var f=dpr*sc,s=this.scale;
+    // pcx/pcy是边界框中心点在OCR图像上的坐标
+    var pcx=bounds.x+bounds.w/2,pcy=bounds.y+bounds.h/2;
+    // v5.4 P1-5: 按字号15%自适应padding(原固定2对小字太大，大字太小)。改0.15可调整padding比例
+    var pad=Math.max(2,Math.round(bounds.h*0.15));
+    // bw/bh是文档坐标系中的宽高，至少2像素
+    var bw=Math.max((bounds.w+pad*2)/f/s,2),bh=Math.max((bounds.h+pad*2)/f/s,2);
+    var cx,cy;
+    // 根据角度计算文档坐标。90度和270度时宽高互换
+    if(angle===0){cx=(cell.x+pcx/f)/s;cy=(cell.y+pcy/f)/s;}
+    else if(angle===90){cx=(cell.x+pcy/f)/s;cy=(cell.y+cellH-pcx/f)/s;var t=bw;bw=bh;bh=t;}
+    else if(angle===180){cx=(cell.x+cellW-pcx/f)/s;cy=(cell.y+cellH-pcy/f)/s;}
+    else if(angle===270){cx=(cell.x+cellW-pcy/f)/s;cy=(cell.y+pcx/f)/s;var t=bw;bw=bh;bh=t;}
+    else{cx=(cell.x+pcx/f)/s;cy=(cell.y+pcy/f)/s;}
+    return{x:cx-bw/2,y:cy-bh/2,w:bw,h:bh};
+  },
+
+  /*================================================================
+    v5.2 核心改进: refineBounds post-OCR边界精修
+    对proc canvas做内容边界检测, 修正Tesseract bbox偏差
+    输入: proc(cropAndProc输出), roughBounds(doc坐标),
+          cell(screen坐标原点), cellW, cellH, osc, dpr
+    返回: 精修后的doc坐标 {x,y,w,h}
+  ================================================================*/
+  // refineBounds：OCR后精修边界，用实际内容像素修正Tesseract的偏差
+  refineBounds:function(proc,roughBounds,cell,cellW,cellH,osc,dpr){
+    var content=this.getContentBounds(proc);
+    // 如果内容边界太小，返回粗略边界
+    if(!content||content.w<2||content.h<2)return roughBounds;
+    var f=dpr*osc,s=this.scale;
+    var x=roughBounds.x,y=roughBounds.y,w=roughBounds.w,h=roughBounds.h;
+    if(this.debugCoords)console.log('refineBounds: rough',JSON.stringify(roughBounds),'content',JSON.stringify(content),'f',f,'s',s);
+    // content是proc canvas内的精确像素边界，转为doc坐标偏移
+    var scale=1/(f*s);
+    var cxOff=content.x*scale,cyOff=content.y*scale;
+    var cwOff=content.w*scale,chOff=content.h*scale;
+    // 直接从cell原点+偏移重建doc坐标(跳过Tesseract bbox的累积偏差)
+    var cx=(cell.x)/s+cxOff,cy=(cell.y)/s+cyOff;
+    w=cwOff;h=chOff;
+    // vpad是外扩量，0.3/s保证气泡不会贴太紧。改0.3可调整外扩量
+    var vpad=0.3/s;
+    x=cx-vpad;y=cy-vpad;w=Math.max(w+vpad*2,1.5/s);h=Math.max(h+vpad*2,1.5/s);
+    if(this.debugCoords)console.log('refineBounds: refined',JSON.stringify({x:x,y:y,w:w,h:h}));
+    return{x:x,y:y,w:w,h:h};
+  },
+
+  /*----- OCR 命中缓存(减少重复Tesseract调用) -----*/
+  // ocrCache：OCR结果缓存，避免对相同图像重复调用Tesseract
+  ocrCache:{
+    _data:null, // _data是缓存数据对象，延迟加载
+    _dirty:false, // _dirty标记数据是否已修改但未保存
+    // _load：从localStorage加载缓存。键名digiFAI_cache_v54
+    _load:function(){if(!this._data){try{this._data=JSON.parse(localStorage.getItem('digiFAI_cache_v54')||'{}');}catch(e){this._data={};}}return this._data;},
+    // _save：把缓存保存到localStorage。如果未修改则跳过
+    _save:function(){if(!this._dirty)return;try{localStorage.setItem('digiFAI_cache_v54',JSON.stringify(this._data));this._dirty=false;}catch(e){}},
+    // get：根据画布和角度获取缓存结果。缓存有效期7天(86400000*7毫秒)。改7可调整有效期
+    get:function(canvas,angle){var key=this._hash(canvas,angle);var data=this._load();var hit=data[key];if(!hit)return null;var age=Date.now()-hit.ts;if(age>86400000*7||hit.n<0)return null;return hit.text;},
+    // put：把识别结果存入缓存。n是使用次数，ts是时间戳
+    put:function(canvas,angle,text){var key=this._hash(canvas,angle);var data=this._load();if(!data[key])data[key]={n:0,text:text,ts:Date.now()};else{data[key].n++;data[key].text=text;data[key].ts=Date.now();}this._dirty=true;this._save();},
+    // invalidate：清空所有缓存
+    invalidate:function(){this._data={};this._dirty=true;this._save();},
+    // _hash：生成画布内容的哈希值，用于缓存键。取64x24像素的采样，步长8
+    _hash:function(canvas,angle){var cx=canvas.getContext('2d',{willReadFrequently:true});var w=Math.min(canvas.width,64),h=Math.min(canvas.height,24);var id=cx.getImageData(0,0,w,h);var d=id.data;var s='';for(var i=0;i<d.length&&s.length<128;i+=8)s+=d[i].toString(16);return'c'+s+'_'+angle;},
+  },
+
+  /*------ 混淆学习缓存封装 -----*/
+  analyzeShape:function(cv){var ctx=cv.getContext('2d'),w=cv.width,h=cv.height;var data=ctx.getImageData(0,0,w,h).data;var minX=w,minY=h,maxX=0,maxY=0;for(var y=0;y<h;y++)for(var x=0;x<w;x++){if(data[(y*w+x)*4]<128){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}}var dw=maxX-minX+1,dh=maxY-minY+1;if(dw<3||dh<8)return null;var whRatio=dw/dh;var topEnd=minY+Math.floor(dh*.28),maxTopRun=0;for(var y=minY;y<=topEnd;y++){var run=0;for(var x=minX;x<=maxX;x++){if(data[(y*w+x)*4]<128){run++;maxTopRun=Math.max(maxTopRun,run);}else run=0;}}var tlEnd=minY+Math.floor(dh*.35),tlMid=minX+Math.floor(dw*.45),tlD=0,tlT=0;for(var y=minY;y<=tlEnd;y++)for(var x=minX;x<=tlMid;x++){tlT++;if(data[(y*w+x)*4]<128)tlD++;}var blStart=minY+Math.floor(dh*.65),blMid=minX+Math.floor(dw*.45),blD=0,blT=0;for(var y=blStart;y<=maxY;y++)for(var x=minX;x<=blMid;x++){blT++;if(data[(y*w+x)*4]<128)blD++;}var midY=minY+Math.floor(dh*.5),midD=0,midT=0;for(var y=midY-1;y<=midY+1;y++)for(var x=minX;x<=maxX;x++){midT++;if(data[(y*w+x)*4]<128)midD++;}var rightEnd=minX+Math.floor(dw*.65),rightD=0,rightT=0;for(var y=minY;y<=maxY;y++)for(var x=rightEnd;x<=maxX;x++){rightT++;if(data[(y*w+x)*4]<128)rightD++;}var holePresent=midD/(midT||1)<.15;return{whRatio:whRatio,topHorizRatio:maxTopRun/dw,tlDensity:tlD/(tlT||1),blDensity:blD/(blT||1),midDensity:midD/(midT||1),rightDensity:rightD/(rightT||1),holePresent:holePresent};},
+  correctDigits:function(cv,text){if(!text||E('sConfuse').value!=='1')return text;var shape=this.analyzeShape(cv);if(!shape)return text;var r=text;if(text.length===1){var ratio=shape.whRatio,top=shape.topHorizRatio,tl=shape.tlDensity,bl=shape.blDensity,mid=shape.midDensity,hole=shape.holePresent;if(ratio<.30&&top<.30)r='1';else if(ratio<.32&&top<.35){if(r==='7'||r==='1')r='1';}else if(ratio>.45||top>.48){if(r==='1'||r==='7')r='7';}var diff=tl-bl;if(diff>.18){if(r==='2')r='5';else if(r==='5')r='2';}else if(diff<-.18){if(r==='5')r='2';else if(r==='2')r='5';}if(ratio>.60&&ratio<.80&&mid>.20){if(r==='8')r='0';else if(r==='0')r='8';}if(ratio>.55&&hole&&mid<.25){if(r==='6'||r==='8')r='8';}if(ratio>.50&&!hole&&mid<.15){if(r==='0'||r==='6')r='6';}if(ratio>.70&&tl>.30&&bl>.25&&mid<.20){if(r==='3')r='8';else if(r==='8')r='3';}if(shape.rightDensity>.40&&ratio<.55){if(r==='4')r='1';}if(ratio>.80&&top<.20&&bl>.30){if(r==='2')r='3';}if(ratio<.45&&top>.50){if(r==='4')r='7';}if(ratio>.65&&ratio<.85&&tl>.20&&bl<.15){if(r==='2')r='7';}}if(r!==text)this.log('混淆纠正:"'+text+'"->"'+r+'"','ok');return r;},
+  loadLearn:function(){try{return JSON.parse(localStorage.getItem('digiFAI_learn_v54')||'{}');}catch(e){return{};}},
+  saveLearn:function(raw,corrected,angle){var L=this.loadLearn(),k=raw+'@'+angle;if(!L[k])L[k]={n:0,v:{}};L[k].n++;L[k].v[corrected]=(L[k].v[corrected]||0)+1;if(Object.keys(L).length>500){var keys=Object.keys(L);for(var i=0;i<100;i++)delete L[keys[i]];}localStorage.setItem('digiFAI_learn_v54',JSON.stringify(L));},
+  getLearn:function(raw,angle){var L=this.loadLearn(),k=raw+'@'+angle,e=L[k];if(!e||e.n<1)return null;var best='',bc=0;Object.keys(e.v).forEach(function(v){if(e.v[v]>bc){bc=e.v[v];best=v;}});return best||null;},
+  applyCorrection:function(){var val=E('corrInput').value.trim();if(!val||!this.lastOCR)return;this.saveLearn(this.lastOCR.value,val,this.lastOCR.angle);this.log('学习:"'+this.lastOCR.value+'"->"'+val+'"','ok');var dim=this.dims.find(function(d){return d.id===A.lastDimId;});if(dim){var parsed=this.parseDim(val);dim.nominal=parsed.nom;dim.type=parsed.type;dim.upperTol=parsed.up;dim.lowerTol=parsed.lo;dim.tolGrade='';dim.tolValue=0;dim.tolDisplay='';dim.equipment=getEquip(parsed.type,parsed.nom);this.autoTol(dim);E('ocrVal').textContent=val;if(this.selId===dim.id){E('bpV').value=dim.nominal;E('bpU').value=dim.upperTol;E('bpL').value=dim.lowerTol;E('bpT').value=dim.type;E('bpTol').value=dim.tolGrade||'';E('bpEquip').value=dim.equipment||'';}this.renderTable();this.toast('已修正: '+val);}E('corrBar').style.display='none';},
+
+  /*----- OCR通道(带缓存) -----*/
+  ocrPass:function(cv,psm,lang){var self=this;var useCache=E('sCache').value==='1';var whitelist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-+/±⌀ΦφØøRrCcDdIiAaSs径直径半°º´';if(useCache){var cached=this.ocrCache.get(cv,psm);if(cached!==null){this.log('缓存命中: '+cached,'info');return Promise.resolve({text:cached,confidence:95,words:[],_cached:true});}}return Tesseract.recognize(cv,lang||'eng',{tessedit_pageseg_mode:psm,tessedit_char_whitelist:whitelist}).then(function(res){var text=(res.data.text||'').trim();if(useCache&&text)self.ocrCache.put(cv,psm,text);return{text:text,confidence:res.data.confidence,words:res.data.words||[]};});},
+  extractDigits:function(raw){
+    var src=normalizeDimText(String(raw||'').trim());if(!src)return'';
+    src=src.replace(/\b([Rr])\s*[lI|]\b/g,'R1').replace(/\b([Rr])\s*[zZ]\b/g,'R2');
+    src=src.replace(/\b([RrCc])\s*([lI|])(?=\d|\b)/g,function(m,p){return p+'1';});
+    var num='([0-9]+(?:\\.[0-9]+)?)';
+    var m=src.match(new RegExp('^\\s*S\\s*R\\s*'+num,'i'));if(m)return'R'+m[1];m=src.match(new RegExp('(?:[×xX]\\s*)?[nN]\\s*'+num));if(m)return'⌀'+m[1];m=src.match(new RegExp('[×xX]\\s*[oO0Q]\\s*'+num));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp('^\\s*[Rr]\\s*'+num));if(m)return'R'+m[1];
+    m=src.match(new RegExp('^\\s*[Cc]\\s*'+num));if(m)return'C'+m[1];
+    m=src.match(new RegExp(num+'\\s*'+DIM_SYMBOLS.source+'\\s*\\d+\\s*[×xX]'));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp(DIM_SYMBOLS.source+'\\s*'+num));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp(num+'\\s*'+DIM_SYMBOLS.source));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp('^\\s*(?:[oO0Q]|[Dd](?![A-Za-z]))\\s*'+num));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp('(?:DIA|DIAM)\\.?\\s*'+num,'i'));if(m)return'⌀'+m[1];
+    m=src.match(new RegExp(num+'\\s*[°º]'));if(m)return m[1]+'°';
+    var d=src.replace(/[Il|]/g,'1').replace(/[^0-9.\-+±]/g,' ').trim();
+    m=d.match(/-?\d+(?:\.\d+)?/g);if(m&&m.length>0)return m[0];return'';
+  },
+  /* ================================================================
+     【multiPassOCR："五路大军"投票决出最佳结果】
+     一次OCR可能认错（比如把"8"看成"0"），这个函数用5种不同的
+     图像处理方式各做一次OCR，然后投票决定最终答案。
+     
+     五路大军：
+     1. 全局阈值（用户设定的阈值）
+     2. 自适应阈值（每个小区域自己算阈值，适合光照不均的图）
+     3. Otsu自动阈值（让电脑自己算最佳阈值）
+     4. 锐化+全局阈值（先让边缘变清晰再识别）
+     5. 反色+全局阈值（把黑底白字变成白底黑字再试一次）
+     
+     投票规则：
+     - 如果某结果出现的次数最多，且总置信度高，它就是赢家
+     - 如果5路结果都不一样，选置信度最高的那个
+     ================================================================ */
+  multiPassOCR:function(angle){var self=this,psm=E('sPSM').value,lang=E('sLang').value,useMulti=E('sMulti').value==='1';var baseThresh=parseInt(E('sThresh').value);var p1=self.cropAndProc(angle,baseThresh,'global');return self.ocrPass(p1,psm,lang).then(function(r1){var d1=self.correctDigits(p1,self.extractDigits(r1.text));if(!useMulti)return{text:d1,confidence:r1.confidence,preview:self.autoCrop(p1),words:r1.words};if(d1&&r1.confidence>=80)return{text:d1,confidence:r1.confidence,preview:self.autoCrop(p1),words:r1.words};var p2=self.cropAndProc(angle,baseThresh,'adaptive');return self.ocrPass(p2,psm,lang).then(function(r2){var d2=self.correctDigits(p2,self.extractDigits(r2.text));if(d1&&d1===d2&&r2.confidence>=70)return{text:d1,confidence:(r1.confidence+r2.confidence)/2,preview:self.autoCrop(p2),words:r1.words};var otsu=self.otsuThresh(self.cropAndProc(angle,0,'global'));var p3=self.cropAndProc(angle,otsu,'global');return self.ocrPass(p3,psm,lang).then(function(r3){var d3=self.correctDigits(p3,self.extractDigits(r3.text));var p4=self.cropAndProc(angle,baseThresh,'sharpen');return self.ocrPass(p4,psm,lang).then(function(r4){var d4=self.correctDigits(p4,self.extractDigits(r4.text));var origI=E('sInvert').value;E('sInvert').value=origI==='0'?'1':'0';var p5=self.cropAndProc(angle,baseThresh,'global');E('sInvert').value=origI;return self.ocrPass(p5,psm,lang).then(function(r5){var d5=self.correctDigits(p5,self.extractDigits(r5.text));var all=[{t:d1,c:r1.confidence,p:p1,w:r1.words},{t:d2,c:r2.confidence,p:p2,w:r2.words},{t:d3,c:r3.confidence,p:p3,w:r3.words},{t:d4,c:r4.confidence,p:p4,w:r4.words},{t:d5,c:r5.confidence,p:p5,w:r5.words}];var votes={};all.forEach(function(r){if(!r.t)return;if(!votes[r.t])votes[r.t]={n:0,tc:0,procs:[],words:[]};votes[r.t].n++;votes[r.t].tc+=r.c;votes[r.t].procs.push(r.p);if(r.w.length)votes[r.t].words=r.w;});var best='',bestS=-1,bP=p1,bW=[];Object.keys(votes).forEach(function(t){var v=votes[t],sc=v.n*1000+v.tc+t.length*50;if(sc>bestS){bestS=sc;best=t;bP=v.procs[0];bW=v.words;}});if(!best){var valid=all.filter(function(r){return r.t;}).sort(function(a,b){return b.c-a.c;});if(valid.length)return{text:valid[0].t,confidence:valid[0].c,preview:self.autoCrop(valid[0].p),words:valid[0].w};return{text:'',confidence:0,preview:self.autoCrop(p1),words:[]};}var conf=votes[best].tc/votes[best].n;return{text:best,confidence:conf,preview:self.autoCrop(bP),words:bW};});});});});});},
+  /* ================================================================
+     【performOCR：用户框选后的"识别发动机"】
+     当用户用鼠标在图纸上框选一块区域后，这个函数就启动了。
+     它是手动识别（框选识别+气泡）的核心流程。
+     
+     工作流程：
+     1. 把状态设为"识别中"，防止用户重复点击
+     2. 如果方向设为"自动"，就尝试0°和90°（快捷模式）或每10°转一圈（专业模式）
+     3. 对每个角度：裁剪->OCR识别->提取数字->算分->记录最好的结果
+     4. 如果置信度不够高，启动 multiPassOCR 做深度识别
+     5. 把最好的结果显示在左侧面板，并自动生成气泡
+     
+     小贴士：为什么需要转角度？因为图纸上有些尺寸是竖着写的，
+     正对OCR读不出来，转90度就能读了。
+     ================================================================ */
+  performOCR:function(){if(this.ocrBusy)return;var self=this;var t0=performance.now();self.ocrBusy=true;self.setStatus('y','识别中...');E('corrBar').style.display='none';if(self.rot==='auto'){var psm=E('sPSM').value,lang=E('sLang').value;var angles=self.autoMode==='quick'?[0,90]:(function(){var a=[];for(var i=0;i<360;i+=10)a.push(i);return a;})();var best={text:'',confidence:0,angle:0},preview=null,bWords=[],idx=0,highConfDone=false;var scanNext=function(){if(idx>=angles.length||highConfDone){finish();return;}var ang=angles[idx++];self.setStatus('y','扫描'+ang+'°...');var proc=self.cropAndProc(ang,undefined,'global');self.ocrPass(proc,psm,lang).then(function(r){var d=self.correctDigits(proc,self.extractDigits(r.text));var lr=self.getLearn(d||r.text,ang);if(lr&&lr!==d)d=lr;var score=d?(r.confidence+d.length*50):0;var bS=best.text?(best.confidence+best.text.length*50):0;if(score>bS){best={text:d,confidence:r.confidence,angle:ang};preview=self.autoCrop(proc);bWords=r.words;}if(d&&r.confidence>=85){self.log('  '+ang+'° -> "'+d+'" ('+r.confidence.toFixed(1)+'%) ✓');highConfDone=true;finish();}else{self.log('  '+ang+'° -> "'+d+'" ('+r.confidence.toFixed(1)+'%)');scanNext();}}).catch(function(){scanNext();});};var finish=function(){if(best.text&&best.confidence<70){self.setStatus('y','深度识别...');self.multiPassOCR(best.angle).then(function(r){if(r.text){best={text:r.text,confidence:r.confidence,angle:best.angle};preview=r.preview;bWords=r.words;}finalShow();}).catch(function(){finalShow();});}else finalShow();};var finalShow=function(){var el=((performance.now()-t0)/1000).toFixed(2);showRes(best,preview,el,bWords);};scanNext();}else{self.multiPassOCR(self.rot).then(function(r){var el=((performance.now()-t0)/1000).toFixed(2);showRes({text:r.text,confidence:r.confidence,angle:self.rot},r.preview,el,r.words);}).catch(function(){self.setStatus('r','错误');self.ocrBusy=false;});}var showRes=function(best,preview,el,words){if(preview){var pv=E('ocrPrev');var img=new Image();img.src=preview.toDataURL('image/png');pv.innerHTML='';pv.appendChild(img);}E('ocrVal').textContent=best.text||'-';E('ocrMeta').textContent=best.text?best.confidence.toFixed(1)+'% '+best.angle+'° '+el+'s':'未识别到数字';if(best.text){self.lastOCR={value:best.text,angle:best.angle,confidence:best.confidence,selX:Math.min(self.selS.x,self.selE.x)/self.scale,selY:Math.min(self.selS.y,self.selE.y)/self.scale,selW:Math.abs(self.selE.x-self.selS.x)/self.scale,selH:Math.abs(self.selE.y-self.selS.y)/self.scale};self.addFromOCR();E('corrBar').style.display='';E('corrInput').value=best.text;self.log('识别: "'+best.text+'" @'+best.angle+'° ('+best.confidence.toFixed(1)+'%, '+el+'s)','ok');}else self.log('未识别到数字','warn');self.setStatus('g','完成 '+el+'s');self.ocrBusy=false;};},
+  /* ================================================================
+     【autoTol：自动给尺寸配"公差"】
+     就像老师批改作业，不同的题目有不同的扣分标准。
+     这个函数根据尺寸类型和大小，自动填写合适的公差值。
+
+     规则：
+     - 角度：默认 ±1°（因为角度一般要求没那么严）
+     - 直径<10mm：±0.1；直径≥10mm：+0.5/0（单边公差）
+     - 其他：查 GB/T 1804 公差表
+     ================================================================ */
+  // autoTol：根据尺寸类型自动计算并填写公差
+  // dim=尺寸对象，会被直接修改（加tolValue/tolDisplay等属性）
+  autoTol:function(dim){
+    // 如果是角度类型。改1为2会让角度默认公差变宽松
+    if(dim.type==='angle'){
+      // tolValue：公差的数值大小。改1为0.5会让角度更严格
+      dim.tolValue=1;
+      // tolDisplay：给人看的公差文字。改'±1°'为'±0.5°'同步显示
+      dim.tolDisplay='±1°';
+      // tolGrade：精度等级(f/m/c/v)。空字符串表示不是国标等级
+      dim.tolGrade='';
+      // upperTol：上差（最大允许值）。改'+1'为'+2'允许更大正偏差
+      dim.upperTol='+1';
+      // lowerTol：下差（最小允许值）。改'-1'为'-2'允许更大负偏差
+      dim.lowerTol='-1';
+      // 角度处理完直接return，不走后面的国标查表
+      return;
+    }
+    // 如果是直径类型。直径有自己特殊的默认公差规则
+    if(dim.type==='diameter'){
+      // n：把标称值字符串转成数字。parseFloat失败返回NaN
+      var n=parseFloat(dim.nominal);
+      // 如果转换成功（不是NaN）
+      if(!isNaN(n)){
+        // 小直径(<10mm)用更严格的公差。改10为20会让更大尺寸才用单边公差
+        if(n<10){
+          // tolValue=0.1：±0.1mm。改0.1为0.05会让小直径更精密
+          dim.tolValue=.1;
+          // tolDisplay显示±0.1。改文字要同步改tolValue
+          dim.tolDisplay='±0.1';
+          // upperTol=+0.1：最大允许比标称大0.1mm
+          dim.upperTol='+0.1';
+          // lowerTol=-0.1：最小允许比标称小0.1mm
+          dim.lowerTol='-0.1';
+        }else{
+          // 大直径用单边公差+0.5/0（只允许大，不允许小）
+          // tolValue=0.5：公差带大小是0.5。改0.5为1.0会让大直径更宽松
+          dim.tolValue=.5;
+          // tolDisplay='+0.5/0'：表示上差+0.5，下差0
+          dim.tolDisplay='+0.5/0';
+          // upperTol=+0.5：最大比标称大0.5
+          dim.upperTol='+0.5';
+          // lowerTol='0'：最小就是标称值，不能小。改'0'为'-0.1'允许小一点
+          dim.lowerTol='0';
+        }
+        // 直径的默认公差不是国标等级，所以tolGrade设为空
+        dim.tolGrade='';
+        // 处理完直接return
+        return;
+      }
+    }
+    // grade：从"未注公差"输入框解析精度等级(如'm')
+    var grade=parseStdGrade();
+    // 如果解析不到等级（如输入框为空），直接return不填公差
+    if(!grade)return;
+    // isR：是否是圆角或倒角类型。这两种类型查圆角公差表
+    var isR=(dim.type==='radius'||dim.type==='chamfer');
+    // tol：查国标公差表得到的数值。parseFloat把nominal转数字
+    var tol=lookupGB(parseFloat(dim.nominal),grade,isR);
+    // 如果查不到对应公差（尺寸超出表范围），直接return
+    if(!tol)return;
+    // tolValue：写入查到的公差数值。改这里会影响后续判定计算
+    dim.tolValue=tol;
+    // tolDisplay：显示为"±数值"。改拼接方式可换显示格式
+    dim.tolDisplay='±'+tol;
+    // tolGrade：记录使用的精度等级。显示在表格里
+    dim.tolGrade=grade;
+    // upperTol：上差写为+数值。改'+'为其他符号会改变显示
+    dim.upperTol='+'+tol;
+    // lowerTol：下差写为-数值
+    dim.lowerTol='-'+tol;
+  },
+
+  foundRect:function(o){return{x:o.selX!==undefined?o.selX:o.x,y:o.selY!==undefined?o.selY:o.y,w:Math.max(o.selW!==undefined?o.selW:(o.w||1),0.1),h:Math.max(o.selH!==undefined?o.selH:(o.h||1),0.1)};},
+  rectOverlapRatio:function(a,b){var ar=this.foundRect(a),br=this.foundRect(b);var ox=Math.max(0,Math.min(ar.x+ar.w,br.x+br.w)-Math.max(ar.x,br.x));var oy=Math.max(0,Math.min(ar.y+ar.h,br.y+br.h)-Math.max(ar.y,br.y));if(ox<=0||oy<=0)return 0;return ox*oy/Math.max(Math.min(ar.w*ar.h,br.w*br.h),0.0001);},
+  sameDimHit:function(a,b){var ar=this.foundRect(a),br=this.foundRect(b),av=a.nominal!==undefined?a.nominal:a.nom,bv=b.nominal!==undefined?b.nominal:b.nom;var ov=this.rectOverlapRatio(a,b);var dx=Math.abs((ar.x+ar.w/2)-(br.x+br.w/2)),dy=Math.abs((ar.y+ar.h/2)-(br.y+br.h/2));var near=dx<Math.max(ar.w,br.w)*0.55&&dy<Math.max(ar.h,br.h)*0.65;return ov>0.55||(av&&bv&&av===bv&&(ov>0.18||near));},
+  normalizeFound:function(f){
+    if(!f)return null;var raw=(f.raw||f.ocrRaw||f.text||f.nom||'').toString();var parsed=f.parsed||this.parseDim(raw||f.nom);
+    if((!parsed.nom||!/\d/.test(parsed.nom))&&raw){var cleaned=this.extractDigits(raw);if(cleaned)parsed=this.parseDim(cleaned);}
+    if(this.isBadDimRaw(raw,parsed))return null;
+    var nom=(parsed.nom&&/\d/.test(parsed.nom))?parsed.nom:(f.nom||'');if(!nom||!/\d/.test(nom))return null;
+    var x=parseFloat(f.x),y=parseFloat(f.y),w=parseFloat(f.w),h=parseFloat(f.h);if(isNaN(x)||isNaN(y))return null;if(isNaN(w)||w<=0)w=2;if(isNaN(h)||h<=0)h=1;
+    return{nom:nom,up:f.up!==undefined?f.up:(parsed.up||''),lo:f.lo!==undefined?f.lo:(parsed.lo||''),type:f.type||parsed.type||'linear',x:x,y:y,w:Math.max(w,0.5),h:Math.max(h,0.5),angle:f.angle||0,conf:f.conf||0,raw:raw||nom};
+  },
+  isBadDimRaw:function(raw,parsed){
+    raw=normalizeDimText(String(raw||'').replace(/[\n\r]+/g,' ').trim());if(!raw)return false;
+    if(/\b(WD|REV|DATE|SIGN|SCALE|PAGE|MARK|NO|DESIGN|REVIEW|Creo|CCD)\b/i.test(raw))return true;
+    if(/[A-Za-z]{2,}/.test(raw)&&!/(DIA|DIAM|PHI)/i.test(raw)&&!/\bSR\b/i.test(raw))return true;
+    var nums=raw.match(/\d+(?:\.\d+)?/g)||[];
+    var hasDimPrefix=/[RrCc]\s*\d|⌀\s*\d|DIA|DIAM|PHI|[×xX]\s*(?:⌀|[oO0QnN])\s*\d/i.test(raw);
+    if(nums.length>3&&!hasDimPrefix)return true;
+    if(nums.length>1&&parsed&&parsed.type==='angle'&&!/[⌀RrCc×xX]/.test(raw))return true;
+    return false;
+  },
+  dedupeFoundList:function(list){
+    var self=this,out=[];(list||[]).forEach(function(item){var f=self.normalizeFound(item);if(!f)return;var dup=out.some(function(o){return self.sameDimHit(f,o);});if(!dup)out.push(f);});
+    out.sort(function(a,b){var dy=a.y-b.y;if(Math.abs(dy)>Math.max(a.h,b.h,1)*0.7)return dy;return a.x-b.x;});return out;
+  },
+  isExistingDimHit:function(f){var self=this;return this.dims.some(function(d){return d.pg===self.pg&&self.sameDimHit(f,d);});},
+  addDimFromFound:function(hit){
+    var f=this.normalizeFound(hit);if(!f||this.isExistingDimHit(f))return null;
+    var num=this.getNextNum();var pos=this.findBubblePos(f.x,f.y,f.w,f.h);
+    var dim={id:Date.now()+Math.random(),num:num,nominal:f.nom,upperTol:f.up||'',lowerTol:f.lo||'',tolValue:0,tolDisplay:'',tolGrade:'',type:f.type||'linear',gdt:'',measured:'',result:'',notes:'',equipment:getEquip(f.type||'linear',f.nom),ocrRaw:f.raw||f.nom,ocrAngle:f.angle||0,pg:this.pg,saved:false,selX:f.x,selY:f.y,selW:f.w,selH:f.h,bubX:pos.x,bubY:pos.y};
+    this.autoTol(dim);this.insertDimSorted(dim);this.addBubSVG(dim);return dim;
+  },
+
+  /*================================================================
+    v5.2 核心改进5: 智能气泡排布findBubblePos
+  ================================================================*/
+  findBubblePos:function(selX,selY,selW,selH){
+    var s=this.scale,R=14/s,OFF=R*2.8;
+    var pd=this.dims.filter(function(d){return d.pg===A.pg;});
+    var cands=[];
+    for(var ring=0;ring<5;ring++){var dist=OFF+ring*OFF*0.6;for(var a=0;a<8;a++){var ang=a*Math.PI/4+ring*0.3;cands.push({x:selX+selW/2+Math.cos(ang)*dist,y:selY+selH/2-Math.sin(ang)*dist});}}
+    var MD=R*3.5,best=cands[0],bestS=1e9;
+    cands.forEach(function(c){var score=0;pd.forEach(function(d){var dist=Math.hypot(c.x-d.bubX,c.y-d.bubY);var overlapPenalty=dist<MD?(MD-dist)*100:0;var farPenalty=dist>MD*3?dist*0.1:0;score+=overlapPenalty+farPenalty;});score+=Math.hypot(c.x-(selX+selW/2),c.y-(selY+selH/2))*0.3;if(score<bestS){bestS=score;best=c;}});
+    return{x:best.x,y:best.y};
+  },
+  addFromOCR:function(){
+    if(!this.lastOCR)return;var r=this.lastOCR;
+    var dim=this.addDimFromFound({nom:r.value,raw:r.value,angle:r.angle,conf:r.confidence,x:r.selX,y:r.selY,w:r.selW,h:r.selH});
+    if(dim){this.lastDimId=dim.id;this.renderTable();this.toast('#'+dim.num+' '+nomDisplay(dim));}
+    else this.toast('该位置已存在尺寸');
+  },
+
+  /* ================================================================
+     【correctAllBoxes / correctOneBox：一键"智能对齐"选框】
+     v5.4重大改进。以前矫正选框会越矫越大，现在用"吸附算法"：
+     1. 先把选框固定扩展到一个标准大小（35×18像素，与当前框大小无关）
+     2. 从外边框向里扫描，找到最近的黑色像素（文字/线条）
+     3. 把边框"吸附"到这些像素的位置，就像磁铁吸铁屑
+     4. 检查：如果新框比原框小太多(<30%)或大太多(>150%)，跳过
+     5. 检查：如果内容中心偏移原中心太远(>30px)，说明框错位严重，跳过
+     6. 在内容周围加一点点留白(vpad)，完成
+     
+     小贴士：选中某个气泡后再点"矫正"，会优先矫正它。
+     ================================================================ */
+  correctOneBox:function(dim){
+    if(!dim)return false;
+    var self=this,s=this.scale,dpr=window.devicePixelRatio||1,osc=parseInt(E('sScale').value)||2;
+    var backup={x:dim.selX,y:dim.selY,w:dim.selW,h:dim.selH};
+    // v5.4: 固定扩展,不再以当前 selW 为基数
+    var expW=35/s,expH=18/s;
+    var cx=dim.selX+dim.selW/2,cy=dim.selY+dim.selH/2;
+    var x1=Math.max(0,cx-expW/2),y1=Math.max(0,cy-expH/2);
+    var x2=x1+expW,y2=y1+expH;
+    self.selS={x:x1*s,y:y1*s};self.selE={x:x2*s,y:y2*s};
+    var proc;
+    try{proc=self.cropAndProc(0,undefined,'global');}catch(e){self.selS=null;self.selE=null;return false;}
+    self.selS=null;self.selE=null;
+    var content=self.getContentBounds(proc);
+    if(!content||content.w<2||content.h<2){self.log('矫正 #'+(dim.num||'?')+': 无内容','info');return false;}
+    var f=dpr*osc,scale=1/(f*s);
+    var cw=content.w*scale,ch=content.h*scale;
+    // 单向过滤: 不小于原 30%,不大于原 1.5x(避免乱跑)
+    if(cw<dim.selW*0.3||ch<dim.selH*0.3){self.log('矫正 #'+(dim.num||'?')+': 内容过小','info');return false;}
+    if(cw>dim.selW*1.5||ch>dim.selH*1.5){self.log('矫正 #'+(dim.num||'?')+': 内容过大(可能框入尺寸线)','warn');return false;}
+    // 检查中心偏移: 若内容中心距原中心 >30px,说明原框错位严重,不矫正
+    var contentCx=x1+content.x*scale+cw/2,contentCy=y1+content.y*scale+ch/2;
+    var dx=contentCx-cx,dy=contentCy-cy;
+    if(Math.hypot(dx,dy)>30/s){self.log('矫正 #'+(dim.num||'?')+': 偏移过大 ('+Math.round(Math.hypot(dx,dy)*s)+'px)','warn');return false;}
+    // 应用新选框
+    var vpad=0.4/s;
+    dim.selX=contentCx-cw/2-vpad;
+    dim.selY=contentCy-ch/2-vpad;
+    dim.selW=Math.max(cw+vpad*2,1.5/s);
+    dim.selH=Math.max(ch+vpad*2,1.5/s);
+    if(self.debugCoords)console.log('correctBox #'+(dim.num||'?'),'was:',JSON.stringify(backup),'now:',JSON.stringify({x:dim.selX,y:dim.selY,w:dim.selW,h:dim.selH}));
+    return true;
+  },
+  correctAllBoxes:function(){
+    var self=this;
+    var dims=this.dims.filter(function(d){return d.pg===self.pg;});
+    if(!dims.length){self.toast('当前页无尺寸');return;}
+    self.setStatus('y','矫正选框中...');self.log('开始矫正选框...','info');
+    // v5.4: 优先矫正当前选中的尺寸,再批量矫正其它
+    var targets=[];
+    if(self.selId!==null&&self.selId!==undefined){var sd=dims.find(function(d){return d.id===self.selId;});if(sd)targets.push(sd);}
+    dims.forEach(function(d){if(targets.indexOf(d)<0)targets.push(d);});
+    var fixed=0,skipped=0;
+    targets.forEach(function(dim){
+      if(self.correctOneBox(dim))fixed++;else skipped++;
+    });
+    self.renderBubbles();
+    self.log('矫正完成: '+fixed+'个更新, '+skipped+'个跳过','ok');
+    self.toast('矫正 '+fixed+' 个选框, '+skipped+' 个跳过');
+    self.setStatus('g','完成');
+    self.updStatus();
+  },
+
+  /* ================================================================
+     【autoBubble：一键自动识别+气泡标注】
+     这是整个程序最"自动化"的功能。用户点击"自动识别"按钮后，
+     这个函数会接管一切，完成从识别到气泡标注的全流程。
+     
+     工作流程：
+     1. 清空旧的尺寸列表和气泡
+     2. 检查用户是否框了选框：
+        - 有选框：逐个处理每个选框（文本层/视觉OCR/稀疏OCR）
+        - 没选框：整张图纸识别（视觉OCR）
+     3. 去重：去掉位置太近的气泡（距离<40px且编号相同）
+     4. 排序：按从左到右、从上到下排列
+     5. 重新编号：从1开始连续编号，回收被删掉的编号
+     6. 更新表格和气泡显示
+     ================================================================ */
+  autoBubble:function(){
+    if(!this.pdf&&!this.isImg)return;var self=this;
+    var pgMarks=this.marks.filter(function(m){return m.pg===self.pg;});
+    if(!pgMarks.length){
+      var pgR=this.regions.filter(function(r){return r.pg===self.pg;});if(!pgR.length){self.toast('请先使用「识别区域」工具框选区域');return;}
+      self.setStatus('y','自动识别中...');self.log('开始自动识别...','info');self.ocrBusy=true;var t0=performance.now(),added=0,ri=0;
+      var addFound=function(list){self.dedupeFoundList(list).forEach(function(f){var dim=self.addDimFromFound(f);if(dim)added++;});};
+      var processRegion=function(){
+        if(ri>=pgR.length){done();return;}var region=pgR[ri++];var found=[];
+        // v5.4 P0-3: 文本层和视觉OCR并行,结果合并去重(原:文本层找到1个就跳过视觉OCR)
+        if(self.textItems.length)found=found.concat(self.autoFromText(region));
+        var sparseP=Promise.resolve([]);
+        if(self.textItems.length<10||self.autoMode==='pro')sparseP=Promise.resolve(self.autoFromSparseOCR(region)).then(function(sf){found=found.concat(sf||[]);return sf||[];}).catch(function(){return[];});
+        var visionP=self.autoFromOCR(region).catch(function(){return[];}).then(function(f){found=found.concat(f||[]);return f||[];});
+        Promise.all([sparseP,visionP]).then(function(){
+          addFound(found);
+          self.log('  区域'+ri+': 找到'+self.dedupeFoundList(found).length+'个','info');
+          processRegion();
+        });
+      };
+      var done=function(){self.ocrBusy=false;var el=((performance.now()-t0)/1000).toFixed(2);self.renderTable();self.log('完成 +'+added+' ('+el+'s)','ok');self.toast('+'+added+' 个尺寸');self.setStatus('g','完成 +'+added);};processRegion();return;
+    }
+    self.setStatus('y','批量识别标记...');self.log('开始批量识别 '+pgMarks.length+' 个标记...','info');self.ocrBusy=true;
+    var t0=performance.now(),added=0,idx=0,psm=E('sPSM').value,lang=E('sLang').value;
+    var addMarkDim=function(mark,parsed,raw,ang,conf,proc,ocrR){var rx=mark.x,ry=mark.y,rw=mark.w,rh=mark.h;var s=self.scale,dpr=window.devicePixelRatio||1,osc=parseInt(E('sScale').value)||2;var refined=false;if(ocrR&&ocrR.words&&ocrR.words.length){var bbox={x0:1e9,y0:1e9,x1:0,y1:0};ocrR.words.forEach(function(w){if(w.bbox){bbox.x0=Math.min(bbox.x0,w.bbox.x0);bbox.y0=Math.min(bbox.y0,w.bbox.y0);bbox.x1=Math.max(bbox.x1,w.bbox.x1);bbox.y1=Math.max(bbox.y1,w.bbox.y1);}});if(bbox.x0<1e9&&bbox.x1>bbox.x0&&bbox.y1>bbox.y0){var mapped=self.mapBoundsToDoc({x:bbox.x0,y:bbox.y0,w:bbox.x1-bbox.x0,h:bbox.y1-bbox.y0},ang||0,{x:mark.x*s,y:mark.y*s},mark.w*s,mark.h*s,osc,dpr);if(mapped.w>=0.5&&mapped.h>=0.5){rx=mapped.x;ry=mapped.y;rw=mapped.w;rh=mapped.h;refined=true;if(self.debugCoords)console.log('markRefine[Tesseract]: mark',JSON.stringify({x:mark.x,y:mark.y,w:mark.w,h:mark.h}),'words->',JSON.stringify({x:rx,y:ry,w:rw,h:rh}));}}}if(!refined&&proc){var content=self.getContentBounds(proc);if(content&&content.w>=2&&content.h>=2){var f=dpr*osc,scale=1/(f*s);rx=mark.x+content.x*scale;ry=mark.y+content.y*scale;rw=content.w*scale;rh=content.h*scale;var vpad=0.3/s;rx-=vpad;ry-=vpad;rw=Math.max(rw+vpad*2,1.5/s);rh=Math.max(rh+vpad*2,1.5/s);if(self.debugCoords)console.log('markRefine[content]: mark',JSON.stringify({x:mark.x,y:mark.y,w:mark.w,h:mark.h}),'refined',JSON.stringify({x:rx,y:ry,w:rw,h:rh}));}}var dim=self.addDimFromFound({nom:parsed.nom,up:parsed.up||mark.up||'',lo:parsed.lo||mark.lo||'',type:parsed.type||mark.type||'linear',x:rx,y:ry,w:rw,h:rh,angle:ang||mark.angle||0,raw:raw||mark.nom,conf:conf||0});if(dim)added++;return dim;};
+    var processMark=function(){
+      if(idx>=pgMarks.length){done();return;}var mark=pgMarks[idx++];
+      if(mark.nom&&/\d/.test(mark.nom)){addMarkDim(mark,{nom:mark.nom,up:mark.up||'',lo:mark.lo||'',type:mark.type||'linear'},mark.nom,mark.angle||0,100,null);processMark();return;}
+      var s=self.scale,isVert=mark.w<mark.h,baseAngle=mark.angle||0;var tryAngles=isVert?[baseAngle,(baseAngle+90)%360]:[baseAngle];var ti=0;
+      var tryNext=function(){
+        if(ti>=tryAngles.length){processMark();return;}var ang=tryAngles[ti++];self.selS={x:mark.x*s,y:mark.y*s};self.selE={x:(mark.x+mark.w)*s,y:(mark.y+mark.h)*s};var proc=self.cropAndProc(ang,undefined,'global');
+        self.ocrPass(proc,psm,lang).then(function(r){var cleaned=self.correctDigits(proc,self.extractDigits(r.text||''));var parsed=self.parseDim(r.text);if(!parsed.nom||!/\d/.test(parsed.nom))parsed=self.parseDim(cleaned||r.text);if(parsed.nom&&/\d/.test(parsed.nom)&&((r.confidence||0)>=45||cleaned)){addMarkDim(mark,parsed,r.text,ang,r.confidence,proc,r);processMark();return;}self.multiPassOCR(ang).then(function(mr){var p2=self.parseDim(mr.text||'');if(p2.nom&&/\d/.test(p2.nom)){addMarkDim(mark,p2,mr.text,ang,mr.confidence,proc,mr);processMark();}else tryNext();}).catch(function(){tryNext();});}).catch(function(){tryNext();});
+      };tryNext();
+    };
+    var done=function(){self.ocrBusy=false;var el=((performance.now()-t0)/1000).toFixed(2);self.hideMarks();self.renderTable();self.log('完成 +'+added+' ('+el+'s)','ok');self.toast('+'+added+' 个尺寸');self.setStatus('g','完成 +'+added);self.selAngle=0;};processMark();
+  },
+
+  /* ================================================================
+     【气泡渲染三人组：addBubSVG / renderBubbles / refreshBubbleSVG】
+     这三个函数负责在图纸上画"小红圈"（气泡标注）。
+     
+     - addBubSVG：给一个尺寸画一个气泡（圆+编号）
+     - renderBubbles：遍历所有尺寸，批量调用 addBubSVG
+     - refreshBubbleSVG：先清空再重画，保证位置同步
+     
+     小贴士：气泡是用SVG（矢量图）画的，不是HTML元素。
+     好处是无论放大缩小，圆圈和文字都不会变模糊。
+     ================================================================ */
+  addBubSVG:function(dim){var svg=document.getElementById('bubbleSvg');var s=this.scale;var bx=dim.bubX*s,by=dim.bubY*s;var sx=dim.selX*s,sy=dim.selY*s,sw=dim.selW*s,sh=dim.selH*s;var corners=[{x:sx,y:sy},{x:sx+sw,y:sy},{x:sx,y:sy+sh},{x:sx+sw,y:sy+sh}];var nc=corners[0],minD=1e9;corners.forEach(function(c){var d=Math.hypot(bx-c.x,by-c.y);if(d<minD){minD=d;nc=c;}});var g=svgEl('g',{class:'bg','data-id':dim.id,transform:'translate('+bx+','+by+')'});g.appendChild(svgEl('rect',{class:'sf',x:sx-bx,y:sy-by,width:sw,height:sh,fill:'rgba(255,60,60,.05)',stroke:'#ff3c3c','stroke-width':'1.5','stroke-dasharray':'5,3',rx:'1'}));var hs=8;[{cn:'nw',x:sx-bx-hs/2,y:sy-by-hs/2,cur:'nw-resize'},{cn:'ne',x:sx+sw-bx-hs/2,y:sy-by-hs/2,cur:'ne-resize'},{cn:'sw',x:sx-bx-hs/2,y:sy+sh-by-hs/2,cur:'sw-resize'},{cn:'se',x:sx+sw-bx-hs/2,y:sy+sh-by-hs/2,cur:'se-resize'}].forEach(function(h){g.appendChild(svgEl('rect',{class:'sf-handle','data-corner':h.cn,x:h.x,y:h.y,width:hs,height:hs,fill:'#ff3c3c',stroke:'#0b0d13','stroke-width':'1',rx:'1',style:'cursor:'+h.cur}));});g.appendChild(svgEl('line',{class:'ll',x1:0,y1:0,x2:nc.x-bx,y2:nc.y-by,stroke:'#ff3c3c','stroke-width':'1.2'}));g.appendChild(svgEl('circle',{class:'cd',cx:nc.x-bx,cy:nc.y-by,r:3,fill:'#ff3c3c'}));g.appendChild(svgEl('circle',{class:'bc',cx:0,cy:0,r:14,fill:'rgba(255,255,255,0.95)',stroke:'#ff3c3c','stroke-width':'2'}));g.appendChild(svgEl('text',{x:0,y:1,'text-anchor':'middle','dominant-baseline':'central',fill:'#ff3c3c','font-family':"'JetBrains Mono',monospace",'font-size':'11','font-weight':'700'},dim.num.toString()));svg.appendChild(g);this.updStatus();},
+  renderBubbles:function(){var svg=document.getElementById('bubbleSvg'),self=this;svg.querySelectorAll('.bg').forEach(function(e){e.remove();});this.dims.filter(function(d){return d.pg===self.pg;}).forEach(function(d){self.addBubSVG(d);});},
+  refreshBubbleSVG:function(dim){var g=document.querySelector('[data-id="'+dim.id+'"]');if(!g)return;var s=this.scale,bx=dim.bubX*s,by=dim.bubY*s,sx=dim.selX*s,sy=dim.selY*s,sw=dim.selW*s,sh=dim.selH*s;g.querySelector('.sf').setAttribute('x',sx-bx);g.querySelector('.sf').setAttribute('y',sy-by);g.querySelector('.sf').setAttribute('width',sw);g.querySelector('.sf').setAttribute('height',sh);var hs=8;var hPos=[{x:sx-bx-hs/2,y:sy-by-hs/2},{x:sx+sw-bx-hs/2,y:sy-by-hs/2},{x:sx-bx-hs/2,y:sy+sh-by-hs/2},{x:sx+sw-bx-hs/2,y:sy+sh-by-hs/2}];g.querySelectorAll('.sf-handle').forEach(function(h,i){h.setAttribute('x',hPos[i].x);h.setAttribute('y',hPos[i].y);});var corners=[{x:sx,y:sy},{x:sx+sw,y:sy},{x:sx,y:sy+sh},{x:sx+sw,y:sy+sh}];var nc=corners[0],minD=1e9;corners.forEach(function(c){var d=Math.hypot(bx-c.x,by-c.y);if(d<minD){minD=d;nc=c;}});g.querySelector('.ll').setAttribute('x2',nc.x-bx);g.querySelector('.ll').setAttribute('y2',nc.y-by);g.querySelector('.cd').setAttribute('cx',nc.x-bx);g.querySelector('.cd').setAttribute('cy',nc.y-by);},
+  updBubblePos:function(id,nbx,nby){var dim=this.dims.find(function(d){return d.id===id;});if(!dim)return;dim.bubX=nbx;dim.bubY=nby;var s=this.scale,bx=nbx*s,by=nby*s,sx=dim.selX*s,sy=dim.selY*s,sw=dim.selW*s,sh=dim.selH*s;var corners=[{x:sx,y:sy},{x:sx+sw,y:sy},{x:sx,y:sy+sh},{x:sx+sw,y:sy+sh}];var nc=corners[0],minD=1e9;corners.forEach(function(c){var d=Math.hypot(bx-c.x,by-c.y);if(d<minD){minD=d;nc=c;}});var g=document.querySelector('[data-id="'+id+'"]');if(!g)return;g.setAttribute('transform','translate('+bx+','+by+')');g.querySelector('.sf').setAttribute('x',sx-bx);g.querySelector('.sf').setAttribute('y',sy-by);g.querySelector('.ll').setAttribute('x2',nc.x-bx);g.querySelector('.ll').setAttribute('y2',nc.y-by);g.querySelector('.cd').setAttribute('cx',nc.x-bx);g.querySelector('.cd').setAttribute('cy',nc.y-by);var hs=8;var hPos2=[{x:sx-bx-hs/2,y:sy-by-hs/2},{x:sx+sw-bx-hs/2,y:sy-by-hs/2},{x:sx-bx-hs/2,y:sy+sh-by-hs/2},{x:sx+sw-bx-hs/2,y:sy+sh-by-hs/2}];g.querySelectorAll('.sf-handle').forEach(function(h,i){h.setAttribute('x',hPos2[i].x);h.setAttribute('y',hPos2[i].y);});},
+  /* ================================================================
+     【气泡事件三人组：onBubDown / onBubMove / onBubUp】
+     这三个函数让用户可以用鼠标拖动图纸上的气泡。
+     
+     拖动原理：
+     1. onBubDown：鼠标按下时记录"起点"和气泡当前位置
+     2. onBubMove：鼠标移动时，计算"走了多远"，更新气泡位置
+     3. onBubUp：鼠标松开时，保存最终位置
+     
+     小贴士：使用"捕获阶段"监听事件，确保气泡优先于画布获得点击，
+     这样点击气泡时不会误触发画布的框选功能。
+     ================================================================ */
+  onBubDown:function(e){var target=e.target;var g=target.closest('.bg');if(!g)return;e.preventDefault();e.stopPropagation();var id=parseFloat(g.dataset.id);this.selBub(id);var dim=this.dims.find(function(d){return d.id===id;});if(!dim)return;var pt=this.svgPt(e),sc=this.scale;if(target.classList.contains('sf-handle')){this.dragSt={type:'resize',id:id,corner:target.dataset.corner,ox:pt.x,oy:pt.y,oSX:dim.selX,oSY:dim.selY,oSW:dim.selW,oSH:dim.selH};}else if(target.classList.contains('sf')){this.dragSt={type:'rect',id:id,ox:pt.x,oy:pt.y,oSX:dim.selX,oSY:dim.selY};}else if(target.classList.contains('bc')||target.tagName==='text'){this.dragSt={type:'bubble',id:id,ox:pt.x-dim.bubX*sc,oy:pt.y-dim.bubY*sc};}},
+  onBubMove:function(e){if(!this.dragSt)return;var pt=this.svgPt(e);var dim=this.dims.find(function(d){return d.id===A.dragSt.id;});if(!dim)return;var s=this.scale;if(this.dragSt.type==='bubble'){this.updBubblePos(this.dragSt.id,(pt.x-this.dragSt.ox)/s,(pt.y-this.dragSt.oy)/s);}else if(this.dragSt.type==='rect'){dim.selX=this.dragSt.oSX+(pt.x-this.dragSt.ox)/s;dim.selY=this.dragSt.oSY+(pt.y-this.dragSt.oy)/s;this.refreshBubbleSVG(dim);}else if(this.dragSt.type==='resize'){var dx=(pt.x-this.dragSt.ox)/s,dy=(pt.y-this.dragSt.oy)/s,ds=this.dragSt;var nx=ds.oSX,ny=ds.oSY,nw=ds.oSW,nh=ds.oSH,c=ds.corner;if(c.indexOf('w')>=0){nx=ds.oSX+dx;nw=ds.oSW-dx;}if(c.indexOf('e')>=0){nw=ds.oSW+dx;}if(c.indexOf('n')>=0){ny=ds.oSY+dy;nh=ds.oSH-dy;}if(c.indexOf('s')>=0){nh=ds.oSH+dy;}var ms=2/s;if(nw<ms){if(c.indexOf('w')>=0)nx=ds.oSX+ds.oSW-ms;nw=ms;}if(nh<ms){if(c.indexOf('n')>=0)ny=ds.oSY+ds.oSH-ms;nh=ms;}dim.selX=nx;dim.selY=ny;dim.selW=nw;dim.selH=nh;this.refreshBubbleSVG(dim);}},
+  onBubUp:function(){if(this.dragSt){this.justDraggedBub=true;var self=this;setTimeout(function(){self.justDraggedBub=false;},350);}this.dragSt=null;},
+  svgPt:function(e){var pt=document.getElementById('bubbleSvg').createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform(document.getElementById('bubbleSvg').getScreenCTM().inverse());},
+  selBub:function(id){this.selId=id;var dim=this.dims.find(function(d){return d.id===id;});if(!dim)return;E('bpPanel').style.display='';E('bpN').value=dim.num;E('bpV').value=dim.nominal;E('bpU').value=dim.upperTol;E('bpL').value=dim.lowerTol;E('bpT').value=dim.type;E('bpG').value=dim.gdt||'';E('bpNo').value=dim.notes||'';E('bpTol').value=dim.tolGrade||'';E('bpEquip').value=dim.equipment||'';var grade=dim.tolGrade||'';var isCustom=(grade==='custom');E('bpU').readOnly=!isCustom&&(grade!=='');E('bpL').readOnly=!isCustom&&(grade!=='');if(isCustom){E('bpU').classList.add('custom-tol');E('bpL').classList.add('custom-tol');}else{E('bpU').classList.remove('custom-tol');E('bpL').classList.remove('custom-tol');}document.querySelectorAll('#dtB tr').forEach(function(t){t.classList.remove('sel');});var tr=document.querySelector('#dtB tr[data-id="'+id+'"]');if(tr)tr.classList.add('sel');document.querySelectorAll('.sf-handle').forEach(function(h){h.classList.remove('show');});var g=document.querySelector('[data-id="'+id+'"]');if(g)g.querySelectorAll('.sf-handle').forEach(function(h){h.classList.add('show');});},
+  deselBub:function(){this.selId=null;E('bpPanel').style.display='none';document.querySelectorAll('#dtB tr').forEach(function(t){t.classList.remove('sel');});document.querySelectorAll('.sf-handle').forEach(function(h){h.classList.remove('show');});},
+  saveBubble:function(){if(this.selId===null)return;var dim=this.dims.find(function(d){return d.id===A.selId;});if(!dim)return;var oldType=dim.type,oldNom=dim.nominal;dim.num=parseInt(E('bpN').value)||dim.num;dim.nominal=E('bpV').value;dim.type=E('bpT').value;dim.gdt=E('bpG').value;dim.notes=E('bpNo').value;dim.equipment=E('bpEquip').value;var grade=E('bpTol').value;if(grade==='custom'){dim.tolGrade='custom';dim.upperTol=E('bpU').value;dim.lowerTol=E('bpL').value;var uN=parseFloat(dim.upperTol)||0,lN=parseFloat(dim.lowerTol)||0;dim.tolValue=Math.max(Math.abs(uN),Math.abs(lN));dim.tolDisplay=dim.upperTol+'/'+dim.lowerTol;}else if(grade==='diam'){dim.tolGrade='diam';var nD=parseFloat(dim.nominal);if(!isNaN(nD)){if(nD>=10){dim.tolValue=.5;dim.tolDisplay='+0.5/0';dim.upperTol='+0.5';dim.lowerTol='0';}else{dim.tolValue=.1;dim.tolDisplay='±0.1';dim.upperTol='+0.1';dim.lowerTol='-0.1';}E('bpU').value=dim.upperTol;E('bpL').value=dim.lowerTol;}}else if(grade==='cham'){dim.tolGrade='cham';var nC=parseFloat(dim.nominal);if(!isNaN(nC)){if(nC>=.5&&nC<=3){dim.tolValue=.2;dim.tolDisplay='±0.2';dim.upperTol='+0.2';dim.lowerTol='-0.2';}else if(nC>3&&nC<=6){dim.tolValue=.5;dim.tolDisplay='±0.5';dim.upperTol='+0.5';dim.lowerTol='-0.5';}else if(nC>6&&nC<=30){dim.tolValue=1;dim.tolDisplay='±1';dim.upperTol='+1';dim.lowerTol='-1';}else{dim.tolValue=2;dim.tolDisplay='±2';dim.upperTol='+2';dim.lowerTol='-2';}E('bpU').value=dim.upperTol;E('bpL').value=dim.lowerTol;}}else if(grade){dim.tolGrade=grade;var isR=(dim.type==='radius'||dim.type==='chamfer');var tol=lookupGB(parseFloat(dim.nominal),grade,isR);if(tol){dim.tolValue=tol;dim.tolDisplay='±'+tol;dim.upperTol='+'+tol;dim.lowerTol='-'+tol;E('bpU').value=dim.upperTol;E('bpL').value=dim.lowerTol;}}else if(dim.type!==oldType||dim.nominal!==oldNom){dim.tolGrade='';this.autoTol(dim);}else{dim.upperTol=E('bpU').value;dim.lowerTol=E('bpL').value;}dim.saved=true;var g=document.querySelector('[data-id="'+dim.id+'"]');if(g)g.querySelector('text').textContent=dim.num;this.renderTable();this.selBub(dim.id);this.toast('已保存 #'+dim.num);},
+  delSel:function(){if(this.selId===null)return;var dim=this.dims.find(function(d){return d.id===A.selId;});if(dim)this.recycleNum(dim.num);this.dims=this.dims.filter(function(d){return d.id!==A.selId;});var g=document.querySelector('[data-id="'+this.selId+'"]');if(g)g.remove();this.deselBub();this.renderTable();this.toast('已删除');this.updStatus();},
+  /* ================================================================
+     【parseDim：把OCR读出的"原始文字"变成"标准尺寸"】
+     OCR读出来的可能是"⌀10.5±0.1"或"R5 (max)"这样的字符串，
+     这个函数就像一个"翻译官"，把它翻译成程序能理解的结构化数据：
+     {type:'直径', nominal:'10.5', upperTol:'+0.1', lowerTol:'-0.1', ...}
+     
+     支持的尺寸格式（不断增加中）：
+     - 线性尺寸：10, 10.5, 10±0.1, 10(+0.1,-0.2)
+     - 直径：⌀10, φ10, Φ10, DIA 10
+     - 半径：R5, SR5
+     - 倒角：C1, 1×45°, 1x45°
+     - 角度：30°, 30°±1°
+     - GD&T：各种形位公差符号
+     ================================================================ */
+  parseDim:function(text){
+    text=normalizeDimText(String(text||'').trim());var type='linear';
+    var srm=text.match(/^\s*S\s*R\s*(\d+(?:\.\d+)?)/i);if(srm)return{nom:srm[1],up:'',lo:'',type:'radius'};var dm=text.match(/(?:[×xX]\s*)?[nN]\s*(\d+(?:\.\d+)?)/);if(dm)return{nom:dm[1],up:'',lo:'',type:'diameter'};dm=text.match(/[×xX]\s*[oO0Q]\s*(\d+(?:\.\d+)?)/);if(dm)return{nom:dm[1],up:'',lo:'',type:'diameter'};dm=text.match(/[×xX]\s*[ΦφϕøØ⌀]\s*(\d+(?:\.\d+)?)/);if(dm)return{nom:dm[1],up:'',lo:'',type:'diameter'};dm=text.match(/(\d+(?:\.\d+)?)\s*[ΦφϕøØ⌀]\s*(?:\d+\s*[×xX])?/);if(dm)return{nom:dm[1],up:'',lo:'',type:'diameter'};dm=text.match(/[ΦφϕøØ⌀]\s*(\d+(?:\.\d+)?)/);if(dm)return{nom:dm[1],up:'',lo:'',type:'diameter'};
+    var qm=text.match(/^\s*\d+\s*[×xX]\s*(\d+(?:\.\d+)?)/);if(qm)return{nom:qm[1],up:'',lo:'',type:'linear'};
+    var cm=text.match(/^\s*[Cc]\s*(\d+(?:\.\d+)?)/);if(cm)return{nom:cm[1],up:'',lo:'',type:'chamfer'};
+    var rm=text.match(/^\s*[Rr]\s*(\d+(?:\.\d+)?)/);if(rm)return{nom:rm[1],up:'',lo:'',type:'radius'};
+    if(DIM_SYMBOLS.test(text)||/^\s*(?:[oO0Q]|[Dd](?![A-Za-z]))\s*\d/.test(text))type='diameter';
+    if(/[°º]/.test(text))type='angle';
+    var c=text.replace(DIM_SYMBOLS_GLOBAL,'').trim();c=c.replace(/^\s*(?:DIA|DIAM)\.?\s*/i,'');c=c.replace(/^\s*[oO0Q]\s*/,'');c=c.replace(/^\s*[Dd](?=\d)\s*/,'');c=c.replace(/^\s*[Ss][Rr]\s*/i,'');
+    // v5.4 P2-7: 增强公差解析,覆盖 7 种常见格式
+    var m;
+    m=c.match(/(\d+(?:\.\d+)?)\s*[+]\s*(\d+(?:\.\d+)?)\s*[-−]\s*(\d+(?:\.\d+)?)/);if(m)return{nom:m[1],up:'+'+m[2],lo:'-'+m[3],type:type};
+    m=c.match(/(\d+(?:\.\d+)?)\s*[±]\s*(\d+(?:\.\d+)?)/);if(m)return{nom:m[1],up:'+'+m[2],lo:'-'+m[2],type:type};
+    // (0,-1) / (0, -1) / (0;-1) / (0,- 1)  — 括号带符号
+    m=c.match(/(\d+(?:\.\d+)?)\s*[\(\[\{]\s*([+\-−]?\s*\d+(?:\.\d+)?)\s*[,;]\s*([+\-−]?\s*\d+(?:\.\d+)?)\s*[\)\]\}]/);
+    if(m){
+      var up=String(m[2]).replace(/\s+/g,'').replace('−','-');if(up.charAt(0)!=='+'&&up.charAt(0)!=='-')up='+'+up;
+      var lo=String(m[3]).replace(/\s+/g,'').replace('−','-');if(lo.charAt(0)!=='+'&&lo.charAt(0)!=='-')lo='-'+lo;
+      return{nom:m[1],up:up,lo:lo,type:type};
+    }
+    // 0+0.1/-0.2  — 紧凑上下差(无括号)
+    m=c.match(/(\d+(?:\.\d+)?)\s*([+\-−]\s*\d+(?:\.\d+)?)\s*[\/／]\s*([+\-−]\s*\d+(?:\.\d+)?)/);
+    if(m){
+      var up2=String(m[2]).replace(/\s+/g,'').replace('−','-');var lo2=String(m[3]).replace(/\s+/g,'').replace('−','-');
+      return{nom:m[1],up:up2.charAt(0)!=='+'&&up2.charAt(0)!=='-'?'+'+up2:up2,lo:lo2.charAt(0)!=='+'&&lo2.charAt(0)!=='-'?'-'+lo2:lo2,type:type};
+    }
+    // 0~+0.1 / 0~-0.1  — 波浪号
+    m=c.match(/(\d+(?:\.\d+)?)\s*[~〜]\s*([+\-−]?\d+(?:\.\d+)?)/);
+    if(m){var u=String(m[2]).replace('−','-');return{nom:m[1],up:u.charAt(0)==='-'?u:'+'+u,lo:'-'+u.replace(/^[+\-]/,''),type:type};}
+    m=c.match(/(\d+(?:\.\d+)?)/);if(m)return{nom:m[1],up:'',lo:'',type:type};return{nom:text,up:'',lo:'',type:type};
+  },
+  /* ================================================================
+     【编号管理：getNextNum / recycleNum】
+     这两个函数管理气泡编号的分配和回收，就像办公室管理门牌号：
+     - 有回收的号码先用回收的（避免编号跳来跳去）
+     - 没回收的就发新号码（nextN不断递增）
+     ================================================================ */
+  // getNextNum：获取下一个可用的气泡编号
+  getNextNum:function(){
+    // 如果回收数组里有编号（之前删除的），优先复用。shift取出第一个
+    if(this.recycled.length>0)return this.recycled.shift();
+    // 没有回收编号，发新号。nextN++是先返回当前值再自增。改++为+=1效果一样
+    return this.nextN++;
+  },
+  // recycleNum：回收一个编号，下次优先使用
+  // n=要回收的编号数字
+  recycleNum:function(n){
+    // ins标记是否已插入。false表示还没找到插入位置
+    var ins=false;
+    // 遍历回收数组，按从小到大顺序插入（保持有序）
+    for(var i=0;i<this.recycled.length;i++){
+      // 如果回收的号比当前项小，插在当前位置前面。改<为>会变成降序
+      if(n<this.recycled[i]){
+        // splice(i,0,n)：在i位置插入n，不删除元素
+        this.recycled.splice(i,0,n);
+        // 标记已插入
+        ins=true;
+        // break跳出循环，不需要继续找了
+        break;
+      }
+    }
+    // 如果遍历完都没找到比它大的（即它是最大的），直接push到末尾
+    if(!ins)this.recycled.push(n);
+  },
+  /* ================================================================
+     【simValue / simAll / delSim：模拟测量值】
+     这三兄弟用于"假装测量"，在正式检验前生成随机但合理的实测值，
+     方便测试判定逻辑和导出功能。
+     ================================================================ */
+  // simValue：给一个尺寸生成随机模拟测量值
+  // dim=尺寸对象；返回字符串形式的模拟值
+  simValue:function(dim){
+    // 如果没有标称值，返回空字符串。改''为'0'会默认模拟为0
+    if(!dim.nominal)return'';
+    // nom：把标称值字符串转成数字
+    var nom=parseFloat(dim.nominal);
+    // 如果转失败返回空
+    if(isNaN(nom))return'';
+    // u/l：上差和下差的数值。||0表示如果解析失败默认0
+    var u=parseFloat(dim.upperTol)||0,l=parseFloat(dim.lowerTol)||0;
+    // 如果上下差都是0（没有公差），直接返回标称值。改toString()可换格式
+    if(u===0&&l===0)return nom.toString();
+    // lo/hi：允许的最小和最大极限尺寸。l可能是负数（如-0.1）
+    var lo=nom+l,hi=nom+u;
+    // range：公差带总宽度。改计算方式可换分布逻辑
+    var range=hi-lo;
+    // 如果公差带宽度<=0，返回标称值（防止异常）
+    if(range<=0)return nom.toString();
+    // val：在[lo,hi]范围内生成均匀分布的随机数。Math.random()生成0~1
+    var val=lo+Math.random()*range;
+    // equip：检测设备名称。不同设备精度不同（小数位不同）
+    var equip=dim.equipment||'';
+    // dec：默认保留小数位数。改1为2会让所有模拟值保留2位小数
+    var dec=1;
+    // 角度尺和卷尺精度较低，保留1位。改dec=1为2可提高模拟精度
+    if(equip==='角度尺')dec=1;
+    else if(equip==='卷尺')dec=1;
+    // 游标卡尺精度较高，保留2位
+    else dec=2;
+    // result：四舍五入到指定小数位
+    var result=parseFloat(val.toFixed(dec));
+    // 如果是角度类型，后面加°符号。改'°'为空字符串则不加单位
+    return dim.type==='angle'?result+'°':result.toString();
+  },
+  // simAll：给所有尺寸批量生成模拟测量值
+  simAll:function(){
+    // self保存A对象引用，因为在forEach回调里this会变
+    var self=this;
+    // 遍历所有尺寸，逐个调用simValue生成模拟值
+    this.dims.forEach(function(d){d.measured=self.simValue(d);});
+    // 刷新表格显示新生成的模拟值
+    this.renderTable();
+    // 弹出提示告诉用户完成了
+    this.toast('全部模拟完成');
+    // 在日志区记录操作
+    this.log('全部模拟实测值已生成','ok');
+  },
+  // delSim：删除所有模拟测量值和判定结果
+  delSim:function(){
+    // self保存A对象引用；cnt计数删除了多少个
+    var self=this,cnt=0;
+    // 遍历所有尺寸，清空实测值和判定结果
+    this.dims.forEach(function(d){
+      // 如果该尺寸有模拟值或判定结果才需要清理
+      if(d.measured||d.result){
+        // measured：实测值清空。改成'-'会保留横线而不是空白
+        d.measured='';
+        // result：判定结果清空
+        d.result='';
+        // 计数器+1
+        cnt++;
+      }
+    });
+    // 刷新表格显示清空后的状态
+    this.renderTable();
+    // 如果有删除的数据，提示删除了多少个
+    if(cnt>0){
+      this.toast('已删除 '+cnt+' 个模拟数据');
+      this.log('已删除全部模拟数值和判定','ok');
+    }else{
+      // 本来就没有模拟数据
+      this.toast('无模拟数据');
+    }
+  },
+  /* ================================================================
+     【renderTable：把尺寸数据画成"表格"】
+     这个函数负责更新页面底部的尺寸列表。每次添加/删除/修改尺寸后，
+     都会调用它来刷新表格。
+     
+     表格列含义：
+     - 编号：气泡编号（如1, 2, 3...）
+     - 标准尺寸：名义值（如⌀10.5）
+     - 标准公差：公差等级和数值（如m ±0.1）
+     - 上差/下差：允许的最大/最小值
+     - 类型：线性/直径/半径/倒角/角度/GD&T
+     - 实测值：检验员手动输入的测量结果
+     - 判定：OK（合格）或 NG（不合格）
+     - 备注：额外说明
+     - 检测设备：自动推荐的检测工具（如卡尺、千分尺）
+     
+     交互功能：
+     - 点击行：选中对应气泡
+     - 拖拽行：调整编号顺序
+     - 双击单元格：直接编辑实测值和备注
+     ================================================================ */
+  // renderTable：把尺寸数据渲染成底部表格。每次增删改后都会调用
+  renderTable:function(){
+    // tb：表格tbody元素；em：空状态提示元素；self保存A引用
+    var tb=E('dtB'),em=E('dtE'),self=this;
+    // dtC：表格右上角计数器，显示总尺寸数量。改textContent格式可换显示样式
+    E('dtC').textContent=this.dims.length;
+    // stD：状态栏显示尺寸总数。改'尺寸:'为'共'可换文字
+    E('stD').textContent='尺寸:'+this.dims.length;
+    // 如果没有尺寸数据，清空表格并显示空提示
+    if(!this.dims.length){tb.innerHTML='';em.style.display='';return;}
+    // 有数据时隐藏空提示
+    em.style.display='none';
+    // tl：类型翻译字典。增删键值可添加更多类型显示
+    var tl={linear:'线性',diameter:'直径',radius:'R半径',chamfer:'C倒角',angle:'角度',gdt:'GD&T'};
+    // 用map遍历所有尺寸生成HTML行，最后用join('')拼接。改join('\n')可换行
+    tb.innerHTML=this.dims.map(function(d){
+      // pass：判定结果。有实测值时调用chkPass判定OK/NG，否则显示'-'
+      var pass=d.measured?(self.chkPass(d)?'<span style="color:var(--ok)">OK</span>':'<span style="color:var(--ac)">NG</span>'):'-';
+      // tolLabel：公差显示文字。有等级时显示"等级 ±值"，否则只显示±值
+      var tolLabel=d.tolGrade?(d.tolGrade+' '+d.tolDisplay):(d.tolDisplay||'');
+      // uDisp/lDisp：上下极限尺寸显示值。fmtLim把标称+公差算成极限值
+      var uDisp=fmtLim(d.nominal,d.upperTol),lDisp=fmtLim(d.nominal,d.lowerTol);
+      // nomCls：CSS类名。saved=true时加locked类让文字变灰提示已保存
+      var nomCls=d.saved?'class="dv locked"':'class="dv"';
+      // 返回一行的HTML字符串。改样式值可调整表格外观
+      return'<tr data-id="'+d.id+'" onclick="A.selBub('+d.id+')" draggable="true" data-num="'+d.num+'">'+
+        // dn类控制编号列样式。改class可换列样式
+        '<td class="dn">'+d.num+'</td><td '+nomCls+'>'+nomDisplay(d)+'</td>'+
+        // 公差列用info颜色、10px小字。改font-size可调整字号
+        '<td style="color:var(--info);font-size:10px">'+tolLabel+'</td><td class="dt2">'+uDisp+'</td><td class="dt2">'+lDisp+'</td>'+
+        // 类型列用t2颜色。tl[d.type]把英文类型翻译成中文
+        '<td style="color:var(--t2);font-size:10px">'+(tl[d.type]||d.type)+'</td>'+
+        // contenteditable让单元格可编辑。data-f标记字段名用于保存
+        '<td contenteditable data-f="measured" style="color:var(--t1)">'+(d.measured||'')+'</td><td>'+pass+'</td>'+
+        '<td contenteditable data-f="notes" style="color:var(--t2)">'+(d.notes||'')+'</td>'+
+        '<td style="color:var(--t2);font-size:10px">'+(d.equipment||'')+'</td>'+
+        // 删除按钮。stopPropagation防止点击行也被触发
+        '<td><button class="b bs bd" style="padding:1px 4px;font-size:9px" onclick="event.stopPropagation();A.delDim('+d.id+')">x</button></td></tr>';
+    }).join('');
+    // 给所有可编辑单元格绑定blur和keydown事件
+    tb.querySelectorAll('td[contenteditable]').forEach(function(td){
+      // blur：失去焦点时保存编辑内容
+      td.addEventListener('blur',function(){
+        // tr：找到当前单元格所在的行；id：尺寸ID；f：字段名(measured/notes)
+        var tr=td.closest('tr');var id=parseFloat(tr.dataset.id);var f=td.dataset.f;
+        // 在dims数组里找到对应的尺寸对象
+        var dim=self.dims.find(function(d){return d.id===id;});
+        if(dim&&f){
+          // old：记录旧值用于比较；trim去掉首尾空格防止误保存
+          var old=dim[f];dim[f]=td.textContent.trim();
+          // 如果修改的是标称值且OCR原始值不同，触发学习机制记住修正
+          if(f==='nominal'&&dim.ocrRaw&&dim[f]!==old&&dim.ocrRaw!==dim[f])self.saveLearn(dim.ocrRaw,dim[f],dim.ocrAngle||0);
+          // 修改标称值后重新推荐设备和自动公差
+          if(f==='nominal'){dim.equipment=getEquip(dim.type,dim.nominal);self.autoTol(dim);}
+          // 重新渲染表格以更新显示（如公差、设备等）
+          self.renderTable();
+        }
+      });
+      // keydown：按下Enter时阻止默认换行并触发blur保存
+      td.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();td.blur();}});
+    });
+    // 拖拽排序功能：给每行绑定drag事件
+    var dragSrcId=null;
+    tb.querySelectorAll('tr[draggable]').forEach(function(tr){
+      // dragstart：开始拖拽时记录源ID并加dragging样式
+      tr.addEventListener('dragstart',function(e){dragSrcId=parseFloat(tr.dataset.id);tr.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragSrcId);});
+      // dragend：拖拽结束时清理样式
+      tr.addEventListener('dragend',function(e){tr.classList.remove('dragging');tb.querySelectorAll('tr').forEach(function(r){r.classList.remove('drag-over');});dragSrcId=null;});
+      // dragover：鼠标经过其他行时高亮显示可放置
+      tr.addEventListener('dragover',function(e){e.preventDefault();e.dataTransfer.dropEffect='move';if(parseFloat(tr.dataset.id)!==dragSrcId)tr.classList.add('drag-over');});
+      // dragleave：离开高亮区域时移除样式
+      tr.addEventListener('dragleave',function(e){tr.classList.remove('drag-over');});
+      // drop：放置时调用moveDim交换位置
+      tr.addEventListener('drop',function(e){e.preventDefault();tr.classList.remove('drag-over');var srcId=parseFloat(e.dataTransfer.getData('text/plain'));var dstId=parseFloat(tr.dataset.id);if(srcId&&dstId&&srcId!==dstId)self.moveDim(srcId,dstId);dragSrcId=null;});
+    });
+  },
+  // moveDim：拖拽排序，把源尺寸移动到目标尺寸的位置
+  // srcId=源尺寸ID；dstId=目标尺寸ID
+  moveDim:function(srcId,dstId){
+    // si/di：源和目标在dims数组中的索引。findIndex找第一个匹配的
+    var si=this.dims.findIndex(function(d){return d.id===srcId;}),
+        di=this.dims.findIndex(function(d){return d.id===dstId;});
+    // 如果找不到源或目标，直接return。改这里可换找不到时的行为
+    if(si<0||di<0)return;
+    // splice(si,1)从si位置删除1个元素并返回被删的数组。 [0]取出被删的元素
+    var dim=this.dims.splice(si,1)[0];
+    // 如果源在目标前面，删除后目标索引会-1，需要修正
+    if(si<di)di--;
+    // 在目标位置插入源元素。改0为1会变成替换而不是插入
+    this.dims.splice(di,0,dim);
+    // 刷新表格显示新顺序
+    this.renderTable();
+    this.toast('已移动');
+  },
+  // insertDimSorted：按编号顺序把尺寸插入dims数组
+  // dim=要插入的尺寸对象；数组始终保持按num升序
+  insertDimSorted:function(dim){
+    // idx：从0开始遍历，找到第一个num>=dim.num的位置
+    var idx=0;
+    while(idx<this.dims.length&&this.dims[idx].num<dim.num)idx++;
+    // 在idx位置插入dim，不删除元素。改0为1会删掉原位置的元素
+    this.dims.splice(idx,0,dim);
+  },
+  // chkPass：判定实测值是否在公差范围内（OK/NG）
+  // d=尺寸对象；返回true=合格，false=不合格或无法判定
+  chkPass:function(d){
+    // 没有实测值或标称值时无法判定，返回false
+    if(!d.measured||!d.nominal)return false;
+    // nom：标称值转数字；meas：实测值清洗后转数字。replace去掉非数字字符
+    var nom=parseFloat(d.nominal),meas=parseFloat(String(d.measured).replace(/[^\d.\-]/g,''));
+    // 如果任一转换失败返回false。改false为true会让无法判定的默认合格
+    if(isNaN(nom)||isNaN(meas))return false;
+    // u/l：上差下差转数字，默认0。||0确保NaN时按0处理
+    var u=parseFloat(d.upperTol)||0,l=parseFloat(d.lowerTol)||0;
+    // 判定公式：实测值必须在[标称+下差, 标称+上差]范围内。改>=为>会变成不包含边界
+    return meas>=nom+l&&meas<=nom+u;
+  },
+  // addEmpty：添加一个空白尺寸（手动添加模式）
+  addEmpty:function(){
+    // num：获取下一个可用编号
+    var num=this.getNextNum();
+    // dim：空白尺寸对象。所有属性设默认值。改selX/selW等可调整默认选框位置
+    var dim={id:Date.now()+Math.random(),num:num,nominal:'',upperTol:'',lowerTol:'',tolValue:0,tolDisplay:'',tolGrade:'',type:'linear',gdt:'',measured:'',result:'',notes:'',equipment:'',ocrRaw:'',ocrAngle:0,pg:this.pg,saved:false,selX:2,selY:2,selW:3,selH:1,bubX:6,bubY:1};
+    // 按编号顺序插入数组
+    this.insertDimSorted(dim);
+    // 在图纸上画气泡
+    this.addBubSVG(dim);
+    // 刷新表格
+    this.renderTable();
+    // 自动选中这个新尺寸，方便用户立即编辑
+    this.selBub(dim.id);
+  },
+  // delDim：删除指定ID的尺寸
+  // id=要删除的尺寸ID
+  delDim:function(id){
+    // 先找到尺寸对象，如果存在则回收其编号
+    var dim=this.dims.find(function(d){return d.id===id;});
+    if(dim)this.recycleNum(dim.num);
+    // filter过滤掉该ID，生成新数组。改!==为===会只保留它（反向删除）
+    this.dims=this.dims.filter(function(d){return d.id!==id;});
+    // 从SVG中删除对应的气泡元素
+    var g=document.querySelector('[data-id="'+id+'"]');
+    if(g)g.remove();
+    // 如果删除的是当前选中的，取消选中状态
+    if(this.selId===id)this.deselBub();
+    // 刷新表格和状态栏
+    this.renderTable();this.updStatus();
+  },
+  // getExportName：生成导出文件名。格式：产品名-图号-(版本)
+  getExportName:function(){
+    // prod：产品名，trim去空格，replace去掉所有空白字符。改/\s+/g为/ /g只去空格
+    var prod=E('iProdName').value.trim().replace(/\s+/g,''),
+        dw=E('iDW').value.trim(),
+        rv=E('iRV').value.trim();
+    // parts：文件名组成部分数组
+    var parts=[];
+    // 有产品名就加入。改push顺序可调整文件名结构
+    if(prod)parts.push(prod);
+    // 有图号就加入
+    if(dw)parts.push(dw);
+    // 用'-'连接各部分。改'-'为'_'会用下划线连接
+    var name=parts.join('-');
+    // 有版本号就追加。改'-('+rv+')'为'_v'+rv可换版本格式
+    if(rv)name+='-('+rv+')';
+    // 如果啥都没有，默认'FAI_report'。改默认值可换默认文件名
+    return name||'FAI_report';
+  },
+  // dl：下载辅助函数。把内容打包成文件并触发浏览器下载
+  // content=文件内容；name=文件名；type=MIME类型
+  dl:function(content,name,type){
+    // Blob是浏览器提供的二进制大对象。type决定文件类型
+    var b=new Blob([content],{type:type});
+    // 创建临时URL指向Blob。用完要revoke释放内存
+    var u=URL.createObjectURL(b);
+    // 创建隐藏的<a>元素触发下载
+    var a=document.createElement('a');
+    a.href=u;a.download=name;a.click();
+    // 释放临时URL，防止内存泄漏。不改会导致多次导出后内存上涨
+    URL.revokeObjectURL(u);
+  },
+  // buildExportCanvas：构建用于导出的画布，在原始图纸上叠加气泡和选框
+  buildExportCanvas:function(){
+    // dpr：设备像素比；cw/ch：画布原始宽高（像素）
+    var dpr=window.devicePixelRatio||1,cw=this.cv.width,ch=this.cv.height;
+    // ec：新建离屏画布，尺寸和原画布一样。改尺寸会裁剪或留白
+    var ec=document.createElement('canvas');ec.width=cw;ec.height=ch;
+    // ex：导出画布的2D上下文
+    var ex=ec.getContext('2d');
+    // 先把原始图纸画上去。drawImage从(0,0)开始完整复制
+    ex.drawImage(this.cv,0,0);
+    // s：缩放比例乘像素比，把文档坐标转成画布像素坐标
+    var s=this.scale*dpr;
+    // 只导出当前页的尺寸。filter过滤pg===当前页
+    this.dims.filter(function(d){return d.pg===A.pg;}).forEach(function(d){
+      // bx/by：气泡中心像素坐标；sx/sy/sw/sh：选框像素坐标
+      var bx=d.bubX*s,by=d.bubY*s,sx=d.selX*s,sy=d.selY*s,sw=d.selW*s,sh=d.selH*s;
+      // corners：选框的四个角坐标。用于找离气泡最近的角
+      var corners=[{x:sx,y:sy},{x:sx+sw,y:sy},{x:sx,y:sy+sh},{x:sx+sw,y:sy+sh}];
+      // nc：最近角；minD：最短距离初始设极大值1e9
+      var nc=corners[0],minD=1e9;
+      // 遍历四个角找离气泡最近的
+      corners.forEach(function(c){
+        var dist=Math.hypot(bx-c.x,by-c.y);
+        if(dist<minD){minD=dist;nc=c;}
+      });
+      // 画选框虚线矩形。strokeStyle改颜色可换框颜色
+      ex.strokeStyle='#ff3c3c';ex.lineWidth=1.5*dpr;
+      // setLineDash画虚线，[5,3]表示5px实线3px空白。改数组可换虚线样式
+      ex.setLineDash([5*dpr,3*dpr]);ex.strokeRect(sx,sy,sw,sh);ex.setLineDash([]);
+      // 画引线：从气泡中心到最近角
+      ex.beginPath();ex.moveTo(bx,by);ex.lineTo(nc.x,nc.y);
+      ex.strokeStyle='#ff3c3c';ex.lineWidth=1.2*dpr;ex.stroke();
+      // 画引线端点小红圆，半径3*dpr。改3为5可变大
+      ex.beginPath();ex.arc(nc.x,nc.y,3*dpr,0,Math.PI*2);
+      ex.fillStyle='#ff3c3c';ex.fill();
+      // 画气泡白底圆，半径14*dpr。改14可调整气泡大小
+      ex.beginPath();ex.arc(bx,by,14*dpr,0,Math.PI*2);
+      ex.fillStyle='rgba(255,255,255,0.95)';ex.fill();
+      // 气泡红色边框，线宽2*dpr。改2为3加粗边框
+      ex.strokeStyle='#ff3c3c';ex.lineWidth=2*dpr;ex.stroke();
+      // 写编号文字。font改字号可调整文字大小；fillStyle改颜色可换字色
+      ex.fillStyle='#ff3c3c';
+      ex.font='700 '+(11*dpr)+'px JetBrains Mono,monospace';
+      ex.textAlign='center';ex.textBaseline='middle';
+      // by+dpr：稍微下移让文字居中。改dpr为0文字会上偏
+      ex.fillText(d.num.toString(),bx,by+dpr);
+    });
+    // 返回画好的画布，供PDF/图片导出使用
+    return ec;
+  },
+  /* ================================================================
+     【导出四人组：expCSV / expXLS / expPDF / expImg】
+     这四个函数负责把数据/图纸"打包带走"。
+     
+     - expCSV：导出纯文本表格，用逗号分隔，任何软件都能打开
+     - expXLS：导出Excel文件，带表头、合并单元格，最正式
+     - expPDF：把带气泡的图纸导出成PDF（像打印一样）
+     - expImg：把带气泡的图纸导出成PNG/JPG图片
+     
+     文件名规则：图号_产品名_日期，例如 ABC123_支架_20250616
+     ================================================================ */
+  // expCSV：导出逗号分隔文本文件。任何表格软件都能打开
+  expCSV:function(){
+    // 没有数据时提示并返回。改提示文字可换无数据时的显示
+    if(!this.dims.length){this.toast('暂无数据');return;}
+    // csv：文件内容字符串。BOM头(﻿)让Excel正确识别UTF-8中文
+    var csv='﻿编号,标准尺寸,标准公差,上差,下差,类型,实测值,判定,备注,检测设备\n';
+    // 遍历每个尺寸拼接一行。改分隔符','为';'可导出分号分隔格式
+    this.dims.forEach(function(d){
+      // p：判定结果文字。有实测值时PASS/FAIL，否则空。改PASS为合格可换文字
+      var p=d.measured?(A.chkPass(d)?'PASS':'FAIL'):'';
+      // 用逗号连接各字段。改顺序可调整CSV列顺序
+      csv+=d.num+','+nomDisplay(d)+','+(d.tolDisplay||'')+','+fmtLim(d.nominal,d.upperTol)+','+fmtLim(d.nominal,d.lowerTol)+','+d.type+','+d.measured+','+p+','+d.notes+','+(d.equipment||'')+'\n';
+    });
+    // 调用dl触发下载。MIME类型text/csv;charset=utf-8确保中文不乱码
+    this.dl(csv,this.getExportName()+'.csv','text/csv;charset=utf-8');
+    this.toast('CSV已导出');
+  },
+  // expXLS：导出Excel文件，带表头和合并单元格
+  expXLS:function(){
+    if(!this.dims.length){this.toast('暂无数据');return;}
+    // wb：新建Excel工作簿。XLSX是SheetJS库提供的全局对象
+    var wb=XLSX.utils.book_new();
+    // hd：表头数据，二维数组。每行是一个数组，空数组表示空行
+    var hd=[['FAI 首件检验报告'],[],['供方名称',E('iSupplier').value,'','产品名称',E('iProdName').value],['图号',E('iDW').value,'','版本',E('iRV').value],['未注公差标准',E('iTolStd').value,'','重要度',E('iImportance').value],['检验日期',new Date().toLocaleDateString('zh-CN')],[],['编号','标准尺寸','标准公差','上差','下差','实测值','判定','备注','检测设备']];
+    var self=this;
+    // 把每个尺寸追加到hd数组作为一行
+    this.dims.forEach(function(d){
+      hd.push([d.num,nomDisplay(d),d.tolDisplay||'',fmtLim(d.nominal,d.upperTol),fmtLim(d.nominal,d.lowerTol),d.measured,d.measured?(self.chkPass(d)?'PASS':'FAIL'):'',d.notes,d.equipment||'']);
+    });
+    // ws：把二维数组转成工作表
+    var ws=XLSX.utils.aoa_to_sheet(hd);
+    // !cols：列宽设置。wch是字符宽度。改数值可调整导出后的列宽
+    ws['!cols']=[{wch:8},{wch:14},{wch:10},{wch:10},{wch:10},{wch:12},{wch:8},{wch:15},{wch:10}];
+    // !merges：合并单元格。这里把第0行0列到第0行8列合并为标题行
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:8}}];
+    // 把工作表加到工作簿，表名叫'FAI'
+    XLSX.utils.book_append_sheet(wb,ws,'FAI');
+    // writeFile直接触发下载。改.xlsx为.xls可换旧版格式
+    XLSX.writeFile(wb,this.getExportName()+'.xlsx');
+    this.toast('Excel已导出');
+  },
+  // expPDF：把带气泡标记的图纸导出成PDF文件
+  expPDF:function(){
+    // 必须先加载图纸才能导出。改提示文字可换错误提示
+    if(!this.pdf&&!this.isImg){this.toast('请先加载图纸');return;}
+    // ec：带气泡叠加的导出画布
+    var ec=this.buildExportCanvas();
+    // imgData：把画布转成JPEG的base64数据。.95是质量系数(0~1)。改.95为1.0质量更高但文件更大
+    var imgData=ec.toDataURL('image/jpeg',.95);
+    // cw/ch：画布的CSS显示宽高（像素）。style.width是显示尺寸不是像素尺寸
+    var cw=parseFloat(this.cv.style.width),ch=parseFloat(this.cv.style.height);
+    // pwmm/phmm：把像素转成毫米。1px≈0.264583mm（96dpi标准）。改系数可换DPI
+    var pwmm=cw*.264583,phmm=ch*.264583;
+    // orient：根据宽高判断横屏还是竖屏。改判断条件可固定某种方向
+    var orient=pwmm>phmm?'landscape':'portrait';
+    // 新建PDF，单位毫米，尺寸按图纸实际大小。format自定义防止留白
+    var pdf=new jspdf.jsPDF({orientation:orient,unit:'mm',format:[pwmm,phmm]});
+    // 把图片塞进PDF，从(0,0)开始铺满。改0,0可调整偏移
+    pdf.addImage(imgData,'JPEG',0,0,pwmm,phmm);
+    // 触发下载。文件名由getExportName生成
+    pdf.save(this.getExportName()+'.pdf');
+    this.toast('PDF已导出');
+  },
+  // expImg：把带气泡的图纸导出成PNG/JPG图片
+  expImg:function(){
+    if(!this.pdf&&!this.isImg){this.toast('请先加载图纸');return;}
+    // fmt：导出格式，从下拉框获取（png/jpeg）。改默认可固定某种格式
+    var fmt=E('eFmt').value;
+    var ec=this.buildExportCanvas();
+    var name=this.getExportName();
+    // toBlob把画布转成二进制Blob，比toDataURL省内存
+    ec.toBlob(function(blob){
+      // 创建临时URL并触发下载
+      var u=URL.createObjectURL(blob);
+      var a=document.createElement('a');
+      a.href=u;a.download=name+'.'+fmt;a.click();
+      URL.revokeObjectURL(u);
+      // MIME类型根据fmt选择。改.95质量系数可调整画质/大小平衡
+    },fmt==='jpeg'?'image/jpeg':'image/png',.95);
+    this.toast('图片已导出');
+  },
+  /* ================================================================
+     【saveProj / loadProj：项目的"存档"和"读档"】
+     就像游戏存档一样，可以把当前所有工作（尺寸、气泡、选框、设置）
+     保存成一个 .json 文件，下次打开时再加载回来。
+     
+     saveProj 保存的内容：
+     - 零件信息（供方、产品名、图号、版本...）
+     - dims[]：所有尺寸和气泡数据
+     - regions[]：识别区域
+     - marks[]：临时标记
+     - nextN / recycled：编号管理
+     
+     loadProj 加载时会自动：
+     - 恢复零件信息到输入框
+     - 恢复所有尺寸和气泡
+     - 如果有图纸打开，立即重绘气泡和选框
+     ================================================================ */
+  // saveProj：把当前项目保存为JSON文件
+  saveProj:function(){
+    // data：要保存的项目数据对象。v是文件格式版本号，改'5.2'可用于版本兼容判断
+    var data={
+      v:'5.2',
+      // date：保存时间戳。toISOString返回UTC时间字符串，如2026-06-16T12:34:56.789Z
+      date:new Date().toISOString(),
+      // info：头部零件信息。改字段可保存更多信息（如操作员、批次号）
+      info:{
+        supplier:E('iSupplier').value,
+        prodName:E('iProdName').value,
+        dw:E('iDW').value,
+        rv:E('iRV').value,
+        tolStd:E('iTolStd').value,
+        importance:E('iImportance').value
+      },
+      // dims：核心尺寸数据数组。这是最重要的部分
+      dims:this.dims,
+      // regions：识别区域数组
+      regions:this.regions,
+      // marks：临时标记数组
+      marks:this.marks,
+      // nextN：下一个新编号。保存它避免重新打开后编号重复
+      nextN:this.nextN,
+      // recycled：回收的编号数组
+      recycled:this.recycled
+    };
+    // JSON.stringify(data,null,2)：把对象转成带缩进的JSON字符串。null,2表示2空格缩进
+    this.dl(JSON.stringify(data,null,2),this.getExportName()+'.json','application/json');
+    this.toast('项目已保存');
+  },
+  // loadProj：从JSON文件加载项目
+  // f=用户选择的File对象
+  loadProj:function(f){
+    var self=this;
+    // f.text()读取文件内容为文本（Promise）。.then处理成功，.catch处理失败
+    f.text().then(function(t){
+      // d：解析后的项目对象。JSON.parse把JSON字符串转回对象
+      var d=JSON.parse(t);
+      // info：项目头部信息。||{}防止旧文件没有info字段
+      var info=d.info||{};
+      // 恢复零件信息到输入框。||''或||'默认值'提供缺省值
+      E('iSupplier').value=info.supplier||'';
+      E('iProdName').value=info.prodName||'';
+      E('iDW').value=info.dw||'';
+      E('iRV').value=info.rv||'';
+      // 未注公差默认GB/T 1804-m。改默认值可换加载时的默认标准
+      E('iTolStd').value=info.tolStd||'GB/T 1804-m';
+      // 重要度默认B。改'B'为'A'可调整默认等级
+      E('iImportance').value=info.importance||'B';
+      // 恢复尺寸数组，同时做兼容性处理（老文件可能缺equipment/saved字段）
+      self.dims=(d.dims||[]).map(function(dim){
+        // 如果老文件没保存equipment，根据类型和标称值自动推荐
+        if(!dim.equipment)dim.equipment=getEquip(dim.type,dim.nominal);
+        // 如果老文件没保存saved，默认设为true（已保存）
+        if(dim.saved===undefined)dim.saved=true;
+        return dim;
+      });
+      // 恢复识别区域。||[]防止字段缺失
+      self.regions=d.regions||[];
+      // 恢复临时标记，老文件可能没有angle字段，补0
+      self.marks=(d.marks||[]).map(function(m){
+        if(m.angle===undefined)m.angle=0;
+        return m;
+      });
+      // 恢复下一个编号。如果没有保存，按当前尺寸数+1估算
+      self.nextN=d.nextN||(self.dims.length+1);
+      // 恢复回收编号数组
+      self.recycled=d.recycled||[];
+      // 如果当前有图纸打开，立即重绘区域、标记、气泡和区域列表
+      if(self.pdf||self.isImg){
+        self.renderRegions();self.renderMarks();self.renderBubbles();self.renderRegionList();
+      }
+      // 刷新表格显示
+      self.renderTable();
+      self.toast('项目已加载');
+      self.log('加载 '+self.dims.length+' 个尺寸','ok');
+    }).catch(function(){
+      // 解析失败或读取失败时提示。改文字可换错误提示
+      self.toast('加载失败');
+    });
+  },
+  // log：在右下角日志区输出一条消息
+  // m=消息内容；t=类型(ok/err/warn/info)，决定颜色
+  log:function(m,t){
+    // el：日志容器；d：新创建的日志条目div
+    var el=E('logA'),d=document.createElement('div');
+    // 根据类型设置不同CSS颜色变量。改var(--ok)可换成功消息颜色
+    d.style.color=t==='ok'?'var(--ok)':t==='err'?'var(--ac)':t==='warn'?'var(--warn)':t==='info'?'var(--info)':'var(--t3)';
+    // textContent设置日志文字，带时间戳。hour12:false确保24小时制
+    d.textContent='['+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'] '+m;
+    // 追加到日志容器末尾
+    el.appendChild(d);
+    // 自动滚动到最底部，显示最新日志。scrollHeight是内容总高度
+    el.scrollTop=el.scrollHeight;
+  },
+  // setStatus：设置顶部状态指示灯和文字
+  // c=颜色类名(y/r/g等)；t=状态文字
+  setStatus:function(c,t){
+    // sDot：状态圆点，设置className为'sd '+颜色类
+    E('sDot').className='sd '+c;
+    // sTxt：状态文字
+    E('sTxt').textContent=t;
+  },
+  // updStatus：更新底部状态栏信息（页码/缩放/气泡数）
+  updStatus:function(){
+    // stP：页码显示。改'第'和'/'可换格式
+    E('stP').textContent='第'+this.pg+'/'+this.total+'页';
+    // stZ：缩放比例显示。scale*100转成百分比，Math.round取整
+    E('stZ').textContent=Math.round(this.scale*100)+'%';
+    // stB：当前页气泡数量。filter过滤pg===当前页
+    E('stB').textContent='气泡:'+this.dims.filter(function(d){return d.pg===A.pg;}).length;
+  },
+  // toast：顶部弹出提示，2秒后自动消失
+  // m=提示文字
+  toast:function(m){
+    // el：toast元素
+    var el=E('toast');
+    // 设置提示文字
+    el.textContent=m;
+    // 加show类让toast显示（CSS控制动画）。改classList.toggle为add更安全
+    el.classList.add('show');
+    // 清除之前的定时器，防止快速连续点击时提前消失
+    clearTimeout(el._t);
+    // _t：私有定时器，2秒后移除show类隐藏。改2000为4000可延长显示时间
+    el._t=setTimeout(function(){el.classList.remove('show');},2000);
+  }
+};
+
+document.addEventListener('DOMContentLoaded',function(){A.init();});
+</script>
+</body>
+</html>

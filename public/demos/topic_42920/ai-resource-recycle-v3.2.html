@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI大模型浪费资源再利用——全流程资源回收演示系统 v3.2</title>
+<style>
+/* ============================================================
+   全局主题变量
+   ============================================================ */
+:root{
+  --bg-deep:#01000c;
+  --bg-panel:rgba(12,7,40,0.85);
+  --primary:#7aa2ff;
+  --purple:#c9a8ff;
+  --cyan:#5ef0ff;
+  --gold:#ffd700;
+  --orange:#ff9040;
+  --red:#ff5050;
+  --green:#5fffa0;
+  --white:#e8ecff;
+  --text:#dde2ff;
+  --text-dim:#6b7398;
+  --text-mid:#9ba8e0;
+  --border:rgba(120,110,220,0.2);
+  --build:#ffc860;  /* 模型构建 */
+  --train:#5aa0ff;  /* 训练 */
+  --infer:#c080ff;  /* 推理 */
+  --app:#ff7050;    /* 应用迭代 */
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{
+  height:100%;width:100%;overflow:auto;
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:radial-gradient(ellipse at top,#0e0830 0%,#050218 50%,#000 100%);
+  color:var(--text);user-select:none;
+}
+body{min-width:1200px;min-height:800px;}
+
+/* 背景网格 */
+.bg-grid{
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(rgba(90,80,200,0.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(90,80,200,0.03) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+
+/* ============================================================
+   顶部标题栏
+   ============================================================ */
+.header{
+  position:relative;z-index:20;text-align:center;padding:10px 20px 4px;
+  background:linear-gradient(180deg,rgba(20,10,60,0.6),transparent);
+}
+.header h1{
+  font-size:20px;font-weight:600;letter-spacing:3px;
+  background:linear-gradient(90deg,var(--primary),var(--purple),var(--gold),var(--purple),var(--primary));
+  background-size:200% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:titleFlow 6s linear infinite;
+}
+@keyframes titleFlow{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.header .sub{font-size:11px;color:var(--text-dim);letter-spacing:2px;margin-top:2px;}
+
+/* ============================================================
+   控制栏（模板+开关）
+   ============================================================ */
+.control-bar{
+  position:relative;z-index:20;display:flex;flex-wrap:wrap;
+  gap:10px;align-items:center;padding:6px 20px 8px;
+  border-bottom:1px solid var(--border);
+  background:rgba(8,4,28,0.5);
+}
+.ctrl-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.ctrl-label{font-size:10px;color:var(--text-dim);letter-spacing:1px;margin-right:2px;white-space:nowrap;}
+.btn{
+  padding:4px 10px;border-radius:5px;font-size:10px;cursor:pointer;
+  transition:all 0.2s;letter-spacing:0.5px;border:1px solid transparent;
+  font-family:inherit;white-space:nowrap;
+}
+.btn-tpl{background:transparent;color:var(--text-mid);border-color:rgba(160,160,220,0.25);}
+.btn-tpl:hover{background:rgba(160,160,220,0.1);border-color:rgba(200,180,255,0.4);}
+.btn-tpl.active{
+  background:linear-gradient(135deg,rgba(90,70,220,0.3),rgba(120,90,255,0.2));
+  border-color:rgba(200,180,255,0.6);color:var(--text);
+  box-shadow:0 0 8px rgba(120,90,230,0.3);
+}
+.btn-preset{background:linear-gradient(135deg,#3a2f7a,#5840b0);color:var(--text);border-color:rgba(180,160,255,0.3);}
+.btn-preset:hover{background:linear-gradient(135deg,#4a3f8a,#6850c0);}
+.btn-preset.active{border-color:var(--gold);box-shadow:0 0 10px rgba(255,200,60,0.3);}
+.btn-master{background:rgba(60,180,120,0.2);color:var(--green);border-color:rgba(100,230,150,0.4);font-weight:600;}
+.btn-master:hover{background:rgba(100,230,150,0.25);}
+.btn-master.off{background:rgba(255,80,60,0.12);color:var(--red);border-color:rgba(255,100,80,0.35);}
+.btn-master.off:hover{background:rgba(255,80,60,0.2);}
+.sep{width:1px;height:18px;background:var(--border);margin:0 4px;}
+
+/* ============================================================
+   主舞台（Canvas + 节点卡片）
+   ============================================================ */
+.stage-wrap{
+  position:relative;z-index:5;
+  width:100%;
+  /* 高度在JS中动态计算，这里给默认值 */
+  min-height:500px;
+}
+#mainCanvas{
+  position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;
+  pointer-events:none;
+}
+.nodes-layer{
+  position:absolute;top:0;left:0;width:100%;height:100%;z-index:2;
+  pointer-events:none;
+}
+
+/* 阶段背景色块 */
+.stage-bg{
+  position:absolute;z-index:0;border-radius:8px;pointer-events:none;
+}
+.stage-bg.build{background:linear-gradient(135deg,rgba(255,200,96,0.06),rgba(255,200,96,0.02));border:1px solid rgba(255,200,96,0.12);}
+.stage-bg.train{background:linear-gradient(135deg,rgba(90,160,255,0.06),rgba(90,160,255,0.02));border:1px solid rgba(90,160,255,0.12);}
+.stage-bg.infer{background:linear-gradient(135deg,rgba(192,128,255,0.06),rgba(192,128,255,0.02));border:1px solid rgba(192,128,255,0.12);}
+.stage-bg.app{background:linear-gradient(135deg,rgba(255,112,80,0.06),rgba(255,112,80,0.02));border:1px solid rgba(255,112,80,0.12);}
+.stage-bg-tag{
+  position:absolute;font-size:10px;letter-spacing:2px;font-weight:600;
+  padding:2px 8px;border-radius:3px;z-index:3;pointer-events:none;
+}
+.stage-bg-tag.build{color:var(--build);border-left:2px solid var(--build);}
+.stage-bg-tag.train{color:var(--train);border-left:2px solid var(--train);}
+.stage-bg-tag.infer{color:var(--infer);border-left:2px solid var(--infer);}
+.stage-bg-tag.app{color:var(--app);border-left:2px solid var(--app);}
+
+/* 节点卡片 */
+.node-card{
+  position:absolute;width:175px;
+  background:linear-gradient(170deg,rgba(35,25,80,0.92),rgba(15,10,48,0.96));
+  border:1px solid var(--border);border-radius:10px;
+  padding:8px 9px 7px;
+  pointer-events:auto;cursor:default;
+  transition:all 0.25s;
+  box-shadow:0 3px 12px rgba(0,0,0,0.4);
+}
+.node-card:hover{transform:translateY(-2px);border-color:rgba(180,160,255,0.4);box-shadow:0 6px 20px rgba(80,60,200,0.25);}
+.node-card.stage-build{border-top:3px solid var(--build);}
+.node-card.stage-train{border-top:3px solid var(--train);}
+.node-card.stage-infer{border-top:3px solid var(--infer);}
+.node-card.stage-app{border-top:3px solid var(--app);}
+.node-card.core{border-color:rgba(255,180,60,0.45);box-shadow:0 0 16px rgba(255,150,60,0.12);}
+.node-card.active{transform:scale(1.04);}
+.node-card.active.stage-build{box-shadow:0 0 18px rgba(255,200,96,0.3);}
+.node-card.active.stage-train{box-shadow:0 0 18px rgba(90,160,255,0.3);}
+.node-card.active.stage-infer{box-shadow:0 0 18px rgba(192,128,255,0.3);}
+.node-card.active.stage-app{box-shadow:0 0 18px rgba(255,112,80,0.3);}
+
+.nc-head{display:flex;align-items:center;gap:4px;margin-bottom:2px;}
+.nc-id{font-family:"Courier New",monospace;font-size:9px;color:var(--text-dim);flex-shrink:0;}
+.nc-name{font-size:11px;font-weight:600;color:var(--text);letter-spacing:0.3px;line-height:1.2;}
+.nc-note{font-size:8px;color:var(--orange);margin-left:2px;}
+.nc-waste-type{font-size:8px;color:var(--text-dim);letter-spacing:0.5px;margin-bottom:4px;}
+.nc-data{font-family:"Courier New",monospace;font-size:8.5px;color:var(--text-mid);line-height:1.7;}
+.nc-data .row{display:flex;justify-content:space-between;}
+.nc-data .lbl{color:var(--text-dim);}
+.nc-data .val{color:var(--primary);font-weight:bold;}
+.nc-waste{
+  font-family:"Courier New",monospace;font-size:8.5px;
+  color:var(--orange);margin-top:3px;padding-top:3px;
+  border-top:1px dashed rgba(255,150,80,0.18);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.nc-waste .wv{color:var(--gold);font-weight:bold;}
+.nc-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-top:5px;padding-top:4px;border-top:1px solid rgba(130,120,255,0.08);
+}
+.nc-toggle{display:flex;align-items:center;gap:4px;}
+.nc-tgl-lbl{font-size:7.5px;color:var(--text-dim);letter-spacing:0.5px;}
+.toggle{position:relative;width:30px;height:15px;cursor:pointer;}
+.toggle input{opacity:0;width:0;height:0;}
+.toggle-track{
+  position:absolute;inset:0;background:rgba(80,50,50,0.5);
+  border:1px solid rgba(255,100,80,0.2);border-radius:15px;transition:0.25s;
+}
+.toggle-track::after{
+  content:'';position:absolute;width:11px;height:11px;left:1.5px;bottom:1px;
+  background:var(--red);border-radius:50%;transition:0.25s;
+  box-shadow:0 0 4px rgba(255,80,60,0.4);
+}
+.toggle input:checked+.toggle-track{background:rgba(60,180,120,0.22);border-color:rgba(100,230,150,0.4);}
+.toggle input:checked+.toggle-track::after{transform:translateX(14px);background:var(--green);box-shadow:0 0 6px rgba(100,230,150,0.5);}
+.nc-badge{font-size:7px;padding:1px 4px;border-radius:3px;background:rgba(255,180,60,0.1);color:var(--gold);border:1px solid rgba(255,180,60,0.18);letter-spacing:0.3px;}
+.nc-badge.off{background:rgba(255,80,60,0.08);color:var(--red);border-color:rgba(255,80,60,0.18);}
+
+/* 学生模型小图标（节点5上方） */
+.student-icon{
+  position:absolute;z-index:4;width:42px;height:42px;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.student-icon canvas{width:42px;height:42px;}
+.student-label{
+  position:absolute;font-size:8px;color:var(--red);
+  letter-spacing:0.5px;white-space:nowrap;bottom:-2px;
+  text-shadow:0 0 4px rgba(255,80,60,0.5);
+}
+
+/* 连线数据标签 */
+.edge-label{
+  position:absolute;z-index:3;pointer-events:none;
+  font-family:"Courier New",monospace;font-size:8px;
+  color:rgba(180,200,255,0.6);background:rgba(10,5,30,0.7);
+  padding:1px 5px;border-radius:3px;white-space:nowrap;
+  border:1px solid rgba(120,120,220,0.12);
+}
+
+/* ============================================================
+   底部效率面板 + 回收总线
+   ============================================================ */
+.bottom-area{
+  position:relative;z-index:10;
+  background:linear-gradient(0deg,rgba(8,4,28,0.98),rgba(15,8,45,0.85));
+  border-top:1px solid var(--border);
+  padding:10px 20px 12px;
+}
+.bus-display{
+  display:flex;align-items:center;gap:14px;
+  margin-bottom:8px;
+  position:relative;
+}
+.bus-label-tag{
+  font-size:11px;letter-spacing:2px;color:var(--gold);font-weight:600;
+  padding:2px 12px;background:rgba(10,5,30,0.8);
+  border:1px solid rgba(255,180,60,0.3);border-radius:10px;
+  text-shadow:0 0 6px rgba(255,200,60,0.4);
+  white-space:nowrap;flex-shrink:0;
+}
+.bus-bar{
+  flex:1;height:10px;border-radius:5px;position:relative;overflow:hidden;
+  background:linear-gradient(90deg,rgba(255,180,60,0.08),rgba(255,200,60,0.2),rgba(255,180,60,0.08));
+  border:1px solid rgba(255,180,60,0.2);
+  box-shadow:0 0 12px rgba(255,180,60,0.12),inset 0 0 6px rgba(255,200,60,0.08);
+}
+.bus-bar-fill{
+  position:absolute;left:0;top:0;bottom:0;
+  background:linear-gradient(90deg,rgba(255,180,60,0.5),rgba(255,220,100,0.8),rgba(255,180,60,0.5));
+  border-radius:5px;transition:width 0.6s;
+  box-shadow:0 0 10px rgba(255,200,60,0.5);
+}
+.bus-metrics{display:flex;gap:18px;font-family:"Courier New",monospace;font-size:9px;white-space:nowrap;}
+.bus-metrics .mi{text-align:center;}
+.bus-metrics .mn{color:rgba(255,180,100,0.5);font-size:8px;letter-spacing:0.5px;}
+.bus-metrics .mv{color:var(--gold);font-size:11px;font-weight:bold;text-shadow:0 0 6px rgba(255,200,60,0.3);}
+
+.eff-panel{
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+  background:rgba(12,8,35,0.7);border:1px solid var(--border);
+  border-radius:8px;padding:8px 12px;
+}
+.ep-title{font-size:10px;color:var(--text-dim);letter-spacing:1px;margin-right:4px;}
+.eff-item{text-align:center;padding:4px 10px;border-radius:5px;background:rgba(30,20,70,0.4);border:1px solid rgba(120,120,255,0.08);min-width:78px;}
+.eff-item.gold{background:rgba(255,200,60,0.06);border-color:rgba(255,180,60,0.2);}
+.eff-item.warn{background:rgba(255,60,40,0.06);border-color:rgba(255,80,60,0.2);}
+.eff-item.highlight{border-color:var(--gold);box-shadow:0 0 8px rgba(255,200,60,0.2);}
+.eff-item .en{font-size:8px;color:var(--text-dim);letter-spacing:0.5px;margin-bottom:2px;}
+.eff-item .ev{font-family:"Courier New",monospace;font-size:15px;font-weight:bold;color:var(--green);text-shadow:0 0 6px rgba(100,255,180,0.3);}
+.eff-item.gold .ev{color:var(--gold);text-shadow:0 0 6px rgba(255,200,60,0.3);}
+.eff-item.warn .ev{color:var(--red);text-shadow:0 0 6px rgba(255,80,60,0.3);}
+
+/* 版本标识 */
+.version-tag{
+  position:fixed;right:14px;bottom:8px;z-index:50;pointer-events:none;
+  font-family:"Courier New",monospace;font-size:9px;
+  color:rgba(140,150,220,0.35);letter-spacing:1px;
+}
+
+/* 图例 */
+.legend{
+  position:fixed;right:14px;bottom:30px;z-index:50;pointer-events:none;
+  font-size:8px;color:rgba(180,180,220,0.4);line-height:1.7;
+  background:rgba(8,4,28,0.7);padding:6px 8px;border-radius:5px;
+  border:1px solid rgba(120,120,220,0.1);
+}
+.legend .lg-item{display:flex;align-items:center;gap:5px;}
+.legend .lg-line{width:20px;height:3px;border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+
+<!-- ========== 顶部标题 ========== -->
+<div class="header">
+  <h1>AI大模型浪费资源再利用——全流程资源回收演示系统</h1>
+  <div class="sub">覆盖模型构建、训练、推理、应用与迭代全生命周期的资源回收可视化</div>
+</div>
+
+<!-- ========== 控制栏 ========== -->
+<div class="control-bar">
+  <div class="ctrl-group">
+    <span class="ctrl-label">场景：</span>
+    <button class="btn btn-tpl active" data-tpl="0">短文本生成</button>
+    <button class="btn btn-tpl" data-tpl="1">长文档分析</button>
+    <button class="btn btn-tpl" data-tpl="2">代码补全</button>
+    <button class="btn btn-tpl" data-tpl="3">多轮对话</button>
+  </div>
+  <div class="sep"></div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">预设：</span>
+    <button class="btn btn-preset" data-pre="build">仅构建回收</button>
+    <button class="btn btn-preset" data-pre="train">仅训练回收</button>
+    <button class="btn btn-preset" data-pre="infer">仅推理回收</button>
+    <button class="btn btn-preset" data-pre="app">仅应用回收</button>
+    <button class="btn btn-preset active" data-pre="all">全流程回收</button>
+  </div>
+  <div class="sep"></div>
+  <div class="ctrl-group">
+    <button class="btn btn-master" id="btnAllOn">✓ 全开</button>
+    <button class="btn btn-master off" id="btnAllOff">✗ 全关</button>
+  </div>
+</div>
+
+<!-- ========== 主舞台 ========== -->
+<div class="stage-wrap" id="stageWrap">
+  <canvas id="mainCanvas"></canvas>
+  <div class="nodes-layer" id="nodesLayer"></div>
+  <!-- 学生模型图标 -->
+  <div class="student-icon" id="studentIcon">
+    <canvas id="studentCanvas" width="42" height="42"></canvas>
+    <span class="student-label">回流驱动的小型副本</span>
+  </div>
+</div>
+
+<!-- ========== 底部效率面板 ========== -->
+<div class="bottom-area">
+  <div class="bus-display">
+    <span class="bus-label-tag">═ 通用算力回收总线 ═</span>
+    <div class="bus-bar"><div class="bus-bar-fill" id="busFill" style="width:0%"></div></div>
+    <div class="bus-metrics">
+      <div class="mi"><div class="mn">通用算力池</div><div class="mv" id="busPool">0 TFLOPS</div></div>
+      <div class="mi"><div class="mn">回收效率</div><div class="mv" id="busEff">0%</div></div>
+      <div class="mi"><div class="mn">碳减排</div><div class="mv" id="busCO2">0 kg</div></div>
+    </div>
+  </div>
+  <div class="eff-panel">
+    <span class="ep-title">效率对比：</span>
+    <div class="eff-item gold" id="effAll"><div class="en">全流程回收</div><div class="ev">0%</div></div>
+    <div class="eff-item" id="effBuild"><div class="en">仅构建回收</div><div class="ev">0%</div></div>
+    <div class="eff-item" id="effTrain"><div class="en">仅训练回收</div><div class="ev">0%</div></div>
+    <div class="eff-item" id="effInfer"><div class="en">仅推理回收</div><div class="ev">0%</div></div>
+    <div class="eff-item" id="effApp"><div class="en">仅应用回收</div><div class="ev">0%</div></div>
+    <div class="eff-item warn" id="effNone"><div class="en">⚠ 无回收</div><div class="ev">0%</div></div>
+  </div>
+</div>
+
+<!-- ========== 版本 + 图例 ========== -->
+<div class="version-tag" id="versionTag"></div>
+<div class="legend">
+  <div class="lg-item"><span class="lg-line" style="background:linear-gradient(90deg,rgba(90,160,255,0.7),rgba(90,160,255,0.3));box-shadow:0 0 4px rgba(90,160,255,0.4);"></span>主数据流（蓝）</div>
+  <div class="lg-item"><span class="lg-line" style="background:linear-gradient(90deg,rgba(255,200,60,0.8),rgba(255,200,60,0.3));box-shadow:0 0 4px rgba(255,200,60,0.4);"></span>通用算力总线（金）</div>
+  <div class="lg-item"><span class="lg-line" style="background:linear-gradient(90deg,rgba(200,100,255,0.8),rgba(200,100,255,0.3));"></span>定向专线（彩）</div>
+  <div class="lg-item"><span class="lg-line" style="background:var(--red);opacity:0.7;"></span>废弃飘散（红）</div>
+</div>
+
+<script>
+/* ======================================================================
+   AI大模型浪费资源再利用——全流程资源回收演示系统 v3.2
+   纯HTML5+CSS+Canvas+JS · 无外部依赖 · 蛇形化工厂布局
+   模块划分：
+     M1 配置常量（版本/节点/模板/专线/总线连接）
+     M2 全局状态
+     M3 布局计算（蛇形网格坐标）
+     M4 DOM节点构建
+     M5 Canvas绘制引擎（背景/连线/圆角折线/专线/粒子）
+     M6 粒子系统
+     M7 数据模拟与效率计算
+     M8 交互事件
+     M9 学生模型图标绘制
+     M10 主循环
+     M11 初始化
+   ====================================================================== */
+(function(){
+'use strict';
+
+/* ============================================================
+   M1 配置常量
+   ============================================================ */
+const APP_VERSION = "3.2";
+
+/** 18个节点定义（顺序即为蛇形走线顺序） */
+const NODES = [
+  // ---- 模型构建阶段 (-1, 0) ----
+  { id:-1, name:'模型架构设计', stage:'build', waste:{type:'废弃架构探索', rate:0.35, unit:'方案'},
+    data:{ unit:'设计方案', base:50 }, flow:{type:'文本', color:'#e8ecff'} },
+  { id:0,  name:'参数初始化',   stage:'build', waste:{type:'随机种子实验', rate:0.20, unit:'种子'},
+    data:{ unit:'初始化方案', base:200 }, flow:{type:'权重', color:'#c9a8ff'} },
+  // ---- 训练阶段 (1~8) ----
+  { id:1,  name:'数据预处理',   stage:'train', waste:{type:'冗余文本', rate:0.10, unit:'tokens'},
+    data:{ unit:'tokens', base:1200 }, flow:{type:'Tokens', color:'#e8ecff'} },
+  { id:2,  name:'Embedding',    stage:'train', waste:{type:'稀疏向量权重', rate:0.08, unit:'向量'},
+    data:{ unit:'tokens', base:1100 }, flow:{type:'Embedding', color:'#c9a8ff'} },
+  { id:3,  name:'注意力计算',   stage:'train', waste:{type:'废弃注意力权重', rate:0.25, unit:'权重', core:false},
+    data:{ unit:'注意力权重', base:900, note:'权重矩阵' }, flow:{type:'注意力张量', color:'#5ef0ff'} },
+  { id:4,  name:'前馈网络(FFN)',stage:'train', waste:{type:'冗余激活值', rate:0.18, unit:'激活'},
+    data:{ unit:'激活值', base:800 }, flow:{type:'FFN输出', color:'#7aa2ff'} },
+  { id:5,  name:'梯度更新',     stage:'train', waste:{type:'废弃梯度势能', rate:0.40, unit:'梯度', core:true},
+    data:{ unit:'梯度', base:700, note:'梯度回流' }, flow:{type:'梯度', color:'#ff5050'} },
+  { id:6,  name:'废弃检查点回收',stage:'train',waste:{type:'中间模型权重', rate:0.48, unit:'权重'},
+    data:{ unit:'检查点', base:550 }, flow:{type:'模型权重', color:'#c9a8ff'} },
+  { id:7,  name:'优化器状态',   stage:'train', waste:{type:'动量冗余', rate:0.15, unit:'动量', bus:true},
+    data:{ unit:'状态', base:480 }, flow:{type:'优化器状态', color:'#5ef0ff'} },
+  { id:8,  name:'量化误差回收', stage:'train', waste:{type:'精度损失信息', rate:0.32, unit:'误差'},
+    data:{ unit:'模型', base:420 }, flow:{type:'量化模型', color:'#7aa2ff'} },
+  // ---- 推理阶段 (9~11) ----
+  { id:9,  name:'推理KV Cache', stage:'infer', waste:{type:'驱逐缓存', rate:0.22, unit:'Cache'},
+    data:{ unit:'KV', base:380 }, flow:{type:'KV Cache', color:'#5ef0ff'} },
+  { id:10, name:'过度思考回收', stage:'infer', waste:{type:'多余计算量', rate:0.28, unit:'Token'},
+    data:{ unit:'tokens', base:340 }, flow:{type:'思考链', color:'#c9a8ff'} },
+  { id:11, name:'推理输出',     stage:'infer', waste:{type:'未采纳Token', rate:0.08, unit:'Token'},
+    data:{ unit:'tokens', base:300 }, flow:{type:'输出Token', color:'#e8ecff'} },
+  // ---- 应用与迭代阶段 (12~16) ----
+  { id:12, name:'Agent方案生成',stage:'app',  waste:{type:'创意废料', rate:0.50, unit:'方案', core:true},
+    data:{ unit:'方案', base:550 }, flow:{type:'方案', color:'#ff9040'} },
+  { id:13, name:'版本迭代',     stage:'app',  waste:{type:'废弃代码', rate:0.55, unit:'代码', core:true},
+    data:{ unit:'代码', base:480 }, flow:{type:'代码', color:'#ff9040'} },
+  { id:14, name:'调试与验证',   stage:'app',  waste:{type:'失败案例', rate:0.40, unit:'用例'},
+    data:{ unit:'用例', base:420 }, flow:{type:'测试用例', color:'#ff9040'} },
+  { id:15, name:'过程数据',     stage:'app',  waste:{type:'中间轨迹', rate:0.44, unit:'轨迹', bus:true},
+    data:{ unit:'轨迹', base:360 }, flow:{type:'轨迹', color:'#ff9040'} },
+  { id:16, name:'模型卸载',     stage:'app',  waste:{type:'传输带宽', rate:0.20, unit:'带宽', bus:true},
+    data:{ unit:'参数', base:280 }, flow:{type:'参数', color:'#5ef0ff'} },
+];
+
+/** 蛇形布局：9列 × 2行；行0 L→R, 行1 R→L */
+const COLS = 9, ROWS = 2;
+
+/** 点对点回收专线（sourceIdx→targetIdx） */
+const SPECIALS = [
+  // 注意力权重复用：节点3→自身（环）
+  { from:4, to:4, color:'rgba(200,100,255,0.7)', glow:'rgba(200,100,255,0.3)', label:'注意力权重复用', type:'self', side:'top' },
+  // 梯度回流驱动小型副本：节点5→上方小型副本图标
+  { from:6, to:'student', color:'rgba(255,60,60,0.75)', glow:'rgba(255,80,60,0.3)', label:'梯度回流驱动小型副本', type:'student' },
+  // KV Cache复用：节点9→节点3
+  { from:10, to:4, color:'rgba(94,240,255,0.7)', glow:'rgba(94,240,255,0.3)', label:'KV Cache复用', type:'curve' },
+  // 废弃方案启发：节点12→节点13
+  { from:13, to:14, color:'rgba(255,144,64,0.7)', glow:'rgba(255,144,64,0.3)', label:'废弃方案启发', type:'short' },
+];
+
+/** 接入通用算力总线的节点（bus:true） */
+const BUS_NODES = NODES.map((n,i)=>n.waste.bus?i:-1).filter(i=>i>=0);
+
+/** 场景模板
+ * specialStates 顺序对应 SPECIALS 数组索引：
+ *   0=注意力权重复用, 1=梯度回流驱动小型副本, 2=KV Cache复用, 3=废弃方案启发
+ *   'active' 绿色活跃 / 'partial' 橙色部分活跃 / 'inactive' 灰色关闭(-)
+ * busFlow: 通用算力总线流量倍率（计算密集型任务总线流量更大）
+ * speed:  整体粒子流速倍率（多轮对话时加速）
+ */
+const TEMPLATES = [
+  { name:'短文本生成', scale:0.8, mul:{build:0.7,train:0.7,infer:0.5,app:0.3},
+    specialStates:['active','active','inactive','active'], busFlow:0.7, speed:1.0 },
+  { name:'长文档分析', scale:2.2, mul:{build:1.0,train:1.0,infer:1.5,app:0.5},
+    specialStates:['active','active','active','inactive'], busFlow:1.3, speed:1.1 },
+  { name:'代码补全',   scale:1.6, mul:{build:1.2,train:1.3,infer:0.8,app:0.9},
+    specialStates:['partial','active','active','active'], busFlow:1.1, speed:1.0 },
+  { name:'多轮对话',   scale:3.2, mul:{build:1.1,train:1.1,infer:1.2,app:2.8},
+    specialStates:['active','active','active','active'], busFlow:1.6, speed:1.5 },
+];
+
+/** 格式化数字（K/M单位） */
+function fmt(n){
+  if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(n>=1e4?0:1)+'K';
+  return Math.round(n).toString();
+}
+
+function rand(a,b){return a+Math.random()*(b-a);}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function getTpl(){return TEMPLATES[state.tplIdx];}
+function getSpecialState(idx){
+  const t=getTpl(); return (t.specialStates&&t.specialStates[idx])||'active';
+}
+
+/* ============================================================
+   M2 全局状态
+   ============================================================ */
+const state = {
+  tplIdx: 0,
+  running: true,
+  executing: false,
+  nodes: NODES.map(n=>({
+    ...n,
+    input:0, processing:0, output:0, wasteAmt:0,
+    recycleOn: true,
+    active: false,
+  })),
+  time:0,
+  layout:null,   // 布局坐标（M3计算后填充）
+  particles:[],
+  busParticles:[],
+  specialParticles:[],
+  wasteParticles:[],
+  // 显示平滑值
+  disp:{eff:0,save:0,co2:0,pool:0,effAll:0,effBuild:0,effTrain:0,effInfer:0,effApp:0},
+};
+
+/* ============================================================
+   M3 布局计算
+   ============================================================ */
+function calcLayout(){
+  const wrap = document.getElementById('stageWrap');
+  const W = wrap.clientWidth;
+  const H = wrap.clientHeight;
+
+  const padX = 30;           // 左右内边距
+  const padTop = 50;         // 顶部留白（给专线+阶段标签）
+  const padBot = 30;         // 底部留白（给总线）
+  const availW = W - padX*2;
+  const availH = H - padTop - padBot;
+
+  // 节点尺寸根据容器自适应
+  const gapX = Math.max(8, availW/COLS*0.07);
+  const cardW = (availW - gapX*(COLS-1)) / COLS;
+  const cardH = Math.min(120, availH/ROWS*0.78);
+  const gapY = Math.max(20, availH/ROWS*0.22);
+  const rowH = cardH + gapY;
+  const startY = padTop;
+
+  // 每个节点的 (x,y)坐标（左上角）
+  const positions = [];
+  for(let i=0;i<NODES.length;i++){
+    let col,row;
+    if(i<9){
+      // 第一行 左→右
+      col=i; row=0;
+    }else{
+      // 第二行 右→左（第9个节点(i=9)在col8, 第17个(i=17)在col0）
+      col=8-(i-9); row=1;
+    }
+    const x = padX + col*(cardW+gapX);
+    const y = startY + row*rowH;
+    positions.push({x,y,w:cardW,h:cardH,col,row,
+      cx:x+cardW/2, cy:y+cardH/2,
+      right:x+cardW, bottom:y+cardH,
+    });
+  }
+
+  // 总线y坐标
+  const busY = startY + 2*rowH - gapY/2 + 8;
+
+  // 阶段背景矩形范围
+  const stageRects = calcStageRects(positions);
+
+  // 学生模型位置（节点5上方）
+  const n5 = positions[6];  // id=5 是第7个(索引6)
+  const studentPos = { x:n5.cx-21, y:n5.y-50, cx:n5.cx, cy:n5.y-30 };
+
+  state.layout = { W,H,padX,padTop,padBot,cardW,cardH,gapX,gapY,rowH,startY,
+                   positions,busY,stageRects,studentPos };
+  return state.layout;
+}
+
+function calcStageRects(pos){
+  // 找到每个阶段节点的最小/最大坐标
+  const stages = {build:{minI:0,maxI:1}, train:{minI:2,maxI:9}, infer:{minI:10,maxI:12}, app:{minI:13,maxI:17}};
+  const rects = {};
+  for(const [k,v] of Object.entries(stages)){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(let i=v.minI;i<=v.maxI;i++){
+      const p=pos[i];
+      minX=Math.min(minX,p.x); minY=Math.min(minY,p.y);
+      maxX=Math.max(maxX,p.right); maxY=Math.max(maxY,p.bottom);
+    }
+    rects[k]={x:minX-8,y:minY-22,w:maxX-minX+16,h:maxY-minY+12};
+  }
+  return rects;
+}
+
+/* ============================================================
+   M4 DOM节点构建
+   ============================================================ */
+const nodeEls = [];
+
+function buildNodeDOM(){
+  const layer = document.getElementById('nodesLayer');
+  layer.innerHTML = '';
+  nodeEls.length = 0;
+
+  state.nodes.forEach((node,idx)=>{
+    const card = document.createElement('div');
+    card.className = 'node-card stage-'+node.stage + (node.waste.core?' core':'');
+    const stageCN = {build:'模型构建',train:'训练',infer:'推理',app:'应用迭代'}[node.stage];
+    const noteHtml = node.data.note ? `<span class="nc-note">[${node.data.note}]</span>` : '';
+    card.innerHTML = `
+      <div class="nc-head">
+        <span class="nc-id">#${String(node.id).padStart(2,'0')}</span>
+        <span class="nc-name">${node.name}${noteHtml}</span>
+      </div>
+      <div class="nc-waste-type">${stageCN} · ${node.waste.type}</div>
+      <div class="nc-data">
+        <div class="row"><span class="lbl">输入</span><span class="val in-val">0</span></div>
+        <div class="row"><span class="lbl">处理中</span><span class="val proc-val">0</span></div>
+        <div class="row"><span class="lbl">输出</span><span class="val out-val">0</span></div>
+      </div>
+      <div class="nc-waste">
+        <span>浪费资源</span>
+        <span><span class="wv waste-val">0</span> <span style="font-size:7px;">${node.waste.unit}</span></span>
+      </div>
+      <div class="nc-foot">
+        <div class="nc-toggle">
+          <span class="nc-tgl-lbl">回收</span>
+          <label class="toggle">
+            <input type="checkbox" checked />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+        <span class="nc-badge">ON</span>
+      </div>`;
+    const toggle = card.querySelector('input[type="checkbox"]');
+    const badge = card.querySelector('.nc-badge');
+    toggle.addEventListener('change',()=>{
+      node.recycleOn = toggle.checked;
+      badge.textContent = toggle.checked?'ON':'OFF';
+      badge.classList.toggle('off',!toggle.checked);
+      recalcEfficiency();
+      updatePresetHighlight();
+    });
+    layer.appendChild(card);
+    nodeEls.push({card,toggle,badge,
+      inEl:card.querySelector('.in-val'),
+      procEl:card.querySelector('.proc-val'),
+      outEl:card.querySelector('.out-val'),
+      wasteEl:card.querySelector('.waste-val'),
+    });
+  });
+}
+
+function positionNodeDOM(){
+  if(!state.layout) return;
+  const {positions} = state.layout;
+  nodeEls.forEach((el,i)=>{
+    const p = positions[i];
+    el.card.style.left = p.x+'px';
+    el.card.style.top = p.y+'px';
+    el.card.style.width = p.w+'px';
+  });
+  // 学生模型位置
+  const sp = state.layout.studentPos;
+  const si = document.getElementById('studentIcon');
+  si.style.left = sp.x+'px'; si.style.top = sp.y+'px';
+}
+
+/* ============================================================
+   M5 Canvas绘制引擎
+   ============================================================ */
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas(){
+  if(!state.layout) return;
+  const {W,H} = state.layout;
+  canvas.width = W*devicePixelRatio;
+  canvas.height = H*devicePixelRatio;
+  canvas.style.width = W+'px';
+  canvas.style.height = H+'px';
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+
+/** 绘制圆角折线（主流程连线） */
+function drawRoundedPath(points, color, width, dashed){
+  if(points.length<2) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if(dashed){ ctx.setLineDash(dashed); }
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for(let i=1;i<points.length-1;i++){
+    const prev = points[i-1], cur=points[i], next=points[i+1];
+    // 圆角：在拐点处取一小段距离画弧
+    const dx1 = cur.x-prev.x, dy1 = cur.y-prev.y;
+    const dx2 = next.x-cur.x, dy2 = next.y-cur.y;
+    const len1 = Math.hypot(dx1,dy1), len2 = Math.hypot(dx2,dy2);
+    const r = Math.min(10, len1*0.3, len2*0.3);
+    const ax = cur.x - dx1/len1*r;
+    const ay = cur.y - dy1/len1*r;
+    const bx = cur.x + dx2/len2*r;
+    const by = cur.y + dy2/len2*r;
+    ctx.lineTo(ax,ay);
+    ctx.quadraticCurveTo(cur.x,cur.y,bx,by);
+  }
+  ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/** 获取主流程连线路径点序列 */
+function getMainPathPoints(){
+  const {positions} = state.layout;
+  const segs = [];
+  for(let i=0;i<NODES.length-1;i++){
+    const a = positions[i], b = positions[i+1];
+    let pts;
+    if(a.row===b.row){
+      // 同行：水平连线
+      if(a.col<b.col){
+        // L→R（行0）
+        pts=[{x:a.right,y:a.cy},{x:b.x,y:b.cy}];
+      }else{
+        // R→L（行1）
+        pts=[{x:a.x,y:a.cy},{x:b.right,y:b.cy}];
+      }
+    }else{
+      // 跨行（a在row0右端→b在row1右端）：U形折返
+      const midY = (a.cy+b.cy)/2;
+      pts=[
+        {x:a.right,y:a.cy},
+        {x:a.right+16,y:a.cy},
+        {x:a.right+16,y:midY},
+        {x:b.right+16,y:midY},
+        {x:b.right+16,y:b.cy},
+        {x:b.right,y:b.cy},
+      ];
+    }
+    segs.push({from:i,to:i+1,pts,mid:midpoint(pts)});
+  }
+  return segs;
+}
+
+function midpoint(pts){
+  // 取路径中点
+  let total=0;
+  const lens=[];
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+    lens.push(d); total+=d;
+  }
+  let target=total/2, acc=0;
+  for(let i=0;i<lens.length;i++){
+    if(acc+lens[i]>=target){
+      const t=(target-acc)/lens[i];
+      return{
+        x:pts[i].x+(pts[i+1].x-pts[i].x)*t,
+        y:pts[i].y+(pts[i+1].y-pts[i].y)*t,
+      };
+    }
+    acc+=lens[i];
+  }
+  return pts[pts.length-1];
+}
+
+/** 绘制阶段背景色块 */
+function drawStageBackgrounds(){
+  const {stageRects} = state.layout;
+  const colors = {
+    build:'rgba(255,200,96,0.05)',
+    train:'rgba(90,160,255,0.05)',
+    infer:'rgba(192,128,255,0.05)',
+    app:'rgba(255,112,80,0.05)',
+  };
+  const borders = {
+    build:'rgba(255,200,96,0.15)',
+    train:'rgba(90,160,255,0.15)',
+    infer:'rgba(192,128,255,0.15)',
+    app:'rgba(255,112,80,0.15)',
+  };
+  for(const [k,r] of Object.entries(stageRects)){
+    ctx.fillStyle = colors[k];
+    ctx.strokeStyle = borders[k];
+    ctx.lineWidth = 1;
+    roundRect(ctx, r.x, r.y, r.w, r.h, 8);
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+/** 绘制主流程连线 */
+function drawMainLines(segs){
+  // 底色线
+  segs.forEach((s,i)=>{
+    const node = state.nodes[s.from];
+    const active = node.active || state.running;
+    const col = node.flow.color;
+    const dim = active?'0.25':'0.1';
+    drawRoundedPath(s.pts, col.replace(')',','+dim+')').replace('rgb','rgba').startsWith('rgba')?col.replace(/[\d.]+\)$/,dim+')'):'rgba(120,140,220,'+dim+')',
+      2.5);
+  });
+}
+
+/** 绘制回收总线 */
+function drawBus(){
+  const {W,busY,padX} = state.layout;
+  const x1=padX, x2=W-padX, y=busY;
+  const tpl=getTpl();
+  const speedMul = tpl.speed||1.0;
+  const flowMul = tpl.busFlow||1.0;
+  // 外发光（流量大时光晕更亮）
+  ctx.save();
+  const glow = 0.25 + flowMul*0.1;
+  const g = ctx.createLinearGradient(x1,y,x2,y);
+  g.addColorStop(0,`rgba(255,180,60,${0.03+flowMul*0.03})`);
+  g.addColorStop(0.5,`rgba(255,210,80,${glow})`);
+  g.addColorStop(1,`rgba(255,180,60,${0.03+flowMul*0.03})`);
+  ctx.fillStyle=g;
+  ctx.fillRect(x1,y-7,x2-x1,14);
+  ctx.strokeStyle=`rgba(255,200,60,${0.25+flowMul*0.15})`;
+  ctx.lineWidth=1;
+  ctx.strokeRect(x1,y-7,x2-x1,14);
+  // 内部流光（速度随模板speed变化）
+  const flow = (state.time*0.8*speedMul)%40;
+  ctx.strokeStyle='rgba(255,230,120,0.6)';
+  ctx.lineWidth=2;
+  ctx.setLineDash([8,32]);
+  ctx.lineDashOffset=-flow;
+  ctx.beginPath(); ctx.moveTo(x1+4,y); ctx.lineTo(x2-4,y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/** 绘制总线支管（节点→总线） */
+function drawBusBranches(){
+  const {positions,busY} = state.layout;
+  BUS_NODES.forEach(i=>{
+    if(!state.nodes[i].recycleOn) return;
+    const p = positions[i];
+    ctx.save();
+    ctx.strokeStyle='rgba(255,200,60,0.35)';
+    ctx.lineWidth=1.8;
+    ctx.setLineDash([4,4]);
+    drawRoundedPath([
+      {x:p.cx,y:p.bottom},
+      {x:p.cx,y:p.bottom+18},
+      {x:p.cx,y:busY-7},
+    ],'rgba(255,200,60,0.35)',1.5,[4,4]);
+    ctx.setLineDash([]);
+    ctx.restore();
+  });
+  // 总线向上分派支流（送到几个关键节点）
+  const feedTargets = [0,2,4,10]; // 初始化/预处理/注意力/KV
+  feedTargets.forEach(i=>{
+    const p = positions[i];
+    ctx.save();
+    ctx.strokeStyle='rgba(255,210,100,0.2)';
+    ctx.lineWidth=1;
+    ctx.setLineDash([3,5]);
+    drawRoundedPath([
+      {x:p.cx,y:busY+7},
+      {x:p.cx,y:p.bottom+5},
+    ],'rgba(255,210,100,0.2)',1,[3,5]);
+    ctx.setLineDash([]);
+    ctx.restore();
+  });
+}
+
+/** 绘制点对点专线（带动态状态指示器） */
+function drawSpecialLines(){
+  const {positions,studentPos,W,H} = state.layout;
+  SPECIALS.forEach((sp,si)=>{
+    const st = getSpecialState(si);
+    // 状态影响透明度：inactive=极暗, partial=正常, active=正常
+    const alpha = st==='inactive'?0.15:1.0;
+    const lineCol = st==='inactive' ? 'rgba(120,120,150,0.25)'
+                  : st==='partial'  ? sp.color.replace(/[\d.]+\)$/,'0.55)')
+                  : sp.color;
+    const glowCol = st==='inactive' ? 'rgba(100,100,130,0.08)'
+                  : st==='partial'  ? sp.glow.replace(/[\d.]+\)$/,'0.2)')
+                  : sp.glow;
+    // 指示器颜色
+    const indCol = st==='inactive' ? {dot:'rgba(120,120,140,0.6)',glow:'rgba(120,120,140,0.2)',txt:'rgba(120,120,140,0.8)'}
+                : st==='partial'  ? {dot:'#ffb040',glow:'rgba(255,160,60,0.35)',txt:'#ffc060'}
+                :                   {dot:'#5fffa0',glow:'rgba(100,255,150,0.35)',txt:'#80ffb0'};
+    const indText = st==='inactive'?'-':st==='partial'?'部分活跃':'活跃';
+
+    ctx.save();
+    ctx.strokeStyle=glowCol;
+    ctx.lineWidth=6;
+    ctx.lineCap='round';
+    ctx.beginPath();
+    let indX,indY; // 指示器位置
+    if(sp.type==='self'){
+      const p = positions[sp.from];
+      ctx.arc(p.cx, p.y-4, 28, Math.PI+0.4, -0.4, false);
+      ctx.stroke();
+      ctx.strokeStyle=lineCol; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.arc(p.cx, p.y-4, 28, Math.PI+0.4, -0.4, false);
+      ctx.stroke();
+      if(st!=='inactive') drawArrow(p.cx+24, p.y-18, lineCol, 0.6);
+      drawLineLabel(sp.label, p.cx, p.y-38, lineCol);
+      indX=p.cx+ctx.measureText(sp.label).width/2+14; indY=p.y-38;
+    }else if(sp.type==='student'){
+      const p = positions[sp.from];
+      const tx=studentPos.cx, ty=studentPos.cy+10;
+      ctx.beginPath();
+      ctx.moveTo(p.cx, p.y);
+      ctx.quadraticCurveTo(p.cx-20, p.y-25, tx, ty);
+      ctx.stroke();
+      ctx.strokeStyle=lineCol; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(p.cx, p.y);
+      ctx.quadraticCurveTo(p.cx-20, p.y-25, tx, ty);
+      ctx.stroke();
+      if(st!=='inactive') drawArrow(tx, ty, lineCol, -0.4);
+      drawLineLabel(sp.label, (p.cx+tx)/2-20, (p.y+ty)/2-10, lineCol);
+      indX=(p.cx+tx)/2-20+ctx.measureText(sp.label).width/2+14; indY=(p.y+ty)/2-10;
+    }else if(sp.type==='short'){
+      const a=positions[sp.from], b=positions[sp.to];
+      const y = Math.min(a.y,b.y)-14;
+      ctx.beginPath();
+      ctx.moveTo(a.cx,a.y);
+      ctx.quadraticCurveTo(a.cx,y,(a.cx+b.cx)/2,y);
+      ctx.quadraticCurveTo(b.cx,y,b.cx,b.y);
+      ctx.stroke();
+      ctx.strokeStyle=lineCol; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(a.cx,a.y);
+      ctx.quadraticCurveTo(a.cx,y,(a.cx+b.cx)/2,y);
+      ctx.quadraticCurveTo(b.cx,y,b.cx,b.y);
+      ctx.stroke();
+      if(st!=='inactive') drawArrow(b.cx-4, b.y-6, lineCol, Math.PI/2);
+      drawLineLabel(sp.label, (a.cx+b.cx)/2, y-10, lineCol);
+      indX=(a.cx+b.cx)/2+ctx.measureText(sp.label).width/2+14; indY=y-10;
+    }else if(sp.type==='curve'){
+      const a=positions[sp.from], b=positions[sp.to];
+      const midY = Math.min(a.y,b.y)-30;
+      ctx.beginPath();
+      ctx.moveTo(a.cx,a.y);
+      ctx.bezierCurveTo(a.cx,midY,b.cx,midY,b.cx,b.bottom);
+      ctx.stroke();
+      ctx.strokeStyle=lineCol; ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.moveTo(a.cx,a.y);
+      ctx.bezierCurveTo(a.cx,midY,b.cx,midY,b.cx,b.bottom);
+      ctx.stroke();
+      if(st!=='inactive') drawArrow(b.cx+2, b.bottom-4, lineCol, Math.PI/2+0.3);
+      drawLineLabel(sp.label, (a.cx+b.cx)/2, midY-10, lineCol);
+      indX=(a.cx+b.cx)/2+ctx.measureText(sp.label).width/2+14; indY=midY-10;
+    }
+    ctx.restore();
+
+    // 绘制状态指示器（8px圆点 + 小字标签）
+    ctx.save();
+    const pulse = 0.7+0.3*Math.sin(state.time*0.08+si);
+    // 光晕
+    const gg=ctx.createRadialGradient(indX,indY,0,indX,indY,10);
+    gg.addColorStop(0,indCol.glow);
+    gg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gg;
+    ctx.beginPath();ctx.arc(indX,indY,10,0,Math.PI*2);ctx.fill();
+    // 圆点
+    ctx.fillStyle=indCol.dot;
+    ctx.globalAlpha = st==='active'?pulse:1.0;
+    ctx.beginPath();ctx.arc(indX,indY,4,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+    // 文字标签
+    ctx.font='8px "PingFang SC",sans-serif';
+    ctx.fillStyle=indCol.txt;
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText(indText,indX+8,indY);
+    ctx.restore();
+  });
+}
+
+function drawArrow(x,y,color,angle){
+  ctx.save();
+  ctx.fillStyle=color;
+  ctx.translate(x,y); ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0,0); ctx.lineTo(-5,-3); ctx.lineTo(-5,3);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawLineLabel(text,x,y,color){
+  ctx.save();
+  ctx.font='9px "PingFang SC",sans-serif';
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle='rgba(10,5,30,0.85)';
+  ctx.strokeStyle=color.replace(/[\d.]+\)$/,'0.3)').replace('rgb','rgba');
+  if(!ctx.strokeStyle.includes('rgba')) ctx.strokeStyle='rgba(200,200,255,0.2)';
+  ctx.lineWidth=1;
+  ctx.fillRect(x-w/2-4,y-7,w+8,14);
+  ctx.strokeRect(x-w/2-4,y-7,w+8,14);
+  ctx.fillStyle=color;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text,x,y);
+  ctx.restore();
+}
+
+/** 绘制连线数据标签（DOM） */
+function drawEdgeLabels(segs){
+  // 移除旧标签
+  document.querySelectorAll('.edge-label').forEach(e=>e.remove());
+  const layer = document.getElementById('nodesLayer');
+  segs.forEach((s,i)=>{
+    const from = state.nodes[i];
+    const txt = `→ ${fmt(from.output*0.9)} ${from.flow.type}`;
+    const el = document.createElement('div');
+    el.className='edge-label';
+    el.textContent=txt;
+    el.style.left=(s.mid.x-30)+'px';
+    el.style.top=(s.mid.y-18)+'px';
+    layer.appendChild(el);
+  });
+}
+
+/* ============================================================
+   M6 粒子系统
+   ============================================================ */
+function spawnMainParticles(segs){
+  const tpl=getTpl();
+  const speedMul = tpl.speed||1.0;
+  segs.forEach((s,i)=>{
+    const rate = state.executing?1.5:(state.running?0.9:0.3);
+    const node = state.nodes[i];
+    const active = node.active;
+    if(Math.random()<0.25*rate*(active?1:0.4)){
+      state.particles.push({
+        seg:i, t:0, speed:rand(0.004,0.01)*(state.executing?1.5:1)*speedMul,
+        size:rand(1.5,3), color:node.flow.color, life:300, alpha:rand(0.5,0.9),
+      });
+    }
+  });
+}
+
+function spawnBusParticles(){
+  const tpl=getTpl();
+  const flowMul = tpl.busFlow||1.0;
+  BUS_NODES.forEach(i=>{
+    if(!state.nodes[i].recycleOn) return;
+    const rate = state.nodes[i].wasteAmt/200;
+    if(Math.random()<0.08*rate*flowMul){
+      const p = state.layout.positions[i];
+      state.busParticles.push({
+        x:p.cx, y:p.bottom, targetY:state.layout.busY, phase:'drop',
+        size:rand(2,3.5), speed:rand(1.5,3)*(tpl.speed||1), dir:Math.random()<0.5?1:-1, alpha:rand(0.6,0.9), life:250,
+      });
+    }
+  });
+}
+
+function spawnSpecialParticles(){
+  const tpl=getTpl();
+  const speedMul = tpl.speed||1.0;
+  SPECIALS.forEach((sp,si)=>{
+    if(!state.nodes[sp.from].recycleOn) return;
+    const st = getSpecialState(si);
+    // inactive=不产生粒子; partial=极稀疏; active=正常
+    let prob=0.1;
+    if(st==='inactive') return;
+    if(st==='partial') prob=0.03;
+    prob *= speedMul;
+    if(Math.random()<prob){
+      const spd = rand(0.006,0.012)*speedMul*(st==='partial'?0.6:1);
+      state.specialParticles.push({
+        special:si, t:0, speed:spd,
+        size:rand(1.5,2.8)*(st==='partial'?0.8:1),
+        life:200, alpha:rand(0.5,0.8)*(st==='partial'?0.6:1),
+        dim: st==='partial',
+      });
+    }
+  });
+}
+
+function spawnWasteParticles(){
+  state.nodes.forEach((node,i)=>{
+    if(node.recycleOn) return;
+    if(node.wasteAmt<=0) return;
+    const rate = node.wasteAmt/400;
+    if(Math.random()<0.06*rate){
+      const p = state.layout.positions[i];
+      state.wasteParticles.push({
+        x:p.cx+rand(-p.w*0.3,p.w*0.3), y:p.bottom,
+        vx:rand(-1,1), vy:rand(0.3,1.5),
+        size:rand(1.5,2.8), life:80, alpha:0.7,
+      });
+    }
+  });
+}
+
+function updateParticles(){
+  // 主流粒子
+  for(let i=state.particles.length-1;i>=0;i--){
+    const p=state.particles[i];
+    p.t+=p.speed; p.life--;
+    if(p.t>=1||p.life<=0){state.particles.splice(i,1);}
+  }
+  // 总线粒子
+  const tpl=getTpl();
+  const spdMul = tpl.speed||1.0;
+  for(let i=state.busParticles.length-1;i>=0;i--){
+    const p=state.busParticles[i];
+    p.life--;
+    if(p.phase==='drop'){
+      p.y+=p.speed*spdMul;
+      if(p.y>=p.targetY){p.y=p.targetY; p.phase='flow'; p.vx=p.dir*rand(1.5,3)*spdMul;}
+    }else{
+      p.x+=p.vx*spdMul; p.vx*=0.995;
+      const maxX = state.layout.W-state.layout.padX;
+      const minX = state.layout.padX;
+      if(p.x<minX||p.x>maxX){state.busParticles.splice(i,1);continue;}
+    }
+    if(p.life<=0){state.busParticles.splice(i,1);}
+  }
+  // 专线粒子
+  for(let i=state.specialParticles.length-1;i>=0;i--){
+    const p=state.specialParticles[i];
+    p.t+=p.speed; p.life--;
+    if(p.t>=1||p.life<=0){state.specialParticles.splice(i,1);}
+  }
+  // 废弃粒子
+  for(let i=state.wasteParticles.length-1;i>=0;i--){
+    const p=state.wasteParticles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.02; p.vx*=0.99;
+    p.size*=0.994; p.alpha*=0.985; p.life--;
+    if(p.life<=0||p.alpha<0.02){state.wasteParticles.splice(i,1);}
+  }
+  // 总量限制
+  if(state.particles.length>600) state.particles.splice(0,state.particles.length-600);
+  if(state.busParticles.length>200) state.busParticles.splice(0,state.busParticles.length-200);
+}
+
+function drawMainParticles(segs){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  state.particles.forEach(p=>{
+    const seg=segs[p.seg];
+    if(!seg) return;
+    const pt = bezierPoint(seg.pts, p.t);
+    const r=p.size;
+    const g=ctx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,r*3);
+    const col=p.color;
+    g.addColorStop(0,hexA(col,p.alpha));
+    g.addColorStop(1,hexA(col,0));
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(pt.x,pt.y,r*3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=hexA(col,p.alpha);
+    ctx.beginPath();ctx.arc(pt.x,pt.y,r*0.6,0,Math.PI*2);ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawBusParticles(){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  state.busParticles.forEach(p=>{
+    const r=p.size;
+    const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r*3);
+    g.addColorStop(0,`rgba(255,210,80,${p.alpha})`);
+    g.addColorStop(1,'rgba(255,200,60,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(p.x,p.y,r*3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=`rgba(255,235,140,${p.alpha})`;
+    ctx.beginPath();ctx.arc(p.x,p.y,r*0.7,0,Math.PI*2);ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawSpecialParticles(){
+  const {positions,studentPos}=state.layout;
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  state.specialParticles.forEach(p=>{
+    const sp=SPECIALS[p.special];
+    let px,py;
+    if(sp.type==='self'){
+      const node=positions[sp.from];
+      const a=Math.PI+0.4 + p.t*((Math.PI*2)-0.8);
+      px=node.cx+Math.cos(a)*28; py=node.y-4+Math.sin(a)*28;
+    }else if(sp.type==='student'){
+      const node=positions[sp.from];
+      const t=p.t;
+      const x0=node.cx,y0=node.y, x1=node.cx-20,y1=node.y-25, x2=studentPos.cx,y2=studentPos.cy+10;
+      const mt=1-t;
+      px=mt*mt*x0+2*mt*t*x1+t*t*x2;
+      py=mt*mt*y0+2*mt*t*y1+t*t*y2;
+    }else if(sp.type==='short'){
+      const a=positions[sp.from],b=positions[sp.to];
+      const y=Math.min(a.y,b.y)-14;
+      if(p.t<0.5){
+        const t=p.t*2;
+        px=a.cx; py=a.y+(y-a.y)*t;
+      }else{
+        const t=(p.t-0.5)*2;
+        px=a.cx+(b.cx-a.cx)*t; py=y;
+      }
+    }else if(sp.type==='curve'){
+      const a=positions[sp.from],b=positions[sp.to];
+      const midY=Math.min(a.y,b.y)-30;
+      const t=p.t;
+      const mt=1-t;
+      px=mt*mt*mt*a.cx + 3*mt*mt*t*a.cx + 3*mt*t*t*b.cx + t*t*t*b.cx;
+      py=mt*mt*mt*a.y + 3*mt*mt*t*midY + 3*mt*t*t*midY + t*t*t*b.bottom;
+    }
+    const r=p.size;
+    const g=ctx.createRadialGradient(px,py,0,px,py,r*3);
+    const coreCol = p.dim ? sp.color.replace(/[\d.]+\)$/,'0.45)') : sp.color;
+    const glowCol = p.dim ? sp.glow.replace(/[\d.]+\)$/,'0.12)') : sp.glow;
+    g.addColorStop(0,coreCol);
+    g.addColorStop(1,glowCol);
+    ctx.fillStyle=g;
+    ctx.globalAlpha = p.dim?0.7:1;
+    ctx.beginPath();ctx.arc(px,py,r*3,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=coreCol.replace(/[\d.]+\)$/, (p.dim?'0.8':'1')+')');
+    ctx.beginPath();ctx.arc(px,py,r*0.6,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  });
+  ctx.restore();
+}
+
+function drawWasteParticles(){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  state.wasteParticles.forEach(p=>{
+    const r=p.size;
+    const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r*3);
+    g.addColorStop(0,`rgba(255,70,50,${p.alpha})`);
+    g.addColorStop(1,'rgba(255,50,30,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath();ctx.arc(p.x,p.y,r*3,0,Math.PI*2);ctx.fill();
+  });
+  ctx.restore();
+}
+
+/** 在折线路径上取t点（近似） */
+function bezierPoint(pts, t){
+  // 将折线分段，按比例t取点
+  let total=0;const lens=[];
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+    lens.push(d);total+=d;
+  }
+  let target=t*total, acc=0;
+  for(let i=0;i<lens.length;i++){
+    if(acc+lens[i]>=target){
+      const rt=(target-acc)/lens[i];
+      return{
+        x:pts[i].x+(pts[i+1].x-pts[i].x)*rt,
+        y:pts[i].y+(pts[i+1].y-pts[i].y)*rt,
+      };
+    }
+    acc+=lens[i];
+  }
+  return pts[pts.length-1];
+}
+
+/** #rrggbb + alpha → rgba */
+function hexA(hex, a){
+  if(hex.startsWith('rgba')||hex.startsWith('rgb')) return hex;
+  const h=hex.replace('#','');
+  const r=parseInt(h.substring(0,2),16);
+  const g=parseInt(h.substring(2,4),16);
+  const b=parseInt(h.substring(4,6),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* ============================================================
+   M7 数据模拟与效率计算
+   ============================================================ */
+function applyTemplate(){
+  const tpl = TEMPLATES[state.tplIdx];
+  state.nodes.forEach(node=>{
+    const mul = tpl.mul[node.stage];
+    const variance = 0.85+Math.random()*0.3;
+    node.input = Math.round(node.data.base*tpl.scale*mul*variance);
+    node.processing = Math.round(node.input*0.88);
+    const wr = node.waste.rate*mul*(0.9+Math.random()*0.2);
+    node.wasteAmt = Math.round(node.input*wr);
+    node.output = node.input - node.wasteAmt;
+  });
+  recalcEfficiency();
+}
+
+function updateNodeDOM(){
+  state.nodes.forEach((node,i)=>{
+    const el=nodeEls[i]; if(!el)return;
+    el.inEl.textContent=fmt(node.input);
+    el.procEl.textContent=fmt(node.processing);
+    el.outEl.textContent=fmt(node.output);
+    el.wasteEl.textContent=fmt(node.wasteAmt);
+    el.card.classList.toggle('active',node.active);
+  });
+}
+
+function recalcEfficiency(){
+  const calcGroup = (indices)=>{
+    let w=0,r=0;
+    indices.forEach(i=>{
+      w+=state.nodes[i].wasteAmt;
+      if(state.nodes[i].recycleOn) r+=state.nodes[i].wasteAmt;
+    });
+    return w>0?r/w*100:0;
+  };
+  const buildIdx=[0,1],trainIdx=[2,3,4,5,6,7,8,9],inferIdx=[10,11,12],appIdx=[13,14,15,16,17];
+  const all = calcGroup([...buildIdx,...trainIdx,...inferIdx,...appIdx]);
+  const buildE=calcGroup(buildIdx), trainE=calcGroup(trainIdx), inferE=calcGroup(inferIdx), appE=calcGroup(appIdx);
+  const tpl=getTpl();
+  const busMul = (tpl.busFlow||1.0);
+  state._target = {all,build:buildE,train:trainE,infer:inferE,app:appE,
+    pool:state.nodes.reduce((s,n,i)=>s+(n.recycleOn&&BUS_NODES.includes(i)?n.wasteAmt*0.0008*busMul:0),0),
+    co2:state.nodes.reduce((s,n,i)=>s+(n.recycleOn?n.wasteAmt*0.0003*busMul:0),0),
+    save:Math.min(82,all*0.7+6)*busMul,
+    fill:all,
+  };
+}
+
+function smoothUpdate(){
+  const lerp=(a,b,k)=>a+(b-a)*k;
+  const t=state._target;
+  if(!t) return;
+  state.disp.eff=lerp(state.disp.eff,t.all,0.08);
+  state.disp.save=lerp(state.disp.save,t.save,0.08);
+  state.disp.co2=lerp(state.disp.co2,t.co2,0.08);
+  state.disp.pool=lerp(state.disp.pool,t.pool,0.08);
+  state.disp.effAll=lerp(state.disp.effAll,t.all,0.08);
+  state.disp.effBuild=lerp(state.disp.effBuild,t.build,0.08);
+  state.disp.effTrain=lerp(state.disp.effTrain,t.train,0.08);
+  state.disp.effInfer=lerp(state.disp.effInfer,t.infer,0.08);
+  state.disp.effApp=lerp(state.disp.effApp,t.app,0.08);
+
+  document.getElementById('busPool').textContent=state.disp.pool.toFixed(1)+' TFLOPS';
+  document.getElementById('busEff').textContent=state.disp.eff.toFixed(1)+'%';
+  document.getElementById('busCO2').textContent=state.disp.co2.toFixed(2)+' kg';
+  document.getElementById('busFill').style.width=clamp(state.disp.fill,0,100)+'%';
+
+  const setEff=(id,v,highlight)=>{
+    const el=document.getElementById(id);
+    el.querySelector('.ev').textContent=v.toFixed(1)+'%';
+    el.classList.toggle('highlight',highlight);
+  };
+  setEff('effAll',state.disp.effAll,state.currentPreset==='all');
+  setEff('effBuild',state.disp.effBuild,state.currentPreset==='build');
+  setEff('effTrain',state.disp.effTrain,state.currentPreset==='train');
+  setEff('effInfer',state.disp.effInfer,state.currentPreset==='infer');
+  setEff('effApp',state.disp.effApp,state.currentPreset==='app');
+  setEff('effNone',0,false);
+}
+
+function executePipeline(){
+  if(state.executing) return;
+  state.executing=true;
+  state.nodes.forEach(n=>n.active=false);
+  state.nodes.forEach((n,i)=>{
+    setTimeout(()=>{n.active=true;},i*120);
+  });
+  setTimeout(()=>{state.executing=false;},NODES.length*120+600);
+}
+
+/* ============================================================
+   M8 交互事件
+   ============================================================ */
+function bindEvents(){
+  document.querySelectorAll('.btn-tpl').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('.btn-tpl').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      state.tplIdx=parseInt(b.dataset.tpl);
+      applyTemplate();
+      executePipeline();
+    });
+  });
+  document.querySelectorAll('.btn-preset').forEach(b=>{
+    b.addEventListener('click',()=>{
+      applyPreset(b.dataset.pre);
+    });
+  });
+  document.getElementById('btnAllOn').addEventListener('click',()=>{
+    state.nodes.forEach((n,i)=>{
+      n.recycleOn=true;
+      nodeEls[i].toggle.checked=true;
+      nodeEls[i].badge.textContent='ON';
+      nodeEls[i].badge.classList.remove('off');
+    });
+    state.currentPreset='all';
+    updatePresetHighlight();
+    recalcEfficiency();
+  });
+  document.getElementById('btnAllOff').addEventListener('click',()=>{
+    state.nodes.forEach((n,i)=>{
+      n.recycleOn=false;
+      nodeEls[i].toggle.checked=false;
+      nodeEls[i].badge.textContent='OFF';
+      nodeEls[i].badge.classList.add('off');
+    });
+    state.currentPreset='none';
+    updatePresetHighlight();
+    recalcEfficiency();
+  });
+  window.addEventListener('resize',()=>{relayout();});
+}
+
+state.currentPreset='all';
+
+function applyPreset(name){
+  state.currentPreset=name;
+  const groups={build:[0,1],train:[2,3,4,5,6,7,8,9],infer:[10,11,12],app:[13,14,15,16,17]};
+  const all=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17];
+  let on;
+  if(name==='all') on=all;
+  else if(name==='build') on=groups.build;
+  else if(name==='train') on=groups.train;
+  else if(name==='infer') on=groups.infer;
+  else if(name==='app') on=groups.app;
+  else on=[];
+  state.nodes.forEach((n,i)=>{
+    const rec=on.includes(i);
+    n.recycleOn=rec;
+    nodeEls[i].toggle.checked=rec;
+    nodeEls[i].badge.textContent=rec?'ON':'OFF';
+    nodeEls[i].badge.classList.toggle('off',!rec);
+  });
+  updatePresetHighlight();
+  recalcEfficiency();
+}
+
+function updatePresetHighlight(){
+  document.querySelectorAll('.btn-preset').forEach(b=>{
+    b.classList.toggle('active',b.dataset.pre===state.currentPreset);
+  });
+}
+
+/* ============================================================
+   M9 学生模型图标绘制
+   ============================================================ */
+function drawStudentModel(){
+  const c=document.getElementById('studentCanvas').getContext('2d');
+  c.clearRect(0,0,42,42);
+  const t=state.time*0.03;
+  // 外光环
+  const grd=c.createRadialGradient(21,24,0,21,24,20);
+  const glow=0.3+0.2*Math.sin(t);
+  grd.addColorStop(0,`rgba(255,100,80,${glow})`);
+  grd.addColorStop(1,'rgba(255,60,40,0)');
+  c.fillStyle=grd;
+  c.beginPath();c.arc(21,24,20,0,Math.PI*2);c.fill();
+  // 大脑/神经网络图形：多个小圆点连线
+  c.strokeStyle='rgba(255,120,80,0.5)';c.lineWidth=0.8;
+  const nodes=[[14,18],[21,14],[28,18],[17,25],[25,25],[21,30],[14,28],[28,28]];
+  for(let i=0;i<nodes.length;i++){
+    for(let j=i+1;j<nodes.length;j++){
+      if(Math.random()<0.3||i===0){
+        c.beginPath();c.moveTo(nodes[i][0],nodes[i][1]);c.lineTo(nodes[j][0],nodes[j][1]);c.stroke();
+      }
+    }
+  }
+  nodes.forEach(n=>{
+    c.fillStyle=`rgba(255,${150+Math.floor(Math.sin(t+n[0])*50)},100,0.9)`;
+    c.beginPath();c.arc(n[0],n[1],2,0,Math.PI*2);c.fill();
+  });
+}
+
+/* ============================================================
+   M10 主循环
+   ============================================================ */
+function tick(){
+  state.time++;
+  if(!state.executing){
+    state.nodes.forEach(n=>{n.active=true;});
+  }
+  ctx.clearRect(0,0,state.layout.W,state.layout.H);
+  const segs = getMainPathPoints();
+  drawStageBackgrounds();
+  drawBusBranches();
+  drawBus();
+  drawMainLines(segs);
+  drawSpecialLines();
+  spawnMainParticles(segs);
+  spawnBusParticles();
+  spawnSpecialParticles();
+  spawnWasteParticles();
+  updateParticles();
+  drawMainParticles(segs);
+  drawBusParticles();
+  drawSpecialParticles();
+  drawWasteParticles();
+  // 数字轻微跳动
+  if(state.time%25===0){
+    state.nodes.forEach(n=>{
+      if(n.input>0){
+        n.input=Math.max(1,n.input+Math.round(rand(-2,2)));
+        n.processing=Math.round(n.input*0.88);
+      }
+    });
+  }
+  updateNodeDOM();
+  smoothUpdate();
+  drawStudentModel();
+  if(state.time%60===0) drawEdgeLabels(segs);
+  requestAnimationFrame(tick);
+}
+
+/* ============================================================
+   M11 初始化
+   ============================================================ */
+function relayout(){
+  // 让stage-wrap高度自适应剩余空间
+  const wrap=document.getElementById('stageWrap');
+  const bot=document.querySelector('.bottom-area');
+  const ctrl=document.querySelector('.control-bar');
+  const hdr=document.querySelector('.header');
+  const totalH = window.innerHeight;
+  const used = hdr.offsetHeight+ctrl.offsetHeight+bot.offsetHeight;
+  wrap.style.height = Math.max(420, totalH-used)+'px';
+  calcLayout();
+  resizeCanvas();
+  positionNodeDOM();
+  // 重绘阶段标签DOM
+  document.querySelectorAll('.stage-bg-tag').forEach(e=>e.remove());
+  document.querySelectorAll('.stage-bg').forEach(e=>e.remove());
+  drawStageTagsDOM();
+}
+
+function drawStageTagsDOM(){
+  const layer=document.getElementById('nodesLayer');
+  const {stageRects} = state.layout;
+  const names={build:'模型构建阶段',train:'训练阶段',infer:'推理阶段',app:'应用与迭代阶段'};
+  for(const[k,r] of Object.entries(stageRects)){
+    const tag=document.createElement('div');
+    tag.className='stage-bg-tag '+k;
+    tag.textContent='━ '+names[k]+' ━';
+    tag.style.left=(r.x+4)+'px';
+    tag.style.top=(r.y-1)+'px';
+    layer.appendChild(tag);
+  }
+}
+
+function init(){
+  document.getElementById('versionTag').textContent=`版本: v${APP_VERSION}`;
+  buildNodeDOM();
+  relayout();
+  applyTemplate();
+  bindEvents();
+  state.running=true;
+  drawEdgeLabels(getMainPathPoints());
+  setTimeout(executePipeline, 500);
+  tick();
+}
+
+window.addEventListener('load',init);
+
+})();
+</script>
+</body>
+</html>

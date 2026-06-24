@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPT 同步 - 观众端</title>
+<style>
+    html, body { margin: 0; padding: 0; height: 100%;
+        background: #111; color: #eee;
+        font-family: system-ui, sans-serif; }
+    .topbar { position: fixed; top: 0; left: 0; right: 0;
+        padding: 6px 12px; background: rgba(0,0,0,.6);
+        font-size: 13px; color: #aaa; z-index: 10;
+        display: flex; justify-content: space-between; }
+    .stage { display: flex; align-items: center; justify-content: center;
+        height: 100vh; }
+    #slide { max-width: 100%; max-height: 100vh; object-fit: contain;
+        box-shadow: 0 0 20px rgba(0,0,0,.5); }
+    .connecting { font-size: 18px; color: #888; }
+    #endhint { display: none; font-size: 22px; color: #ddd; text-align: center; }
+</style>
+</head>
+<body>
+<div class="topbar">
+    <span>会话：<b id="sid"></b></span>
+    <span id="page">连接中...</span>
+</div>
+<div class="stage">
+    <div id="hint" class="connecting">正在连接服务器...</div>
+    <img id="slide" style="display:none">
+    <div id="endhint">放映已结束</div>
+</div>
+<script>
+const path = location.pathname.split('/');
+const sid = path[path.length - 1] || path[path.length - 2];
+document.getElementById('sid').textContent = sid;
+
+const img = document.getElementById('slide');
+const hint = document.getElementById('hint');
+const endhint = document.getElementById('endhint');
+const pageEl = document.getElementById('page');
+let total = 0;
+
+function loadSlide(index) {
+    img.src = `/slides/${sid}/${index}.png?t=${Date.now()}`;
+    img.style.display = 'block';
+    hint.style.display = 'none';
+    endhint.style.display = 'none';
+    pageEl.textContent = total ? `${index} / ${total}` : `第 ${index} 页`;
+}
+
+function showEnd() {
+    img.style.display = 'none';
+    hint.style.display = 'none';
+    endhint.style.display = 'block';
+    pageEl.textContent = '已结束';
+}
+
+(async function () {
+    const r = await fetch(`/state/${sid}`);
+    if (!r.ok) { hint.textContent = '会话不存在'; return; }
+    const st = await r.json();
+    total = st.total;
+    if (st.ended) { showEnd(); return; }
+    loadSlide(st.current);
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws/${sid}`);
+    ws.onopen = () => { hint.textContent = '等待演讲者开始...'; };
+    ws.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        if (d.type === 'slide') loadSlide(d.index);
+        else if (d.type === 'end') showEnd();
+    };
+    ws.onclose = () => { pageEl.textContent = '连接已断开'; };
+})();
+</script>
+</body>
+</html>

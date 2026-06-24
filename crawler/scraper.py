@@ -26,7 +26,7 @@ BASE_URL = "https://forum.trae.cn/c/38-category/40-category/40"
 API_URL = f"{BASE_URL}.json"
 TOPIC_URL = "https://forum.trae.cn/t/topic"
 PAGE_SIZE = 20
-DELAY = 0.5
+DELAY = 0.3
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'data')
 PAGES_DIR = os.path.join(OUTPUT_DIR, 'pages')
 DEMOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'demos')
@@ -191,25 +191,22 @@ def main():
 
     print(f"  共获取 {len(all_topics)} 个帖子")
 
-    print("\n[Step 2] 筛选网页/前端作品...")
+    print("\n[Step 2] 筛选网页/前端作品（仅基于标题/摘要）...")
     web_topics = []
     for topic in all_topics:
         title = topic.get('title', '')
         excerpt = topic.get('excerpt', '')
         if is_web_project(title, excerpt, ''):
             web_topics.append(topic)
-            continue
-        topic['_need_detail_check'] = True
-        web_topics.append(topic)
 
-    print(f"  初步筛选 {len(web_topics)} 个候选帖子")
+    print(f"  通过标题/摘要筛选出 {len(web_topics)} 个候选帖子")
 
     print("\n[Step 3] 获取帖子详情并处理...")
     projects = []
     for i, topic in enumerate(web_topics):
         topic_id = topic['id']
         title = topic.get('title', '')
-        print(f"  [{i + 1}/{len(web_topics)}] 处理: {title[:40]}...")
+        print(f"  [{i + 1}/{len(web_topics)}] 处理: {title[:50]}...")
 
         try:
             detail_data = fetch_topic_detail(topic_id)
@@ -217,17 +214,12 @@ def main():
             if not detail:
                 continue
 
-            if topic.get('_need_detail_check'):
-                cooked = detail_data.get('post_stream', {}).get('posts', [{}])[0].get('cooked', '')
-                if not is_web_project(title, topic.get('excerpt', ''), cooked):
-                    continue
-
             project = process_project(topic, detail)
             if project:
                 projects.append(project)
                 print(f"    -> 已收录 ({project['type']})")
         except Exception as e:
-            print(f"    [ERROR] {e}")
+            print(f"    [SKIP] {e}")
 
         time.sleep(DELAY)
 

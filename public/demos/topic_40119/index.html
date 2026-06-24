@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会议废话过滤器 · AI Meeting Refiner</title>
+<style>
+  :root{
+    --bg-0:#070b1f;
+    --bg-1:#0a1030;
+    --bg-2:#0f1840;
+    --glass:rgba(255,255,255,0.04);
+    --glass-strong:rgba(255,255,255,0.07);
+    --border:rgba(255,255,255,0.08);
+    --border-strong:rgba(120,200,255,0.18);
+    --text:#e8eefc;
+    --text-dim:#8a96b8;
+    --text-mute:#5a6585;
+    --cyan:#22d3ee;
+    --cyan-deep:#0891b2;
+    --teal:#2dd4bf;
+    --blue:#3b82f6;
+    --green:#34d399;
+    --yellow:#fbbf24;
+    --orange:#fb923c;
+    --red:#f87171;
+    --purple:#a78bfa;
+    --shadow-lg:0 24px 60px -20px rgba(0,0,0,0.6);
+    --shadow-glow:0 0 40px rgba(34,211,238,0.15);
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Source Han Sans CN","Noto Sans CJK SC",sans-serif;
+    background:var(--bg-0);
+    color:var(--text);
+    overflow:hidden;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* 背景氛围层 */
+  .bg-layer{
+    position:fixed;inset:0;z-index:-1;overflow:hidden;
+    background:
+      radial-gradient(ellipse 80% 60% at 15% 10%, rgba(34,211,238,0.10), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 85% 90%, rgba(59,130,246,0.10), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 50% 50%, rgba(45,212,191,0.05), transparent 70%),
+      linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+  }
+  .bg-layer::before{
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(rgba(120,200,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,200,255,0.025) 1px, transparent 1px);
+    background-size:48px 48px;
+    mask-image:radial-gradient(ellipse 70% 60% at 50% 40%, #000 30%, transparent 80%);
+  }
+  .bg-layer::after{
+    content:"";position:absolute;inset:0;
+    background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity:0.5;mix-blend-mode:overlay;
+  }
+
+  /* 顶部状态栏 */
+  .topbar{
+    height:64px;display:flex;align-items:center;gap:20px;
+    padding:0 24px;
+    background:linear-gradient(180deg, rgba(15,24,64,0.85), rgba(10,16,48,0.6));
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border-bottom:1px solid var(--border);
+    position:relative;z-index:10;
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-logo{
+    width:38px;height:38px;border-radius:11px;
+    background:linear-gradient(135deg, var(--cyan), var(--blue));
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 8px 24px -6px rgba(34,211,238,0.5), inset 0 1px 0 rgba(255,255,255,0.3);
+    position:relative;
+  }
+  .brand-logo svg{width:22px;height:22px;color:#fff}
+  .brand-text{display:flex;flex-direction:column;line-height:1.15}
+  .brand-title{font-size:15px;font-weight:700;letter-spacing:0.5px}
+  .brand-sub{font-size:10.5px;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase}
+
+  .meeting-info{
+    display:flex;align-items:center;gap:14px;
+    padding:8px 16px;border-radius:12px;
+    background:var(--glass);border:1px solid var(--border);
+    margin-left:8px;
+  }
+  .meeting-info .dot{width:8px;height:8px;border-radius:50%;background:var(--text-mute);transition:all .3s}
+  .meeting-info.live .dot{background:var(--red);box-shadow:0 0 12px var(--red);animation:pulse 1.4s infinite}
+  .meeting-info .label{font-size:12px;color:var(--text-dim)}
+  .meeting-info .title{font-size:13px;font-weight:600}
+  .meeting-info .timer{
+    font-family:"SF Mono","Consolas",monospace;font-size:13px;
+    color:var(--cyan);font-variant-numeric:tabular-nums;
+    padding:3px 10px;border-radius:6px;
+    background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);
+  }
+
+  .topbar-spacer{flex:1}
+
+  .ctrl-btn{
+    height:38px;padding:0 16px;border-radius:10px;
+    border:1px solid var(--border);
+    background:var(--glass);color:var(--text);
+    font-size:13px;font-weight:500;cursor:pointer;
+    display:flex;align-items:center;gap:7px;
+    transition:all .25s;font-family:inherit;
+  }
+  .ctrl-btn:hover{background:var(--glass-strong);border-color:var(--border-strong);transform:translateY(-1px)}
+  .ctrl-btn svg{width:14px;height:14px}
+  .ctrl-btn.primary{
+    background:linear-gradient(135deg, var(--cyan), var(--blue));
+    border:none;color:#fff;font-weight:600;
+    box-shadow:0 8px 20px -6px rgba(34,211,238,0.5);
+  }
+  .ctrl-btn.primary:hover{box-shadow:0 12px 28px -6px rgba(34,211,238,0.65)}
+  .ctrl-btn.ghost{background:transparent}
+
+  /* 主体布局 */
+  .main{
+    display:grid;grid-template-columns:1.35fr 1fr;
+    gap:18px;padding:18px 24px 18px;
+    height:calc(100vh - 64px);
+  }
+
+  .panel{
+    background:var(--glass);
+    border:1px solid var(--border);
+    border-radius:18px;
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    box-shadow:var(--shadow-lg);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    position:relative;
+  }
+  .panel::before{
+    content:"";position:absolute;top:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg, transparent, rgba(34,211,238,0.4), transparent);
+  }
+
+  .panel-head{
+    padding:16px 20px 14px;
+    border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:12px;
+    flex-shrink:0;
+  }
+  .panel-head .icon{
+    width:30px;height:30px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;
+    background:rgba(34,211,238,0.12);color:var(--cyan);
+  }
+  .panel-head .icon svg{width:16px;height:16px}
+  .panel-head h2{font-size:14px;font-weight:600;letter-spacing:0.3px}
+  .panel-head .sub{font-size:11px;color:var(--text-mute);margin-left:auto}
+
+  /* 转录区 */
+  .transcript-body{
+    flex:1;overflow-y:auto;padding:20px 22px;
+    font-size:14.5px;line-height:1.95;
+    scroll-behavior:smooth;
+  }
+  .transcript-body::-webkit-scrollbar{width:6px}
+  .transcript-body::-webkit-scrollbar-thumb{background:rgba(120,200,255,0.15);border-radius:3px}
+  .transcript-body::-webkit-scrollbar-thumb:hover{background:rgba(120,200,255,0.3)}
+
+  .speaker-line{
+    display:flex;gap:12px;margin-bottom:14px;
+    animation:fadeUp .5s ease both;
+  }
+  .avatar{
+    width:32px;height:32px;border-radius:9px;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:700;color:#fff;
+    background:linear-gradient(135deg, var(--cyan-deep), var(--blue));
+    box-shadow:0 4px 12px -3px rgba(0,0,0,0.4);
+  }
+  .avatar.p2{background:linear-gradient(135deg, #f59e0b, #ef4444)}
+  .avatar.p3{background:linear-gradient(135deg, #8b5cf6, #ec4899)}
+  .avatar.p4{background:linear-gradient(135deg, #10b981, #06b6d4)}
+
+  .bubble-wrap{flex:1;min-width:0}
+  .bubble-meta{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .bubble-meta .name{font-size:12px;font-weight:600;color:var(--text)}
+  .bubble-meta .time{font-size:10.5px;color:var(--text-mute);font-family:"SF Mono",monospace}
+  .bubble{
+    padding:11px 15px;border-radius:4px 13px 13px 13px;
+    background:rgba(255,255,255,0.025);
+    border:1px solid rgba(255,255,255,0.04);
+    font-size:14px;color:var(--text);
+    word-break:break-word;
+  }
+
+  /* 标记样式 */
+  .tag-normal{color:var(--text)}
+  .tag-repetitive{
+    background:linear-gradient(180deg, transparent 55%, rgba(251,191,36,0.28) 55%);
+    padding:0 2px;border-radius:2px;
+    animation:highlightIn .6s ease both;
+  }
+  .tag-irrelevant{
+    color:var(--text-mute);text-decoration:line-through;
+    text-decoration-color:rgba(138,150,184,0.6);
+    animation:highlightIn .6s ease both;
+  }
+  .tag-preamble{
+    background:linear-gradient(180deg, transparent 55%, rgba(251,146,60,0.28) 55%);
+    padding:0 2px;border-radius:2px;
+    animation:highlightIn .6s ease both;
+  }
+  .tag-decision{
+    color:var(--green);font-weight:700;
+    background:rgba(52,211,153,0.10);
+    padding:1px 5px;border-radius:4px;
+    border:1px solid rgba(52,211,153,0.25);
+    animation:decisionIn .6s ease both;
+  }
+  .tag-action{
+    color:var(--cyan);font-weight:600;
+    background:rgba(34,211,238,0.10);
+    padding:1px 5px;border-radius:4px;
+    border-left:2px solid var(--cyan);
+    animation:actionIn .6s ease both;
+  }
+
+  .typing-cursor{
+    display:inline-block;width:7px;height:15px;
+    background:var(--cyan);margin-left:2px;
+    vertical-align:middle;border-radius:1px;
+    animation:blink 1s steps(2) infinite;
+  }
+
+  /* 图例 */
+  .legend{
+    padding:10px 20px;border-top:1px solid var(--border);
+    display:flex;flex-wrap:wrap;gap:10px 14px;
+    flex-shrink:0;background:rgba(0,0,0,0.15);
+  }
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim)}
+  .legend-chip{width:18px;height:14px;border-radius:3px;display:inline-block}
+  .lc-rep{background:linear-gradient(180deg, transparent 55%, rgba(251,191,36,0.5) 55%)}
+  .lc-irr{background:rgba(138,150,184,0.3);text-decoration:line-through}
+  .lc-pre{background:linear-gradient(180deg, transparent 55%, rgba(251,146,60,0.5) 55%)}
+  .lc-dec{background:rgba(52,211,153,0.2);border:1px solid rgba(52,211,153,0.4)}
+  .lc-act{background:rgba(34,211,238,0.2);border-left:2px solid var(--cyan)}
+
+  /* 右侧分析区 */
+  .analysis-body{flex:1;overflow-y:auto;padding:18px 20px}
+  .analysis-body::-webkit-scrollbar{width:6px}
+  .analysis-body::-webkit-scrollbar-thumb{background:rgba(120,200,255,0.15);border-radius:3px}
+
+  .tabs{
+    display:flex;gap:4px;padding:6px;
+    background:rgba(0,0,0,0.2);border-radius:11px;
+    margin-bottom:18px;
+  }
+  .tab{
+    flex:1;padding:8px 6px;border-radius:8px;
+    font-size:12px;color:var(--text-dim);cursor:pointer;
+    text-align:center;transition:all .25s;font-weight:500;
+    border:none;background:transparent;font-family:inherit;
+  }
+  .tab:hover{color:var(--text)}
+  .tab.active{
+    background:linear-gradient(135deg, rgba(34,211,238,0.18), rgba(59,130,246,0.18));
+    color:var(--cyan);box-shadow:inset 0 0 0 1px rgba(34,211,238,0.25);
+  }
+
+  .tab-pane{display:none;animation:fadeUp .4s ease both}
+  .tab-pane.active{display:block}
+
+  /* 评分卡 */
+  .score-card{
+    padding:22px;border-radius:14px;
+    background:linear-gradient(135deg, rgba(34,211,238,0.08), rgba(59,130,246,0.08));
+    border:1px solid var(--border-strong);
+    text-align:center;margin-bottom:16px;
+    position:relative;overflow:hidden;
+  }
+  .score-card::before{
+    content:"";position:absolute;top:-50%;left:-50%;width:200%;height:200%;
+    background:radial-gradient(circle, rgba(34,211,238,0.1), transparent 50%);
+    animation:rotate 12s linear infinite;
+  }
+  .score-ring{
+    width:130px;height:130px;margin:0 auto 14px;position:relative;
+  }
+  .score-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+  .score-ring circle{fill:none;stroke-width:8;stroke-linecap:round}
+  .score-ring .bg{stroke:rgba(255,255,255,0.06)}
+  .score-ring .fg{
+    stroke:url(#scoreGrad);
+    stroke-dasharray:377;
+    stroke-dashoffset:377;
+    transition:stroke-dashoffset 1.5s cubic-bezier(.4,0,.2,1);
+    filter:drop-shadow(0 0 8px rgba(34,211,238,0.5));
+  }
+  .score-num{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+  }
+  .score-num .val{font-size:38px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
+  .score-num .unit{font-size:11px;color:var(--text-dim);letter-spacing:1px}
+  .score-grade{
+    display:inline-block;padding:3px 12px;border-radius:20px;
+    font-size:11px;font-weight:600;letter-spacing:1px;
+    background:rgba(52,211,153,0.15);color:var(--green);
+    border:1px solid rgba(52,211,153,0.3);
+  }
+  .score-title{font-size:13px;color:var(--text-dim);margin-top:8px}
+
+  .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+  .metric{
+    padding:12px 14px;border-radius:11px;
+    background:var(--glass);border:1px solid var(--border);
+  }
+  .metric .label{font-size:11px;color:var(--text-mute);margin-bottom:6px;display:flex;align-items:center;gap:5px}
+  .metric .label .dot{width:6px;height:6px;border-radius:50%}
+  .metric .val{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+  .metric .bar{height:4px;border-radius:2px;background:rgba(255,255,255,0.06);margin-top:8px;overflow:hidden}
+  .metric .bar-fill{height:100%;border-radius:2px;transition:width 1s ease}
+
+  .suggest-list{display:flex;flex-direction:column;gap:8px}
+  .suggest{
+    padding:11px 13px;border-radius:10px;
+    background:rgba(255,255,255,0.025);border:1px solid var(--border);
+    display:flex;gap:10px;font-size:12.5px;color:var(--text-dim);
+    animation:fadeUp .4s ease both;
+  }
+  .suggest .ico{flex-shrink:0;width:18px;height:18px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px}
+  .suggest.warn .ico{background:rgba(251,191,36,0.15);color:var(--yellow)}
+  .suggest.good .ico{background:rgba(52,211,153,0.15);color:var(--green)}
+  .suggest.info .ico{background:rgba(34,211,238,0.15);color:var(--cyan)}
+
+  /* 要点列表 */
+  .section-title{
+    font-size:11px;color:var(--text-mute);letter-spacing:2px;
+    text-transform:uppercase;margin:18px 0 10px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .section-title:first-child{margin-top:0}
+  .section-title::after{content:"";flex:1;height:1px;background:var(--border)}
+
+  .point-card{
+    padding:13px 15px;border-radius:11px;
+    background:var(--glass);border:1px solid var(--border);
+    margin-bottom:8px;display:flex;gap:12px;
+    animation:fadeUp .4s ease both;
+    transition:all .25s;
+  }
+  .point-card:hover{border-color:var(--border-strong);transform:translateX(2px)}
+  .point-card .pico{
+    width:28px;height:28px;border-radius:8px;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-size:13px;
+  }
+  .point-card.decision .pico{background:rgba(52,211,153,0.15);color:var(--green)}
+  .point-card.action .pico{background:rgba(34,211,238,0.15);color:var(--cyan)}
+  .point-card.owner .pico{background:rgba(167,139,250,0.15);color:var(--purple)}
+  .point-card .pbody{flex:1;min-width:0}
+  .point-card .ptitle{font-size:13px;font-weight:600;margin-bottom:3px}
+  .point-card .pmeta{font-size:11px;color:var(--text-mute);display:flex;gap:10px;flex-wrap:wrap}
+  .point-card .pmeta span{display:flex;align-items:center;gap:3px}
+  .point-card .badge{
+    display:inline-block;padding:1px 7px;border-radius:4px;
+    font-size:10px;font-weight:600;
+  }
+  .badge-urgent{background:rgba(248,113,113,0.15);color:var(--red)}
+  .badge-normal{background:rgba(34,211,238,0.15);color:var(--cyan)}
+
+  /* 精简版 */
+  .refined-text{
+    padding:18px 20px;border-radius:13px;
+    background:linear-gradient(135deg, rgba(52,211,153,0.06), rgba(34,211,238,0.06));
+    border:1px solid rgba(52,211,153,0.2);
+    font-size:13.5px;line-height:1.9;
+    animation:fadeUp .5s ease both;
+  }
+  .refined-text p{margin-bottom:10px}
+  .refined-text p:last-child{margin-bottom:0}
+  .refined-text strong{color:var(--green)}
+  .refined-text .hl{color:var(--cyan);font-weight:600}
+  .compare-box{
+    margin-top:14px;padding:14px;border-radius:11px;
+    background:var(--glass);border:1px solid var(--border);
+  }
+  .compare-box .row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0}
+  .compare-box .row + .row{border-top:1px dashed var(--border)}
+  .compare-box .label{color:var(--text-dim)}
+  .compare-box .v1{color:var(--text-mute);text-decoration:line-through}
+  .compare-box .v2{color:var(--green);font-weight:600}
+
+  /* 导出栏 */
+  .export-bar{
+    padding:14px 20px;border-top:1px solid var(--border);
+    display:flex;gap:8px;flex-shrink:0;background:rgba(0,0,0,0.15);
+  }
+  .export-btn{
+    flex:1;height:36px;border-radius:9px;
+    border:1px solid var(--border);background:var(--glass);
+    color:var(--text-dim);font-size:12px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    transition:all .25s;font-family:inherit;font-weight:500;
+  }
+  .export-btn:hover{color:var(--text);border-color:var(--border-strong);background:var(--glass-strong)}
+  .export-btn svg{width:13px;height:13px}
+
+  /* Toast */
+  .toast-wrap{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+    z-index:1000;display:flex;flex-direction:column;gap:8px;align-items:center;
+  }
+  .toast{
+    padding:11px 20px;border-radius:11px;
+    background:rgba(15,24,64,0.95);backdrop-filter:blur(20px);
+    border:1px solid var(--border-strong);
+    color:var(--text);font-size:13px;
+    box-shadow:var(--shadow-lg);
+    display:flex;align-items:center;gap:10px;
+    animation:toastIn .3s ease;
+  }
+  .toast .ico{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px}
+  .toast.success .ico{background:rgba(52,211,153,0.2);color:var(--green)}
+  .toast.info .ico{background:rgba(34,211,238,0.2);color:var(--cyan)}
+
+  /* 动画 */
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes highlightIn{from{background-color:rgba(255,255,255,0.15)}to{background-color:transparent}}
+  @keyframes decisionIn{from{transform:scale(0.9);opacity:0}to{transform:scale(1);opacity:1}}
+  @keyframes actionIn{from{transform:translateX(-6px);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes rotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+  @keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes wave{0%,100%{height:6px}50%{height:18px}}
+
+  /* 音波 */
+  .wave-bars{display:flex;align-items:center;gap:2px;height:20px}
+  .wave-bars span{
+    width:3px;background:var(--cyan);border-radius:2px;
+    animation:wave 1s ease-in-out infinite;
+  }
+  .wave-bars span:nth-child(1){animation-delay:0s}
+  .wave-bars span:nth-child(2){animation-delay:0.1s}
+  .wave-bars span:nth-child(3){animation-delay:0.2s}
+  .wave-bars span:nth-child(4){animation-delay:0.3s}
+  .wave-bars span:nth-child(5){animation-delay:0.4s}
+  .wave-bars.paused span{animation-play-state:paused;height:6px}
+
+  /* 响应式 */
+  @media (max-width:1100px){
+    .main{grid-template-columns:1fr;height:auto;overflow-y:auto}
+    body{overflow:auto}
+  }
+</style>
+</head>
+<body>
+<div class="bg-layer"></div>
+
+<!-- 顶部状态栏 -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12h2l2-7 4 14 3-9 2 4h5"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <span class="brand-title">会议废话过滤器</span>
+      <span class="brand-sub">Meeting Refiner · AI</span>
+    </div>
+  </div>
+
+  <div class="meeting-info" id="meetingInfo">
+    <span class="dot"></span>
+    <div>
+      <div class="label">当前会议</div>
+      <div class="title">Q3 产品迭代评审会</div>
+    </div>
+    <span class="timer" id="timer">00:00</span>
+    <div class="wave-bars paused" id="waveBars">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <div class="topbar-spacer"></div>
+
+  <button class="ctrl-btn" id="resetBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+    重置
+  </button>
+  <button class="ctrl-btn primary" id="playBtn">
+    <svg viewBox="0 0 24 24" fill="currentColor" id="playIcon"><path d="M8 5v14l11-7z"/></svg>
+    <span id="playLabel">开始转录</span>
+  </button>
+</header>
+
+<!-- 主体 -->
+<main class="main">
+
+  <!-- 左：转录区 -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+      </div>
+      <h2>实时语音转录</h2>
+      <span class="sub" id="transcriptStatus">就绪</span>
+    </div>
+    <div class="transcript-body" id="transcriptBody">
+      <div style="color:var(--text-mute);text-align:center;padding:60px 20px;font-size:13px;">
+        <div style="font-size:32px;margin-bottom:12px;opacity:0.4">🎙️</div>
+        点击右上角"开始转录"按钮，体验 AI 实时会议转录<br>
+        系统将自动识别废话、决策与行动项
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-chip lc-rep"></span>重复表述</div>
+      <div class="legend-item"><span class="legend-chip lc-irr"></span>无关闲聊</div>
+      <div class="legend-item"><span class="legend-chip lc-pre"></span>过度铺垫</div>
+      <div class="legend-item"><span class="legend-chip lc-dec"></span>核心决策</div>
+      <div class="legend-item"><span class="legend-chip lc-act"></span>行动项</div>
+    </div>
+  </section>
+
+  <!-- 右：分析区 -->
+  <section class="panel">
+    <div class="panel-head">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      </div>
+      <h2>AI 智能分析</h2>
+      <span class="sub" id="analysisStatus">等待转录</span>
+    </div>
+    <div class="analysis-body">
+      <div class="tabs">
+        <button class="tab active" data-tab="score">效率评分</button>
+        <button class="tab" data-tab="points">核心要点</button>
+        <button class="tab" data-tab="refined">精简版本</button>
+      </div>
+
+      <!-- 评分 -->
+      <div class="tab-pane active" id="pane-score">
+        <div class="score-card">
+          <div class="score-ring">
+            <svg viewBox="0 0 130 130">
+              <defs>
+                <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#22d3ee"/>
+                  <stop offset="100%" stop-color="#34d399"/>
+                </linearGradient>
+              </defs>
+              <circle class="bg" cx="65" cy="65" r="60"/>
+              <circle class="fg" id="scoreRing" cx="65" cy="65" r="60"/>
+            </svg>
+            <div class="score-num">
+              <span class="val" id="scoreVal">0</span>
+              <span class="unit">/ 100</span>
+            </div>
+          </div>
+          <div class="score-grade" id="scoreGrade">待评估</div>
+          <div class="score-title" id="scoreTitle">完成转录后查看会议效率评分</div>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="label"><span class="dot" style="background:var(--green)"></span>有效内容占比</div>
+            <div class="val" id="m1">—</div>
+            <div class="bar"><div class="bar-fill" id="b1" style="background:var(--green);width:0"></div></div>
+          </div>
+          <div class="metric">
+            <div class="label"><span class="dot" style="background:var(--yellow)"></span>冗余内容占比</div>
+            <div class="val" id="m2">—</div>
+            <div class="bar"><div class="bar-fill" id="b2" style="background:var(--yellow);width:0"></div></div>
+          </div>
+          <div class="metric">
+            <div class="label"><span class="dot" style="background:var(--cyan)"></span>决策明确度</div>
+            <div class="val" id="m3">—</div>
+            <div class="bar"><div class="bar-fill" id="b3" style="background:var(--cyan);width:0"></div></div>
+          </div>
+          <div class="metric">
+            <div class="label"><span class="dot" style="background:var(--purple)"></span>行动项清晰度</div>
+            <div class="val" id="m4">—</div>
+            <div class="bar"><div class="bar-fill" id="b4" style="background:var(--purple);width:0"></div></div>
+          </div>
+        </div>
+
+        <div class="section-title">改进建议</div>
+        <div class="suggest-list" id="suggestList">
+          <div class="suggest info"><div class="ico">i</div><div>完成转录后将生成个性化改进建议</div></div>
+        </div>
+      </div>
+
+      <!-- 要点 -->
+      <div class="tab-pane" id="pane-points">
+        <div class="section-title">核心决策</div>
+        <div id="decisionList">
+          <div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>
+        </div>
+        <div class="section-title">行动项</div>
+        <div id="actionList">
+          <div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>
+        </div>
+        <div class="section-title">责任人</div>
+        <div id="ownerList">
+          <div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>
+        </div>
+      </div>
+
+      <!-- 精简版 -->
+      <div class="tab-pane" id="pane-refined">
+        <div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center" id="refinedEmpty">
+          等待转录完成...<br>系统将自动生成精简版会议纪要
+        </div>
+        <div id="refinedContent" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- 导出 -->
+    <div class="export-bar">
+      <button class="export-btn" data-fmt="markdown">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Markdown
+      </button>
+      <button class="export-btn" data-fmt="pdf">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        PDF
+      </button>
+      <button class="export-btn" data-fmt="email">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        邮件
+      </button>
+      <button class="export-btn" data-fmt="save">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        存档
+      </button>
+    </div>
+  </section>
+</main>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* ============ 预设会议内容 ============ */
+const MEETING = {
+  title: "Q3 产品迭代评审会",
+  date: "2026-06-22",
+  segments: [
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:00", type:"normal",
+      text:"各位早上好，今天召开 Q3 产品迭代评审会，主要讨论智能推荐功能的上线计划。" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:01", type:"preamble",
+      text:"嗯，我先简单说一下背景吧，这个项目其实已经酝酿很久了，从去年开始我们就一直在调研市场需求，做了大量用户访谈。" },
+    { speaker:"王浩", role:"开发工程师", avatar:"王", cls:"p2", time:"09:02", type:"irrelevant",
+      text:"那个，对了，昨天我看了一个不错的电影叫《代码人生》，强烈推荐给大家，周末可以看看。" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:03", type:"normal",
+      text:"好了，回到正题。经过前期调研和讨论，" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:03", type:"decision",
+      text:"我们决定在 Q3 正式上线智能推荐功能 v1.0" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:04", type:"action",
+      text:"由张明负责推荐算法部分，李华负责前端开发，7月15日前完成开发，7月底上线。" },
+    { speaker:"李华", role:"前端开发", avatar:"李", cls:"p4", time:"09:05", type:"repetitive",
+      text:"需要说明的是，这个功能非常重要，非常非常重要，我们必须保证质量，质量是第一位的。" },
+    { speaker:"李华", role:"前端开发", avatar:"李", cls:"p4", time:"09:06", type:"repetitive",
+      text:"王总之前也提到过，提到过好几次，说用户体验是第一位的，是最重要的。" },
+    { speaker:"王浩", role:"开发工程师", avatar:"王", cls:"p2", time:"09:07", type:"preamble",
+      text:"那么我就多说两句，其实吧，从技术角度来说呢，这个事情我们需要好好评估一下，毕竟涉及到很多方面。" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:08", type:"decision",
+      text:"技术方案采用协同过滤 + 内容召回双路融合，A/B 测试两周后全量发布。" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:09", type:"action",
+      text:"王浩负责后端接口，本周五前输出技术方案文档。" },
+    { speaker:"张明", role:"产品负责人", avatar:"张", cls:"p1", time:"09:10", type:"normal",
+      text:"大家还有什么意见吗？没有的话就按这个方案执行，散会。" }
+  ]
+};
+
+/* ============ 状态 ============ */
+let state = {
+  playing:false,
+  idx:0,
+  timerSec:0,
+  timerInt:null,
+  typedChars:0,
+  typedSegIdx:0,
+  typeInt:null,
+  finished:false
+};
+
+const $ = id => document.getElementById(id);
+const transcriptBody = $("transcriptBody");
+
+/* ============ Toast ============ */
+function toast(msg, type="info"){
+  const t = document.createElement("div");
+  t.className = "toast " + type;
+  const ico = type==="success"?"✓":"i";
+  t.innerHTML = `<div class="ico">${ico}</div><div>${msg}</div>`;
+  $("toastWrap").appendChild(t);
+  setTimeout(()=>{ t.style.opacity="0"; t.style.transform="translateY(10px)"; t.style.transition="all .3s"; setTimeout(()=>t.remove(),300); }, 2400);
+}
+
+/* ============ 计时器 ============ */
+function fmtTime(s){
+  const m = String(Math.floor(s/60)).padStart(2,"0");
+  const ss = String(s%60).padStart(2,"0");
+  return m+":"+ss;
+}
+function startTimer(){
+  state.timerInt = setInterval(()=>{ state.timerSec++; $("timer").textContent = fmtTime(state.timerSec); }, 1000);
+}
+function stopTimer(){ clearInterval(state.timerInt); }
+
+/* ============ 转录核心 ============ */
+function startTranscript(){
+  if(state.finished){ resetAll(); }
+  state.playing = true;
+  $("playLabel").textContent = "暂停";
+  $("playIcon").innerHTML = '<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>';
+  $("meetingInfo").classList.add("live");
+  $("waveBars").classList.remove("paused");
+  $("transcriptStatus").textContent = "转录中...";
+  $("analysisStatus").textContent = "实时分析中";
+  startTimer();
+  typeNextSegment();
+}
+
+function pauseTranscript(){
+  state.playing = false;
+  $("playLabel").textContent = "继续";
+  $("playIcon").innerHTML = '<path d="M8 5v14l11-7z"/>';
+  $("meetingInfo").classList.remove("live");
+  $("waveBars").classList.add("paused");
+  $("transcriptStatus").textContent = "已暂停";
+  stopTimer();
+  clearInterval(state.typeInt);
+}
+
+function typeNextSegment(){
+  if(state.idx >= MEETING.segments.length){ finishTranscript(); return; }
+  const seg = MEETING.segments[state.idx];
+
+  // 创建气泡容器
+  const line = document.createElement("div");
+  line.className = "speaker-line";
+  line.innerHTML = `
+    <div class="avatar ${seg.cls}">${seg.avatar}</div>
+    <div class="bubble-wrap">
+      <div class="bubble-meta">
+        <span class="name">${seg.speaker}</span>
+        <span style="font-size:10px;color:var(--text-mute)">·</span>
+        <span class="time">${seg.time}</span>
+      </div>
+      <div class="bubble"><span class="tag-${seg.type}" data-text="${escapeAttr(seg.text)}"></span><span class="typing-cursor" id="cur-${state.idx}"></span></div>
+    </div>`;
+  transcriptBody.appendChild(line);
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+
+  const target = line.querySelector(`.tag-${seg.type}`);
+  const cursor = $(`cur-${state.idx}`);
+  const fullText = seg.text;
+  let i = 0;
+
+  // 不同类型不同打字速度（废话略快）
+  const speed = (seg.type==="irrelevant"||seg.type==="preamble")?28:55;
+
+  state.typeInt = setInterval(()=>{
+    if(!state.playing){ return; }
+    if(i >= fullText.length){
+      clearInterval(state.typeInt);
+      if(cursor) cursor.remove();
+      state.idx++;
+      // 实时更新分析（每完成一段）
+      liveUpdateAnalysis();
+      setTimeout(typeNextSegment, 350);
+      return;
+    }
+    target.textContent += fullText.charAt(i);
+    i++;
+    transcriptBody.scrollTop = transcriptBody.scrollHeight;
+  }, speed);
+}
+
+function escapeAttr(s){ return s.replace(/"/g,"&quot;"); }
+
+function finishTranscript(){
+  state.playing = false;
+  state.finished = true;
+  $("playLabel").textContent = "重新播放";
+  $("playIcon").innerHTML = '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>';
+  $("meetingInfo").classList.remove("live");
+  $("waveBars").classList.add("paused");
+  $("transcriptStatus").textContent = "转录完成";
+  $("analysisStatus").textContent = "分析完成";
+  stopTimer();
+  finalAnalysis();
+  toast("转录完成，已生成智能分析报告", "success");
+}
+
+function resetAll(){
+  pauseTranscript();
+  state = { playing:false, idx:0, timerSec:0, timerInt:null, typedChars:0, typedSegIdx:0, typeInt:null, finished:false };
+  $("timer").textContent = "00:00";
+  $("transcriptStatus").textContent = "就绪";
+  $("analysisStatus").textContent = "等待转录";
+  $("playLabel").textContent = "开始转录";
+  $("playIcon").innerHTML = '<path d="M8 5v14l11-7z"/>';
+  $("meetingInfo").classList.remove("live");
+  $("waveBars").classList.add("paused");
+  transcriptBody.innerHTML = `<div style="color:var(--text-mute);text-align:center;padding:60px 20px;font-size:13px;"><div style="font-size:32px;margin-bottom:12px;opacity:0.4">🎙️</div>点击右上角"开始转录"按钮，体验 AI 实时会议转录<br>系统将自动识别废话、决策与行动项</div>`;
+  resetAnalysis();
+}
+
+/* ============ 分析 ============ */
+function resetAnalysis(){
+  $("scoreVal").textContent = "0";
+  $("scoreGrade").textContent = "待评估";
+  $("scoreGrade").style.background = "rgba(52,211,153,0.15)";
+  $("scoreGrade").style.color = "var(--green)";
+  $("scoreTitle").textContent = "完成转录后查看会议效率评分";
+  $("scoreRing").style.strokeDashoffset = 377;
+  ["m1","m2","m3","m4"].forEach(id=>$(id).textContent="—");
+  ["b1","b2","b3","b4"].forEach(id=>$(id).style.width="0");
+  $("suggestList").innerHTML = '<div class="suggest info"><div class="ico">i</div><div>完成转录后将生成个性化改进建议</div></div>';
+  $("decisionList").innerHTML = '<div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>';
+  $("actionList").innerHTML = '<div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>';
+  $("ownerList").innerHTML = '<div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">等待转录完成...</div>';
+  $("refinedEmpty").style.display = "block";
+  $("refinedContent").style.display = "none";
+}
+
+function computeStats(upToIdx){
+  const segs = upToIdx>=0 ? MEETING.segments.slice(0, upToIdx+1) : MEETING.segments;
+  const total = segs.length;
+  let normal=0, repetitive=0, irrelevant=0, preamble=0, decision=0, action=0;
+  segs.forEach(s=>{
+    if(s.type==="normal")normal++;
+    else if(s.type==="repetitive")repetitive++;
+    else if(s.type==="irrelevant")irrelevant++;
+    else if(s.type==="preamble")preamble++;
+    else if(s.type==="decision")decision++;
+    else if(s.type==="action")action++;
+  });
+  const waste = repetitive+irrelevant+preamble;
+  const valid = normal+decision+action;
+  const validRatio = total? Math.round(valid/total*100):0;
+  const wasteRatio = total? Math.round(waste/total*100):0;
+  const decisionScore = total? Math.min(100, Math.round(decision*25 + action*15)):0;
+  const actionScore = total? Math.min(100, Math.round(action*20 + decision*10)):0;
+  // 综合评分：有效内容占比 40% + 决策明确度 30% + 行动清晰度 30% - 浪费惩罚
+  let score = Math.round(validRatio*0.4 + decisionScore*0.3 + actionScore*0.3);
+  if(wasteRatio>40) score -= 10;
+  score = Math.max(0, Math.min(100, score));
+  return {total,normal,repetitive,irrelevant,preamble,decision,action,waste,valid,validRatio,wasteRatio,decisionScore,actionScore,score};
+}
+
+function liveUpdateAnalysis(){
+  const s = computeStats(state.idx);
+  updateScoreUI(s);
+}
+
+function updateScoreUI(s){
+  $("scoreVal").textContent = s.score;
+  const offset = 377 - (377 * s.score / 100);
+  $("scoreRing").style.strokeDashoffset = offset;
+
+  let grade, gColor, gBg, title;
+  if(s.score>=85){ grade="优秀"; gColor="var(--green)"; gBg="rgba(52,211,153,0.15)"; title="会议高效，决策清晰，行动明确"; }
+  else if(s.score>=70){ grade="良好"; gColor="var(--cyan)"; gBg="rgba(34,211,238,0.15)"; title="会议质量不错，仍有优化空间"; }
+  else if(s.score>=55){ grade="一般"; gColor="var(--yellow)"; gBg="rgba(251,191,36,0.15)"; title="存在较多冗余内容，建议精简"; }
+  else { grade="待改进"; gColor="var(--red)"; gBg="rgba(248,113,113,0.15)"; title="冗余内容过多，会议效率较低"; }
+  $("scoreGrade").textContent = grade;
+  $("scoreGrade").style.color = gColor;
+  $("scoreGrade").style.background = gBg;
+  $("scoreGrade").style.borderColor = gColor;
+  $("scoreTitle").textContent = title;
+
+  $("m1").textContent = s.validRatio + "%";
+  $("m2").textContent = s.wasteRatio + "%";
+  $("m3").textContent = s.decisionScore;
+  $("m4").textContent = s.actionScore;
+  $("b1").style.width = s.validRatio + "%";
+  $("b2").style.width = s.wasteRatio + "%";
+  $("b3").style.width = s.decisionScore + "%";
+  $("b4").style.width = s.actionScore + "%";
+}
+
+function finalAnalysis(){
+  const s = computeStats(MEETING.segments.length-1);
+  updateScoreUI(s);
+
+  // 建议
+  const suggests = [];
+  if(s.wasteRatio>30) suggests.push({t:"warn",m:`冗余内容占比 ${s.wasteRatio}%，建议会议前明确议程，控制发言时长`});
+  if(s.irrelevant>0) suggests.push({t:"warn",m:`检测到 ${s.irrelevant} 处无关闲聊，建议会议主持人及时引导话题回归`});
+  if(s.preamble>0) suggests.push({t:"info",m:`检测到 ${s.preamble} 处过度铺垫，建议发言直奔主题，提升信息密度`});
+  if(s.repetitive>0) suggests.push({t:"info",m:`检测到 ${s.repetitive} 处重复表述，建议会前准备要点，避免反复强调`});
+  if(s.decision>=2) suggests.push({t:"good",m:`决策明确度高，共形成 ${s.decision} 项核心决策`});
+  if(s.action>=2) suggests.push({t:"good",m:`行动项清晰，共 ${s.action} 项任务已指定责任人`});
+  if(suggests.length===0) suggests.push({t:"good",m:"会议结构合理，内容质量优秀"});
+
+  $("suggestList").innerHTML = suggests.map((s,i)=>`
+    <div class="suggest ${s.t}" style="animation-delay:${i*0.08}s">
+      <div class="ico">${s.t==="warn"?"!":s.t==="good"?"✓":"i"}</div>
+      <div>${s.m}</div>
+    </div>`).join("");
+
+  // 决策
+  const decisions = MEETING.segments.filter(x=>x.type==="decision");
+  $("decisionList").innerHTML = decisions.map((d,i)=>`
+    <div class="point-card decision" style="animation-delay:${i*0.1}s">
+      <div class="pico">✓</div>
+      <div class="pbody">
+        <div class="ptitle">${d.text}</div>
+        <div class="pmeta">
+          <span>👤 ${d.speaker}</span>
+          <span>🕐 ${d.time}</span>
+          <span class="badge badge-normal">已确认</span>
+        </div>
+      </div>
+    </div>`).join("");
+
+  // 行动项
+  const actions = MEETING.segments.filter(x=>x.type==="action");
+  $("actionList").innerHTML = actions.map((a,i)=>{
+    const urgent = /本周|周五|7月15日/.test(a.text);
+    return `
+    <div class="point-card action" style="animation-delay:${i*0.1}s">
+      <div class="pico">→</div>
+      <div class="pbody">
+        <div class="ptitle">${a.text}</div>
+        <div class="pmeta">
+          <span>👤 ${a.speaker}</span>
+          <span>🕐 ${a.time}</span>
+          <span class="badge ${urgent?'badge-urgent':'badge-normal'}">${urgent?'紧急':'常规'}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // 责任人
+  const ownerMap = {};
+  actions.forEach(a=>{
+    const m = a.text.match(/由(.+?)负责|(.+?)负责/g);
+    if(m){
+      m.forEach(mm=>{
+        const names = mm.replace(/由|负责/g,"").split(/[，,和]/).filter(Boolean);
+        names.forEach(n=>{
+          n = n.trim();
+          if(!ownerMap[n]) ownerMap[n] = [];
+          ownerMap[n].push(a.text);
+        });
+      });
+    }
+  });
+  // 补充：从行动项文本里抓人名
+  ["张明","李华","王浩"].forEach(name=>{
+    actions.forEach(a=>{
+      if(a.text.includes(name) && !ownerMap[name]){
+        ownerMap[name] = ownerMap[name]||[];
+        if(!ownerMap[name].includes(a.text)) ownerMap[name].push(a.text);
+      }
+    });
+  });
+
+  const owners = Object.keys(ownerMap);
+  if(owners.length){
+    $("ownerList").innerHTML = owners.map((n,i)=>`
+      <div class="point-card owner" style="animation-delay:${i*0.1}s">
+        <div class="pico">${n.charAt(0)}</div>
+        <div class="pbody">
+          <div class="ptitle">${n}</div>
+          <div class="pmeta">
+            <span>📋 ${ownerMap[n].length} 项任务</span>
+            <span class="badge badge-normal">已分配</span>
+          </div>
+        </div>
+      </div>`).join("");
+  }else{
+    $("ownerList").innerHTML = '<div style="color:var(--text-mute);font-size:12px;padding:20px;text-align:center">未识别到明确责任人</div>';
+  }
+
+  // 精简版
+  $("refinedEmpty").style.display = "none";
+  $("refinedContent").style.display = "block";
+  $("refinedContent").innerHTML = `
+    <div class="refined-text">
+      <p><strong>📌 会议主题：</strong>${MEETING.title}（${MEETING.date}）</p>
+      <p><strong>🎯 核心决策：</strong>Q3 正式上线智能推荐功能 v1.0；技术方案采用<span class="hl">协同过滤 + 内容召回双路融合</span>，A/B 测试两周后全量发布。</p>
+      <p><strong>⚡ 行动项：</span></strong></p>
+      <p style="padding-left:14px">· <span class="hl">张明</span> — 负责推荐算法部分，7月15日前完成开发</p>
+      <p style="padding-left:14px">· <span class="hl">李华</span> — 负责前端开发，7月15日前完成开发，7月底上线</p>
+      <p style="padding-left:14px">· <span class="hl">王浩</span> — 负责后端接口，本周五前输出技术方案文档</p>
+      <p><strong>⏰ 关键时间节点：</strong>7月15日完成开发 → 7月底正式上线</p>
+    </div>
+    <div class="compare-box">
+      <div class="row"><span class="label">原始转录字数</span><span class="v1">${countChars()} 字</span></div>
+      <div class="row"><span class="label">精简后字数</span><span class="v2">约 180 字</span></div>
+      <div class="row"><span class="label">压缩比</span><span class="v2">${Math.round((1 - 180/countChars())*100)}%</span></div>
+      <div class="row"><span class="label">节省阅读时间</span><span class="v2">约 2 分钟</span></div>
+    </div>`;
+}
+
+function countChars(){
+  return MEETING.segments.reduce((sum,s)=>sum+s.text.length,0);
+}
+
+/* ============ Tab 切换 ============ */
+document.querySelectorAll(".tab").forEach(tab=>{
+  tab.addEventListener("click",()=>{
+    document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p=>p.classList.remove("active"));
+    tab.classList.add("active");
+    $("pane-"+tab.dataset.tab).classList.add("active");
+  });
+});
+
+/* ============ 按钮 ============ */
+$("playBtn").addEventListener("click",()=>{
+  if(state.playing) pauseTranscript();
+  else startTranscript();
+});
+$("resetBtn").addEventListener("click",()=>{
+  resetAll();
+  toast("已重置，可重新开始转录","info");
+});
+
+/* ============ 导出 ============ */
+document.querySelectorAll(".export-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    if(!state.finished){
+      toast("请先完成转录再导出","info");
+      return;
+    }
+    const fmt = btn.dataset.fmt;
+    if(fmt==="save"){
+      saveToHistory();
+      return;
+    }
+    const map = {markdown:"Markdown",pdf:"PDF",email:"邮件"};
+    toast(`已生成${map[fmt]}文件（演示）`,"success");
+  });
+});
+
+/* ============ LocalStorage 存档 ============ */
+function saveToHistory(){
+  const s = computeStats(MEETING.segments.length-1);
+  const record = {
+    id: Date.now(),
+    title: MEETING.title,
+    date: MEETING.date,
+    duration: fmtTime(state.timerSec),
+    score: s.score,
+    grade: $("scoreGrade").textContent,
+    decisions: MEETING.segments.filter(x=>x.type==="decision").map(x=>x.text),
+    actions: MEETING.segments.filter(x=>x.type==="action").map(x=>x.text),
+    savedAt: new Date().toLocaleString("zh-CN")
+  };
+  let history = [];
+  try{ history = JSON.parse(localStorage.getItem("meeting_history")||"[]"); }catch(e){}
+  history.unshift(record);
+  if(history.length>20) history = history.slice(0,20);
+  localStorage.setItem("meeting_history", JSON.stringify(history));
+  toast(`已存档至本地（共 ${history.length} 条记录）`,"success");
+}
+
+/* ============ 初始化：检查历史记录 ============ */
+window.addEventListener("load",()=>{
+  try{
+    const history = JSON.parse(localStorage.getItem("meeting_history")||"[]");
+    if(history.length){
+      setTimeout(()=>toast(`检测到 ${history.length} 条历史会议记录`,"info"), 600);
+    }
+  }catch(e){}
+});
+</script>
+</body>
+</html>

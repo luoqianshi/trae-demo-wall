@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安居审 - AI智能合同审核工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1e3a8a',
+                        'primary-light': '#3b82f6',
+                        'primary-dark': '#1e40af',
+                        danger: '#dc2626',
+                        warning: '#f97316',
+                        info: '#3b82f6',
+                        success: '#16a34a',
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans SC', 'system-ui', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Noto Sans SC', system-ui, sans-serif; background: #f8fafc; }
+        .scan-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(30, 58, 138, 0.95); z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.8s ease, visibility 0.8s ease;
+        }
+        .scan-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+        .scan-line {
+            width: 300px; height: 3px; background: linear-gradient(90deg, transparent, #60a5fa, transparent);
+            animation: scanMove 2s ease-in-out infinite; margin: 30px 0;
+        }
+        @keyframes scanMove {
+            0%, 100% { transform: translateY(-80px); opacity: 0; }
+            50% { transform: translateY(80px); opacity: 1; }
+        }
+        .scan-document {
+            width: 240px; height: 320px; border: 2px solid rgba(96, 165, 250, 0.4);
+            border-radius: 8px; position: relative; overflow: hidden;
+            background: rgba(255,255,255,0.05);
+        }
+        .scan-document::before {
+            content: ''; position: absolute; top: 20px; left: 20px; right: 20px; height: 8px;
+            background: rgba(96, 165, 250, 0.3); border-radius: 4px;
+        }
+        .scan-document::after {
+            content: ''; position: absolute; top: 40px; left: 20px; right: 40px; height: 6px;
+            background: rgba(96, 165, 250, 0.2); border-radius: 3px;
+        }
+        .scan-text { color: #93bbfc; font-size: 14px; margin-top: 20px; letter-spacing: 2px; }
+        .scan-dots::after {
+            content: ''; animation: dots 1.5s steps(4, end) infinite;
+        }
+        @keyframes dots { 0%, 20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%, 100% { content: '...'; } }
+        .pulse-btn { animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+            50% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+        }
+        .risk-card { transition: all 0.3s ease; cursor: pointer; }
+        .risk-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); }
+        .clause-content {
+            max-height: 0; overflow: hidden; transition: max-height 0.4s ease;
+        }
+        .clause-content.expanded { max-height: 800px; }
+        .law-popup {
+            position: absolute; background: white; border: 1px solid #e5e7eb;
+            border-radius: 12px; padding: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            z-index: 100; width: 320px; opacity: 0; visibility: hidden; transition: all 0.3s ease;
+            pointer-events: none;
+        }
+        .law-popup.show { opacity: 1; visibility: visible; pointer-events: auto; }
+        .compare-view {
+            display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: start;
+        }
+        .compare-arrow {
+            display: flex; align-items: center; justify-content: center;
+            color: #6b7280; font-size: 24px;
+        }
+        .tab-btn { transition: all 0.3s ease; position: relative; padding: 8px 16px; border-radius: 8px; }
+        .tab-btn:hover:not(.active) { background: #f1f5f9; }
+        .tab-btn.active {
+            background: #1e3a8a;
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+        }
+        .tab-btn.active::after {
+            content: ''; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+            width: 60%; height: 4px; background: #3b82f6; border-radius: 2px;
+        }
+        .upload-area { transition: all 0.3s ease; cursor: pointer; border: 2px dashed #d1d5db; }
+        .upload-area:hover { border-color: #3b82f6; background: #eff6ff; transform: scale(1.02); }
+        .upload-area.dragover { border-color: #1e3a8a; background: #dbeafe; transform: scale(1.02); }
+        .upload-area.processing { pointer-events: none; opacity: 0.7; }
+        .upload-btn { transition: all 0.2s ease; }
+        .upload-btn:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+        .upload-btn:active { transform: scale(0.98); }
+        .fade-enter { opacity: 0; transform: translateY(10px); }
+        .fade-enter-active { opacity: 1; transform: translateY(0); transition: all 0.3s ease; }
+        .fade-exit { opacity: 1; transform: translateY(0); }
+        .fade-exit-active { opacity: 0; transform: translateY(-10px); transition: all 0.3s ease; }
+        .count-animate { transition: all 0.5s ease; }
+        .success-check {
+            animation: checkPulse 0.5s ease;
+        }
+        @keyframes checkPulse {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        header.scrolled { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+        @media (max-width: 1024px) {
+            .compare-view { grid-template-columns: 1fr; }
+            .compare-arrow { transform: rotate(90deg); }
+        }
+        @media (max-width: 640px) {
+            .compare-view { grid-template-columns: 1fr; }
+            .compare-arrow { display: flex !important; transform: rotate(90deg); margin: 8px 0; }
+            .risk-item { margin-bottom: 0.5rem; }
+            .risk-item .p-4 { padding: 0.75rem; }
+            .stats-row { gap: 1rem; }
+            .tab-btn { padding: 0.5rem 0.75rem; font-size: 0.875rem; }
+        }
+        .typing-indicator span {
+            display: inline-block; width: 6px; height: 6px; background: #94a3b8;
+            border-radius: 50%; margin: 0 2px; animation: typing 1.4s infinite ease-in-out both;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        .chat-bubble { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .report-modal {
+            animation: modalIn 0.3s ease;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .scene-tab { transition: all 0.3s ease; }
+        .scene-tab.active { background: #1e3a8a; color: white; }
+        .risk-item { transition: all 0.3s ease; }
+        .risk-item:hover { transform: translateX(4px); }
+    </style>
+</head>
+<body>
+
+    <div id="scanOverlay" class="scan-overlay hidden">
+        <div class="text-white text-2xl font-bold mb-8 tracking-wider">安居审</div>
+        <div class="scan-document"></div>
+        <div class="scan-line"></div>
+        <div class="scan-text scan-dots">AI智能审核中</div>
+    </div>
+
+    <header class="bg-white shadow-sm sticky top-0 z-50 transition-shadow duration-300" id="mainHeader">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <div class="w-10 h-10 bg-gradient-to-br from-primary to-primary-light rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="ml-3">
+                        <h1 class="text-xl font-bold text-gray-900">安居审</h1>
+                        <p class="text-xs text-gray-500">AI智能合同审核工具</p>
+                    </div>
+                </div>
+                <nav class="hidden md:flex space-x-8">
+                    <a href="#" class="text-gray-600 hover:text-primary transition font-medium">首页</a>
+                    <a href="#" onclick="scrollToDemo()" class="text-gray-600 hover:text-primary transition font-medium">功能演示</a>
+                    <a href="#" class="text-gray-600 hover:text-primary transition font-medium">关于我们</a>
+                </nav>
+                <div class="hidden md:flex items-center space-x-4">
+                    <button class="px-4 py-2 text-gray-600 hover:text-primary transition font-medium">登录</button>
+                    <button class="px-6 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary-dark transition pulse-btn">免费试用</button>
+                </div>
+                <button class="md:hidden p-2" onclick="toggleMobileMenu()">
+                    <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </div>
+            <div id="mobileMenu" class="hidden md:hidden pb-4">
+                <a href="#" class="block py-2 text-gray-600 hover:text-primary">首页</a>
+                <a href="#" onclick="scrollToDemo()" class="block py-2 text-gray-600 hover:text-primary">功能演示</a>
+                <a href="#" class="block py-2 text-gray-600 hover:text-primary">关于我们</a>
+                <button class="mt-2 w-full px-4 py-2 bg-primary text-white rounded-lg font-medium">免费试用</button>
+            </div>
+        </div>
+    </header>
+
+    <section class="bg-gradient-to-br from-primary via-primary-dark to-blue-900 text-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+            <div class="text-center">
+                <h2 class="text-4xl md:text-5xl font-bold mb-6">AI驱动的合同智能审核</h2>
+                <p class="text-xl text-blue-200 mb-8 max-w-2xl mx-auto">为二手房买卖、租赁、装修等场景提供专业的法律风险识别与条款优化建议</p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                    <button onclick="scrollToDemo()" class="px-8 py-4 bg-white text-primary font-bold rounded-xl hover:bg-gray-100 transition shadow-lg">立即体验</button>
+                    <button class="px-8 py-4 border-2 border-white text-white font-bold rounded-xl hover:bg-white/10 transition">了解更多</button>
+                </div>
+                <div class="mt-12 grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div class="bg-white/10 backdrop-blur rounded-xl p-6">
+                        <div class="text-3xl font-bold">98%</div>
+                        <div class="text-blue-200 text-sm">风险识别准确率</div>
+                    </div>
+                    <div class="bg-white/10 backdrop-blur rounded-xl p-6">
+                        <div class="text-3xl font-bold">50+</div>
+                        <div class="text-blue-200 text-sm">法律条款库</div>
+                    </div>
+                    <div class="bg-white/10 backdrop-blur rounded-xl p-6">
+                        <div class="text-3xl font-bold">3秒</div>
+                        <div class="text-blue-200 text-sm">平均审核时间</div>
+                    </div>
+                    <div class="bg-white/10 backdrop-blur rounded-xl p-6">
+                        <div class="text-3xl font-bold">10万+</div>
+                        <div class="text-blue-200 text-sm">服务用户数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="demo" class="py-20 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-gray-900 mb-4">功能演示</h2>
+                <p class="text-gray-600">上传合同文件，AI智能识别风险条款并提供优化建议</p>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div class="bg-gray-100 px-6 py-4 border-b">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div class="flex items-center space-x-4">
+                            <div class="flex space-x-2">
+                                <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                                <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                            </div>
+                            <div class="text-sm text-gray-600">
+                                <span id="fileName">未上传文件</span>
+                                <span class="mx-2 hidden" id="fileInfoSeparator">|</span>
+                                <span id="fileInfo" class="hidden"></span>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <div class="upload-area border-2 border-dashed border-gray-300 rounded-lg px-4 py-2 flex items-center space-x-2 cursor-pointer" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
+                                <span class="text-sm text-gray-600" id="uploadText">上传文件</span>
+                                <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png" class="hidden" onchange="handleFileUpload(this)">
+                            </div>
+                            <button onclick="generateAgreement()" class="upload-btn px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                <span>生成补充协议</span>
+                            </button>
+                            <button onclick="exportReport()" class="upload-btn px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-dark transition flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                </svg>
+                                <span>导出审核报告</span>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="p-6">
+                    <div class="flex items-center space-x-6 mb-6 overflow-x-auto">
+                        <button class="tab-btn active font-medium text-primary whitespace-nowrap" data-scene="house" onclick="switchScene('house')">二手房买卖</button>
+                        <button class="tab-btn font-medium text-gray-500 whitespace-nowrap" data-scene="rent" onclick="switchScene('rent')">房屋租赁</button>
+                        <button class="tab-btn font-medium text-gray-500 whitespace-nowrap" data-scene="decorate" onclick="switchScene('decorate')">装修工程</button>
+                        <div class="ml-auto text-sm text-gray-500 whitespace-nowrap">
+                            <span id="scanResult">已识别 0 个条款 · 发现 0 处风险</span>
+                        </div>
+                    </div>
+                    <div id="sceneHint" class="hidden mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start space-x-2">
+                        <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <div>
+                            <p class="text-sm text-yellow-800 font-medium">温馨提示</p>
+                            <p class="text-xs text-yellow-700" id="sceneHintText">建议上传对应类型的合同文件以获得更精准的分析结果。</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 stats-row">
+                        <div class="lg:col-span-2 space-y-4">
+                            <div class="flex flex-wrap gap-2 mb-4">
+                                <button onclick="filterRisk('all')" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition active-filter">全部</button>
+                                <button onclick="filterRisk('severe')" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200 transition">严重风险</button>
+                                <button onclick="filterRisk('warning')" class="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm hover:bg-orange-200 transition">警告风险</button>
+                                <button onclick="filterRisk('suggest')" class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition">建议优化</button>
+                            </div>
+                            <div id="riskList" class="space-y-4"></div>
+                            <div id="noRiskMessage" class="hidden text-center py-12 text-gray-500">
+                                <svg class="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <p class="text-lg font-medium">暂无风险条款</p>
+                                <p class="text-sm">请上传合同文件开始分析</p>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-50 rounded-xl p-6">
+                            <h3 class="font-bold text-gray-900 mb-4 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                风险统计
+                            </h3>
+                            <div class="space-y-4">
+                                <div class="bg-red-50 rounded-lg p-4">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-red-800 font-medium">严重风险</span>
+                                        <span class="text-2xl font-bold text-red-600 count-up" id="severeCount" data-target="0">0</span>
+                                    </div>
+                                </div>
+                                <div class="bg-orange-50 rounded-lg p-4">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-orange-800 font-medium">警告风险</span>
+                                        <span class="text-2xl font-bold text-orange-600 count-up" id="warningCount" data-target="0">0</span>
+                                    </div>
+                                </div>
+                                <div class="bg-blue-50 rounded-lg p-4">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-blue-800 font-medium">建议优化</span>
+                                        <span class="text-2xl font-bold text-blue-600 count-up" id="suggestCount" data-target="0">0</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-8">
+                                <h3 class="font-bold text-gray-900 mb-4 flex items-center">
+                                    <svg class="w-5 h-5 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                    </svg>
+                                    AI法律咨询
+                                </h3>
+                                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                    <div id="chatContainer" class="h-48 overflow-y-auto p-4 space-y-4">
+                                        <div class="flex space-x-3">
+                                            <div class="w-8 h-8 bg-primary rounded-full flex-shrink-0 flex items-center justify-center">
+                                                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                                </svg>
+                                            </div>
+                                            <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-3">
+                                                <p class="text-gray-800 text-sm">您好！我是您的AI法律助手，可以为您解答合同相关的法律问题。请问有什么可以帮助您的？</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="p-3 border-t border-gray-200 flex space-x-2">
+                                        <input type="text" id="chatInput" placeholder="输入您的问题..." class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary" onkeypress="if(event.key === 'Enter') sendChatMessage()">
+                                        <button onclick="sendChatMessage()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                        </svg>
+                    </div>
+                    <h3 class="font-bold text-gray-900 mb-2">风险识别</h3>
+                    <p class="text-gray-600 text-sm">基于AI算法精准识别合同中的法律风险点，包括严重风险、警告风险和优化建议</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                    <h3 class="font-bold text-gray-900 mb-2">条款对比</h3>
+                    <p class="text-gray-600 text-sm">清晰展示原始条款与建议修改方案，帮助您快速理解风险并做出决策</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-purple-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                        </svg>
+                    </div>
+                    <h3 class="font-bold text-gray-900 mb-2">智能生成</h3>
+                    <p class="text-gray-600 text-sm">根据识别的风险自动生成补充协议，一键下载即可使用</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="bg-gray-900 text-gray-300 py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <div class="flex items-center mb-4">
+                        <div class="w-10 h-10 bg-gradient-to-br from-primary-light to-blue-600 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                        <span class="ml-3 text-white font-bold text-xl">安居审</span>
+                    </div>
+                    <p class="text-sm">AI驱动的合同智能审核工具，为您的安居之路保驾护航</p>
+                </div>
+                <div>
+                    <h4 class="text-white font-medium mb-4">支持场景</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#" class="hover:text-white transition">二手房买卖</a></li>
+                        <li><a href="#" class="hover:text-white transition">租房合同</a></li>
+                        <li><a href="#" class="hover:text-white transition">装修合同</a></li>
+                        <li><a href="#" class="hover:text-white transition">物业合同</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-white font-medium mb-4">联系我们</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li>客服热线：400-888-9999</li>
+                        <li>邮箱：support@anjushen.com</li>
+                        <li>工作时间：9:00-21:00</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 mt-8 pt-8 text-center text-sm">
+                <p>安居审. All rights reserved. | 京ICP备XXXXXXXX号</p>
+            </div>
+        </div>
+    </footer>
+
+    <div id="agreementModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="bg-gray-50 px-6 py-4 border-b flex items-center justify-between">
+                <h3 class="font-bold text-gray-900 text-lg">补充协议</h3>
+                <button onclick="closeAgreement()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6" id="agreementContent"></div>
+            <div class="bg-gray-50 px-6 py-4 border-t flex justify-end space-x-4">
+                <button onclick="closeAgreement()" class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition">关闭</button>
+                <button onclick="downloadAgreement()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition">下载协议</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reportModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto report-modal">
+            <div class="bg-primary px-6 py-4 flex items-center justify-between">
+                <h3 class="font-bold text-white text-lg">安居审 - 合同审核报告</h3>
+                <button onclick="closeReport()" class="text-white/80 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6" id="reportContent"></div>
+            <div class="bg-gray-50 px-6 py-4 border-t flex justify-end space-x-4">
+                <button onclick="closeReport()" class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition">关闭</button>
+                <button onclick="downloadReport()" class="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition">导出PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const scenes = {
+            house: {
+                fileName: '二手房买卖合同.pdf',
+                fileInfo: '2.3 MB · 共12页',
+                scanResult: '已识别 23 个条款 · 发现 9 处风险',
+                counts: { severe: 2, warning: 3, suggest: 4 },
+                risks: [
+                    {
+                        type: 'severe',
+                        title: '违约金条款过高',
+                        original: '"买方逾期付款，每日按<span class="bg-red-200 px-1 rounded">总房款0.5%</span>支付违约金"',
+                        suggested: '"买方逾期付款，每日按<span class="bg-green-200 px-1 rounded">未付款项的万分之五</span>支付违约金"',
+                        analysis: '日违约金0.5%折合年利率182.5%，远超法定合理范围（通常不超过万分之五），可能被法院认定为显失公平而调整。',
+                        law: { title: '《民法典》第585条', content: '当事人可以约定一方违约时应当根据违约情况向对方支付一定数额的违约金，也可以约定因违约产生的损失赔偿额的计算方法。约定的违约金过分高于造成的损失的，人民法院或者仲裁机构可以根据当事人的请求予以适当减少。' }
+                    },
+                    {
+                        type: 'severe',
+                        title: '定金条款违法',
+                        original: '"定金人民币20万元，<span class="bg-red-200 px-1 rounded">任何情况下不予退还</span>"',
+                        suggested: '"定金不超过总房款20%，因卖方原因未能签约<span class="bg-green-200 px-1 rounded">双倍返还</span>"',
+                        analysis: '"任何情况下不予退还"违反定金罚则，且定金不得超过主合同标的额20%。若卖方违约也应双倍返还。',
+                        law: { title: '《民法典》第586、587条', content: '当事人可以约定一方向对方给付定金作为债权的担保。定金的数额由当事人约定；但是，不得超过主合同标的额的百分之二十，超过部分不产生定金的效力。债务人履行债务的，定金应当抵作价款或者收回。收受定金的一方不履行债务或者履行债务不符合约定，致使不能实现合同目的的，应当双倍返还定金。' }
+                    },
+                    {
+                        type: 'warning',
+                        title: '费用转嫁条款',
+                        original: '"房屋交割前的<span class="bg-red-200 px-1 rounded">物业费、水电费由买方承担</span>"',
+                        suggested: '"以交割日为界，之前费用由<span class="bg-green-200 px-1 rounded">卖方结清并提供缴费凭证</span>"',
+                        analysis: '卖方可能将长期欠费转嫁给买方，交割时应要求卖方提供所有费用结清证明。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '权属瑕疵未约定',
+                        original: '"房屋现状交付，<span class="bg-red-200 px-1 rounded">卖方不保证权属无瑕疵</span>"',
+                        suggested: '"卖方保证房屋权属清晰，<span class="bg-green-200 px-1 rounded">若有瑕疵需承担违约责任</span>"',
+                        analysis: '未约定权属瑕疵的处理方式，若房屋存在抵押、查封等情况，买方权益无法保障。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '户口迁移无保障',
+                        original: '"卖方承诺<span class="bg-red-200 px-1 rounded">尽快</span>迁出户口"',
+                        suggested: '"卖方应在<span class="bg-green-200 px-1 rounded">过户前迁出所有户口</span>"',
+                        analysis: '"尽快"表述模糊，无时间约束，可能影响买方落户。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '争议管辖条款',
+                        original: '"争议提交<span class="bg-red-200 px-1 rounded">卖方所在地</span>仲裁委员会"',
+                        suggested: '"争议提交<span class="bg-green-200 px-1 rounded">房屋所在地人民法院</span>管辖"',
+                        analysis: '约定卖方所在地仲裁增加买方维权成本，改为房屋所在地法院管辖更公平合理。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '交房时间不明确',
+                        original: '"卖方应在<span class="bg-red-200 px-1 rounded">合理时间内</span>交付房屋"',
+                        suggested: '"卖方应在<span class="bg-green-200 px-1 rounded">过户后7日内</span>交付房屋"',
+                        analysis: '"合理时间"表述模糊，建议明确具体交房期限及逾期责任。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '房屋验收标准缺失',
+                        original: '"按房屋<span class="bg-red-200 px-1 rounded">现状</span>交付"',
+                        suggested: '"按《房屋交接清单》<span class="bg-green-200 px-1 rounded">逐项验收</span>交付"',
+                        analysis: '缺少验收标准和清单，出现纠纷时难以界定责任。'
+                    }
+                ],
+                agreement: [
+                    { title: '第一条 违约金条款', content: '原合同约定的"每日按总房款0.5%支付违约金"调整为"每日按未付款项的万分之五支付违约金"，该标准符合法律规定及市场惯例。' },
+                    { title: '第二条 定金条款', content: '定金数额不得超过总房款的20%。因甲方（卖方）原因导致合同无法履行的，应向乙方双倍返还定金；因乙方（买方）原因导致合同无法履行的，无权要求返还定金。' },
+                    { title: '第三条 费用承担', content: '房屋交割日（以实际交付钥匙为准）之前的物业费、水电费、燃气费等所有费用由甲方承担，甲方应在交割前结清并提供缴费凭证。' },
+                    { title: '第四条 争议解决', content: '因本合同引起的争议，双方应友好协商解决；协商不成的，任何一方均可向房屋所在地人民法院提起诉讼。' }
+                ]
+            },
+            rent: {
+                fileName: '房屋租赁合同.pdf',
+                fileInfo: '1.8 MB · 共8页',
+                scanResult: '已识别 18 个条款 · 发现 7 处风险',
+                counts: { severe: 2, warning: 2, suggest: 3 },
+                risks: [
+                    {
+                        type: 'severe',
+                        title: '押金条款违法',
+                        original: '"押金人民币5000元，<span class="bg-red-200 px-1 rounded">租赁期内不予退还</span>"',
+                        suggested: '"押金在租赁期满且<span class="bg-green-200 px-1 rounded">房屋验收合格后3日内退还</span>"',
+                        analysis: '租赁期内不予退还押金违反公平原则，押金应在合同期满且房屋无损坏时退还。',
+                        law: { title: '《民法典》第733条', content: '租赁期限届满，承租人应当返还租赁物。返还的租赁物应当符合按照约定或者根据租赁物的性质使用后的状态。' }
+                    },
+                    {
+                        type: 'severe',
+                        title: '单方面解约权',
+                        original: '"出租人可<span class="bg-red-200 px-1 rounded">随时解除合同</span>收回房屋"',
+                        suggested: '"出租人需提前<span class="bg-green-200 px-1 rounded">30日书面通知</span>才能解除合同"',
+                        analysis: '出租人单方面随时解约侵犯承租人的居住权，应约定提前通知期限及违约责任。',
+                        law: { title: '《民法典》第724条', content: '有下列情形之一，非因承租人原因致使租赁物无法使用的，承租人可以解除合同：（一）租赁物被司法机关或者行政机关依法查封、扣押；（二）租赁物权属有争议；（三）租赁物具有违反法律、行政法规关于使用条件的强制性规定情形。' }
+                    },
+                    {
+                        type: 'warning',
+                        title: '租金涨幅过高',
+                        original: '"续租时租金<span class="bg-red-200 px-1 rounded">可上浮50%</span>"',
+                        suggested: '"续租时租金<span class="bg-green-200 px-1 rounded">上浮不超过10%</span>"',
+                        analysis: '租金涨幅50%过高，可能导致承租人无法负担，建议约定合理涨幅或参考周边市场价。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '维修责任不明',
+                        original: '"房屋维修费用<span class="bg-red-200 px-1 rounded">全部由承租人承担</span>"',
+                        suggested: '"房屋主体结构维修由<span class="bg-green-200 px-1 rounded">出租人承担</span>"',
+                        analysis: '房屋主体结构维修是出租人的法定义务，不应全部转嫁给承租人。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '押金抵扣模糊',
+                        original: '"押金可用于抵扣<span class="bg-red-200 px-1 rounded">任何费用</span>"',
+                        suggested: '"押金仅用于<span class="bg-green-200 px-1 rounded">房屋损坏赔偿</span>"',
+                        analysis: '"任何费用"范围过宽，可能被出租人滥用。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '转租限制过严',
+                        original: '"承租人<span class="bg-red-200 px-1 rounded">不得转租</span>任何情况下"',
+                        suggested: '"承租人经<span class="bg-green-200 px-1 rounded">出租人书面同意</span>后可转租"',
+                        analysis: '完全禁止转租过于苛刻，建议允许经出租人同意后的合理转租。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '家具损坏赔偿模糊',
+                        original: '"损坏家具照价赔偿"',
+                        suggested: '"损坏家具按<span class="bg-green-200 px-1 rounded">折旧后价值</span>赔偿"',
+                        analysis: '未考虑家具折旧，建议按实际使用年限计算折旧后的赔偿金额。'
+                    }
+                ],
+                agreement: [
+                    { title: '第一条 押金条款', content: '押金人民币5000元，在租赁期满且房屋验收合格后3日内无息退还。若房屋有损坏，出租人可从押金中扣除维修费用。' },
+                    { title: '第二条 合同解除', content: '出租人如需提前解除合同，需提前30日书面通知承租人，并支付相当于1个月租金的违约金。' },
+                    { title: '第三条 租金调整', content: '续租时租金上浮不得超过10%，或参考周边同类房屋市场租金确定。' },
+                    { title: '第四条 维修责任', content: '房屋主体结构及附属设施的自然损坏由出租人负责维修；承租人造成的损坏由承租人负责修复或赔偿。' }
+                ]
+            },
+            decorate: {
+                fileName: '装修工程合同.pdf',
+                fileInfo: '3.1 MB · 共15页',
+                scanResult: '已识别 25 个条款 · 发现 8 处风险',
+                counts: { severe: 1, warning: 4, suggest: 3 },
+                risks: [
+                    {
+                        type: 'severe',
+                        title: '工期延误无处罚',
+                        original: '"工期延误<span class="bg-red-200 px-1 rounded">不承担违约责任</span>"',
+                        suggested: '"工期延误每日按<span class="bg-green-200 px-1 rounded">合同总价0.5‰</span>支付违约金"',
+                        analysis: '未约定工期延误责任，施工方可能随意拖延工期，建议约定明确的逾期违约金。',
+                        law: { title: '《民法典》第509条', content: '当事人应当按照约定全面履行自己的义务。当事人应当遵循诚信原则，根据合同的性质、目的和交易习惯履行通知、协助、保密等义务。' }
+                    },
+                    {
+                        type: 'warning',
+                        title: '增项费用条款模糊',
+                        original: '"装修工程增项费用<span class="bg-red-200 px-1 rounded">不得超过合同总价10%</span>"',
+                        suggested: '"增项费用不得超过合同总价10%，<span class="bg-green-200 px-1 rounded">超出部分需书面确认</span>"',
+                        analysis: '未约定超出10%部分的处理方式，施工方可能随意增项，导致预算严重超支。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '材料标准不明确',
+                        original: '"使用<span class="bg-red-200 px-1 rounded">优质材料</span>进行施工"',
+                        suggested: '"使用附件清单中<span class="bg-green-200 px-1 rounded">指定品牌和型号</span>的材料"',
+                        analysis: '"优质材料"表述模糊，施工方可能使用低质材料，建议明确材料品牌、型号及规格。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '质保期过短',
+                        original: '"工程质保期为<span class="bg-red-200 px-1 rounded">3个月</span>"',
+                        suggested: '"工程质保期为<span class="bg-green-200 px-1 rounded">2年</span>，防水工程5年"',
+                        analysis: '3个月质保期过短，不符合行业惯例，建议至少约定2年质保期，防水工程不少于5年。'
+                    },
+                    {
+                        type: 'warning',
+                        title: '付款节点不合理',
+                        original: '"签订合同后<span class="bg-red-200 px-1 rounded">一次性付清全款</span>"',
+                        suggested: '"按进度分阶段付款，<span class="bg-green-200 px-1 rounded">尾款5%验收后支付</span>"',
+                        analysis: '一次性付清全款风险过高，建议按施工进度分阶段付款，保留尾款作为质量保证金。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '验收标准未约定',
+                        original: '"工程完工后<span class="bg-red-200 px-1 rounded">双方验收</span>"',
+                        suggested: '"按附件《<span class="bg-green-200 px-1 rounded">施工验收标准</span>》进行验收"',
+                        analysis: '未约定具体验收标准，可能导致验收时产生争议，建议制定详细的验收标准作为合同附件。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '安全责任未明确',
+                        original: '"施工安全由<span class="bg-red-200 px-1 rounded">双方共同负责</span>"',
+                        suggested: '"施工期间安全责任由<span class="bg-green-200 px-1 rounded">施工方全部承担</span>"',
+                        analysis: '安全责任划分不清，建议明确施工期间的安全责任由施工方承担。'
+                    },
+                    {
+                        type: 'suggest',
+                        title: '图纸资料未移交',
+                        original: '"施工完成后<span class="bg-red-200 px-1 rounded">不移交</span>竣工图纸"',
+                        suggested: '"施工完成后<span class="bg-green-200 px-1 rounded">应移交</span>全套竣工图纸"',
+                        analysis: '竣工图纸是后期维修和改造的重要依据，建议要求施工方移交。'
+                    }
+                ],
+                agreement: [
+                    { title: '第一条 工期延误', content: '若因施工方原因导致工期延误，每日按合同总价的0.5‰支付违约金。延误超过15日的，甲方有权解除合同。' },
+                    { title: '第二条 增项管理', content: '工程增项需经甲方书面确认，增项费用不得超过合同总价的10%，超出部分需重新签订补充协议。' },
+                    { title: '第三条 材料标准', content: '所有材料必须符合附件《材料清单》中指定的品牌、型号和规格，不得擅自更换。' },
+                    { title: '第四条 质保期', content: '工程质保期为2年，防水工程质保期为5年。质保期内出现质量问题，施工方需免费维修。' }
+                ]
+            }
+        };
+
+        const chatResponses = {
+            '定金最多能收多少': '根据《民法典》第586条规定，定金的数额由当事人约定，但不得超过主合同标的额的20%。超过部分不产生定金的效力。例如，房屋总价100万，定金最多只能收20万。',
+            '违约金太高怎么办': '如果合同约定的违约金过高，您可以根据《民法典》第585条规定，请求人民法院或者仲裁机构予以适当减少。通常法院会参考实际损失来调整违约金。',
+            '租房押金能退吗': '根据《民法典》第733条规定，租赁期限届满后，承租人返还租赁物且验收合格的，出租人应当退还押金。除非合同明确约定了扣除押金的情形。',
+            '装修增项太多': '建议在合同中明确约定增项费用的上限（如不超过合同总价的10%），并且要求所有增项必须经过书面确认才能执行，超出部分由施工方承担。',
+            '逾期交房怎么处理': '首先查看合同中是否约定了逾期交房的违约责任。如果没有约定或约定不明确，可以根据《民法典》要求对方赔偿实际损失，包括租金损失、搬家费用等。',
+            '物业费该谁交': '二手房交易中，通常以房屋交割日为界，之前的物业费由卖方承担，之后的由买方承担。建议在合同中明确约定，并要求卖方提供交割前的费用结清证明。',
+            '默认': '感谢您的提问！关于合同审核和法律风险方面的问题，建议您上传具体合同文件，我们的AI审核系统会为您提供专业的风险分析和修改建议。'
+        };
+
+        let currentScene = 'house';
+        let currentRisks = [];
+        let uploadedFileName = '';
+
+        function detectScene(fileName) {
+            var lowerName = fileName.toLowerCase();
+            if (lowerName.includes('买卖') || lowerName.includes('购房') || lowerName.includes('二手房') || lowerName.includes('售房')) {
+                return 'house';
+            } else if (lowerName.includes('租') || lowerName.includes('租赁') || lowerName.includes('租房')) {
+                return 'rent';
+            } else if (lowerName.includes('装修') || lowerName.includes('施工') || lowerName.includes('装饰') || lowerName.includes('装潢')) {
+                return 'decorate';
+            }
+            return 'house';
+        }
+
+        function shuffleArray(array) {
+            var newArray = array.slice();
+            for (var i = newArray.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var temp = newArray[i];
+                newArray[i] = newArray[j];
+                newArray[j] = temp;
+            }
+            return newArray;
+        }
+
+        function getRandomRisks(allRisks, min, max) {
+            var count = min + Math.floor(Math.random() * (max - min + 1));
+            var shuffled = shuffleArray(allRisks);
+            return shuffled.slice(0, count);
+        }
+
+        function renderRiskItem(risk, index) {
+            var colorClass = risk.type === 'severe' ? 'red' : risk.type === 'warning' ? 'orange' : 'blue';
+            var riskText = risk.type === 'severe' ? '严重' : risk.type === 'warning' ? '警告' : '建议';
+            var lawHtml = '';
+            if (risk.law) {
+                lawHtml = '<div class="relative mt-3"><div class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer hover:text-primary" onmouseenter="showLawPopup(this, \'law-' + index + '\')" onmouseleave="hideLawPopup(\'law-' + index + '\')"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg><span class="font-medium">法律依据：' + risk.law.title + '</span></div><div class="law-popup" id="law-' + index + '"><div class="text-primary font-bold text-sm mb-2">' + risk.law.title + '</div><p class="text-gray-600 text-sm leading-relaxed">' + risk.law.content + '</p></div></div>';
+            }
+            return '<div class="risk-item border border-' + colorClass + '-200 rounded-xl overflow-hidden bg-white" data-risk="' + risk.type + '" id="risk-' + index + '">' +
+                '<div class="bg-' + colorClass + '-50 px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-' + colorClass + '-100 transition" onclick="toggleClause(this)">' +
+                '<div class="flex items-center space-x-3">' +
+                '<span class="bg-' + colorClass + '-600 text-white text-xs font-bold px-2 py-1 rounded">' + riskText + '</span>' +
+                '<span class="font-medium text-gray-900 text-sm">' + risk.title + '</span>' +
+                '</div>' +
+                '<svg class="w-5 h-5 text-gray-400 transform transition-transform rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>' +
+                '</svg>' +
+                '</div>' +
+                '<div class="clause-content">' +
+                '<div class="p-4 space-y-4">' +
+                '<div class="compare-view">' +
+                '<div class="bg-red-50 border border-red-200 rounded-lg p-4">' +
+                '<div class="text-red-600 text-xs font-bold mb-2">原始条款</div>' +
+                '<p class="text-red-800 text-sm">' + risk.original + '</p>' +
+                '</div>' +
+                '<div class="compare-arrow hidden md:flex">→</div>' +
+                '<div class="bg-green-50 border border-green-200 rounded-lg p-4">' +
+                '<div class="text-green-600 text-xs font-bold mb-2">建议修改</div>' +
+                '<p class="text-green-800 text-sm">' + risk.suggested + '</p>' +
+                '</div>' +
+                '</div>' +
+                '<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">' +
+                '<div class="flex items-start space-x-2">' +
+                '<svg class="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>' +
+                '</svg>' +
+                '<div>' +
+                '<div class="text-yellow-800 font-medium text-sm">风险分析</div>' +
+                '<p class="text-yellow-700 text-sm mt-1">' + risk.analysis + '</p>' +
+                '</div>' +
+                '</div>' +
+                '</div>' +
+                lawHtml +
+                '</div>' +
+                '</div>' +
+                '</div>';
+        }
+
+        function renderAgreement(items) {
+            var html = '';
+            for (var i = 0; i < items.length; i++) {
+                html += '<div class="bg-white border border-gray-200 rounded-lg p-4 mb-4"><div class="font-bold text-gray-900 mb-2">' + items[i].title + '</div><p class="text-gray-700 text-sm">' + items[i].content + '</p></div>';
+            }
+            return html;
+        }
+
+        function animateValue(id, start, end, duration) {
+            var obj = document.getElementById(id);
+            if (!obj) return;
+            var startTime = null;
+            function animate(currentTime) {
+                if (!startTime) startTime = currentTime;
+                var progress = Math.min((currentTime - startTime) / duration, 1);
+                var value = Math.floor(progress * (end - start) + start);
+                obj.textContent = value;
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+
+        function animateCountUp(id, target) {
+            var obj = document.getElementById(id);
+            if (!obj) return;
+            var current = 0;
+            var increment = target / 30;
+            var timer = setInterval(function() {
+                current += increment;
+                if (current >= target) {
+                    current = target;
+                    clearInterval(timer);
+                }
+                obj.textContent = Math.floor(current);
+            }, 30);
+        }
+
+        function switchScene(scene, skipAnimation) {
+            var buttons = document.querySelectorAll('.tab-btn');
+            for (var i = 0; i < buttons.length; i++) {
+                buttons[i].classList.remove('active');
+                buttons[i].classList.add('text-gray-500');
+                buttons[i].classList.remove('text-primary');
+            }
+            var activeBtn = document.querySelector('[data-scene="' + scene + '"]');
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+                activeBtn.classList.remove('text-gray-500');
+                activeBtn.classList.add('text-primary');
+            }
+
+            var data = scenes[scene];
+            currentScene = scene;
+
+            if (!uploadedFileName) {
+                document.getElementById('fileName').textContent = data.fileName;
+                document.getElementById('fileInfo').textContent = data.fileInfo;
+            }
+
+            var riskList = document.getElementById('riskList');
+            var noRiskMessage = document.getElementById('noRiskMessage');
+            var agreementContent = document.getElementById('agreementContent');
+            var statsRow = document.querySelector('.stats-row');
+
+            if (skipAnimation) {
+                currentRisks = data.risks;
+                renderRisks(currentRisks);
+                document.getElementById('scanResult').textContent = data.scanResult;
+                animateCountUp('severeCount', data.counts.severe);
+                animateCountUp('warningCount', data.counts.warning);
+                animateCountUp('suggestCount', data.counts.suggest);
+                agreementContent.innerHTML = renderAgreement(data.agreement);
+            } else {
+                riskList.style.transition = 'all 0.3s ease';
+                riskList.style.opacity = '0';
+                riskList.style.transform = 'translateY(15px)';
+
+                agreementContent.style.transition = 'all 0.3s ease 0.1s';
+                agreementContent.style.opacity = '0';
+                agreementContent.style.transform = 'translateY(10px)';
+
+                if (statsRow) {
+                    statsRow.style.transition = 'all 0.3s ease';
+                    statsRow.style.opacity = '0';
+                    statsRow.style.transform = 'scale(0.98)';
+                }
+
+                setTimeout(function() {
+                    currentRisks = data.risks;
+                    renderRisks(currentRisks);
+                    document.getElementById('scanResult').textContent = data.scanResult;
+                    animateCountUp('severeCount', data.counts.severe);
+                    animateCountUp('warningCount', data.counts.warning);
+                    animateCountUp('suggestCount', data.counts.suggest);
+                    agreementContent.innerHTML = renderAgreement(data.agreement);
+
+                    riskList.style.opacity = '1';
+                    riskList.style.transform = 'translateY(0)';
+
+                    agreementContent.style.opacity = '1';
+                    agreementContent.style.transform = 'translateY(0)';
+
+                    if (statsRow) {
+                        statsRow.style.opacity = '1';
+                        statsRow.style.transform = 'scale(1)';
+                    }
+                }, 200);
+            }
+
+            var sceneHint = document.getElementById('sceneHint');
+            sceneHint.classList.add('hidden');
+        }
+
+        function renderRisks(risks) {
+            var riskList = document.getElementById('riskList');
+            var noRiskMessage = document.getElementById('noRiskMessage');
+
+            if (!risks || risks.length === 0) {
+                riskList.innerHTML = '';
+                riskList.classList.add('hidden');
+                noRiskMessage.classList.remove('hidden');
+            } else {
+                noRiskMessage.classList.add('hidden');
+                riskList.classList.remove('hidden');
+                riskList.innerHTML = '';
+                for (var j = 0; j < risks.length; j++) {
+                    riskList.innerHTML += renderRiskItem(risks[j], j);
+                }
+            }
+        }
+
+        function handleFileUpload(input) {
+            var file = input.files[0];
+            if (!file) return;
+
+            var validTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+            if (!validTypes.includes(file.type)) {
+                alert('请上传PDF、JPG或PNG格式的文件');
+                return;
+            }
+
+            var uploadArea = document.getElementById('uploadArea');
+            uploadArea.classList.add('processing');
+            uploadArea.innerHTML = '<svg class="w-5 h-5 text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span class="text-sm text-gray-600 ml-2">正在分析...</span>';
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var scanOverlay = document.getElementById('scanOverlay');
+                scanOverlay.classList.remove('hidden');
+
+                setTimeout(function() {
+                    scanOverlay.classList.add('hidden');
+                    processFile(file);
+                }, 3000);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function processFile(file) {
+            uploadedFileName = file.name;
+            var fileName = file.name;
+            var fileSize = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+            var fileExtension = fileName.split('.').pop().toLowerCase();
+            var pageCount = fileExtension === 'pdf' ? '待解析' : '1页';
+
+            document.getElementById('fileName').textContent = fileName;
+            document.getElementById('fileInfo').textContent = fileSize + ' · 共' + pageCount;
+            document.getElementById('fileInfoSeparator').classList.remove('hidden');
+            document.getElementById('fileInfo').classList.remove('hidden');
+
+            var scene = detectScene(fileName);
+            var isDefaultScene = false;
+            var lowerName = fileName.toLowerCase();
+            if (!lowerName.includes('买卖') && !lowerName.includes('购房') && !lowerName.includes('二手房') && !lowerName.includes('售房') &&
+                !lowerName.includes('租') && !lowerName.includes('租赁') && !lowerName.includes('租房') &&
+                !lowerName.includes('装修') && !lowerName.includes('施工') && !lowerName.includes('装饰') && !lowerName.includes('装潢')) {
+                isDefaultScene = true;
+            }
+
+            var data = scenes[scene];
+            var randomRisks = getRandomRisks(data.risks, 3, 5);
+
+            var severeCount = 0, warningCount = 0, suggestCount = 0;
+            for (var i = 0; i < randomRisks.length; i++) {
+                if (randomRisks[i].type === 'severe') severeCount++;
+                else if (randomRisks[i].type === 'warning') warningCount++;
+                else suggestCount++;
+            }
+
+            currentScene = scene;
+            currentRisks = randomRisks;
+
+            document.getElementById('scanResult').textContent = '已识别 ' + (randomRisks.length + Math.floor(Math.random() * 5 + 10)) + ' 个条款 · 发现 ' + randomRisks.length + ' 处风险';
+
+            var sceneHint = document.getElementById('sceneHint');
+            if (isDefaultScene) {
+                sceneHint.classList.remove('hidden');
+            } else {
+                sceneHint.classList.add('hidden');
+            }
+
+            renderRisks(randomRisks);
+            animateCountUp('severeCount', severeCount);
+            animateCountUp('warningCount', warningCount);
+            animateCountUp('suggestCount', suggestCount);
+
+            document.getElementById('agreementContent').innerHTML = renderAgreement(data.agreement);
+
+            var uploadArea = document.getElementById('uploadArea');
+            uploadArea.classList.remove('processing');
+            uploadArea.innerHTML = '<svg class="w-5 h-5 text-green-600 success-check" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span class="text-sm text-green-600 ml-2">分析完成</span><span class="text-xs text-gray-400 ml-2">点击重新上传</span>';
+
+            setTimeout(function() {
+                uploadArea.innerHTML = '<svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg><span class="text-sm text-gray-600 ml-2">重新上传</span>';
+            }, 2000);
+
+            var buttons = document.querySelectorAll('.tab-btn');
+            for (var j = 0; j < buttons.length; j++) {
+                buttons[j].classList.remove('active');
+                buttons[j].classList.add('text-gray-500');
+                buttons[j].classList.remove('text-primary');
+            }
+            var activeBtn = document.querySelector('[data-scene="' + scene + '"]');
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+                activeBtn.classList.remove('text-gray-500');
+                activeBtn.classList.add('text-primary');
+            }
+        }
+
+        function toggleClause(element) {
+            var content = element.nextElementSibling;
+            var arrow = element.querySelector('svg');
+
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                arrow.classList.remove('rotate-180');
+            } else {
+                content.classList.add('expanded');
+                arrow.classList.add('rotate-180');
+            }
+        }
+
+        function showLawPopup(element, popupId) {
+            var popup = document.getElementById(popupId);
+            if (popup) {
+                popup.classList.add('show');
+            }
+        }
+
+        function hideLawPopup(popupId) {
+            var popup = document.getElementById(popupId);
+            if (popup) {
+                popup.classList.remove('show');
+            }
+        }
+
+        function filterRisk(type) {
+            var buttons = document.querySelectorAll('.flex-wrap .px-4');
+            for (var i = 0; i < buttons.length; i++) {
+                buttons[i].classList.remove('active-filter');
+                buttons[i].classList.add('bg-gray-100', 'text-gray-700');
+                buttons[i].classList.remove('bg-red-100', 'text-red-700', 'bg-orange-100', 'text-orange-700', 'bg-blue-100', 'text-blue-700');
+            }
+            event.target.classList.add('active-filter');
+            event.target.classList.remove('bg-gray-100', 'text-gray-700');
+
+            if (type === 'severe') {
+                event.target.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'warning') {
+                event.target.classList.add('bg-orange-100', 'text-orange-700');
+            } else if (type === 'suggest') {
+                event.target.classList.add('bg-blue-100', 'text-blue-700');
+            }
+
+            if (type === 'all') {
+                renderRisks(currentRisks);
+            } else {
+                var filtered = [];
+                for (var j = 0; j < currentRisks.length; j++) {
+                    if (currentRisks[j].type === type) {
+                        filtered.push(currentRisks[j]);
+                    }
+                }
+                renderRisks(filtered);
+            }
+        }
+
+        function generateAgreement() {
+            if (currentRisks.length === 0) {
+                alert('请先上传合同文件进行分析');
+                return;
+            }
+            var modal = document.getElementById('agreementModal');
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAgreement() {
+            var modal = document.getElementById('agreementModal');
+            modal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+
+        function downloadAgreement() {
+            alert('功能演示中，实际下载将在正式版本中启用');
+        }
+
+        function exportReport() {
+            if (currentRisks.length === 0) {
+                alert('请先上传合同文件进行分析');
+                return;
+            }
+
+            var data = scenes[currentScene];
+            var severeRisks = [], warningRisks = [], suggestRisks = [];
+            for (var i = 0; i < currentRisks.length; i++) {
+                if (currentRisks[i].type === 'severe') severeRisks.push(currentRisks[i]);
+                else if (currentRisks[i].type === 'warning') warningRisks.push(currentRisks[i]);
+                else suggestRisks.push(currentRisks[i]);
+            }
+
+            var reportHTML = '<div class="space-y-6">' +
+                '<div class="border-b pb-4">' +
+                '<h2 class="text-2xl font-bold text-gray-900 mb-2">审核概览</h2>' +
+                '<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">' +
+                '<div class="bg-gray-50 p-4 rounded-lg"><div class="text-lg font-bold text-gray-900 break-all">' + (uploadedFileName || data.fileName) + '</div><div class="text-sm text-gray-500">文件名称</div></div>' +
+                '<div class="bg-gray-50 p-4 rounded-lg"><div class="text-2xl font-bold text-primary">' + currentRisks.length + '</div><div class="text-sm text-gray-500">发现风险</div></div>' +
+                '<div class="bg-red-50 p-4 rounded-lg"><div class="text-2xl font-bold text-red-600">' + severeRisks.length + '</div><div class="text-sm text-gray-500">严重风险</div></div>' +
+                '<div class="bg-orange-50 p-4 rounded-lg"><div class="text-2xl font-bold text-orange-600">' + warningRisks.length + '</div><div class="text-sm text-gray-500">警告风险</div></div>' +
+                '<div class="bg-blue-50 p-4 rounded-lg"><div class="text-2xl font-bold text-blue-600">' + suggestRisks.length + '</div><div class="text-sm text-gray-500">建议优化</div></div>' +
+                '</div>' +
+                '</div>' +
+
+                '<div>' +
+                '<h3 class="text-lg font-bold text-gray-900 mb-3 flex items-center"><span class="w-8 h-8 bg-red-600 text-white rounded-lg flex items-center justify-center mr-2">' + severeRisks.length + '</span>严重风险条款</h3>';
+            if (severeRisks.length > 0) {
+                reportHTML += '<div class="space-y-3">';
+                for (var i = 0; i < severeRisks.length; i++) {
+                    reportHTML += '<div class="bg-red-50 border border-red-200 rounded-lg p-4">' +
+                        '<div class="font-bold text-red-800 mb-2">' + (i + 1) + '. ' + severeRisks[i].title + '</div>' +
+                        '<div class="text-sm text-red-700 mb-2"><strong>原始条款：</strong>' + severeRisks[i].original + '</div>' +
+                        '<div class="text-sm text-green-700 mb-2"><strong>建议修改：</strong>' + severeRisks[i].suggested + '</div>' +
+                        '<div class="text-sm text-gray-700"><strong>风险分析：</strong>' + severeRisks[i].analysis + '</div>' +
+                        '</div>';
+                }
+                reportHTML += '</div>';
+            } else {
+                reportHTML += '<div class="text-center py-8 text-gray-500">未发现严重风险</div>';
+            }
+            reportHTML += '</div>' +
+
+                '<div>' +
+                '<h3 class="text-lg font-bold text-gray-900 mb-3 flex items-center"><span class="w-8 h-8 bg-orange-500 text-white rounded-lg flex items-center justify-center mr-2">' + warningRisks.length + '</span>警告风险条款</h3>';
+            if (warningRisks.length > 0) {
+                reportHTML += '<div class="space-y-3">';
+                for (var i = 0; i < warningRisks.length; i++) {
+                    reportHTML += '<div class="bg-orange-50 border border-orange-200 rounded-lg p-4">' +
+                        '<div class="font-bold text-orange-800 mb-2">' + (i + 1) + '. ' + warningRisks[i].title + '</div>' +
+                        '<div class="text-sm text-orange-700 mb-2"><strong>原始条款：</strong>' + warningRisks[i].original + '</div>' +
+                        '<div class="text-sm text-green-700 mb-2"><strong>建议修改：</strong>' + warningRisks[i].suggested + '</div>' +
+                        '<div class="text-sm text-gray-700"><strong>风险分析：</strong>' + warningRisks[i].analysis + '</div>' +
+                        '</div>';
+                }
+                reportHTML += '</div>';
+            } else {
+                reportHTML += '<div class="text-center py-8 text-gray-500">未发现警告风险</div>';
+            }
+            reportHTML += '</div>' +
+
+                '<div>' +
+                '<h3 class="text-lg font-bold text-gray-900 mb-3 flex items-center"><span class="w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center mr-2">' + suggestRisks.length + '</span>建议优化条款</h3>';
+            if (suggestRisks.length > 0) {
+                reportHTML += '<div class="space-y-3">';
+                for (var i = 0; i < suggestRisks.length; i++) {
+                    reportHTML += '<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">' +
+                        '<div class="font-bold text-blue-800 mb-2">' + (i + 1) + '. ' + suggestRisks[i].title + '</div>' +
+                        '<div class="text-sm text-blue-700 mb-2"><strong>原始条款：</strong>' + suggestRisks[i].original + '</div>' +
+                        '<div class="text-sm text-green-700 mb-2"><strong>建议修改：</strong>' + suggestRisks[i].suggested + '</div>' +
+                        '<div class="text-sm text-gray-700"><strong>风险分析：</strong>' + suggestRisks[i].analysis + '</div>' +
+                        '</div>';
+                }
+                reportHTML += '</div>';
+            } else {
+                reportHTML += '<div class="text-center py-8 text-gray-500">未发现建议优化项</div>';
+            }
+            reportHTML += '</div>' +
+
+                '<div>' +
+                '<h3 class="text-lg font-bold text-gray-900 mb-3">修改建议清单</h3>' +
+                '<div class="bg-gray-50 rounded-lg p-4">' +
+                '<ul class="space-y-2 text-sm text-gray-700 list-disc list-inside">';
+            for (var i = 0; i < currentRisks.length; i++) {
+                reportHTML += '<li>' + currentRisks[i].title + '：建议修改为' + currentRisks[i].suggested.replace(/<[^>]*>/g, '') + '</li>';
+            }
+            reportHTML += '</ul></div></div>' +
+
+                '<div class="text-center text-sm text-gray-500 pt-4 border-t">' +
+                '<p>本报告由安居审AI智能合同审核工具生成</p>' +
+                '<p>生成时间：' + new Date().toLocaleString('zh-CN') + '</p>' +
+                '</div></div>';
+
+            document.getElementById('reportContent').innerHTML = reportHTML;
+            var modal = document.getElementById('reportModal');
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeReport() {
+            var modal = document.getElementById('reportModal');
+            modal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+
+        function downloadReport() {
+            alert('功能演示中，实际PDF下载功能将在正式版本中启用');
+        }
+
+        function scrollToDemo() {
+            document.getElementById('demo').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function toggleMobileMenu() {
+            var menu = document.getElementById('mobileMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        function sendChatMessage() {
+            var input = document.getElementById('chatInput');
+            var message = input.value.trim();
+            if (!message) return;
+
+            var container = document.getElementById('chatContainer');
+            container.innerHTML += '<div class="flex space-x-3 justify-end"><div class="bg-primary text-white rounded-2xl rounded-tr-none p-3 max-w-[80%]"><p class="text-sm">' + message + '</p></div><div class="w-8 h-8 bg-gray-200 rounded-full flex-shrink-0 flex items-center justify-center"><svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></div></div>';
+
+            input.value = '';
+
+            container.innerHTML += '<div class="flex space-x-3 typing-indicator"><div class="w-8 h-8 bg-primary rounded-full flex-shrink-0 flex items-center justify-center"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg></div><div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-3"><div class="flex space-x-1"><span></span><span></span><span></span></div></div></div>';
+
+            container.scrollTop = container.scrollHeight;
+
+            var response = chatResponses['默认'];
+            for (var key in chatResponses) {
+                if (key !== '默认' && message.includes(key)) {
+                    response = chatResponses[key];
+                    break;
+                }
+            }
+
+            setTimeout(function() {
+                var typing = container.querySelector('.typing-indicator');
+                if (typing) typing.remove();
+
+                container.innerHTML += '<div class="flex space-x-3 chat-bubble"><div class="w-8 h-8 bg-primary rounded-full flex-shrink-0 flex items-center justify-center"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg></div><div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-3 max-w-[80%]"><p class="text-gray-800 text-sm">' + response + '</p></div></div>';
+                container.scrollTop = container.scrollHeight;
+            }, 1500);
+        }
+
+        window.addEventListener('scroll', function() {
+            var header = document.getElementById('mainHeader');
+            if (window.scrollY > 10) {
+                header.classList.add('scrolled');
+            } else {
+                header.classList.remove('scrolled');
+            }
+        });
+
+        document.getElementById('uploadArea').addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+
+        document.getElementById('uploadArea').addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+
+        document.getElementById('uploadArea').addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('fileInput').files = files;
+                handleFileUpload(document.getElementById('fileInput'));
+            }
+        });
+
+        switchScene('house', true);
+    </script>
+</body>
+</html>

@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 赛博白板</title>
+<!-- Tailwind CSS via Play CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Tailwind 配置：扩展墨绿暗黑科技风配色 + 卡片四色体系
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: {
+            900: '#0a0f0d',  // 深墨黑
+            800: '#0f1714',  // 墨绿黑
+            700: '#141d1a',  // 面板底
+            600: '#1a2622',  // 卡片底
+            500: '#243530',  // 边框
+          },
+          moss: {
+            400: '#4ade80',  // 高亮绿
+            500: '#22c55e',  // 主色绿
+            600: '#16a34a',  // 深绿
+          },
+          cyber: {
+            400: '#5eead4',  // 青绿
+            500: '#14b8a6',  // 赛博青
+          },
+          // 四色卡片体系
+          cardblue:  { base:'#1e3a5f', stripe:'#3b82f6', glow:'rgba(59,130,246,.35)', tag:'rgba(59,130,246,.18)', text:'#93c5fd' },
+          cardred:   { base:'#3a1e1e', stripe:'#ef4444', glow:'rgba(239,68,68,.35)',  tag:'rgba(239,68,68,.18)',  text:'#fca5a5' },
+          cardgreen: { base:'#1e3a2a', stripe:'#22c55e', glow:'rgba(34,197,94,.35)',  tag:'rgba(34,197,94,.18)',  text:'#86efac' },
+          cardyellow:{ base:'#3a351e', stripe:'#eab308', glow:'rgba(234,179,8,.35)',  tag:'rgba(234,179,8,.18)',  text:'#fde68a' },
+        },
+        fontFamily: {
+          sans: ['Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  /* 微弱网格背景纹理 */
+  .grid-canvas {
+    background-color: #0a0f0d;
+    background-image:
+      linear-gradient(rgba(34, 197, 94, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 197, 94, 0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  /* 画布氛围光晕 */
+  .grid-canvas::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 25% 15%, rgba(34, 197, 94, 0.06), transparent 55%),
+      radial-gradient(ellipse at 75% 85%, rgba(20, 184, 166, 0.05), transparent 55%);
+    pointer-events: none;
+  }
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #243530; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4ade80; }
+  /* 按钮微光扫过动画 */
+  .btn-glow { position: relative; overflow: hidden; }
+  .btn-glow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.6s;
+  }
+  .btn-glow:hover::after { transform: translateX(100%); }
+
+  /* ===== AI 思考动画遮罩 ===== */
+  .ai-thinking-overlay {
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(10, 15, 13, 0.75); backdrop-filter: blur(6px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; opacity: 0; pointer-events: none; transition: opacity .3s;
+  }
+  .ai-thinking-overlay.active { opacity: 1; pointer-events: auto; }
+  .ai-orb {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: conic-gradient(from 0deg, #22c55e, #14b8a6, #3b82f6, #22c55e);
+    animation: orbSpin 1.2s linear infinite;
+    box-shadow: 0 0 40px rgba(34,197,94,.5), 0 0 80px rgba(20,184,166,.3);
+    position: relative;
+  }
+  .ai-orb::after {
+    content: ''; position: absolute; inset: 8px; border-radius: 50%;
+    background: #0a0f0d; box-shadow: inset 0 0 20px rgba(34,197,94,.3);
+  }
+  @keyframes orbSpin { to { transform: rotate(360deg); } }
+  .ai-dots { display: flex; gap: 6px; }
+  .ai-dots span {
+    width: 8px; height: 8px; border-radius: 50%; background: #4ade80;
+    animation: dotBounce 1.4s ease-in-out infinite;
+  }
+  .ai-dots span:nth-child(2) { animation-delay: .2s; }
+  .ai-dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes dotBounce {
+    0%, 80%, 100% { transform: scale(.6); opacity: .4; }
+    40% { transform: scale(1.2); opacity: 1; }
+  }
+
+  /* ===== 知识卡片（优化动画） ===== */
+  .kb-card {
+    position: absolute; width: 300px; min-height: 180px;
+    border-radius: 14px; overflow: hidden;
+    cursor: grab; user-select: none;
+    /* 入场：淡入 + 缩放 + 上浮 */
+    opacity: 0; transform: scale(.85) translateY(24px);
+    animation: cardIn .55s cubic-bezier(.23,1,.32,1) forwards;
+    transition: box-shadow .2s ease, transform .2s ease, opacity .3s ease;
+    backdrop-filter: blur(8px);
+    will-change: transform, left, top;  /* 性能优化提示 */
+  }
+  .kb-card.dragging {
+    cursor: grabbing;
+    transform: scale(1.03);
+    z-index: 1000 !important;
+    transition: none;  /* 拖拽时禁用过渡，保证跟手 */
+    box-shadow: 0 16px 48px rgba(0,0,0,.6);
+  }
+  @keyframes cardIn {
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  /* 退场动画类 */
+  .kb-card.removing {
+    animation: cardOut .3s cubic-bezier(.4,0,.2,1) forwards;
+  }
+  @keyframes cardOut {
+    to { opacity: 0; transform: scale(.85) translateY(-12px); }
+  }
+  .kb-card .stripe { height: 4px; width: 100%; }
+
+  /* ===== Toast ===== */
+  .toast-container {
+    position: fixed; top: 20px; right: 20px; z-index: 9999;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast {
+    padding: 12px 20px; border-radius: 8px;
+    background: #141d1a; border: 1px solid #243530; color: #e4e4ef;
+    font-size: 13px; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    animation: toastIn .3s ease, toastOut .3s ease 2.2s forwards;
+  }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes toastOut { to { opacity: 0; transform: translateX(40px); } }
+
+  /* ===== 画布提示淡入淡出 ===== */
+  .canvas-hint {
+    transition: opacity .5s ease, transform .5s ease;
+  }
+  .canvas-hint.hidden {
+    opacity: 0 !important;
+    transform: translate(-50%, -50%) scale(.95);
+    pointer-events: none;
+  }
+
+  /* ===== 保存状态指示器 ===== */
+  .save-indicator {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    padding: 8px 14px; border-radius: 20px;
+    background: rgba(20, 29, 26, .9); border: 1px solid #243530;
+    color: #4ade80; font-size: 12px; font-family: monospace;
+    display: flex; align-items: center; gap: 6px;
+    opacity: 0; transform: translateY(10px);
+    transition: opacity .3s ease, transform .3s ease;
+    backdrop-filter: blur(8px);
+  }
+  .save-indicator.visible {
+    opacity: 1; transform: translateY(0);
+  }
+  .save-indicator .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #4ade80;
+    box-shadow: 0 0 8px #4ade80;
+  }
+</style>
+</head>
+<body class="h-screen w-screen overflow-hidden bg-ink-900 text-gray-100 font-sans">
+<div class="flex h-full">
+
+  <!-- ===== 左侧固定宽度控制面板 ===== -->
+  <aside class="w-80 min-w-80 flex-shrink-0 bg-ink-700 border-r border-ink-500/60 flex flex-col gap-6 p-6 overflow-y-auto">
+
+    <!-- 标题区 -->
+    <header class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-moss-500 to-cyber-500 flex items-center justify-center text-lg shadow-lg shadow-moss-500/20">
+        <span>⚡</span>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-gray-50">AI 赛博白板</h1>
+        <p class="text-xs text-gray-500">Cyber Whiteboard v1.3.0</p>
+      </div>
+    </header>
+
+    <!-- 副标题说明 -->
+    <p class="text-sm text-gray-400 leading-relaxed -mt-2">
+      输入核心课题，由 AI 矩阵拆解为可视化思维卡片。数据自动本地保存。
+    </p>
+
+    <div class="h-px bg-ink-500/60"></div>
+
+    <!-- 课题输入区 -->
+    <section class="flex flex-col gap-3">
+      <label for="topicInput" class="text-xs font-semibold uppercase tracking-widest text-moss-400">
+        输入核心课题
+      </label>
+      <textarea
+        id="topicInput"
+        rows="6"
+        placeholder="例如：大模型落地的核心瓶颈与突破路径&#10;例如：创业公司从0到1的冷启动策略&#10;例如：一份5万字论文的利益相关者分析"
+        class="w-full bg-ink-800 border border-ink-500/70 rounded-xl p-4 text-sm leading-relaxed text-gray-100 placeholder-gray-600 resize-y focus:outline-none focus:border-moss-500 focus:ring-1 focus:ring-moss-500/40 transition"></textarea>
+    </section>
+
+    <!-- AI 矩阵拆解按钮 -->
+    <button
+      id="btnDecompose"
+      onclick="handleDecompose()"
+      class="btn-glow w-full py-3.5 rounded-xl bg-gradient-to-r from-moss-600 to-cyber-500 text-white text-base font-semibold tracking-wide shadow-lg shadow-moss-500/25 hover:shadow-moss-500/40 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200">
+      ⚡ AI 矩阵拆解
+    </button>
+
+    <div class="h-px bg-ink-500/60"></div>
+
+    <!-- 统计区 -->
+    <section class="flex gap-3">
+      <div class="flex-1 bg-ink-800 rounded-lg p-3 text-center border border-ink-500/40">
+        <div id="cardCount" class="text-xl font-bold text-cyber-400">0</div>
+        <div class="text-xs text-gray-500 mt-0.5">卡片数</div>
+      </div>
+      <div class="flex-1 bg-ink-800 rounded-lg p-3 text-center border border-ink-500/40">
+        <div id="topicCount" class="text-xl font-bold text-moss-400">0</div>
+        <div class="text-xs text-gray-500 mt-0.5">已拆解</div>
+      </div>
+    </section>
+
+    <!-- 清空按钮 -->
+    <button onclick="clearAll()" class="w-full py-2.5 rounded-lg border border-ink-500/60 text-gray-400 text-sm hover:border-red-500/60 hover:text-red-400 transition">
+      🗑 清空白板
+    </button>
+
+  </aside>
+
+  <!-- ===== 右侧无限白板画布 ===== -->
+  <main id="canvas" class="flex-1 relative overflow-hidden grid-canvas">
+
+    <!-- 画布中央提示 -->
+    <div id="canvasHint" class="canvas-hint absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none select-none">
+      <div class="text-6xl mb-4 opacity-20">🧠</div>
+      <p class="text-sm text-gray-500 leading-loose">
+        在左侧输入核心课题<br>
+        点击「AI 矩阵拆解」生成卡片
+      </p>
+    </div>
+
+    <!-- 画布右上角标识 -->
+    <div class="absolute top-4 right-4 text-xs text-gray-600 font-mono tracking-wider opacity-60 pointer-events-none">
+      ∞ INFINITE CANVAS
+    </div>
+
+    <!-- AI 思考动画遮罩 -->
+    <div id="aiThinking" class="ai-thinking-overlay">
+      <div class="ai-orb"></div>
+      <div class="text-sm text-moss-400 font-mono tracking-widest">AI 矩阵拆解中</div>
+      <div class="ai-dots"><span></span><span></span><span></span></div>
+    </div>
+
+  </main>
+
+</div>
+
+<!-- Toast 容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- 保存状态指示器 -->
+<div class="save-indicator" id="saveIndicator">
+  <span class="dot"></span>
+  <span id="saveText">已保存</span>
+</div>
+
+<script>
+// ===== 状态管理 =====
+const STORAGE_KEY = 'ai_cyber_whiteboard_v1_3';
+let cards = [];           // 卡片数据
+let cardIdCounter = 0;    // ID 计数器
+let zCounter = 10;        // 层级计数器
+let dragState = null;     // 拖拽状态
+let saveTimer = null;     // 保存防抖计时器
+let rafId = null;         // requestAnimationFrame ID
+
+// ===== 四色卡片配置 =====
+const CARD_THEMES = {
+  blue:   { name:'核心诉求卡', tag:'核心诉求', stripe:'#3b82f6', base:'#1e3a5f', glow:'rgba(59,130,246,.35)',  tagBg:'rgba(59,130,246,.18)',  tagText:'#93c5fd' },
+  red:    { name:'阻碍冲突卡', tag:'阻碍冲突', stripe:'#ef4444', base:'#3a1e1e', glow:'rgba(239,68,68,.35)',   tagBg:'rgba(239,68,68,.18)',   tagText:'#fca5a5' },
+  green:  { name:'政策执行卡', tag:'政策执行', stripe:'#22c55e', base:'#1e3a2a', glow:'rgba(34,197,94,.35)',   tagBg:'rgba(34,197,94,.18)',   tagText:'#86efac' },
+  yellow: { name:'落地痛点卡', tag:'落地痛点', stripe:'#eab308', base:'#3a351e', glow:'rgba(234,179,8,.35)',   tagBg:'rgba(234,179,8,.18)',   tagText:'#fde68a' },
+};
+
+// ===== Mock 专业分析文字模板 =====
+const MOCK_CONTENT = {
+  blue: {
+    title: '核心诉求识别',
+    desc: '聚焦课题最关键的价值主张：明确研究/项目的核心问题边界，识别主要利益相关者（研究者、评审、用户、资方）的诉求优先级。建议采用「问题树分析法」自顶向下拆解，确保每一层子问题可验证、可量化，避免目标泛化导致的执行漂移。'
+  },
+  red: {
+    title: '阻碍冲突矩阵',
+    desc: '梳理课题推进中的核心阻力：① 资源约束（算力、数据、资金）；② 方法论冲突（理论假设与工程现实的偏差）；③ 利益博弈（学术创新度与商业可行性的权衡）；④ 技术债务（原型快速迭代与系统稳定性的矛盾）。需建立冲突优先级矩阵，量化各阻力的影响半径。'
+  },
+  green: {
+    title: '政策执行路径',
+    desc: '构建可落地的执行框架：依据课题目标制定三阶段路线图——短期（0-3月）完成核心模块验证；中期（3-9月）推进小规模试点与数据回流；长期（9-18月）形成可复用的方法论沉淀。每阶段设置明确里程碑与退出条件，配套风险预案与合规审查节点。'
+  },
+  yellow: {
+    title: '落地痛点诊断',
+    desc: '识别工程化落地的关键瓶颈：① 数据质量与标注一致性；② 模型推理延迟与边缘部署的算力限制；③ 用户冷启动阶段的体验断层；④ 跨团队协作中的接口契约稳定性。建议引入「故障注入测试」与「灰度发布」机制，提前暴露长尾问题。'
+  }
+};
+
+// ===== LocalStorage 持久化 =====
+function saveToStorage() {
+  try {
+    const payload = {
+      cards,
+      cardIdCounter,
+      zCounter,
+      savedAt: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    showSaveIndicator();
+  } catch (e) {
+    // 配额超限或隐私模式，静默失败
+    console.warn('LocalStorage 保存失败:', e);
+  }
+}
+
+// 防抖保存：拖拽过程中避免频繁写入
+function debouncedSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveToStorage, 400);
+}
+
+// 从 LocalStorage 恢复
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.cards)) return false;
+
+    cards = data.cards;
+    cardIdCounter = data.cardIdCounter || 0;
+    zCounter = data.zCounter || 10;
+
+    // 边界修复：恢复时确保卡片不超出当前画布
+    const canvas = document.getElementById('canvas');
+    const rect = canvas.getBoundingClientRect();
+    cards.forEach((c, i) => {
+      c.x = Math.max(0, Math.min(c.x, rect.width - 300));
+      c.y = Math.max(0, Math.min(c.y, rect.height - 180));
+      createCardElement(c, i * 80);
+    });
+
+    if (cards.length > 0) {
+      document.getElementById('canvasHint').classList.add('hidden');
+    }
+    updateStats();
+    return true;
+  } catch (e) {
+    console.warn('LocalStorage 读取失败:', e);
+    return false;
+  }
+}
+
+// 保存指示器
+function showSaveIndicator() {
+  const indicator = document.getElementById('saveIndicator');
+  const text = document.getElementById('saveText');
+  text.textContent = '已保存 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  indicator.classList.add('visible');
+  clearTimeout(indicator._timer);
+  indicator._timer = setTimeout(() => indicator.classList.remove('visible'), 1500);
+}
+
+// ===== AI 矩阵拆解主流程 =====
+function handleDecompose() {
+  const input = document.getElementById('topicInput').value.trim();
+  const btn = document.getElementById('btnDecompose');
+
+  if (!input) {
+    showToast('请先输入核心课题');
+    return;
+  }
+
+  // 锁定按钮 + 启动 AI 思考动画
+  btn.disabled = true;
+  btn.classList.add('opacity-70', 'pointer-events-none');
+  const originalText = btn.textContent;
+  btn.textContent = '⚡ 拆解中...';
+  document.getElementById('aiThinking').classList.add('active');
+
+  // 模拟 AI 思考延迟（1.6s）
+  setTimeout(() => {
+    document.getElementById('aiThinking').classList.remove('active');
+    btn.disabled = false;
+    btn.classList.remove('opacity-70', 'pointer-events-none');
+    btn.textContent = originalText;
+
+    generateCards(input);
+    document.getElementById('canvasHint').classList.add('hidden');
+    updateStats();
+    showToast(`已生成 4 张拆解卡片`);
+    saveToStorage();  // 生成后立即保存
+  }, 1600);
+}
+
+// ===== 生成 4 张卡片 =====
+function generateCards(topic) {
+  const canvas = document.getElementById('canvas');
+  const rect = canvas.getBoundingClientRect();
+  const cardW = 300, cardH = 200, gap = 28;
+  // 2x2 网格布局，居中
+  const totalW = 2 * cardW + gap;
+  const totalH = 2 * cardH + gap;
+  const startX = Math.max(40, (rect.width - totalW) / 2);
+  const startY = Math.max(40, (rect.height - totalH) / 2);
+
+  const order = ['blue', 'red', 'green', 'yellow'];
+  order.forEach((color, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const theme = CARD_THEMES[color];
+    const mock = MOCK_CONTENT[color];
+
+    const cardData = {
+      id: ++cardIdCounter,
+      color,
+      tag: theme.tag,
+      title: mock.title,
+      desc: mock.desc,
+      stripe: theme.stripe,
+      base: theme.base,
+      glow: theme.glow,
+      tagBg: theme.tagBg,
+      tagText: theme.tagText,
+      x: startX + col * (cardW + gap),
+      y: startY + row * (cardH + gap),
+    };
+    cards.push(cardData);
+    createCardElement(cardData, i * 140);
+  });
+}
+
+// ===== 创建卡片 DOM =====
+function createCardElement(data, delay) {
+  const el = document.createElement('div');
+  el.className = 'kb-card';
+  el.dataset.id = data.id;
+  el.style.left = data.x + 'px';
+  el.style.top = data.y + 'px';
+  el.style.zIndex = ++zCounter;
+  el.style.animationDelay = delay + 'ms';
+  el.style.background = `linear-gradient(145deg, ${data.base}, #0f1714)`;
+  el.style.border = `1px solid ${data.stripe}40`;
+  el.style.boxShadow = `0 8px 32px rgba(0,0,0,.5), 0 0 0 1px ${data.stripe}20`;
+
+  el.innerHTML = `
+    <div class="stripe" style="background: linear-gradient(90deg, ${data.stripe}, ${data.stripe}80);"></div>
+    <div class="px-4 pt-3 pb-4">
+      <div class="flex items-start justify-between mb-2.5">
+        <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded"
+              style="background:${data.tagBg}; color:${data.tagText};">
+          ${data.tag}
+        </span>
+        <button class="w-6 h-6 rounded-md flex items-center justify-center text-xs transition-colors"
+                style="background:rgba(255,255,255,.05); color:#8888a0;"
+                onmouseover="this.style.background='rgba(239,68,68,.2)';this.style.color='#fca5a5';"
+                onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.color='#8888a0';"
+                onclick="deleteCard(${data.id})" title="删除卡片">
+          ✕
+        </button>
+      </div>
+      <h3 class="text-[15px] font-bold mb-2 leading-snug" style="color:#f1f5f9;">${data.title}</h3>
+      <p class="text-[12.5px] leading-relaxed" style="color:#94a3b8;">${data.desc}</p>
+    </div>
+  `;
+
+  // 拖拽事件绑定
+  el.addEventListener('mousedown', onDragStart);
+  el.addEventListener('touchstart', onTouchStart, { passive: false });
+
+  document.getElementById('canvas').appendChild(el);
+}
+
+// ===== 拖拽：鼠标 =====
+function onDragStart(e) {
+  if (e.target.closest('button')) return;
+  const el = e.currentTarget;
+  const rect = el.getBoundingClientRect();
+  const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+  dragState = {
+    el,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+    canvasRect,
+    moved: false,
+    pendingX: null,
+    pendingY: null
+  };
+  el.classList.add('dragging');
+  el.style.zIndex = ++zCounter;
+  e.preventDefault();
+}
+
+// ===== 拖拽：触屏 =====
+function onTouchStart(e) {
+  if (e.target.closest('button')) return;
+  const touch = e.touches[0];
+  const el = e.currentTarget;
+  const rect = el.getBoundingClientRect();
+  const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+  dragState = {
+    el,
+    offsetX: touch.clientX - rect.left,
+    offsetY: touch.clientY - rect.top,
+    canvasRect,
+    moved: false,
+    pendingX: null,
+    pendingY: null
+  };
+  el.classList.add('dragging');
+  el.style.zIndex = ++zCounter;
+  e.preventDefault();
+}
+
+// ===== 拖拽移动（全局监听 + rAF 优化） =====
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  scheduleMove(e.clientX, e.clientY);
+});
+document.addEventListener('touchmove', e => {
+  if (!dragState) return;
+  scheduleMove(e.touches[0].clientX, e.touches[0].clientY);
+  e.preventDefault();
+}, { passive: false });
+
+// 使用 requestAnimationFrame 合并多次移动事件，保证流畅
+function scheduleMove(cx, cy) {
+  dragState.pendingX = cx;
+  dragState.pendingY = cy;
+  if (rafId) return;  // 已有帧在排队
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    if (!dragState) return;
+    moveCard(dragState.pendingX, dragState.pendingY);
+  });
+}
+
+function moveCard(cx, cy) {
+  const { el, offsetX, offsetY, canvasRect } = dragState;
+  let x = cx - canvasRect.left - offsetX;
+  let y = cy - canvasRect.top - offsetY;
+  // 边界约束：卡片至少保留 80px 在画布内（防止完全拖出）
+  const minVisible = 80;
+  x = Math.max(-(el.offsetWidth - minVisible), Math.min(x, canvasRect.width - minVisible));
+  y = Math.max(-(el.offsetHeight - minVisible), Math.min(y, canvasRect.height - minVisible));
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  dragState.moved = true;
+  // 同步数据
+  const card = cards.find(c => c.id === +el.dataset.id);
+  if (card) { card.x = x; card.y = y; }
+}
+
+// ===== 结束拖拽 =====
+document.addEventListener('mouseup', endDrag);
+document.addEventListener('touchend', endDrag);
+
+function endDrag() {
+  if (!dragState) return;
+  dragState.el.classList.remove('dragging');
+  // 拖拽结束后防抖保存
+  if (dragState.moved) debouncedSave();
+  dragState = null;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+
+// ===== 删除卡片 =====
+function deleteCard(id) {
+  const el = document.querySelector(`.kb-card[data-id="${id}"]`);
+  if (el) {
+    el.classList.add('removing');
+    setTimeout(() => el.remove(), 300);
+  }
+  cards = cards.filter(c => c.id !== id);
+  updateStats();
+  if (cards.length === 0) {
+    document.getElementById('canvasHint').classList.remove('hidden');
+  }
+  showToast('卡片已删除');
+  debouncedSave();  // 防抖保存
+}
+
+// ===== 统计更新 =====
+function updateStats() {
+  document.getElementById('cardCount').textContent = cards.length;
+  document.getElementById('topicCount').textContent = cards.length > 0 ? 1 : 0;
+}
+
+// ===== Toast 通知 =====
+function showToast(msg) {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+// ===== 清空白板 =====
+function clearAll() {
+  if (cards.length === 0) {
+    showToast('白板已是空的');
+    return;
+  }
+  document.querySelectorAll('.kb-card').forEach(el => {
+    el.classList.add('removing');
+    setTimeout(() => el.remove(), 300);
+  });
+  cards = [];
+  cardIdCounter = 0;
+  zCounter = 10;
+  updateStats();
+  document.getElementById('canvasHint').classList.remove('hidden');
+  showToast('白板已清空');
+  saveToStorage();  // 立即保存清空状态
+}
+
+// ===== 窗口 resize 响应：重新约束卡片位置 =====
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (resizeTimer) clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const canvas = document.getElementById('canvas');
+    const rect = canvas.getBoundingClientRect();
+    const minVisible = 80;
+    let changed = false;
+    cards.forEach(c => {
+      const el = document.querySelector(`.kb-card[data-id="${c.id}"]`);
+      if (!el) return;
+      const newX = Math.max(-(el.offsetWidth - minVisible), Math.min(c.x, rect.width - minVisible));
+      const newY = Math.max(-(el.offsetHeight - minVisible), Math.min(c.y, rect.height - minVisible));
+      if (newX !== c.x || newY !== c.y) {
+        c.x = newX; c.y = newY;
+        el.style.left = newX + 'px';
+        el.style.top = newY + 'px';
+        changed = true;
+      }
+    });
+    if (changed) debouncedSave();
+  }, 200);
+});
+
+// ===== 页面卸载前强制保存（防止防抖未执行） =====
+window.addEventListener('beforeunload', () => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveToStorage();
+  }
+});
+
+// ===== 初始化：从 LocalStorage 恢复 =====
+window.addEventListener('DOMContentLoaded', () => {
+  const restored = loadFromStorage();
+  if (restored) {
+    showToast('已恢复上次会话');
+  }
+});
+</script>
+</body>
+</html>
