@@ -16,6 +16,15 @@
       <ProjectGrid />
       <Footer />
     </main>
+
+    <!-- 直达底部按钮 -->
+    <button
+      @click="scrollToBottom"
+      class="fixed right-6 bottom-6 z-50 w-10 h-10 rounded-full bg-trae-surface border border-white/10 flex items-center justify-center text-trae-text-secondary hover:text-trae-accent hover:border-trae-accent/50 transition-all duration-300 shadow-lg backdrop-blur-sm"
+      title="直达底部"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+    </button>
   </div>
 </template>
 
@@ -29,4 +38,8 @@ import traeBlackImg from '@/assets/trae-black.png'
 import bannerImg from '@/assets/banner.webp'
 
 const bannerUrl = bannerImg
+
+function scrollToBottom() {
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+}
 </script>
