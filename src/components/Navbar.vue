@@ -4,9 +4,7 @@
     :class="scrolled ? 'bg-trae-bg/85 backdrop-blur-xl border-b border-white/5' : 'bg-trae-bg/55 backdrop-blur-md'"
   >
     <router-link to="/" class="flex items-center gap-2.5 no-underline">
-      <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-trae-accent to-trae-accent-deep grid place-items-center text-black font-extrabold text-sm shadow-[0_0_16px_rgba(34,197,94,0.35)]">
-        T
-      </div>
+      <img :src="logoUrl" alt="TRAE" class="w-7 h-7" />
       <span class="text-trae-text font-bold text-base tracking-wide">TRAE Demo Wall</span>
     </router-link>
 
@@ -40,6 +38,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import logoUrl from '@/assets/trae-black.png'
 
 const scrolled = ref(false)
 

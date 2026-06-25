@@ -9,21 +9,9 @@
 
         <h1 class="text-[clamp(40px,6vw,64px)] font-extrabold leading-[1.1] tracking-tight mb-6 text-trae-text">
           探索
-          <span class="bg-gradient-to-br from-trae-accent via-[#4ade80] to-[#86efac] bg-clip-text text-transparent">AI</span>
+          <span class="bg-gradient-to-br from-trae-accent via-[#4ade80] to-[#86efac] bg-clip-text text-transparent">TRAE AI</span>
           驱动的创意作品
         </h1>
-
-        <p class="text-lg text-trae-text-secondary mb-10 max-w-[560px]">
-          来自 TRAE 社区的 <span class="text-trae-text font-semibold">{{ stats.totalProjects }}+</span> 网页/前端创新项目，一站式体验
-        </p>
-
-        <div class="flex items-center gap-6 mb-10 text-sm text-trae-text-secondary font-mono">
-          <span>{{ stats.totalProjects }} 件作品</span>
-          <span class="text-trae-border">·</span>
-          <span>{{ tagCount }} 个赛道</span>
-          <span class="text-trae-border">·</span>
-          <span>{{ formatNumber(stats.totalViews) }}+ 次浏览</span>
-        </div>
 
         <div class="flex gap-3 flex-wrap">
           <a href="#projects" class="btn-primary">开始探索</a>
