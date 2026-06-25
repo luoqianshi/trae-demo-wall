@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>② 构建流水线优化：从文本到图谱</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1; --primary-dark: #4f46e5; --primary-light: #a5b4fc;
+            --secondary: #8b5cf6; --accent: #06b6d4; --accent-2: #10b981;
+            --amber: #f59e0b; --rose: #f43f5e;
+            --text-dark: #0f172a; --text: #1e293b; --text-gray: #64748b; --text-light: #94a3b8;
+            --bg: #f8fafc; --bg-white: #ffffff; --border: #e2e8f0; --border-light: #f1f5f9;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.06);
+            --shadow: 0 4px 6px -1px rgba(0,0,0,.02), 0 2px 4px -2px rgba(0,0,0,.04);
+            --shadow-md: 0 12px 24px -8px rgba(0,0,0,.06), 0 4px 8px rgba(0,0,0,.03);
+            --shadow-lg: 0 24px 48px -12px rgba(0,0,0,.12), 0 8px 16px -8px rgba(0,0,0,.06);
+            --shadow-primary: 0 12px 28px rgba(99,102,241,.2);
+            --radius-sm: 10px; --radius-md: 16px; --radius-lg: 24px; --radius-xl: 32px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.7;
+            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+        }
+        .progress-bar {
+            position: fixed; top: 0; left: 0; height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent), var(--secondary));
+            z-index: 10000; transition: width 0.1s linear; border-radius: 0 2px 2px 0;
+        }
+        .hero {
+            position: relative; background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 30%, #312e81 60%, #4338ca 100%);
+            color: white; padding: 72px 48px 56px; text-align: center; overflow: hidden;
+        }
+        .hero-orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.35; animation: orbFloat 20s ease-in-out infinite; pointer-events: none; }
+        .hero-orb-1 { width: 500px; height: 500px; background: #6366f1; top: -150px; left: -100px; }
+        .hero-orb-2 { width: 400px; height: 400px; background: #06b6d4; bottom: -120px; right: -80px; animation-delay: -7s; }
+        .hero-orb-3 { width: 300px; height: 300px; background: #8b5cf6; top: 40%; right: 25%; animation-delay: -14s; }
+        @keyframes orbFloat {
+            0%, 100% { transform: translate(0,0) scale(1); }
+            25% { transform: translate(40px,-30px) scale(1.1); }
+            50% { transform: translate(-20px,20px) scale(0.95); }
+            75% { transform: translate(-30px,-10px) scale(1.05); }
+        }
+        .hero-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px); background-size: 60px 60px; mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%); pointer-events: none; }
+        .hero-content { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; }
+        .hero .tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 18px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); border-radius: 100px; font-size: 13px; margin-bottom: 16px; }
+        .hero h1 { font-size: clamp(28px, 4vw, 42px); font-weight: 800; margin-bottom: 12px; }
+        .hero p { font-size: 17px; opacity: 0.9; max-width: 680px; margin: 0 auto; line-height: 1.8; }
+        .hero .gradient-text { background: linear-gradient(135deg, #c084fc, #818cf8, #38bdf8); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .page-layout { display: grid; grid-template-columns: 260px 1fr; max-width: 1280px; margin: 0 auto; gap: 40px; padding: 48px 40px; }
+        .side-nav { position: sticky; top: 24px; align-self: start; background: rgba(255,255,255,.85); backdrop-filter: blur(10px); border-radius: var(--radius-lg); padding: 20px 0; box-shadow: var(--shadow-md); border: 1px solid var(--border); max-height: calc(100vh - 48px); overflow-y: auto; }
+        .nav-title { padding: 0 20px 12px; font-weight: 700; color: var(--primary-dark); font-size: 14px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+        .nav-item { display: block; padding: 10px 20px; color: var(--text-gray); text-decoration: none; font-size: 14px; transition: color 0.2s, background 0.2s; border-left: 3px solid transparent; position: relative; }
+        .nav-item:hover { color: var(--primary); background: #eef2ff; border-left-color: var(--primary); }
+        .nav-item.active { color: var(--primary-dark); background: #eef2ff; font-weight: 600; border-left-color: var(--primary); }
+        .nav-item.active::after { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, var(--primary), var(--secondary)); border-radius: 3px 0 0 3px; }
+        .nav-back { display: block; margin: 16px 20px 0; padding: 12px; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; text-align: center; border-radius: 10px; text-decoration: none; font-size: 13px; font-weight: 600; transition: color 0.2s, background 0.2s; }
+        .nav-back:hover { opacity: 0.92; transform: translateY(-1px); box-shadow: var(--shadow-primary); }
+        .main-content { min-width: 0; }
+        .section-block { background: white; border-radius: var(--radius-lg); padding: 44px 48px; margin-bottom: 28px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); transition: box-shadow 0.3s, border-color 0.3s; content-visibility: auto; contain-intrinsic-size: auto 400px; }
+        .section-block:hover { box-shadow: var(--shadow-md); }
+        .section-block h2 { font-size: 28px; font-weight: 800; color: var(--text-dark); margin-bottom: 12px; letter-spacing: -0.5px; }
+        .section-block h3 { font-size: 20px; font-weight: 700; color: var(--text-dark); margin: 32px 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+        .section-block h4 { font-size: 17px; font-weight: 700; color: var(--primary-dark); margin: 20px 0 8px; }
+        .section-block p { margin-bottom: 14px; color: var(--text-gray); line-height: 1.85; font-size: 15px; }
+        .section-desc { font-size: 16px; color: var(--text-gray); margin-bottom: 24px; line-height: 1.8; }
+        .section-block ul, .section-block ol { margin: 10px 0 18px 20px; color: var(--text-gray); font-size: 15px; line-height: 1.9; }
+        .section-block ul li, .section-block ol li { margin-bottom: 8px; }
+        .compare-table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 16px 0; border-radius: var(--radius-sm); overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+        .compare-table th { background: linear-gradient(135deg, #1e1b4b, #312e81); color: white; padding: 14px 16px; font-size: 14px; font-weight: 600; text-align: left; }
+        .compare-table td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); background: white; }
+        .compare-table tr:last-child td { border-bottom: none; }
+        .compare-table tbody tr:hover td { background: #f8fafc; }
+        .compare-table tbody tr:nth-child(even) td { background: #fafbfc; }
+        .compare-table tbody tr:nth-child(even):hover td { background: #f1f5f9; }
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 16px 0; }
+        .tech-card { background: linear-gradient(135deg, #f8fafc, #f1f5f9); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 22px 20px; transition: box-shadow 0.3s, border-color 0.3s; }
+        .tech-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--primary-light); }
+        .tech-card .icon { font-size: 32px; margin-bottom: 10px; }
+        .tech-card .title { font-size: 16px; font-weight: 700; color: var(--text-dark); margin-bottom: 8px; }
+        .tech-card .body { font-size: 14px; color: var(--text-gray); line-height: 1.7; }
+        .info-box { background: linear-gradient(135deg, #eef2ff, #e0e7ff); border: 1px solid #a5b4fc; border-radius: var(--radius-sm); padding: 18px 22px; margin: 20px 0; font-size: 14px; color: #3730a3; line-height: 1.8; }
+        .warning-box { background: linear-gradient(135deg, #fef3c7, #fef9c3); border: 1px solid #fcd34d; border-radius: var(--radius-sm); padding: 18px 22px; margin: 20px 0; font-size: 14px; color: #92400e; line-height: 1.8; }
+        .highlight-box { background: linear-gradient(135deg, #ede9fe, #ddd6fe); border: 1px solid #a78bfa; border-radius: var(--radius-sm); padding: 22px 26px; margin: 20px 0; font-size: 15px; line-height: 1.8; }
+        .numbered-list li { margin-bottom: 12px; }
+        .numbered-list li strong { color: var(--text-dark); }
+        .tag { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; margin: 2px; }
+        .tag-blue { background: #dbeafe; color: #1e40af; }
+        .tag-purple { background: #ede9fe; color: #6d28d9; }
+        .tag-green { background: #dcfce7; color: #166534; }
+        .tag-yellow { background: #fef3c7; color: #92400e; }
+        .tag-rose { background: #fce7f3; color: #9d174d; }
+        .tag-cyan { background: #cffafe; color: #155e75; }
+        code { background: #f1f5f9; color: #6366f1; padding: 2px 8px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; }
+        .flow-chart { margin: 20px 0; }
+        .flow-steps { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; }
+        .flow-step { background: white; border: 2px solid var(--border); border-radius: var(--radius-sm); padding: 14px 18px; text-align: center; font-size: 13px; font-weight: 600; min-width: 100px; transition: box-shadow 0.3s, border-color 0.3s; }
+        .flow-step:hover { border-color: var(--primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        .flow-arrow { font-size: 20px; color: var(--primary); padding: 0 8px; font-weight: 700; }
+        .flow-label { text-align: center; font-size: 13px; color: var(--text-light); margin-top: 16px; font-style: italic; }
+        .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(.4,0,.2,1); }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+        footer { background: #0f172a; color: #94a3b8; padding: 40px 0; text-align: center; margin-top: 40px; }
+        .footer-links { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
+        .footer-links a { color: #cbd5e1; text-decoration: none; font-size: 14px; transition: color 0.2s; }
+        .footer-links a:hover { color: #818cf8; }
+        .footer-copy { font-size: 13px; color: #64748b; }
+        .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-light); margin-bottom: 24px; }
+        .breadcrumb a { color: var(--primary); text-decoration: none; }
+        .breadcrumb a:hover { text-decoration: underline; }
+        .breadcrumb span { color: var(--text-gray); }
+        .next-prev { display: flex; justify-content: space-between; margin-top: 32px; gap: 16px; }
+        .next-prev a { padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; text-decoration: none; transition: color 0.2s, background 0.2s; }
+        .prev-link { background: #f1f5f9; color: var(--text-gray); border: 1px solid var(--border); }
+        .prev-link:hover { background: #e2e8f0; }
+        .next-link { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; }
+        .next-link:hover { box-shadow: var(--shadow-primary); transform: translateY(-1px); }
+        /* Extra styles for code blocks */
+        .code-block { background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 20px 24px; margin: 16px 0; font-size: 13px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; line-height: 1.7; overflow-x: auto; white-space: pre; }
+        .code-block .comment { color: #64748b; }
+        .code-block .keyword { color: #c084fc; }
+        .code-block .string { color: #34d399; }
+        .code-block .function { color: #38bdf8; }
+        @media (max-width: 900px) {
+            .page-layout { grid-template-columns: 1fr; padding: 24px 16px; }
+            .side-nav { position: static; max-height: none; }
+            .section-block { padding: 28px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-bar" id="progressBar"></div>
+    <header class="hero">
+        <div class="hero-orb hero-orb-1"></div>
+        <div class="hero-orb hero-orb-2"></div>
+        <div class="hero-orb hero-orb-3"></div>
+        <div class="hero-grid"></div>
+        <div class="hero-content">
+            <span class="tag">📐 知识图谱工程架构指南</span>
+            <h1>② 构建流水线优化：<span class="gradient-text">从文本到图谱</span></h1>
+            <p>Garbage in, garbage out——构建阶段的质量决定了整个图谱系统的上限</p>
+        </div>
+    </header>
+    <div class="page-layout">
+        <nav class="side-nav" id="sideNav">
+            <div class="nav-title">📖 内容导航</div>
+            <a href="../ai-knowledge-intro.html" class="nav-item" style="font-weight:700;color:var(--primary-dark);">🏠 返回首页</a>
+            <a href="../ai-basics.html" class="nav-item" style="font-weight:600;color:#10b981;">💡 AI基础入门</a>
+            <a href="../projects.html" class="nav-item" style="font-weight:600;color:#f43f5e;">🔧 实战项目</a>
+            <a href="../interactive-tutorial.html" class="nav-item" style="font-weight:600;color:var(--accent);">🎮 互动教程</a>
+            <a href="../kg-optimization.html" class="nav-item" style="font-weight:600;color:var(--primary);">📐 架构指南总览</a>
+            <a href="../explore.html" class="nav-item" style="font-weight:600;color:#f59e0b;">🗺️ 探索地图</a>
+            <a href="overview.html" class="nav-item">① 知识图谱全景图</a>
+            <a href="pipeline.html" class="nav-item active">② 构建流水线</a>
+            <a href="embedding.html" class="nav-item">③ 图嵌入与向量检索</a>
+            <a href="query.html" class="nav-item">④ 查询优化</a>
+            <a href="scale.html" class="nav-item">⑤ 大规模工程</a>
+            <a href="llm-kg.html" class="nav-item">⑥ LLM + KG 融合</a>
+            <a href="trends.html" class="nav-item">⑦ 2026 趋势</a>
+            <a href="cases.html" class="nav-item">⑧ 工程案例</a>
+            <a href="multimodal.html" class="nav-item">⑨ 图文多模态检索</a>
+            <a href="../ai-knowledge-intro.html" class="nav-back">🏠 返回首页</a>
+        </nav>
+        <main class="main-content">
+            <div class="breadcrumb">
+                <a href="../ai-knowledge-intro.html">首页</a> <span>›</span> <a href="overview.html">① 知识图谱全景图</a> <span>›</span> <span>② 构建流水线</span>
+            </div>
+
+            <!-- Section 1: 构建流水线全景 -->
+            <section class="section-block reveal">
+                <h2>📐 构建流水线全景</h2>
+                <p class="section-desc">知识图谱的构建不是一步到位的魔法，而是一个多层次、多阶段的工程流水线。理解每个阶段的目标和挑战，是构建高质量图谱的关键。</p>
+
+                <div class="flow-chart">
+                    <div class="flow-steps">
+                        <div class="flow-step">📄 <br>原始文本</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">🔍 <br>NER</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">🔗 <br>关系抽取</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">🤝 <br>实体对齐</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">🧩 <br>知识融合</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">✅ <br>质量检查</div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-step">📊 <br>知识图谱</div>
+                    </div>
+                    <div class="flow-label">从原始文本到结构化知识图谱的完整流水线</div>
+                </div>
+
+                <h3>流水线设计的核心原则</h3>
+                <ol class="numbered-list">
+                    <li><strong>模块化（Modularity）</strong>：每个阶段独立、可替换。当 NER 模型升级时，不应影响关系抽取。使用明确的接口契约（如 JSON Schema）连接各阶段。</li>
+                    <li><strong>可观测性（Observability）</strong>：每个阶段都有明确的输入输出度量。记录每个阶段的处理量、准确率、延迟，便于定位瓶颈。</li>
+                    <li><strong>幂等性（Idempotency）</strong>：同样的输入产生同样的输出。支持重跑和增量更新，避免重复处理导致的数据不一致。</li>
+                    <li><strong>容错性（Fault Tolerance）</strong>：单个文档处理失败不应阻塞整个流水线。使用死信队列（DLQ）收集失败记录，支持人工介入和自动重试。</li>
+                    <li><strong>版本化（Versioning）</strong>：每个阶段的模型版本、配置版本都应有记录。出问题时可以追溯到具体版本。</li>
+                </ol>
+
+                <div class="info-box">
+                    <strong>💡 工程建议：</strong>在流水线早期就建立全面的日志和度量体系。一个常见的错误是等到生产环境出问题后才开始加监控——那时已经晚了。建议使用 MLflow 或 Weights & Biases 追踪每次流水线运行的全部指标。
+                </div>
+            </section>
+
+            <!-- Section 2: 信息抽取四代演进 -->
+            <section class="section-block reveal">
+                <h2>🔍 信息抽取：四代技术演进</h2>
+                <p class="section-desc">信息抽取（Information Extraction）是构建流水线的核心环节。从规则到深度学习，再到 LLM 和 Agent，四代技术各有优劣。</p>
+
+                <h3>四代技术对比</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>代际</th><th>技术方案</th><th>准确率</th><th>召回率</th><th>标注成本</th><th>推理成本</th><th>适用场景</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>第一代</strong></td>
+                            <td>正则 + 词典 + CRF</td>
+                            <td>高（95%+）</td>
+                            <td>低（50-60%）</td>
+                            <td>低</td>
+                            <td>极低</td>
+                            <td>格式固定、实体类型少</td>
+                        </tr>
+                        <tr>
+                            <td><strong>第二代</strong></td>
+                            <td>BiLSTM-CRF / BERT</td>
+                            <td>高（90%+）</td>
+                            <td>中高（80-85%）</td>
+                            <td>高（需数千标注）</td>
+                            <td>中</td>
+                            <td>通用领域、有标注数据</td>
+                        </tr>
+                        <tr>
+                            <td><strong>第三代</strong></td>
+                            <td>LLM Few-shot / In-context</td>
+                            <td>中高（85%+）</td>
+                            <td>中（75-80%）</td>
+                            <td>极低（几个示例）</td>
+                            <td>高</td>
+                            <td>快速原型、冷启动</td>
+                        </tr>
+                        <tr>
+                            <td><strong>第四代</strong></td>
+                            <td>LLM Agent + 自我修正</td>
+                            <td>高（90%+）</td>
+                            <td>高（85%+）</td>
+                            <td>极低</td>
+                            <td>极高</td>
+                            <td>复杂场景、高质量要求</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>第一代：规则 + 词典方法</h3>
+                <p>虽然"古老"，但在特定场景下仍然是最佳选择。当数据格式固定、实体类型有限时，规则方法的准确率最高、成本最低。</p>
+
+                <div class="code-block"><span class="comment"># 第一代：基于规则和词典的 NER</span>
+<span class="keyword">import</span> re
+<span class="keyword">from</span> collections <span class="keyword">import</span> defaultdict
+
+<span class="keyword">class</span> <span class="function">RuleBasedNER</span>:
+    <span class="keyword">def</span> <span class="function">__init__</span>(self):
+        <span class="comment"># 词典：实体类型 -> 实体名称列表</span>
+        self.gazetteers = {
+            <span class="string">"PERSON"</span>: {<span class="string">"Elon Musk"</span>, <span class="string">"Sam Altman"</span>, <span class="string">"Jeff Dean"</span>},
+            <span class="string">"ORG"</span>: {<span class="string">"OpenAI"</span>, <span class="string">"Google"</span>, <span class="string">"Meta"</span>, <span class="string">"Microsoft"</span>},
+            <span class="string">"LOC"</span>: {<span class="string">"San Francisco"</span>, <span class="string">"Beijing"</span>, <span class="string">"London"</span>},
+        }
+        <span class="comment"># 正则规则：模式 -> 实体类型</span>
+        self.patterns = [
+            (re.compile(<span class="string">r'\b[A-Z][a-z]+ (?:[A-Z][a-z]+ )?[A-Z][a-z]+\b'</span>), <span class="string">"PERSON"</span>),
+            (re.compile(<span class="string">r'\b\d{4}年\d{1,2}月\d{1,2}日\b'</span>), <span class="string">"DATE"</span>),
+            (re.compile(<span class="string">r'\$\d+(?:\.\d+)?(?:亿|万|百万)?\b'</span>), <span class="string">"MONEY"</span>),
+        ]
+    
+    <span class="keyword">def</span> <span class="function">extract</span>(self, text):
+        entities = []
+        <span class="comment"># 词典匹配</span>
+        <span class="keyword">for</span> entity_type, names <span class="keyword">in</span> self.gazetteers.items():
+            <span class="keyword">for</span> name <span class="keyword">in</span> names:
+                <span class="keyword">for</span> match <span class="keyword">in</span> re.finditer(re.escape(name), text):
+                    entities.append({
+                        <span class="string">"text"</span>: match.group(),
+                        <span class="string">"type"</span>: entity_type,
+                        <span class="string">"start"</span>: match.start(),
+                        <span class="string">"end"</span>: match.end()
+                    })
+        <span class="comment"># 正则匹配</span>
+        <span class="keyword">for</span> pattern, entity_type <span class="keyword">in</span> self.patterns:
+            <span class="keyword">for</span> match <span class="keyword">in</span> pattern.finditer(text):
+                entities.append({
+                    <span class="string">"text"</span>: match.group(),
+                    <span class="string">"type"</span>: entity_type,
+                    <span class="string">"start"</span>: match.start(),
+                    <span class="string">"end"</span>: match.end()
+                })
+        <span class="keyword">return</span> sorted(entities, key=<span class="keyword">lambda</span> x: x[<span class="string">"start"</span>])
+
+ner = RuleBasedNER()
+result = ner.extract(<span class="string">"Elon Musk announced OpenAI raised $10亿 in 2024年6月15日."</span>)</div>
+
+                <div class="warning-box">
+                    <strong>⚠️ 规则方法的局限性：</strong>维护成本随实体类型和规则数量线性增长。当实体超过 100 个类型时，规则之间会互相冲突。推荐只在格式高度固定的场景（如财务报表、医疗报告）中使用。
+                </div>
+
+                <h3>第二代：深度学习（BERT + BiLSTM-CRF）</h3>
+                <p>深度学习方法是 2018-2023 年间的主流方案。它不需要手工编写规则，但需要大量标注数据。核心架构：</p>
+                <ul>
+                    <li><strong>BERT 编码器</strong>：将每个 token 编码为上下文相关的向量表示。</li>
+                    <li><strong>BiLSTM</strong>：捕获序列中的双向依赖关系。</li>
+                    <li><strong>CRF 解码器</strong>：在标签序列上施加约束（如 B-PER 后面不能跟 I-ORG），提升标注一致性。</li>
+                </ul>
+
+                <div class="code-block"><span class="comment"># 第二代：使用 HuggingFace + spaCy 进行 NER</span>
+<span class="keyword">import</span> spacy
+<span class="keyword">from</span> transformers <span class="keyword">import</span> pipeline
+
+<span class="comment"># 方案 A：spaCy 预训练模型（快速、轻量）</span>
+nlp = spacy.load(<span class="string">"zh_core_web_trf"</span>)  <span class="comment"># 中文 transformer 模型</span>
+doc = nlp(<span class="string">"马云于1999年在杭州创立了阿里巴巴集团。"</span>)
+<span class="keyword">for</span> ent <span class="keyword">in</span> doc.ents:
+    <span class="keyword">print</span>(<span class="string">f"{ent.text} -> {ent.label_}"</span>)
+<span class="comment"># 输出: 马云 -> PERSON, 1999年 -> DATE, 杭州 -> GPE, 阿里巴巴集团 -> ORG</span>
+
+<span class="comment"># 方案 B：HuggingFace Pipeline（更高准确率）</span>
+ner_pipeline = pipeline(<span class="string">"ner"</span>, model=<span class="string">"dslim/bert-base-NER"</span>, aggregation_strategy=<span class="string">"simple"</span>)
+result = ner_pipeline(<span class="string">"Elon Musk founded SpaceX in Hawthorne, California."</span>)
+<span class="comment"># 输出: [{"entity_group":"PER","word":"Elon Musk","score":0.998}, ...]</span></div>
+
+                <div class="highlight-box">
+                    <strong>🔑 微调 BERT 的建议：</strong>通用预训练模型在特定领域（如医疗、法律、金融）的准确率会显著下降。建议在目标领域标注 500-2000 条数据，使用 LoRA 或 Adapter 进行参数高效微调（PEFT），可以在几小时内完成。
+                </div>
+
+                <h3>第三代：LLM Few-shot 抽取</h3>
+                <p>2023 年 GPT-4 发布后，使用 LLM 进行信息抽取成为新范式。优点是零标注成本，缺点是推理成本高、延迟大。</p>
+
+                <div class="code-block"><span class="comment"># 第三代：LLM Few-shot NER + 关系抽取</span>
+<span class="keyword">from</span> openai <span class="keyword">import</span> OpenAI
+client = OpenAI()
+
+<span class="keyword">def</span> <span class="function">extract_with_llm</span>(text, examples=None):
+    system_prompt = <span class="string">"""你是一个信息抽取专家。从文本中识别实体和关系。
+实体类型：PERSON, ORG, LOC, DATE, PRODUCT, EVENT
+关系类型：FOUNDED(成立), WORKED_AT(就职于), LOCATED_IN(位于), ACQUIRED(收购)"""</span>
+    
+    <span class="keyword">if</span> examples:
+        system_prompt += <span class="string">"\n\n示例：\n"</span> + <span class="string">"\n"</span>.join(examples)
+    
+    response = client.chat.completions.create(
+        model=<span class="string">"gpt-4o"</span>,
+        messages=[
+            {<span class="string">"role"</span>: <span class="string">"system"</span>, <span class="string">"content"</span>: system_prompt},
+            {<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: <span class="string">f"文本：{text}"</span>}
+        ],
+        response_format={<span class="string">"type"</span>: <span class="string">"json_object"</span>}
+    )
+    <span class="keyword">return</span> response.choices[0].message.content
+
+<span class="comment"># Few-shot 示例</span>
+examples = [
+    <span class="string">'文本："Steve Jobs co-founded Apple in Cupertino."\n{"entities":[{"name":"Steve Jobs","type":"PERSON"},{"name":"Apple","type":"ORG"},{"name":"Cupertino","type":"LOC"}],"relations":[{"head":"Steve Jobs","relation":"FOUNDED","tail":"Apple"},{"head":"Apple","relation":"LOCATED_IN","tail":"Cupertino"}]}'</span>
+]
+
+result = extract_with_llm(<span class="string">"Satya Nadella became CEO of Microsoft in 2014. Microsoft is headquartered in Redmond."</span>, examples)</div>
+
+                <h3>第四代：LLM Agent 自主抽取</h3>
+                <p>2025-2026 年的前沿方向。让 LLM Agent 自主规划抽取策略、验证结果、自我修正。Agent 可以：</p>
+                <ul>
+                    <li><strong>自主拆解复杂文本</strong>：将长文档拆分为多个段落，分别抽取后再合并。</li>
+                    <li><strong>自我验证</strong>：抽取完成后，检查实体类型是否合理、关系是否冲突。</li>
+                    <li><strong>迭代修正</strong>：发现错误后自动修正，多轮迭代提升质量。</li>
+                    <li><strong>主动查询</strong>：遇到不确定的实体时，可以调用搜索引擎或知识库进行验证。</li>
+                </ul>
+
+                <div class="code-block"><span class="comment"># 第四代：LLM Agent 自主抽取（概念代码）</span>
+<span class="keyword">class</span> <span class="function">ExtractionAgent</span>:
+    <span class="keyword">def</span> <span class="function">extract</span>(self, text):
+        <span class="comment"># Step 1: 规划——分析文本结构，决定抽取策略</span>
+        plan = self.llm.plan(<span class="string">f"分析文本并规划抽取策略：{text[:500]}..."</span>)
+        
+        <span class="comment"># Step 2: 执行——按计划抽取</span>
+        <span class="keyword">if</span> plan[<span class="string">"strategy"</span>] == <span class="string">"split"</span>:
+            chunks = self.split_text(text, plan[<span class="string">"chunk_size"</span>])
+            results = [self.extract_chunk(chunk) <span class="keyword">for</span> chunk <span class="keyword">in</span> chunks]
+            entities, relations = self.merge_results(results)
+        <span class="keyword">else</span>:
+            entities, relations = self.extract_chunk(text)
+        
+        <span class="comment"># Step 3: 验证——检查抽取结果的一致性</span>
+        issues = self.verify(entities, relations)
+        
+        <span class="comment"># Step 4: 修正——对有问题的结果进行修正</span>
+        <span class="keyword">if</span> issues:
+            entities, relations = self.fix(entities, relations, issues)
+        
+        <span class="keyword">return</span> entities, relations
+    
+    <span class="keyword">def</span> <span class="function">verify</span>(self, entities, relations):
+        <span class="string">"""检查：实体类型一致性、关系方向、实体-关系对应"""</span>
+        issues = []
+        <span class="comment"># 检查关系中的实体是否都存在</span>
+        entity_names = {e[<span class="string">"name"</span>] <span class="keyword">for</span> e <span class="keyword">in</span> entities}
+        <span class="keyword">for</span> r <span class="keyword">in</span> relations:
+            <span class="keyword">if</span> r[<span class="string">"head"</span>] <span class="keyword">not</span> <span class="keyword">in</span> entity_names:
+                issues.append(<span class="string">f"关系中的头实体 '{r['head']}' 未识别"</span>)
+            <span class="keyword">if</span> r[<span class="string">"tail"</span>] <span class="keyword">not</span> <span class="keyword">in</span> entity_names:
+                issues.append(<span class="string">f"关系中的尾实体 '{r['tail']}' 未识别"</span>)
+        <span class="keyword">return</span> issues</div>
+            </section>
+
+            <!-- Section 3: 命名实体识别深入 -->
+            <section class="section-block reveal">
+                <h2>🏷️ 命名实体识别（NER）深入</h2>
+                <p class="section-desc">NER 是信息抽取的基础。实体识别不准确，后续的关系抽取和知识融合都将建立在错误的基础上。</p>
+
+                <h3>NER 的标注策略</h3>
+                <p>NER 标注有三种主流方案：</p>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>标注方案</th><th>标签数量</th><th>复杂度</th><th>适用场景</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>BIO</strong>（Begin-Inside-Outside）</td><td>2N+1</td><td>低</td><td>简单 NER，实体不重叠</td></tr>
+                        <tr><td><strong>BIOES</strong>（+End+Single）</td><td>4N+1</td><td>中</td><td>需要精确边界，最常用</td></tr>
+                        <tr><td><strong>Span-based</strong></td><td>枚举所有 span</td><td>高</td><td>嵌套实体（如"北京市海淀区"）</td></tr>
+                    </tbody>
+                </table>
+
+                <p><strong>BIOES 标注示例：</strong></p>
+                <div class="code-block"><span class="comment">文本：马云在杭州创立了阿里巴巴</span>
+马  B-PER    杭  B-LOC    阿  B-ORG
+云  E-PER    州  S-LOC    里  I-ORG
+在  O        创  O        巴  I-ORG
+             立  O        巴  I-ORG
+             了  O         E-ORG</div>
+
+                <h3>嵌套 NER 的挑战</h3>
+                <p>在许多场景中，实体会嵌套出现。例如：</p>
+                <ul>
+                    <li>"<strong>阿里巴巴集团</strong>的<strong>达摩院</strong>"——"达摩院"是 ORG，但它是"阿里巴巴集团"的一部分。</li>
+                    <li>"<strong>北京市海淀区中关村</strong>"——"中关村"是 LOC，嵌套在"海淀区"中，再嵌套在"北京市"中。</li>
+                    <li>解决方案：使用 Span-based 方法或 W2NER（Word-Word Relation Classification）模型。</li>
+                </ul>
+
+                <h3>中文 NER 的特殊挑战</h3>
+                <p>中文 NER 面临一些英文 NER 不存在的挑战：</p>
+                <ul>
+                    <li><strong>分词歧义</strong>：中文没有天然的分词边界。"南京市长江大桥"可以理解为"南京市/长江大桥"或"南京市长/江大桥"。错误的分词会直接导致 NER 错误。</li>
+                    <li><strong>实体边界模糊</strong>：中文实体经常以缩写、简称、别名出现。如"阿里巴巴"可能被写作"阿里"、"阿里集团"、"Alibaba"。</li>
+                    <li><strong>多义性</strong>：同一个词在不同上下文中可能是不同类型。如"苹果"可能是水果（FOOD）也可能是公司（ORG）。</li>
+                </ul>
+
+                <div class="info-box">
+                    <strong>💡 中文 NER 最佳实践：</strong>使用基于字符（character-based）而非基于词（word-based）的模型，可以避免分词错误传播。推荐使用 BERT-Chinese 或 ERNIE 等预训练模型，在目标领域做微调。
+                </div>
+            </section>
+
+            <!-- Section 4: 关系抽取 -->
+            <section class="section-block reveal">
+                <h2>🔗 关系抽取：从实体到知识</h2>
+                <p class="section-desc">识别出实体只是第一步，真正有价值的是实体之间的关系。关系抽取将孤立的实体连接成知识网络。</p>
+
+                <h3>关系抽取的三种范式</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>范式</th><th>方法</th><th>输入</th><th>输出</th><th>优点</th><th>缺点</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>管道式</strong></td>
+                            <td>先 NER，再关系分类</td>
+                            <td>文本 + 实体对</td>
+                            <td>关系类型</td>
+                            <td>模块独立，易于优化</td>
+                            <td>错误传播</td>
+                        </tr>
+                        <tr>
+                            <td><strong>联合抽取</strong></td>
+                            <td>NER 和关系同时抽取</td>
+                            <td>文本</td>
+                            <td>实体 + 关系</td>
+                            <td>避免错误传播</td>
+                            <td>模型复杂，训练困难</td>
+                        </tr>
+                        <tr>
+                            <td><strong>端到端</strong></td>
+                            <td>直接从文本生成三元组</td>
+                            <td>文本</td>
+                            <td>三元组列表</td>
+                            <td>最简单直接</td>
+                            <td>可控性差</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>管道式关系抽取（Pipeline）</h3>
+                <p>这是生产环境中最常用的方案。先完成 NER，然后对每对实体判断它们之间是否存在关系。</p>
+
+                <div class="code-block"><span class="comment"># 管道式关系抽取：NER → 关系分类</span>
+<span class="keyword">import</span> torch
+<span class="keyword">from</span> transformers <span class="keyword">import</span> AutoTokenizer, AutoModelForSequenceClassification
+
+<span class="comment"># 加载关系分类模型（以中文为例）</span>
+model_name = <span class="string">"bert-base-chinese"</span>
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(
+    model_name, num_labels=5  <span class="comment"># 5 种关系类型</span>
+)
+
+relation_types = [<span class="string">"FOUNDED"</span>, <span class="string">"WORKED_AT"</span>, <span class="string">"LOCATED_IN"</span>, <span class="string">"ACQUIRED"</span>, <span class="string">"NO_RELATION"</span>]
+
+<span class="keyword">def</span> <span class="function">classify_relation</span>(text, head_entity, tail_entity):
+    <span class="string">"""判断两个实体之间的关系类型"""</span>
+    <span class="comment"># 将实体用特殊标记包裹</span>
+    marked_text = text.replace(head_entity, <span class="string">f"[E1]{head_entity}[/E1]"</span>)
+    marked_text = marked_text.replace(tail_entity, <span class="string">f"[E2]{tail_entity}[/E2]"</span>)
+    
+    inputs = tokenizer(marked_text, return_tensors=<span class="string">"pt"</span>, truncation=<span class="keyword">True</span>)
+    <span class="keyword">with</span> torch.no_grad():
+        logits = model(**inputs).logits
+    pred = torch.argmax(logits, dim=-1).item()
+    <span class="keyword">return</span> relation_types[pred]
+
+<span class="comment"># 使用示例</span>
+text = <span class="string">"马云于1999年在杭州创立了阿里巴巴集团。"</span>
+entities = [
+    {<span class="string">"name"</span>: <span class="string">"马云"</span>, <span class="string">"type"</span>: <span class="string">"PERSON"</span>},
+    {<span class="string">"name"</span>: <span class="string">"杭州"</span>, <span class="string">"type"</span>: <span class="string">"LOC"</span>},
+    {<span class="string">"name"</span>: <span class="string">"阿里巴巴集团"</span>, <span class="string">"type"</span>: <span class="string">"ORG"</span>},
+]
+
+<span class="comment"># 对所有实体对进行关系分类</span>
+relations = []
+<span class="keyword">for</span> i, e1 <span class="keyword">in</span> enumerate(entities):
+    <span class="keyword">for</span> e2 <span class="keyword">in</span> entities[i+1:]:
+        rel = classify_relation(text, e1[<span class="string">"name"</span>], e2[<span class="string">"name"</span>])
+        <span class="keyword">if</span> rel != <span class="string">"NO_RELATION"</span>:
+            relations.append({<span class="string">"head"</span>: e1[<span class="string">"name"</span>], <span class="string">"relation"</span>: rel, <span class="string">"tail"</span>: e2[<span class="string">"name"</span>]})</div>
+
+                <div class="warning-box">
+                    <strong>⚠️ 管道式方法的致命缺陷——错误传播：</strong>如果 NER 漏掉了"阿里巴巴集团"这个实体，那么关系抽取阶段永远无法发现"马云-创立-阿里巴巴集团"这个关系。因此，在实际工程中，通常会对 NER 设置较低的阈值（提高召回率），并在关系抽取阶段过滤掉错误的关系（提高准确率）。
+                </div>
+
+                <h3>使用 LLM 进行端到端关系抽取</h3>
+                <p>LLM 可以直接从文本中抽取三元组，无需分步进行 NER 和关系分类：</p>
+
+                <div class="code-block"><span class="comment"># LLM 端到端关系抽取</span>
+<span class="keyword">def</span> <span class="function">extract_triples_llm</span>(text, ontology):
+    <span class="string">"""使用 LLM 直接从文本中抽取三元组"""</span>
+    prompt = <span class="string">f"""根据以下本体定义，从文本中抽取三元组。
+
+本体定义：
+- 实体类型：{', '.join(ontology['entity_types'])}
+- 关系类型：{', '.join(ontology['relation_types'])}
+
+文本：
+{text}
+
+请以 JSON 格式输出三元组列表：
+{{"triples": [{{"subject": "...", "predicate": "...", "object": "..."}}]}}"""</span>
+    
+    response = client.chat.completions.create(
+        model=<span class="string">"gpt-4o"</span>,
+        messages=[{<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: prompt}],
+        response_format={<span class="string">"type"</span>: <span class="string">"json_object"</span>}
+    )
+    <span class="keyword">return</span> json.loads(response.choices[0].message.content)
+
+<span class="comment"># 使用示例</span>
+ontology = {
+    <span class="string">"entity_types"</span>: [<span class="string">"PERSON"</span>, <span class="string">"ORG"</span>, <span class="string">"LOC"</span>, <span class="string">"DATE"</span>, <span class="string">"PRODUCT"</span>],
+    <span class="string">"relation_types"</span>: [<span class="string">"创立"</span>, <span class="string">"就职于"</span>, <span class="string">"位于"</span>, <span class="string">"收购"</span>, <span class="string">"投资"</span>]
+}
+
+result = extract_triples_llm(
+    <span class="string">"张一鸣于2012年创立字节跳动，总部位于北京。2021年字节跳动收购了沐瞳科技。"</span>,
+    ontology
+)</div>
+            </section>
+
+            <!-- Section 5: 实体对齐 -->
+            <section class="section-block reveal">
+                <h2>🤝 实体对齐：消解"多词一义"</h2>
+                <p class="section-desc">同一个实体在不同数据源中可能有不同的名称。"阿里巴巴"、"阿里"、"Alibaba"、"阿里巴巴集团"——它们指向的是同一个实体。</p>
+
+                <h3>四种实体对齐方法</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>方法</th><th>原理</th><th>准确率</th><th>速度</th><th>适用规模</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>基于字符串</strong></td>
+                            <td>编辑距离、Jaccard、TF-IDF</td>
+                            <td>中（70-80%）</td>
+                            <td>极快</td>
+                            <td>百万级</td>
+                        </tr>
+                        <tr>
+                            <td><strong>基于规则</strong></td>
+                            <td>利用唯一标识符（ISBN、DOI、统一社会信用代码）</td>
+                            <td>极高（99%+）</td>
+                            <td>极快</td>
+                            <td>任意</td>
+                        </tr>
+                        <tr>
+                            <td><strong>基于嵌入</strong></td>
+                            <td>将实体编码为向量，计算余弦相似度</td>
+                            <td>高（85-95%）</td>
+                            <td>中</td>
+                            <td>千万级</td>
+                        </tr>
+                        <tr>
+                            <td><strong>基于 LLM</strong></td>
+                            <td>让 LLM 判断两个实体是否相同</td>
+                            <td>高（90-95%）</td>
+                            <td>慢</td>
+                            <td>万级（需分批）</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>方法 1：基于字符串的实体对齐</h3>
+                <div class="code-block"><span class="comment"># 字符串相似度对齐</span>
+<span class="keyword">from</span> difflib <span class="keyword">import</span> SequenceMatcher
+<span class="keyword">from</span> sklearn.feature_extraction.text <span class="keyword">import</span> TfidfVectorizer
+<span class="keyword">import</span> numpy <span class="keyword">as</span> np
+
+<span class="keyword">def</span> <span class="function">string_similarity</span>(s1, s2):
+    <span class="string">"""综合多种字符串相似度"""</span>
+    <span class="comment"># 编辑距离相似度</span>
+    seq_sim = SequenceMatcher(None, s1, s2).ratio()
+    <span class="comment"># Jaccard 相似度（字符级）</span>
+    set1, set2 = set(s1), set(s2)
+    jaccard = len(set1 & set2) / len(set1 | set2) <span class="keyword">if</span> set1 | set2 <span class="keyword">else</span> 0
+    <span class="comment"># 加权平均</span>
+    <span class="keyword">return</span> 0.6 * seq_sim + 0.4 * jaccard
+
+<span class="keyword">def</span> <span class="function">align_by_string</span>(entities_a, entities_b, threshold=0.85):
+    <span class="string">"""基于字符串相似度进行实体对齐"""</span>
+    pairs = []
+    <span class="keyword">for</span> a <span class="keyword">in</span> entities_a:
+        <span class="keyword">for</span> b <span class="keyword">in</span> entities_b:
+            sim = string_similarity(a[<span class="string">"name"</span>], b[<span class="string">"name"</span>])
+            <span class="keyword">if</span> sim >= threshold:
+                pairs.append((a, b, sim))
+    <span class="keyword">return</span> sorted(pairs, key=<span class="keyword">lambda</span> x: x[2], reverse=<span class="keyword">True</span>)</div>
+
+                <h3>方法 2：基于规则的实体对齐（推荐首选）</h3>
+                <p>如果数据源中有唯一标识符，应该优先使用规则对齐。这是最高效、最准确的方法：</p>
+                <ul>
+                    <li><strong>企业</strong>：统一社会信用代码、工商注册号</li>
+                    <li><strong>人物</strong>：身份证号（需脱敏）、ORCID（学术）、LinkedIn URL</li>
+                    <li><strong>书籍</strong>：ISBN</li>
+                    <li><strong>论文</strong>：DOI</li>
+                    <li><strong>产品</strong>：SKU、UPC、EAN</li>
+                </ul>
+                <div class="info-box">
+                    <strong>💡 最佳实践：</strong>在对齐策略中采用"规则优先，嵌入兜底"的策略。先用唯一标识符做精确匹配，剩下的用嵌入相似度做模糊匹配，最后用 LLM 做人工审核。
+                </div>
+
+                <h3>方法 3：基于嵌入的实体对齐</h3>
+                <p>当没有唯一标识符时，可以使用嵌入模型将实体名称和属性编码为向量，然后计算余弦相似度：</p>
+
+                <div class="code-block"><span class="comment"># 基于嵌入的实体对齐</span>
+<span class="keyword">from</span> sentence_transformers <span class="keyword">import</span> SentenceTransformer
+<span class="keyword">import</span> faiss
+
+model = SentenceTransformer(<span class="string">'paraphrase-multilingual-MiniLM-L12-v2'</span>)
+
+<span class="keyword">def</span> <span class="function">align_by_embedding</span>(entities_a, entities_b, threshold=0.9):
+    <span class="string">"""使用嵌入模型进行实体对齐"""</span>
+    <span class="comment"># 构建实体描述（名称 + 属性）</span>
+    desc_a = [<span class="string">f"{e['name']} {e.get('type','')} {e.get('description','')}"</span> <span class="keyword">for</span> e <span class="keyword">in</span> entities_a]
+    desc_b = [<span class="string">f"{e['name']} {e.get('type','')} {e.get('description','')}"</span> <span class="keyword">for</span> e <span class="keyword">in</span> entities_b]
+    
+    <span class="comment"># 编码</span>
+    emb_a = model.encode(desc_a, normalize_embeddings=<span class="keyword">True</span>)
+    emb_b = model.encode(desc_b, normalize_embeddings=<span class="keyword">True</span>)
+    
+    <span class="comment"># 使用 FAISS 加速检索</span>
+    dim = emb_a.shape[1]
+    index = faiss.IndexFlatIP(dim)  <span class="comment"># 内积 = 余弦相似度（已归一化）</span>
+    index.add(emb_b.astype(<span class="string">'float32'</span>))
+    
+    scores, indices = index.search(emb_a.astype(<span class="string">'float32'</span>), k=1)
+    
+    pairs = []
+    <span class="keyword">for</span> i, (score, idx) <span class="keyword">in</span> enumerate(zip(scores[:,0], indices[:,0])):
+        <span class="keyword">if</span> score >= threshold:
+            pairs.append((entities_a[i], entities_b[idx], float(score)))
+    <span class="keyword">return</span> pairs</div>
+
+                <h3>方法 4：基于 LLM 的实体对齐</h3>
+                <p>将实体对齐转化为一个二分类问题，让 LLM 判断两个实体是否相同。适合处理字符串和嵌入方法都难以处理的复杂情况（如"字节跳动" vs "ByteDance"）：</p>
+
+                <div class="code-block"><span class="comment"># LLM 实体对齐</span>
+<span class="keyword">def</span> <span class="function">llm_entity_match</span>(entity_a, entity_b):
+    prompt = <span class="string">f"""判断以下两个实体是否指向同一对象。
+
+实体 A: 名称="{entity_a['name']}", 类型="{entity_a['type']}", 属性="{entity_a.get('attributes',{})}"
+实体 B: 名称="{entity_b['name']}", 类型="{entity_b['type']}", 属性="{entity_b.get('attributes',{})}"
+
+请回答：是 或 否，并给出理由。"""</span>
+    
+    response = client.chat.completions.create(
+        model=<span class="string">"gpt-4o"</span>,
+        messages=[{<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: prompt}]
+    )
+    <span class="keyword">return</span> <span class="string">"是"</span> <span class="keyword">in</span> response.choices[0].message.content</div>
+            </section>
+
+            <!-- Section 6: 知识融合 -->
+            <section class="section-block reveal">
+                <h2>🧩 知识融合：从多源到统一</h2>
+                <p class="section-desc">当多个数据源都包含相同实体的信息时，如何合并成一个完整、准确、无冲突的实体记录？</p>
+
+                <h3>知识融合的核心挑战</h3>
+                <ol class="numbered-list">
+                    <li><strong>属性冲突</strong>：数据源 A 说"公司成立于 1999 年"，数据源 B 说"公司成立于 2000 年"。哪个是正确的？</li>
+                    <li><strong>关系冲突</strong>：数据源 A 说"A 是 B 的子公司"，数据源 B 说"A 是 B 的竞争对手"。两者矛盾。</li>
+                    <li><strong>信息冗余</strong>：多个数据源提供了重复的信息，需要去重但不丢失信息。</li>
+                    <li><strong>信息缺失</strong>：合并后某个实体的某些属性仍然为空，需要补全。</li>
+                </ol>
+
+                <h3>冲突消解策略</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>策略</th><th>描述</th><th>适用场景</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>最新优先</strong></td><td>选择时间戳最新的值</td><td>随时间变化的属性（股价、员工数）</td></tr>
+                        <tr><td><strong>多数投票</strong></td><td>选择出现次数最多的值</td><td>多个低可信度的数据源</td></tr>
+                        <tr><td><strong>可信源优先</strong></td><td>根据数据源可信度排序，选择最高可信度的值</td><td>有明确的权威数据源（如官方数据库）</td></tr>
+                        <tr><td><strong>LLM 仲裁</strong></td><td>让 LLM 分析冲突上下文，做出判断</td><td>复杂冲突，需要语义理解</td></tr>
+                        <tr><td><strong>保留所有</strong></td><td>保留所有值，标注来源和置信度</td><td>需要审计追溯的场景</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="code-block"><span class="comment"># 知识融合引擎</span>
+<span class="keyword">class</span> <span class="function">KnowledgeFusion</span>:
+    <span class="keyword">def</span> <span class="function">__init__</span>(self, source_trust_scores):
+        <span class="string">"""source_trust_scores: {source_name: trust_score}"""</span>
+        self.trust_scores = source_trust_scores
+    
+    <span class="keyword">def</span> <span class="function">resolve_conflict</span>(self, attribute, values_with_sources):
+        <span class="string">"""
+        values_with_sources: [(value, source, timestamp), ...]
+        返回: 融合后的最优值
+        """</span>
+        <span class="keyword">if</span> len(values_with_sources) == 1:
+            <span class="keyword">return</span> values_with_sources[0][0]
+        
+        <span class="comment"># 策略 1：可信源优先</span>
+        best_source = max(values_with_sources, 
+                         key=<span class="keyword">lambda</span> x: self.trust_scores.get(x[1], 0.5))
+        <span class="keyword">if</span> self.trust_scores.get(best_source[1], 0.5) > 0.8:
+            <span class="keyword">return</span> best_source[0]
+        
+        <span class="comment"># 策略 2：多数投票</span>
+        <span class="keyword">from</span> collections <span class="keyword">import</span> Counter
+        value_counts = Counter(v <span class="keyword">for</span> v, _, _ <span class="keyword">in</span> values_with_sources)
+        most_common = value_counts.most_common(1)[0]
+        <span class="keyword">if</span> most_common[1] > len(values_with_sources) / 2:
+            <span class="keyword">return</span> most_common[0]
+        
+        <span class="comment"># 策略 3：最新优先</span>
+        latest = max(values_with_sources, key=<span class="keyword">lambda</span> x: x[2])
+        <span class="keyword">return</span> latest[0]
+    
+    <span class="keyword">def</span> <span class="function">merge_entities</span>(self, entities):
+        <span class="string">"""合并多个对齐后的实体记录"""</span>
+        merged = {<span class="string">"name"</span>: entities[0][<span class="string">"name"</span>], <span class="string">"type"</span>: entities[0][<span class="string">"type"</span>]}
+        all_attrs = defaultdict(list)
+        
+        <span class="keyword">for</span> entity <span class="keyword">in</span> entities:
+            <span class="keyword">for</span> attr, value <span class="keyword">in</span> entity.get(<span class="string">"attributes"</span>, {}).items():
+                all_attrs[attr].append((
+                    value,
+                    entity.get(<span class="string">"source"</span>, <span class="string">"unknown"</span>),
+                    entity.get(<span class="string">"timestamp"</span>, <span class="string">"1970-01-01"</span>)
+                ))
+        
+        <span class="keyword">for</span> attr, values <span class="keyword">in</span> all_attrs.items():
+            merged[attr] = self.resolve_conflict(attr, values)
+        
+        merged[<span class="string">"sources"</span>] = list(set(e.get(<span class="string">"source"</span>) <span class="keyword">for</span> e <span class="keyword">in</span> entities))
+        <span class="keyword">return</span> merged</div>
+            </section>
+
+            <!-- Section 7: 质量控制 -->
+            <section class="section-block reveal">
+                <h2>✅ 质量控制与 Human-in-the-Loop</h2>
+                <p class="section-desc">自动化抽取不可能 100% 准确。质量控制是将"AI 生成的知识"转化为"可信知识"的关键环节。</p>
+
+                <h3>质量度量金字塔</h3>
+                <p>知识图谱的质量可以从三个层次来度量：</p>
+                <ol class="numbered-list">
+                    <li><strong>语法质量</strong>：三元组格式是否正确？实体类型是否在本体定义中？关系是否在允许的范围内？——这是最容易自动检查的。</li>
+                    <li><strong>语义质量</strong>：三元组是否合理？"马云-创立-腾讯"虽然在语法上正确，但语义上是错误的。——需要领域知识来验证。</li>
+                    <li><strong>实用质量</strong>：知识是否满足下游任务的需求？是否覆盖了关键领域？——需要端到端评估。</li>
+                </ol>
+
+                <h3>自动化质量检查</h3>
+                <div class="code-block"><span class="comment"># 自动化知识图谱质量检查</span>
+<span class="keyword">class</span> <span class="function">KGQualityChecker</span>:
+    <span class="keyword">def</span> <span class="function">__init__</span>(self, ontology):
+        self.ontology = ontology  <span class="comment"># 本体定义</span>
+    
+    <span class="keyword">def</span> <span class="function">check_syntax</span>(self, triples):
+        <span class="string">"""检查语法质量"""</span>
+        errors = []
+        <span class="keyword">for</span> i, (s, p, o) <span class="keyword">in</span> enumerate(triples):
+            <span class="comment"># 检查实体类型是否在本体中</span>
+            <span class="keyword">if</span> s[<span class="string">"type"</span>] <span class="keyword">not</span> <span class="keyword">in</span> self.ontology[<span class="string">"entity_types"</span>]:
+                errors.append(<span class="string">f"Triple {i}: 主体类型 '{s['type']}' 不在本体中"</span>)
+            <span class="keyword">if</span> o[<span class="string">"type"</span>] <span class="keyword">not</span> <span class="keyword">in</span> self.ontology[<span class="string">"entity_types"</span>]:
+                errors.append(<span class="string">f"Triple {i}: 客体类型 '{o['type']}' 不在本体中"</span>)
+            <span class="comment"># 检查关系是否在本体中</span>
+            <span class="keyword">if</span> p <span class="keyword">not</span> <span class="keyword">in</span> self.ontology[<span class="string">"relation_types"</span>]:
+                errors.append(<span class="string">f"Triple {i}: 关系 '{p}' 不在本体中"</span>)
+            <span class="comment"># 检查关系约束</span>
+            allowed = self.ontology[<span class="string">"relation_constraints"</span>].get(p, {})
+            <span class="keyword">if</span> allowed:
+                <span class="keyword">if</span> s[<span class="string">"type"</span>] <span class="keyword">not</span> <span class="keyword">in</span> allowed.get(<span class="string">"domain"</span>, []):
+                    errors.append(<span class="string">f"Triple {i}: 关系 '{p}' 不允许主体类型 '{s['type']}'"</span>)
+                <span class="keyword">if</span> o[<span class="string">"type"</span>] <span class="keyword">not</span> <span class="keyword">in</span> allowed.get(<span class="string">"range"</span>, []):
+                    errors.append(<span class="string">f"Triple {i}: 关系 '{p}' 不允许客体类型 '{o['type']}'"</span>)
+        <span class="keyword">return</span> errors
+    
+    <span class="keyword">def</span> <span class="function">check_consistency</span>(self, triples):
+        <span class="string">"""检查一致性：是否存在冲突的三元组"""</span>
+        conflicts = []
+        <span class="comment"># 检查自相矛盾</span>
+        <span class="keyword">for</span> i, (s1, p1, o1) <span class="keyword">in</span> enumerate(triples):
+            <span class="keyword">for</span> j, (s2, p2, o2) <span class="keyword">in</span> enumerate(triples):
+                <span class="keyword">if</span> i < j <span class="keyword">and</span> s1 == s2 <span class="keyword">and</span> p1 == p2 <span class="keyword">and</span> o1 != o2:
+                    <span class="keyword">if</span> p1 <span class="keyword">in</span> self.ontology.get(<span class="string">"functional_properties"</span>, []):
+                        conflicts.append(<span class="string">f"函数性属性冲突: {s1} -{p1}-> {o1} vs {o2}"</span>)
+        <span class="keyword">return</span> conflicts</div>
+
+                <h3>Human-in-the-Loop 工作流</h3>
+                <p>即使有最好的自动检查，仍然需要人工审核。设计高效的 Human-in-the-loop 工作流：</p>
+                <ol class="numbered-list">
+                    <li><strong>自动预筛选</strong>：自动检查通过的三元组直接入库。只将置信度低、有冲突的三元组提交人工审核。</li>
+                    <li><strong>采样审核</strong>：对自动通过的三元组按比例采样（如 5%），人工审核以估计整体质量。</li>
+                    <li><strong>审核界面</strong>：提供友好的审核界面，让领域专家可以快速判断"接受"、"拒绝"、"修正"。</li>
+                    <li><strong>反馈闭环</strong>：审核结果反馈到模型训练中，持续提升自动抽取的准确率。</li>
+                    <li><strong>专家分层</strong>：初级审核员处理简单案件，疑难案件升级给高级专家。</li>
+                </ol>
+
+                <div class="info-box">
+                    <strong>💡 成本估算：</strong>人工审核的成本约为 0.5-2 元/三元组（取决于复杂度）。对于一个百万三元组的图谱，如果 10% 需要人工审核，成本约为 5-20 万元。在做预算时需要充分考虑这部分成本。
+                </div>
+            </section>
+
+            <!-- Section 8: 版本管理与增量更新 -->
+            <section class="section-block reveal">
+                <h2>📦 版本管理与增量更新</h2>
+                <p class="section-desc">知识图谱是"活"的系统，需要持续更新。版本管理确保每次更新都是可追溯、可回滚的。</p>
+
+                <h3>版本管理策略</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>策略</th><th>描述</th><th>存储成本</th><th>回滚速度</th><th>适用场景</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><strong>全量快照</strong></td><td>每次更新保存完整图谱副本</td><td>极高</td><td>极快</td><td>图谱较小（< 100 万节点）</td></tr>
+                        <tr><td><strong>增量日志</strong></td><td>记录每次变更（类似 WAL）</td><td>低</td><td>慢（需重放）</td><td>变更频繁的场景</td></tr>
+                        <tr><td><strong>时间戳版本</strong></td><td>每个三元组记录有效时间范围</td><td>中</td><td>快（查询时过滤）</td><td>需要历史查询的场景</td></tr>
+                        <tr><td><strong>Git-like 分支</strong></td><td>支持多分支并行修改，合并</td><td>中</td><td>中</td><td>多团队协作的场景</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>增量更新架构</h3>
+                <div class="code-block"><span class="comment"># 增量更新流水线</span>
+<span class="keyword">class</span> <span class="function">IncrementalUpdater</span>:
+    <span class="keyword">def</span> <span class="function">__init__</span>(self, graph_db, change_log):
+        self.db = graph_db
+        self.change_log = change_log  <span class="comment"># 变更日志（Kafka Topic）</span>
+    
+    <span class="keyword">def</span> <span class="function">process_change</span>(self, change):
+        <span class="string">"""处理单条变更：
+        change = {
+            "type": "ADD" | "UPDATE" | "DELETE",
+            "entity": {...},
+            "timestamp": "2026-01-15T10:30:00Z",
+            "source": "pipeline_v2.3"
+        }
+        """</span>
+        <span class="keyword">if</span> change[<span class="string">"type"</span>] == <span class="string">"ADD"</span>:
+            self.db.create_entity(change[<span class="string">"entity"</span>])
+        <span class="keyword">elif</span> change[<span class="string">"type"</span>] == <span class="string">"UPDATE"</span>:
+            <span class="comment"># 保存旧版本到历史表</span>
+            old = self.db.get_entity(change[<span class="string">"entity"</span>][<span class="string">"id"</span>])
+            self.db.save_history(change[<span class="string">"entity"</span>][<span class="string">"id"</span>], old, change[<span class="string">"timestamp"</span>])
+            <span class="comment"># 更新</span>
+            self.db.update_entity(change[<span class="string">"entity"</span>])
+        <span class="keyword">elif</span> change[<span class="string">"type"</span>] == <span class="string">"DELETE"</span>:
+            self.db.soft_delete_entity(change[<span class="string">"entity"</span>][<span class="string">"id"</span>], change[<span class="string">"timestamp"</span>])
+    
+    <span class="keyword">def</span> <span class="function">rollback_to</span>(self, target_time):
+        <span class="string">"""回滚到指定时间点（通过重放反向操作）"""</span>
+        changes = self.change_log.get_changes(
+            from_time=target_time,
+            to_time=datetime.now()
+        )
+        <span class="keyword">for</span> change <span class="keyword">in</span> reversed(changes):
+            self.reverse_change(change)</div>
+
+                <h3>Schema 演化</h3>
+                <p>随着业务发展，本体定义也会变化。Schema 演化需要考虑：</p>
+                <ul>
+                    <li><strong>前向兼容</strong>：新的 Schema 可以读取旧数据。添加新的实体类型、关系类型通常是安全的。</li>
+                    <li><strong>后向兼容</strong>：旧版本的查询在 Schema 变更后仍然可用。删除或重命名类型需要谨慎。</li>
+                    <li><strong>数据迁移</strong>：当 Schema 发生不兼容变更时，需要编写数据迁移脚本。使用 Flyway 或 Liquibase 管理迁移版本。</li>
+                </ul>
+
+                <div class="warning-box">
+                    <strong>⚠️ Schema 变更黄金法则：</strong>先在测试环境验证迁移脚本，确保所有数据正确转换后再上线。永远保留回滚方案。生产环境的 Schema 变更应该在低峰期进行，并提前通知所有下游消费者。
+                </div>
+            </section>
+
+            <!-- Section 9: 最佳实践与工具链 -->
+            <section class="section-block reveal">
+                <h2>🛠️ 最佳实践与推荐工具链</h2>
+                <p class="section-desc">总结构建流水线中的关键经验和推荐工具。</p>
+
+                <h3>推荐工具链</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr><th>环节</th><th>推荐工具</th><th>替代方案</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>文本预处理</td><td>spaCy, NLTK, jieba</td><td>Stanza, HanLP</td></tr>
+                        <tr><td>NER 模型</td><td>HuggingFace Transformers</td><td>spaCy, Flair, DeepKE</td></tr>
+                        <tr><td>关系抽取</td><td>OpenAI API + LangChain</td><td>DeepKE, OpenNRE</td></tr>
+                        <tr><td>实体对齐</td><td>Sentence-Transformers + FAISS</td><td>OpenEA, Dedupe</td></tr>
+                        <tr><td>流水线编排</td><td>Apache Airflow, Prefect</td><td>Dagster, Luigi, Temporal</td></tr>
+                        <tr><td>质量监控</td><td>Great Expectations</td><td>Deequ, Soda</td></tr>
+                        <tr><td>实验追踪</td><td>MLflow, Weights & Biases</td><td>Neptune, DVC</td></tr>
+                        <tr><td>标注工具</td><td>Label Studio, Prodigy</td><td>Doccano, Brat</td></tr>
+                        <tr><td>图数据库</td><td>Neo4j</td><td>NebulaGraph, JanusGraph</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>关键经验总结</h3>
+                <ol class="numbered-list">
+                    <li><strong>先跑通，再优化</strong>：先用 LLM 快速搭建端到端流水线，验证业务价值。然后再逐步用微调模型替换 LLM，降低成本和延迟。</li>
+                    <li><strong>标注数据是核心资产</strong>：尽早建立标注规范，持续积累标注数据。标注数据是模型迭代的燃料，也是评估模型改进的基准。</li>
+                    <li><strong>监控一切</strong>：每个阶段的准确率、召回率、处理延迟、错误率。没有监控的流水线就是盲飞。</li>
+                    <li><strong>Human-in-the-loop 不是可选项</strong>：即使是 99% 准确率的系统，也需要人工审核来发现那 1% 的错误。设计好审核工作流。</li>
+                    <li><strong>从简单到复杂</strong>：从结构化数据源开始（数据库表），然后是半结构化数据（JSON/XML），最后才是非结构化文本。复杂度递增，风险可控。</li>
+                    <li><strong>关注数据安全</strong>：知识图谱往往包含敏感信息。确保抽取过程中的数据脱敏、访问控制和审计日志。</li>
+                </ol>
+
+                <div class="highlight-box">
+                    <strong>🔑 终极建议：</strong>构建流水线最大的成本不是技术，而是沟通。信息抽取、实体对齐、知识融合——每个环节都需要与领域专家密切合作。投入 50% 的时间在沟通和对齐上，比投入 100% 的时间在写代码上更有效。
+                </div>
+            </section>
+
+            <!-- ============ 本章练习 ============ -->
+            <section class="section-block reveal">
+                <h2>📝 本章练习</h2>
+                <p class="section-desc">检验你对本章核心概念的理解。</p>
+                <div class="card-grid">
+                    <div class="tech-card">
+                        <div class="icon">⭐</div>
+                        <div class="title">练习 1: 手写NER标注</div>
+                        <div class="body">取一段200字的中文新闻文本，手工标注出其中的所有实体（人名、地名、机构名、时间、数量等），并统一使用BIO标注格式。然后思考：AI模型可能在哪些地方出错？</div>
+                        <p style="margin-top:10px;font-size:12px;color:var(--text-light);">💡 提示: 注意边界模糊的实体（如"长三角地区"是地名还是区域概念？），这是NER的主要难点。</p>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">⭐⭐</div>
+                        <div class="title">练习 2: 设计实体对齐策略</div>
+                        <div class="body">假设你从两个数据源（企查查和天眼查）分别抽取了同一批公司的信息，但公司名称、地址格式不一致。设计一个实体对齐策略，包括：相似度计算方法、阈值设定、人工审核触发条件。</div>
+                        <p style="margin-top:10px;font-size:12px;color:var(--text-light);">💡 提示: 考虑使用多种相似度（名称编辑距离、地址Jaccard相似度、行业分类匹配）的加权组合。</p>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">⭐⭐⭐</div>
+                        <div class="title">练习 3: 编写知识融合规则</div>
+                        <div class="body">设计一个知识融合规则引擎，处理以下冲突场景：(1) 同一实体的属性值冲突（如两家公司的注册资本不同），(2) 关系冲突（如A是B的子公司 vs A是B的供应商）。写出优先级规则。</div>
+                        <p style="margin-top:10px;font-size:12px;color:var(--text-light);">💡 提示: 考虑数据源的权威性（官方数据 > 第三方数据）、时间新鲜度（最新数据 > 旧数据）和多数投票。</p>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">⭐⭐⭐</div>
+                        <div class="title">练习 4: 设计质量检查流程</div>
+                        <div class="body">设计一个知识图谱构建流水线的质量检查流程，包含：每个阶段的检查指标、自动化检查规则、人工抽检策略、质量仪表盘设计。如何确保流水线不产生"垃圾进垃圾出"？</div>
+                        <p style="margin-top:10px;font-size:12px;color:var(--text-light);">💡 提示: 在关键节点设置"质量门"（Quality Gate），不达标的数据不能进入下一阶段。</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 核心要点回顾 ============ -->
+            <section class="section-block reveal">
+                <h2>🔑 核心要点回顾</h2>
+                <p class="section-desc">本章最重要的7个关键认知。</p>
+                <div class="highlight-box">
+                    <ul style="margin:0;padding-left:20px;line-height:2.2;">
+                        <li><strong>构建流水线是知识图谱工程的核心</strong>——从原始文本到结构化知识，流水线的质量直接决定了图谱的可用性。</li>
+                        <li><strong>信息抽取是流水线的第一步也是最关键的一步</strong>——NER、关系抽取、事件抽取的准确率会影响后续所有环节。</li>
+                        <li><strong>实体对齐是知识融合的基础</strong>——不同数据源对同一实体的描述可能完全不同，需要精心设计对齐策略。</li>
+                        <li><strong>知识融合需要规则和统计方法结合</strong>——纯规则难以覆盖所有情况，纯统计方法可能缺乏可解释性。</li>
+                        <li><strong>标注数据是核心资产</strong>——尽早建立标注规范，持续积累标注数据，标注质量比数量更重要。</li>
+                        <li><strong>Human-in-the-loop 不是可选项</strong>——即使是99%准确率的系统，也需要人工审核来发现那1%的错误。</li>
+                        <li><strong>从简单到复杂的渐进式策略</strong>——先结构化数据，再半结构化，最后非结构化文本，风险可控。</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- ============ 延伸阅读 ============ -->
+            <section class="section-block reveal">
+                <h2>📖 延伸阅读</h2>
+                <p class="section-desc">深入学习本章主题的推荐资源。</p>
+                <div class="card-grid">
+                    <div class="tech-card">
+                        <div class="icon">📄</div>
+                        <div class="title">Named Entity Recognition: A Survey (ACM Computing Surveys, 2022)</div>
+                        <div class="body">全面综述NER技术的发展脉络，从规则方法到深度学习再到预训练模型，覆盖中英文NER的最新进展。</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">🛠️</div>
+                        <div class="title">spaCy + Prodigy</div>
+                        <div class="body">spaCy是工业级NLP库，Prodigy是其配套的标注工具。组合使用可快速搭建NER和关系抽取的标注-训练-迭代循环。</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">📄</div>
+                        <div class="title">Entity Resolution and Data Quality: A Comprehensive Survey</div>
+                        <div class="body">全面介绍实体解析（Entity Resolution）的理论、算法和工程实践，是设计实体对齐系统的必读文献。</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">🛠️</div>
+                        <div class="title">Label Studio</div>
+                        <div class="body">开源数据标注平台，支持文本、图像、音频等多种数据类型，内置NER标注模板和团队协作功能。</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="icon">📘</div>
+                        <div class="title">Speech and Language Processing (Jurafsky & Martin, 3rd ed.)</div>
+                        <div class="body">NLP领域的经典教材，第18章（信息抽取）和第21章（关系抽取）对理解知识图谱构建流水线非常有帮助。</div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="next-prev">
+                <a href="overview.html" class="prev-link">← 上一章：知识图谱全景图</a>
+                <a href="embedding.html" class="next-link">下一章：图嵌入与向量检索 →</a>
+            </div>
+        </main>
+    </div>
+    <footer>
+        <div class="footer-links">
+            <a href="../ai-knowledge-intro.html">首页</a>
+            <a href="../ai-basics.html">AI基础</a>
+            <a href="../projects.html">实战项目</a>
+            <a href="../interactive-tutorial.html">互动教程</a>
+            <a href="../explore.html">探索地图</a>
+            <a href="overview.html">全景图</a>
+            <a href="pipeline.html">构建流水线</a>
+            <a href="embedding.html">图嵌入</a>
+            <a href="query.html">查询优化</a>
+            <a href="scale.html">大规模工程</a>
+            <a href="llm-kg.html">LLM+KG</a>
+            <a href="trends.html">趋势</a>
+            <a href="cases.html">案例</a>
+            <a href="multimodal.html">多模态</a>
+        </div>
+        <p class="footer-copy">2026 AI 知识图谱工程架构指南 · 纯 HTML/CSS 构建</p>
+    </footer>
+    <script>
+        window.addEventListener('scroll', () => {
+            const h = document.documentElement;
+            const pct = (h.scrollTop / (h.scrollHeight - h.clientHeight)) * 100;
+            document.getElementById('progressBar').style.width = pct + '%';
+        });
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+        setTimeout(() => {
+            document.querySelectorAll('.reveal').forEach(el => {
+                if (el.getBoundingClientRect().top < window.innerHeight) el.classList.add('visible');
+            });
+        }, 100);
+        document.addEventListener('DOMContentLoaded', () => {
+            renderMathInElement(document.body, { delimiters: [{left: '\\(', right: '\\)', display: false}], throwOnError: false });
+        });
+    </script>
+</body>
+</html>
