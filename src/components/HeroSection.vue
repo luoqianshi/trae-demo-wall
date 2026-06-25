@@ -46,6 +46,15 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
               TRAE Idea Hall
             </a>
+            <a
+              href="https://www.trae.cn/ai-creativity?utm_source=community"
+              target="_blank"
+              rel="noopener"
+              class="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-trae-pill bg-white/5 text-white/80 text-sm font-medium border border-white/10 backdrop-blur-sm hover:bg-white/10 hover:text-white hover:border-white/15 transition-all duration-200"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+              大赛官网
+            </a>
           </div>
         </div>
       </div>
