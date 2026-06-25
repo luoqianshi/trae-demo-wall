@@ -16,31 +16,6 @@
       </span>
     </router-link>
 
-    <div class="flex items-center gap-2">
-      <router-link
-        to="/"
-        class="nav-glass-btn"
-        active-class="!text-trae-text bg-white/10 border-white/20"
-      >
-        首页
-      </router-link>
-      <a
-        href="https://trae-idea-incubator.netlify.app/"
-        target="_blank"
-        rel="noopener"
-        class="nav-glass-btn"
-      >
-        灵感孵化舱
-      </a>
-      <a
-        href="https://luoqianshi.github.io/TRAE-AI-Creativity-Competition-Idea-Hall/"
-        target="_blank"
-        rel="noopener"
-        class="nav-glass-btn"
-      >
-        TRAE Idea Hall
-      </a>
-    </div>
   </nav>
 </template>
 

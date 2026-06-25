@@ -24,12 +24,9 @@
     </div>
 
     <div class="p-4">
-      <h3 class="text-base font-semibold text-trae-text mb-1.5 line-clamp-1 group-hover:text-trae-accent transition-colors">
+      <h3 class="text-base font-semibold text-trae-text mb-3 line-clamp-1 group-hover:text-trae-accent transition-colors">
         {{ project.title }}
       </h3>
-      <p class="text-[13px] text-trae-text-secondary line-clamp-2 mb-3 leading-relaxed">
-        {{ project.description || '暂无描述' }}
-      </p>
       <div class="flex items-center justify-between">
         <span class="tag-pill !py-1 !px-2.5 !text-[11px] cursor-default">
           {{ project.tags?.[0] || '未分类' }}
