@@ -11,8 +11,8 @@
           class="typewriter-insert"
           :class="{ 'typewriter-visible': showInsert }"
         >{{ insertText }}</span>
-        <span class="typewriter-base"> Demo Wall</span>
         <span class="typewriter-cursor" :class="{ 'typewriter-cursor-blink': cursorBlink }"></span>
+        <span class="typewriter-base"> Demo Wall</span>
       </span>
     </router-link>
 
