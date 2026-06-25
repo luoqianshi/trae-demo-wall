@@ -8,7 +8,7 @@ export const useProjectStore = defineStore('project', {
     pageCache: {},
     currentTag: '全部',
     searchQuery: '',
-    sortBy: 'newest',
+    sortBy: 'views',
     filteredProjects: [],
     visibleCount: 12,
     batchSize: 12,

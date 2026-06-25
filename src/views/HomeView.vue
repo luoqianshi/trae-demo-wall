@@ -4,9 +4,11 @@
     <Navbar />
     <main class="relative z-[1]">
       <!-- Disclaimer Banner -->
-      <div class="pt-16 bg-trae-bg border-b border-white/[0.04]">
-        <div class="max-w-trae-container mx-auto px-8 py-3 text-center">
-          <p class="text-trae-text-muted text-xs">本站为社区爱好者自发搭建的作品展示页，非 TRAE 官方网站。</p>
+      <div class="pt-16 bg-trae-bg">
+        <div class="border-b border-white/[0.04]">
+          <p class="text-center text-[11px] text-trae-text-muted/40 py-2 tracking-wide">
+            本站为社区爱好者自发搭建的作品展示页，非 TRAE 官方网站。
+          </p>
         </div>
         <div class="w-full">
           <img :src="bannerUrl" alt="Banner" class="w-full" />

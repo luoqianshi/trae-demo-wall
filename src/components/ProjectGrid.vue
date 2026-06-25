@@ -2,7 +2,6 @@
   <section id="projects" class="py-20">
     <div class="max-w-trae-container mx-auto px-8">
       <div class="flex items-baseline gap-4 mb-12">
-        <span class="font-mono text-sm text-trae-accent tracking-widest">02</span>
         <h2 class="text-4xl font-bold text-trae-text">
           作品<span class="bg-gradient-to-br from-trae-accent to-[#4ade80] bg-clip-text text-transparent">展示</span>
         </h2>

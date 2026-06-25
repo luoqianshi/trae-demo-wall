@@ -3,34 +3,39 @@
     class="fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-8 transition-all duration-300"
     :class="scrolled ? 'bg-trae-bg/85 backdrop-blur-xl border-b border-white/5' : 'bg-trae-bg/55 backdrop-blur-md'"
   >
-    <router-link to="/" class="flex items-center gap-2.5 no-underline">
-      <img :src="logoUrl" alt="TRAE" class="w-7 h-7" />
-      <span class="text-trae-text font-bold text-base tracking-wide">TRAE Demo Wall</span>
+    <router-link to="/" class="flex items-center gap-2.5 no-underline min-w-0">
+      <img :src="logoUrl" alt="TRAE" class="w-7 h-7 shrink-0" />
+      <span class="text-trae-text font-bold text-base tracking-wide whitespace-nowrap">
+        <span class="typewriter-base">TRAE</span>
+        <span class="typewriter-insert" :class="{ 'typewriter-visible': showInsert }">{{ insertText }}</span>
+        <span class="typewriter-base">Demo Wall</span>
+        <span class="typewriter-cursor" :class="{ 'typewriter-cursor-blink': cursorBlink }"></span>
+      </span>
     </router-link>
 
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-2">
       <router-link
         to="/"
-        class="px-4 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
+        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
         active-class="!text-trae-text bg-trae-accent/10"
       >
         首页
       </router-link>
       <a
-        href="https://forum.trae.cn/c/38-category/40-category/40"
+        href="https://trae-idea-incubator.netlify.app/"
         target="_blank"
         rel="noopener"
-        class="px-4 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
+        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
       >
-        大赛论坛
+        灵感孵化舱
       </a>
       <a
-        href="https://github.com/luoqianshi/trae-demo-wall"
+        href="https://luoqianshi.github.io/TRAE-AI-Creativity-Competition-Idea-Hall/"
         target="_blank"
         rel="noopener"
-        class="px-4 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
+        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
       >
-        GitHub
+        TRAE Idea Hall
       </a>
     </div>
   </nav>
@@ -41,11 +46,98 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import logoUrl from '@/assets/trae-black.png'
 
 const scrolled = ref(false)
+const showInsert = ref(false)
+const insertText = ref('')
+const cursorBlink = ref(true)
+
+const FULL_INSERT = ' AI Creativity Competition'
+const TYPE_SPEED = 80
+const DELETE_SPEED = 40
+const PAUSE_FULL = 5000
+const PAUSE_EMPTY = 5000
+
+let animTimer = null
+let isTyping = true
+
+function typeNext() {
+  if (insertText.value.length < FULL_INSERT.length) {
+    insertText.value = FULL_INSERT.slice(0, insertText.value.length + 1)
+    animTimer = setTimeout(typeNext, TYPE_SPEED)
+  } else {
+    showInsert.value = true
+    animTimer = setTimeout(startDelete, PAUSE_FULL)
+  }
+}
+
+function deleteNext() {
+  if (insertText.value.length > 0) {
+    insertText.value = insertText.value.slice(0, -1)
+    animTimer = setTimeout(deleteNext, DELETE_SPEED)
+  } else {
+    showInsert.value = false
+    animTimer = setTimeout(startType, PAUSE_EMPTY)
+  }
+}
+
+function startType() {
+  isTyping = true
+  showInsert.value = true
+  typeNext()
+}
+
+function startDelete() {
+  isTyping = false
+  deleteNext()
+}
+
+function startAnimation() {
+  showInsert.value = true
+  typeNext()
+}
+
+function stopAnimation() {
+  if (animTimer) {
+    clearTimeout(animTimer)
+    animTimer = null
+  }
+}
 
 function onScroll() {
   scrolled.value = window.scrollY > 50
 }
 
-onMounted(() => window.addEventListener('scroll', onScroll))
-onUnmounted(() => window.removeEventListener('scroll', onScroll))
+onMounted(() => {
+  window.addEventListener('scroll', onScroll)
+  startAnimation()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', onScroll)
+  stopAnimation()
+})
 </script>
+
+<style scoped>
+.typewriter-insert {
+  display: inline;
+  opacity: 1;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: currentColor;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+}
+
+.typewriter-cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+</style>
