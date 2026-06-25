@@ -5,10 +5,13 @@
   >
     <router-link to="/" class="flex items-center gap-2.5 no-underline min-w-0">
       <img :src="logoUrl" alt="TRAE" class="w-7 h-7 shrink-0" />
-      <span class="text-trae-text font-bold text-base tracking-wide whitespace-nowrap">
+      <span class="text-trae-text font-bold text-base tracking-wide whitespace-nowrap flex items-center">
         <span class="typewriter-base">TRAE</span>
-        <span class="typewriter-insert" :class="{ 'typewriter-visible': showInsert }">{{ insertText }}</span>
-        <span class="typewriter-base">Demo Wall</span>
+        <span
+          class="typewriter-insert"
+          :class="{ 'typewriter-visible': showInsert }"
+        >{{ insertText }}</span>
+        <span class="typewriter-base"> Demo Wall</span>
         <span class="typewriter-cursor" :class="{ 'typewriter-cursor-blink': cursorBlink }"></span>
       </span>
     </router-link>
@@ -37,6 +40,14 @@
       >
         TRAE Idea Hall
       </a>
+      <a
+        href="https://www.trae.ai/"
+        target="_blank"
+        rel="noopener"
+        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-bg bg-trae-accent hover:bg-[#4ade80] transition-colors no-underline"
+      >
+        大赛官网
+      </a>
     </div>
   </nav>
 </template>
@@ -57,7 +68,6 @@ const PAUSE_FULL = 5000
 const PAUSE_EMPTY = 5000
 
 let animTimer = null
-let isTyping = true
 
 function typeNext() {
   if (insertText.value.length < FULL_INSERT.length) {
@@ -80,13 +90,11 @@ function deleteNext() {
 }
 
 function startType() {
-  isTyping = true
   showInsert.value = true
   typeNext()
 }
 
 function startDelete() {
-  isTyping = false
   deleteNext()
 }
 
@@ -120,6 +128,7 @@ onUnmounted(() => {
 <style scoped>
 .typewriter-insert {
   display: inline;
+  color: #22c55e;
   opacity: 1;
 }
 

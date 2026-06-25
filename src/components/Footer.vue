@@ -1,7 +1,7 @@
 <template>
-  <footer class="border-t border-white/[0.04] py-12">
+  <footer class="border-t border-white/[0.04] py-8 mt-auto">
     <div class="max-w-trae-container mx-auto px-8 text-center">
-      <p class="text-trae-text-muted text-sm mb-4">
+      <p class="text-trae-text-muted text-sm mb-3">
         TRAE AI 创造力大赛初赛作品集 · 数据来自
         <a href="https://forum.trae.cn" target="_blank" rel="noopener" class="text-trae-accent hover:underline">TRAE 社区论坛</a>
       </p>

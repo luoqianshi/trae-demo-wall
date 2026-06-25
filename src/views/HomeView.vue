@@ -5,8 +5,8 @@
     <main class="relative z-[1]">
       <!-- Disclaimer Banner -->
       <div class="pt-16 bg-trae-bg">
-        <div class="border-b border-white/[0.04]">
-          <p class="text-center text-[11px] text-trae-text-muted/40 py-2 tracking-wide">
+        <div class="border-b border-white/[0.08] bg-trae-surface/20">
+          <p class="text-center text-xs text-trae-text-muted py-2 tracking-wide">
             本站为社区爱好者自发搭建的作品展示页，非 TRAE 官方网站。
           </p>
         </div>

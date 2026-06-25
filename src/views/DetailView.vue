@@ -1,7 +1,8 @@
 <template>
-  <div class="min-h-screen pt-20 pb-12">
+  <div class="min-h-screen flex flex-col">
+    <ParticleCanvas />
     <Navbar />
-    <main class="relative z-[1] max-w-trae-container mx-auto px-8">
+    <main class="relative z-[1] flex-1 max-w-trae-container mx-auto px-8 pt-24 pb-12">
       <!-- 返回首页按钮 -->
       <div class="mb-6">
         <router-link
@@ -20,6 +21,7 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
+import ParticleCanvas from '@/components/ParticleCanvas.vue'
 import Navbar from '@/components/Navbar.vue'
 import ProjectDetail from '@/components/ProjectDetail.vue'
 import Footer from '@/components/Footer.vue'
