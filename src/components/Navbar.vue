@@ -19,8 +19,8 @@
     <div class="flex items-center gap-2">
       <router-link
         to="/"
-        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
-        active-class="!text-trae-text bg-trae-accent/10"
+        class="nav-glass-btn"
+        active-class="!text-trae-text bg-white/10 border-white/20"
       >
         首页
       </router-link>
@@ -28,7 +28,7 @@
         href="https://trae-idea-incubator.netlify.app/"
         target="_blank"
         rel="noopener"
-        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
+        class="nav-glass-btn"
       >
         灵感孵化舱
       </a>
@@ -36,17 +36,9 @@
         href="https://luoqianshi.github.io/TRAE-AI-Creativity-Competition-Idea-Hall/"
         target="_blank"
         rel="noopener"
-        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-text-secondary hover:text-trae-text transition-colors no-underline"
+        class="nav-glass-btn"
       >
         TRAE Idea Hall
-      </a>
-      <a
-        href="https://www.trae.ai/"
-        target="_blank"
-        rel="noopener"
-        class="px-3 py-2 rounded-trae-pill text-sm font-medium text-trae-bg bg-trae-accent hover:bg-[#4ade80] transition-colors no-underline"
-      >
-        大赛官网
       </a>
     </div>
   </nav>
@@ -148,5 +140,28 @@ onUnmounted(() => {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+.nav-glass-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.nav-glass-btn:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 </style>
