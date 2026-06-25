@@ -19,7 +19,9 @@ export const useProjectStore = defineStore('project', {
   getters: {
     tags(state) {
       if (!state.indexData) return []
-      return ['全部', ...Object.keys(state.indexData.stats.tagCounts)]
+      const invalidTags = ['65-tag', '68-tag']
+      const validTags = Object.keys(state.indexData.stats.tagCounts).filter(t => !invalidTags.includes(t))
+      return ['全部', ...validTags]
     },
     projectCount(state) {
       return state.filteredProjects.length

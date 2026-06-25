@@ -22,8 +22,19 @@
             <p class="text-trae-text-muted">暂无可预览内容</p>
           </div>
         </div>
-        <div v-if="project.demoUrl" class="mt-3 flex justify-end">
+        <div class="mt-3 flex justify-end gap-2">
           <a
+            v-if="project.localPath"
+            :href="project.localPath"
+            target="_blank"
+            rel="noopener"
+            class="btn-secondary !py-2 !px-4 !text-xs"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+            全屏查看
+          </a>
+          <a
+            v-if="project.demoUrl"
             :href="project.demoUrl"
             target="_blank"
             rel="noopener"

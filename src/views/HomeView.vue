@@ -8,8 +8,8 @@
         <div class="max-w-trae-container mx-auto px-8 py-3 text-center">
           <p class="text-trae-text-muted text-xs">本站为社区爱好者自发搭建的作品展示页，非 TRAE 官方网站。</p>
         </div>
-        <div class="max-w-trae-container mx-auto px-8 pb-0">
-          <img :src="bannerUrl" alt="Banner" class="w-full rounded-b-2xl" />
+        <div class="w-full">
+          <img :src="bannerUrl" alt="Banner" class="w-full" />
         </div>
       </div>
       <HeroSection />
