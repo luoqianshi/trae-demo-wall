@@ -35,7 +35,8 @@ export const useProjectStore = defineStore('project', {
     async loadIndex() {
       if (this.indexData) return
       try {
-        const resp = await fetch('./data/index.json')
+        const v = Date.now()
+        const resp = await fetch(`./data/index.json?v=${v}`)
         const data = await resp.json()
         this.indexData = data
         this.allProjects = data.projects
@@ -48,7 +49,8 @@ export const useProjectStore = defineStore('project', {
     async loadPage(pageNum) {
       if (this.loadedPages.has(pageNum)) return
       try {
-        const resp = await fetch(`./data/pages/page-${pageNum}.json`)
+        const v = Date.now()
+        const resp = await fetch(`./data/pages/page-${pageNum}.json?v=${v}`)
         const data = await resp.json()
         this.loadedPages.add(pageNum)
         this.pageCache[pageNum] = data.projects
