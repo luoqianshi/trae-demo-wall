@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>坠入深渊 · Demo</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: #05050a;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: #e8eaf6;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: radial-gradient(ellipse at center, #0a0a20 0%, #020208 70%, #000 100%);
+    cursor: pointer;
+  }
+  .hud {
+    position: fixed;
+    top: 16px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 24px;
+    pointer-events: none;
+    font-size: 18px;
+    letter-spacing: 1px;
+    text-shadow: 0 0 8px rgba(120, 180, 255, 0.6);
+  }
+  .hud .score {
+    color: #cfe2ff;
+  }
+  .hud .shield {
+    color: #ffd966;
+  }
+  .hud .depth {
+    color: #a0f0ff;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 5, 20, 0.78);
+    backdrop-filter: blur(4px);
+    text-align: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    margin: 0 0 12px;
+    font-size: 42px;
+    letter-spacing: 4px;
+    color: #ff8fa3;
+    text-shadow: 0 0 16px rgba(255, 143, 163, 0.6);
+  }
+  .overlay p {
+    margin: 6px 0;
+    font-size: 16px;
+    color: #cfd4e5;
+    line-height: 1.6;
+  }
+  .overlay .btn {
+    margin-top: 20px;
+    padding: 10px 28px;
+    font-size: 18px;
+    border: 1px solid #6ab0ff;
+    border-radius: 6px;
+    background: linear-gradient(180deg, rgba(60, 120, 220, 0.25), rgba(20, 40, 100, 0.25));
+    color: #dbe7ff;
+    letter-spacing: 2px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .overlay .btn:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(180deg, rgba(90, 160, 255, 0.35), rgba(30, 60, 140, 0.35));
+  }
+  .tip {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #8a93ad;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border: 1px solid #ffd966;
+    border-radius: 999px;
+    color: #ffd966;
+    font-size: 14px;
+    margin: 0 4px;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div class="hud">
+  <div class="score">积分：<span id="score">0</span></div>
+  <div class="depth">深度：<span id="depth">0</span> m</div>
+  <div class="shield">盾：<span id="shield">0</span></div>
+</div>
+
+<div id="startOverlay" class="overlay hidden">
+  <h1>坠入深渊</h1>
+  <p>点击屏幕任意位置 <span class="pill">+1 层盾</span></p>
+  <p>撞到陨石消耗 <span class="pill">1 层盾</span> 并击碎陨石，盾不足时不会死亡但游戏暂停</p>
+  <p>依据下落深度累积积分</p>
+  <button class="btn" id="startBtn">重新开始</button>
+  <div class="tip">提示：任意点击都会叠加盾层</div>
+</div>
+
+<div id="pauseOverlay" class="overlay hidden">
+  <h1>前方有陨石</h1>
+  <p>你的盾已耗尽，点击屏幕叠加盾层再继续</p>
+  <p>当前深度：<span id="pauseDepth">0</span> m &nbsp;·&nbsp; 积分：<span id="pauseScore">0</span></p>
+  <button class="btn" id="resumeBtn">加盾冲破</button>
+  <div class="tip">也可以直接点击屏幕任意处叠加盾后继续</div>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const scoreEl = document.getElementById('score');
+  const depthEl = document.getElementById('depth');
+  const shieldEl = document.getElementById('shield');
+  const startOverlay = document.getElementById('startOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const pauseOverlay = document.getElementById('pauseOverlay');
+  const resumeBtn = document.getElementById('resumeBtn');
+  const pauseDepthEl = document.getElementById('pauseDepth');
+  const pauseScoreEl = document.getElementById('pauseScore');
+
+  let W = window.innerWidth;
+  let H = window.innerHeight;
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Game state - auto-running
+  const state = {
+    running: true,
+    paused: false,
+    startTime: 0,
+    lastTime: 0,
+    depth: 0,       // meters fallen
+    score: 0,
+    shield: 0,
+    speed: 320,     // falling speed (px/s in world), obstacle speed matches this
+    stars: [],
+    speedLines: [],
+    obstacles: [],
+    particles: [],
+    spawnTimer: 0,
+    spawnInterval: 0.85, // seconds
+    heroX: W / 2,
+    heroY: H / 2,
+    heroBob: 0,
+    awaitingObstacle: null, // pending obstacle at pause
+  };
+
+  function reset() {
+    state.running = true;
+    state.paused = false;
+    state.depth = 0;
+    state.score = 0;
+    state.shield = 0;
+    state.speed = 320;
+    state.obstacles = [];
+    state.speedLines = [];
+    state.particles = [];
+    state.spawnTimer = 0;
+    state.spawnInterval = 0.85;
+    state.heroX = W / 2;
+    state.heroY = H / 2;
+    state.heroBob = 0;
+    state.awaitingObstacle = null;
+    initStars();
+  }
+
+  function initStars() {
+    state.stars = [];
+    const n = 140;
+    for (let i = 0; i < n; i++) {
+      state.stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.3 + 0.2,
+        speed: Math.random() * 40 + 15,
+        tw: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  // Speed lines (appear behind hero, move upward to indicate fast falling)
+  function ensureSpeedLines() {
+    const target = 60;
+    while (state.speedLines.length < target) {
+      state.speedLines.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        len: 20 + Math.random() * 80,
+        alpha: 0.15 + Math.random() * 0.55,
+        bias: Math.random(),
+      });
+    }
+  }
+
+  function updateSpeedLines(dt) {
+    ensureSpeedLines();
+    const base = state.speed * 1.6;
+    for (const l of state.speedLines) {
+      l.y -= (base + l.bias * base * 0.8) * dt;
+      if (l.y + l.len < 0) {
+        l.y = H + Math.random() * 40;
+        l.x = Math.random() * W;
+        l.len = 20 + Math.random() * 80;
+        l.alpha = 0.15 + Math.random() * 0.55;
+        l.bias = Math.random();
+      }
+    }
+  }
+
+  function drawSpeedLines() {
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const l of state.speedLines) {
+      const grad = ctx.createLinearGradient(l.x, l.y, l.x, l.y + l.len);
+      grad.addColorStop(0, `rgba(200, 220, 255, 0)`);
+      grad.addColorStop(0.5, `rgba(200, 220, 255, ${l.alpha.toFixed(3)})`);
+      grad.addColorStop(1, `rgba(200, 220, 255, 0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.2 + l.bias * 1.2;
+      ctx.beginPath();
+      ctx.moveTo(l.x, l.y);
+      ctx.lineTo(l.x, l.y + l.len);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Create an irregular meteor polygon (8-14 vertices) with 2-4 craters
+  function createMeteor() {
+    const baseR = 28 + Math.random() * 34;
+    const nVerts = 8 + Math.floor(Math.random() * 7); // 8-14
+    const verts = [];
+    for (let i = 0; i < nVerts; i++) {
+      const angle = (i / nVerts) * Math.PI * 2;
+      const jitter = 0.75 + Math.random() * 0.5;
+      verts.push({
+        angle: angle,
+        r: baseR * jitter,
+      });
+    }
+    const nCraters = 2 + Math.floor(Math.random() * 3); // 2-4
+    const craters = [];
+    for (let i = 0; i < nCraters; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = Math.random() * baseR * 0.5;
+      craters.push({
+        x: Math.cos(a) * dist,
+        y: Math.sin(a) * dist,
+        r: 3 + Math.random() * (baseR * 0.18),
+      });
+    }
+    return {
+      x: Math.random() * (W - baseR * 2) + baseR,
+      y: H + baseR + 20,
+      vy: state.speed * (0.9 + Math.random() * 0.5) + 40,
+      rot: Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 1.8,
+      radius: baseR,
+      verts: verts,
+      craters: craters,
+      color1: `hsl(${20 + Math.random() * 30}, 35%, ${30 + Math.random() * 15}%)`,
+      color2: `hsl(${15 + Math.random() * 25}, 50%, ${15 + Math.random() * 10}%)`,
+      alive: true,
+    };
+  }
+
+  function drawHero(x, y, bob) {
+    // Body
+    ctx.save();
+    ctx.translate(x, y + bob);
+
+    // Shield aura
+    if (state.shield > 0) {
+      const pulse = 1 + Math.sin(performance.now() / 180) * 0.06;
+      const layers = Math.min(state.shield, 6);
+      for (let i = 0; i < layers; i++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, (22 + i * 6) * pulse, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(120, 200, 255, ${0.35 - i * 0.045})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, 28);
+      grad.addColorStop(0, 'rgba(140, 210, 255, 0.35)');
+      grad.addColorStop(1, 'rgba(140, 210, 255, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -10, 8, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd6b3';
+    ctx.fill();
+    ctx.strokeStyle = '#b06a4a';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Eyes
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(-3, -11, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, -11, 1.2, 0, Math.PI * 2); ctx.fill();
+
+    // Body
+    ctx.beginPath();
+    ctx.moveTo(-6, -2);
+    ctx.lineTo(6, -2);
+    ctx.lineTo(7, 12);
+    ctx.lineTo(-7, 12);
+    ctx.closePath();
+    ctx.fillStyle = '#4a6fa5';
+    ctx.fill();
+    ctx.strokeStyle = '#22304a';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Arms (flailing)
+    const t = performance.now() / 220;
+    const armSwing = Math.sin(t) * 0.6;
+    ctx.strokeStyle = '#ffd6b3';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(-12 - Math.cos(armSwing) * 4, 6 + Math.sin(armSwing) * 6);
+    ctx.moveTo(6, 0);
+    ctx.lineTo(12 + Math.cos(armSwing + 1) * 4, 6 + Math.sin(armSwing + 1) * 6);
+    ctx.stroke();
+
+    // Legs
+    ctx.strokeStyle = '#2a3a55';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-3, 12);
+    ctx.lineTo(-5, 22);
+    ctx.moveTo(3, 12);
+    ctx.lineTo(5, 22);
+    ctx.stroke();
+
+    // Falling motion streaks behind
+    ctx.strokeStyle = 'rgba(180, 200, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) {
+      const ox = (Math.random() - 0.5) * 16;
+      const len = 8 + Math.random() * 10;
+      ctx.beginPath();
+      ctx.moveTo(ox, -40 - i * 8);
+      ctx.lineTo(ox, -40 - i * 8 - len);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawMeteor(m) {
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    ctx.rotate(m.rot);
+
+    // Outer glow
+    const glow = ctx.createRadialGradient(0, 0, m.radius * 0.4, 0, 0, m.radius * 1.6);
+    glow.addColorStop(0, 'rgba(255, 140, 80, 0.45)');
+    glow.addColorStop(1, 'rgba(255, 140, 80, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, m.radius * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Polygon body
+    ctx.beginPath();
+    for (let i = 0; i < m.verts.length; i++) {
+      const v = m.verts[i];
+      const px = Math.cos(v.angle) * v.r;
+      const py = Math.sin(v.angle) * v.r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    // Fill gradient
+    const grad = ctx.createRadialGradient(-m.radius * 0.3, -m.radius * 0.3, m.radius * 0.2, 0, 0, m.radius);
+    grad.addColorStop(0, m.color1);
+    grad.addColorStop(1, m.color2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 180, 120, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Craters
+    for (const c of m.craters) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+      const cg = ctx.createRadialGradient(c.x - c.r * 0.3, c.y - c.r * 0.3, 0.5, c.x, c.y, c.r);
+      cg.addColorStop(0, '#1b120c');
+      cg.addColorStop(1, '#3a2618');
+      ctx.fillStyle = cg;
+      ctx.fill();
+    }
+
+    // Motion trail (downward streaks above meteor since meteor moves upward)
+    ctx.strokeStyle = 'rgba(255, 180, 120, 0.35)';
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < 3; i++) {
+      const ox = (Math.random() - 0.5) * m.radius;
+      const len = 6 + Math.random() * 10;
+      ctx.beginPath();
+      ctx.moveTo(ox, m.radius + i * 6);
+      ctx.lineTo(ox, m.radius + i * 6 + len);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawStars(dt) {
+    for (const s of state.stars) {
+      s.y += s.speed * dt * (state.running && !state.paused ? 1 : 0.2);
+      s.tw += dt * 3;
+      if (s.y > H) {
+        s.y = -2;
+        s.x = Math.random() * W;
+      }
+      const alpha = 0.4 + Math.sin(s.tw) * 0.3;
+      ctx.fillStyle = `rgba(200, 220, 255, ${alpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function spawnParticles(x, y, color) {
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 80 + Math.random() * 200;
+      state.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0.5 + Math.random() * 0.4,
+        age: 0,
+        r: 2 + Math.random() * 3,
+        color: color,
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    for (const p of state.particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+    }
+    state.particles = state.particles.filter(p => p.age < p.life);
+  }
+
+  function drawParticles() {
+    for (const p of state.particles) {
+      const t = 1 - p.age / p.life;
+      ctx.globalAlpha = t;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * t, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function heroHitbox() {
+    return { x: state.heroX, y: state.heroY, r: 16 };
+  }
+
+  function checkCollision(m) {
+    const h = heroHitbox();
+    const dx = m.x - h.x;
+    const dy = m.y - h.y;
+    const rr = m.radius * 0.78 + h.r; // slightly forgiving
+    return dx * dx + dy * dy < rr * rr;
+  }
+
+  function tick(now) {
+    const t = now / 1000;
+    let dt = state.lastTime ? Math.min(t - state.lastTime, 0.05) : 0.016;
+    state.lastTime = t;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Background vignette stars
+    drawStars(dt);
+
+    state.heroBob = Math.sin(now / 400) * 2;
+
+    if (state.running && !state.paused) {
+      // Score by depth
+      state.depth += state.speed * dt * 0.05; // meters
+      state.score = Math.floor(state.depth * 10);
+      // Gradually speed up
+      state.speed = Math.min(900, 320 + state.depth * 0.8);
+      state.spawnInterval = Math.max(0.35, 0.85 - state.depth * 0.002);
+
+      // Speed lines (faster when falling faster)
+      updateSpeedLines(dt);
+
+      // Spawn obstacles
+      state.spawnTimer += dt;
+      while (state.spawnTimer >= state.spawnInterval) {
+        state.spawnTimer -= state.spawnInterval;
+        state.obstacles.push(createMeteor());
+      }
+
+      // Move obstacles upward
+      for (const m of state.obstacles) {
+        m.y -= (state.speed + m.vy * 0.3) * dt;
+        m.rot += m.vrot * dt;
+      }
+
+      // Collision
+      for (const m of state.obstacles) {
+        if (!m.alive) continue;
+        if (checkCollision(m)) {
+          if (state.shield > 0) {
+            state.shield -= 1;
+            m.alive = false;
+            spawnParticles(m.x, m.y, '#ffb060');
+          } else {
+            // Pause the game; keep this obstacle in place
+            state.paused = true;
+            state.awaitingObstacle = m;
+            pauseDepthEl.textContent = Math.floor(state.depth);
+            pauseScoreEl.textContent = state.score;
+            pauseOverlay.classList.remove('hidden');
+            break;
+          }
+        }
+      }
+
+      // Remove off-screen or dead
+      state.obstacles = state.obstacles.filter(m => m.alive && m.y > -m.radius * 2 - 40);
+
+      updateParticles(dt);
+    } else {
+      // Keep speed lines slowly moving even when paused so screen isn't dead
+      updateSpeedLines(dt * 0.25);
+      updateParticles(dt);
+    }
+
+    // Draw
+    drawSpeedLines();
+    for (const m of state.obstacles) drawMeteor(m);
+    drawParticles();
+    drawHero(state.heroX, state.heroY, state.heroBob);
+
+    // HUD
+    scoreEl.textContent = state.score;
+    depthEl.textContent = Math.floor(state.depth);
+    shieldEl.textContent = state.shield;
+
+    requestAnimationFrame(tick);
+  }
+
+  function startGame() {
+    reset();
+    startOverlay.classList.add('hidden');
+    pauseOverlay.classList.add('hidden');
+  }
+
+  function addShield() {
+    state.shield += 1;
+  }
+
+  function resumeIfReady() {
+    if (state.paused && state.shield > 0) {
+      state.paused = false;
+      pauseOverlay.classList.add('hidden');
+      if (state.awaitingObstacle) {
+        // Consume one layer on resume to break the obstacle
+        state.shield = Math.max(0, state.shield - 1);
+        const m = state.awaitingObstacle;
+        spawnParticles(m.x, m.y, '#ffb060');
+        m.alive = false;
+        state.awaitingObstacle = null;
+      }
+    }
+  }
+
+  // Click handling - add shield anywhere, and attempt resume when paused
+  function handleClick(e) {
+    if (!state.running) return;
+    addShield();
+    if (state.paused) {
+      // Resume only when shield sufficient
+      resumeIfReady();
+    }
+  }
+
+  canvas.addEventListener('pointerdown', handleClick);
+
+  startBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    startGame();
+  });
+  resumeBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (state.shield <= 0) {
+      // Give them one free layer from the button so the demo feels generous
+      addShield();
+    }
+    resumeIfReady();
+  });
+
+  // Initialize a pretty static background on the menu
+  initStars();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

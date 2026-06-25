@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>番茄钟</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  }
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body { margin: 0; min-height: 100vh; background-color: #09090b; color: #e4e4e7; }
+* { scrollbar-width: thin; scrollbar-color: #27272a transparent; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zoom-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+@keyframes draw-line {
+  from { text-decoration-thickness: 0px; opacity: 0.3; }
+  to   { text-decoration-thickness: 2px; opacity: 1; }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 0.4; }
+}
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-25%); }
+}
+
+.modal-glow {
+  position: absolute;
+  top: -1px; left: -1px; right: -1px; bottom: -1px;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: 0 0 60px 20px rgb(249 115 22 / 0.08),
+              inset 0 0 20px 4px rgb(249 115 22 / 0.04);
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(rgb(63 63 70 / 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(63 63 70 / 0.12) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.todo-done {
+  text-decoration: line-through;
+  text-decoration-color: rgb(250 204 21 / 0.6);
+  text-decoration-thickness: 2px;
+  animation: draw-line 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.cb-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+#completion-modal { display: none; }
+#completion-modal.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen bg-zinc-950 flex items-center justify-center px-6 py-8 lg:px-16">
+  <div class="bg-grid pointer-events-none fixed inset-0 opacity-[0.03]"></div>
+
+  <div class="relative w-full max-w-5xl flex flex-col lg:flex-row lg:items-center gap-8 lg:gap-0">
+
+    <!-- 左侧：待办目标 -->
+    <div class="flex-1 lg:pr-12">
+      <div id="todo-panel">
+        <!-- 编辑模式（未计时） -->
+        <div id="todo-edit">
+          <p class="text-sm text-zinc-500 font-medium tracking-wide uppercase mb-3">
+            待办目标
+          </p>
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-col gap-1">
+              <span class="text-xs text-zinc-600 pl-1">主任务</span>
+              <input id="input-0" type="text" placeholder="输入本次主要目标..."
+                class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition-all duration-200 focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="text-xs text-zinc-600 pl-1">子任务 1</span>
+              <input id="input-1" type="text" placeholder="输入第一个子任务..."
+                class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition-all duration-200 focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20" />
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="text-xs text-zinc-600 pl-1">子任务 2</span>
+              <input id="input-2" type="text" placeholder="输入第二个子任务..."
+                class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition-all duration-200 focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 锁定模式（计时中） -->
+        <div id="todo-locked" class="hidden">
+          <p class="text-sm text-zinc-500 font-medium tracking-wide uppercase mb-3">
+            当前目标
+          </p>
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
+            <ul id="todo-checklist" class="space-y-2"></ul>
+            <div id="todo-empty" class="hidden flex items-center gap-2.5 text-sm text-zinc-600">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+              暂无目标
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分隔线 -->
+    <div class="hidden lg:block w-px self-stretch bg-zinc-800/60 mx-6"></div>
+
+    <!-- 右侧：计时器 -->
+    <div class="flex flex-col items-center gap-8 lg:flex-1">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-orange-600/15 flex items-center justify-center">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-orange-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <h1 class="text-lg font-bold text-zinc-100 tracking-tight">番茄钟</h1>
+      </div>
+
+      <!-- 圆形进度倒计时 -->
+      <div class="relative inline-flex items-center justify-center">
+        <svg id="timer-svg" width="300" height="300" class="-rotate-90">
+          <circle cx="150" cy="150" r="120" fill="none" stroke="rgb(39 39 42)" stroke-width="6"/>
+          <circle id="progress-ring" cx="150" cy="150" r="120" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"
+            class="text-orange-500 transition-all duration-1000 ease-linear"
+            stroke-dasharray="753.9822368615503" stroke-dashoffset="0"/>
+        </svg>
+
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+          <span id="timer-text" class="font-mono font-bold tracking-tight tabular-nums text-zinc-100 transition-colors duration-300" style="font-size:5rem;line-height:1">
+            25:00
+          </span>
+          <span id="timer-status" class="text-xs text-zinc-600 mt-2 tracking-widest uppercase">
+            准备就绪
+          </span>
+        </div>
+      </div>
+
+      <!-- 控制按钮 -->
+      <div id="controls" class="flex items-center justify-center gap-4">
+        <button id="btn-start" onclick="startTimer()"
+          class="flex items-center gap-2 px-8 py-3 rounded-xl font-semibold text-sm transition-all duration-200 bg-zinc-800 text-zinc-600 cursor-not-allowed shadow-none"
+          disabled>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          开始专注
+        </button>
+
+        <button id="btn-pause" onclick="pauseTimer()"
+          class="hidden flex items-center gap-2 px-8 py-3 rounded-xl font-semibold text-sm transition-all duration-200 border border-orange-600/50 text-orange-400 hover:bg-orange-600/10 active:scale-95">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          暂停
+        </button>
+
+        <button id="btn-resume" onclick="resumeTimer()"
+          class="hidden flex items-center gap-2 px-8 py-3 rounded-xl font-semibold text-sm transition-all duration-200 bg-orange-600 text-white hover:bg-orange-500 active:scale-95 shadow-lg shadow-orange-600/20">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          继续
+        </button>
+
+        <button id="btn-reset" onclick="resetTimer()"
+          class="hidden flex items-center gap-2 px-8 py-3 rounded-xl font-semibold text-sm transition-all duration-200 bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 active:scale-95">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          重置
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 完成弹窗 -->
+<div id="completion-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/80 backdrop-blur-sm">
+  <div id="modal-card" class="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 w-[90%] max-w-sm shadow-2xl transition-all duration-500 opacity-0 scale-95 translate-y-4 relative">
+    <div class="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+      <div class="modal-glow"></div>
+    </div>
+    <div class="relative flex flex-col items-center text-center">
+      <div class="relative mb-4">
+        <div class="w-20 h-20 rounded-full bg-orange-600/10 flex items-center justify-center">
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-orange-400"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+        </div>
+        <div class="absolute -top-1 -right-1 w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center" style="animation: bounce 1s infinite">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/></svg>
+        </div>
+      </div>
+      <h2 class="text-xl font-bold text-zinc-100 mb-1">恭喜完成拆解专注！</h2>
+      <p class="text-sm text-zinc-500 mb-2">你成功坚持了 25 分钟的深度专注</p>
+      <span id="modal-badge" class="hidden text-xs text-orange-400/80 bg-orange-600/10 px-3 py-1 rounded-full mb-6"></span>
+      <div id="modal-todo-list" class="w-full mb-6"></div>
+      <button onclick="dismissComplete()"
+        class="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-semibold text-sm transition-all duration-200 bg-orange-600 text-white hover:bg-orange-500 active:scale-95 shadow-lg shadow-orange-600/20">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        开启新任务
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Tailwind CDN 安全类预注册 -->
+<div class="hidden peer-checked:border-orange-500 peer-checked:bg-orange-500/20 peer-checked:opacity-100 peer-checked:scale-100 opacity-0 scale-50 bg-orange-600/5 bg-orange-500 bg-zinc-600"></div>
+
+<script>
+const DEFAULT_TIME = 25 * 60
+const C = 2 * Math.PI * 120
+
+const state = {
+  todos: ['', '', ''],
+  taskDone: [false, false, false],
+  timeLeft: DEFAULT_TIME,
+  totalTime: DEFAULT_TIME,
+  isRunning: false,
+  isPaused: false,
+  isCompleted: false,
+}
+let intervalId = null
+
+/* ====== 核心函数 ====== */
+function tick() {
+  if (state.timeLeft <= 1) {
+    state.timeLeft = 0
+    state.isRunning = false
+    state.isPaused = false
+    state.isCompleted = true
+    clearInterval(intervalId)
+    intervalId = null
+    onComplete()
+  } else {
+    state.timeLeft -= 1
+  }
+  render()
+}
+
+function startTimer() {
+  const t0 = state.todos[0].trim()
+  const t1 = state.todos[1].trim()
+  if (!t0 || !t1) return
+  state.isRunning = true
+  state.isPaused = false
+  state.isCompleted = false
+  state.taskDone = [false, false, false]
+  intervalId = setInterval(tick, 1000)
+  render()
+}
+
+function pauseTimer() {
+  state.isPaused = true
+  clearInterval(intervalId)
+  intervalId = null
+  render()
+}
+
+function resumeTimer() {
+  state.isPaused = false
+  intervalId = setInterval(tick, 1000)
+  render()
+}
+
+function resetTimer() {
+  clearInterval(intervalId)
+  intervalId = null
+  Object.assign(state, {
+    timeLeft: DEFAULT_TIME,
+    totalTime: DEFAULT_TIME,
+    isRunning: false,
+    isPaused: false,
+    isCompleted: false,
+    taskDone: [false, false, false],
+  })
+  render()
+}
+
+function dismissComplete() {
+  clearInterval(intervalId)
+  intervalId = null
+  Object.assign(state, {
+    isCompleted: false,
+    todos: ['', '', ''],
+    timeLeft: DEFAULT_TIME,
+    totalTime: DEFAULT_TIME,
+    isRunning: false,
+    isPaused: false,
+    taskDone: [false, false, false],
+  })
+  document.getElementById('completion-modal').classList.remove('show')
+  render()
+}
+
+function toggleDone(i) {
+  state.taskDone[i] = !state.taskDone[i]
+  render()
+}
+
+function setTodo(i, val) {
+  state.todos[i] = val
+  updateStartButton()
+}
+
+function onComplete() {
+  playChime()
+  if (Notification.permission === 'granted') {
+    new Notification('恭喜完成拆解专注！', { body: '你成功坚持了 25 分钟的深度专注' })
+  } else if (Notification.permission === 'default') {
+    Notification.requestPermission()
+  }
+  showModal()
+}
+
+function playChime() {
+  const ctx = new AudioContext()
+  ;[523.25, 659.25, 783.99].forEach((f, i) => {
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.connect(g); g.connect(ctx.destination)
+    o.type = 'sine'
+    o.frequency.setValueAtTime(f, ctx.currentTime + i * 0.2)
+    g.gain.setValueAtTime(0, ctx.currentTime + i * 0.2)
+    g.gain.linearRampToValueAtTime(0.3, ctx.currentTime + i * 0.2 + 0.05)
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.5)
+    o.start(ctx.currentTime + i * 0.2)
+    o.stop(ctx.currentTime + i * 0.2 + 0.5)
+  })
+}
+
+/* ====== 界面渲染 ====== */
+function updateStartButton() {
+  const t0 = state.todos[0].trim()
+  const t1 = state.todos[1].trim()
+  const btn = document.getElementById('btn-start')
+  if (state.isRunning) return
+  const can = t0 && t1
+  btn.disabled = !can
+  btn.classList.toggle('bg-orange-600', can)
+  btn.classList.toggle('text-white', can)
+  btn.classList.toggle('hover:bg-orange-500', can)
+  btn.classList.toggle('active:scale-95', can)
+  btn.classList.toggle('shadow-lg', can)
+  btn.classList.toggle('shadow-orange-600/20', can)
+  btn.classList.toggle('cursor-pointer', can)
+  btn.classList.toggle('bg-zinc-800', !can)
+  btn.classList.toggle('text-zinc-600', !can)
+  btn.classList.toggle('cursor-not-allowed', !can)
+  btn.classList.toggle('shadow-none', !can)
+}
+
+function render() {
+  const { todos, taskDone, timeLeft, totalTime, isRunning, isPaused, isCompleted } = state
+
+  // === 编辑/锁定模式切换 ===
+  document.getElementById('todo-edit').classList.toggle('hidden', isRunning)
+  document.getElementById('todo-locked').classList.toggle('hidden', !isRunning)
+
+  // === 同步输入框值 ===
+  ;[0, 1, 2].forEach(i => {
+    const inp = document.getElementById('input-' + i)
+    if (inp) inp.value = todos[i]
+  })
+
+  // === 锁定模式：checklist ===
+  const filledTodos = todos.filter(t => t.trim())
+  const checklist = document.getElementById('todo-checklist')
+  const emptyMsg = document.getElementById('todo-empty')
+
+  if (filledTodos.length > 0) {
+    emptyMsg.classList.add('hidden')
+    checklist.classList.remove('hidden')
+    checklist.innerHTML = todos.map((todo, i) => {
+      if (!todo.trim()) return ''
+      const done = taskDone[i]
+      return `
+        <li class="flex items-center gap-3 text-sm">
+          <label class="relative flex items-center cursor-pointer select-none">
+            <input type="checkbox" class="cb-hidden peer" ${done ? 'checked' : ''} onchange="toggleDone(${i})" />
+            <span class="w-5 h-5 rounded-md border transition-all duration-300 flex items-center justify-center shrink-0
+              border-zinc-700 bg-zinc-800
+              peer-checked:border-orange-500 peer-checked:bg-orange-500/20
+              peer-focus-visible:ring-1 peer-focus-visible:ring-orange-500/50">
+              <span class="text-orange-400 transition-all duration-300 opacity-0 scale-50 peer-checked:opacity-100 peer-checked:scale-100">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </span>
+            </span>
+          </label>
+          <span class="relative transition-colors duration-500 ${done ? 'text-zinc-600 todo-done' : 'text-zinc-300'}">
+            ${escapeHtml(todo)}
+          </span>
+        </li>`
+    }).join('')
+    checklist.classList.remove('hidden')
+  } else {
+    checklist.classList.add('hidden')
+    emptyMsg.classList.remove('hidden')
+  }
+
+  // === 计时器 ===
+  const min = String(Math.floor(timeLeft / 60)).padStart(2, '0')
+  const sec = String(timeLeft % 60).padStart(2, '0')
+  const progress = totalTime > 0 ? timeLeft / totalTime : 1
+  const dashOffset = C * (1 - progress)
+  const isWarning = timeLeft <= 60 && timeLeft > 0
+  const isUrgent = timeLeft <= 10 && timeLeft > 0
+
+  document.getElementById('timer-text').innerHTML = `${min}<span class="${isUrgent ? 'text-red-400/50' : isWarning ? 'text-yellow-400/50' : 'text-zinc-600'}">:</span>${sec}`
+
+  let timerColor = 'text-zinc-100'
+  if (isUrgent) timerColor = 'text-red-400'
+  else if (isWarning) timerColor = 'text-yellow-400'
+  const timerEl = document.getElementById('timer-text')
+  timerEl.className = `font-mono font-bold tracking-tight tabular-nums transition-colors duration-300 ${timerColor} ${isPaused ? 'animate-pulse' : ''}`
+  timerEl.style.cssText = 'font-size:5rem;line-height:1'
+
+  const ring = document.getElementById('progress-ring')
+  ring.setAttribute('stroke-dashoffset', dashOffset)
+  ring.className = (isUrgent ? 'text-red-500' : isWarning ? 'text-yellow-500' : 'text-orange-500') + ' transition-all duration-1000 ease-linear'
+
+  document.getElementById('timer-status').textContent = !isRunning ? '准备就绪' : isPaused ? '已暂停' : '专注中'
+
+  // === 按钮 ===
+  updateStartButton()
+  document.getElementById('btn-start').classList.toggle('hidden', isRunning)
+  document.getElementById('btn-pause').classList.toggle('hidden', !(isRunning && !isPaused))
+  document.getElementById('btn-resume').classList.toggle('hidden', !(isRunning && isPaused))
+  document.getElementById('btn-reset').classList.toggle('hidden', !isRunning)
+
+  // 更新暂停/继续按钮的 flex 属性
+  const showPause = isRunning && !isPaused
+  const showResume = isRunning && isPaused
+  const showReset = isRunning
+  document.getElementById('btn-pause').style.display = showPause ? 'flex' : 'none'
+  document.getElementById('btn-resume').style.display = showResume ? 'flex' : 'none'
+  document.getElementById('btn-reset').style.display = showReset ? 'flex' : 'none'
+}
+
+function showModal() {
+  const modal = document.getElementById('completion-modal')
+  const card = document.getElementById('modal-card')
+  const filledTodos = state.todos.filter(t => t.trim())
+  const doneCount = state.taskDone.filter(Boolean).length
+
+  // Badge
+  const badge = document.getElementById('modal-badge')
+  if (doneCount > 0) {
+    badge.classList.remove('hidden')
+    badge.textContent = `完成了 ${doneCount}/${filledTodos.length} 个目标`
+  } else {
+    badge.classList.add('hidden')
+  }
+
+  // Todo list
+  const listContainer = document.getElementById('modal-todo-list')
+  if (filledTodos.length > 0) {
+    listContainer.innerHTML = `
+      <ul class="space-y-2">
+        ${state.todos.map((todo, i) => {
+          if (!todo.trim()) return ''
+          const done = state.taskDone[i]
+          return `
+            <li class="flex items-center gap-3 text-sm rounded-lg px-4 py-2.5 transition-colors duration-500 ${done ? 'bg-orange-600/5 text-zinc-500' : 'bg-zinc-800/50 text-zinc-400'}">
+              <span class="w-2 h-2 rounded-full shrink-0 transition-colors duration-500 ${done ? 'bg-orange-500' : 'bg-zinc-600'}"></span>
+              <span class="${done ? 'line-through' : ''}">${escapeHtml(todo)}</span>
+            </li>`
+        }).join('')}
+      </ul>`
+  } else {
+    listContainer.innerHTML = ''
+  }
+
+  modal.classList.add('show')
+  // 延迟入场动画
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      card.classList.remove('opacity-0', 'scale-95', 'translate-y-4')
+    })
+  })
+
+  // 重置动画准备下次
+  setTimeout(() => {
+    card.classList.add('opacity-0', 'scale-95', 'translate-y-4')
+  }, 600)
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div')
+  d.textContent = s
+  return d.innerHTML
+}
+
+/* ====== 事件绑定 ====== */
+;[0, 1, 2].forEach(i => {
+  document.getElementById('input-' + i).addEventListener('input', function () {
+    setTodo(i, this.value)
+  })
+})
+
+// 初始渲染
+render()
+</script>
+
+</body>
+</html>

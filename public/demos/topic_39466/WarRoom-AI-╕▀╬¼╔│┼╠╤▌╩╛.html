@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>War-Room AI | 高维沙盘推演系统</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        dark: '#08080f', panel: '#12121c', accent: '#00f0ff', danger: '#ff2a2a',
+        warning: '#ffb000', success: '#10b981', cfo: '#a855f7', pr: '#3b82f6',
+        rival: '#ef4444', consumer: '#10b981', ceo: '#f59e0b', muted: '#64748b'
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Noto Sans SC', 'sans-serif']
+      }
+    }
+  }
+}
+</script>
+<style>
+* { box-sizing: border-box; }
+body { background: #08080f; color: #e2e8f0; overflow: hidden; height: 100vh; margin: 0; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #08080f; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+
+/* === 粒子背景 === */
+#particle-canvas { position: fixed; top: 0; left: 0; z-index: 0; pointer-events: none; }
+
+/* === 呼吸灯 === */
+@keyframes pulse-shadow {
+  0% { box-shadow: 0 0 0 0 rgba(0,240,255,0.5); }
+  70% { box-shadow: 0 0 0 12px rgba(0,240,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,240,255,0); }
+}
+.pulse-active { animation: pulse-shadow 1.5s infinite; }
+
+/* === 打字机 === */
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.typing-cursor::after { content: '█'; color: #00f0ff; animation: blink 1s step-start infinite; }
+
+/* === 消息滑入 === */
+@keyframes slideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+.msg-enter { animation: slideUp 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+/* === 扫描线 === */
+.scanline-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+  pointer-events: none; z-index: 999; opacity: 0.4;
+}
+
+/* === 故障文字 === */
+@keyframes glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, -1px); }
+  80% { transform: translate(1px, 2px); }
+  100% { transform: translate(0); }
+}
+.glitch-text { animation: glitch 0.3s ease-in-out; }
+
+/* === 屏幕抖动 === */
+@keyframes screenShake {
+  0%,100% { transform: translate(0); }
+  10% { transform: translate(-3px, 1px); }
+  20% { transform: translate(3px, -1px); }
+  30% { transform: translate(-2px, -2px); }
+  40% { transform: translate(2px, 2px); }
+  50% { transform: translate(-1px, 1px); }
+  60% { transform: translate(1px, -1px); }
+  70% { transform: translate(-2px, 0); }
+  80% { transform: translate(2px, 0); }
+}
+.screen-shake { animation: screenShake 0.5s ease-out; }
+
+/* === 报告弹窗 === */
+@keyframes modalIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+@keyframes modalOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.92); } }
+.modal-show { animation: modalIn 0.35s cubic-bezier(0.16,1,0.3,1) forwards; }
+.modal-hide { animation: modalOut 0.25s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+/* === 进度条 === */
+.progress-bar { transition: width 0.5s cubic-bezier(0.4,0,0.2,1); }
+
+/* === 预设卡片 === */
+.preset-card { transition: all 0.25s ease; cursor: pointer; }
+.preset-card:hover { border-color: rgba(0,240,255,0.5); background: rgba(0,240,255,0.05); transform: translateY(-1px); }
+.preset-card.active { border-color: #00f0ff; background: rgba(0,240,255,0.08); box-shadow: 0 0 20px rgba(0,240,255,0.1); }
+
+/* === 风险条 === */
+.risk-bar { transition: width 1.5s cubic-bezier(0.16,1,0.3,1); }
+
+/* === Agent 卡片发光增强 === */
+@keyframes agentGlow {
+  0%,100% { box-shadow: 0 0 8px transparent; }
+  50% { box-shadow: 0 0 24px var(--glow-color); }
+}
+.agent-speaking { animation: agentGlow 1.2s ease-in-out infinite; }
+
+/* === 暂停脉冲 === */
+@keyframes pausePulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pause-pulse { animation: pausePulse 1.5s ease-in-out infinite; }
+</style>
+</head>
+<body class="font-sans relative" id="app-body">
+
+<canvas id="particle-canvas"></canvas>
+<div class="scanline-overlay"></div>
+
+<!-- ==================== 顶部导航 ==================== -->
+<header class="h-12 border-b border-gray-800/70 bg-panel/90 backdrop-blur flex items-center px-5 justify-between z-20 relative" id="app-header">
+  <div class="flex items-center gap-3">
+    <i class="fa-solid fa-chess-knight text-accent text-lg"></i>
+    <h1 class="text-base font-bold tracking-widest text-white" id="header-title">WAR-ROOM <span class="text-accent text-xs font-mono ml-1">AI v2.0</span></h1>
+    <span class="px-2 py-0.5 bg-danger/15 border border-danger/40 text-danger text-[10px] font-mono rounded animate-pulse">CLASSIFIED</span>
+  </div>
+  <div class="flex gap-6 text-[11px] font-mono text-muted">
+    <span>SYS_LOAD: <span class="text-accent transition-all duration-700" id="sys-load">23%</span></span>
+    <span>THREAT_LV: <span class="text-warning transition-all duration-500" id="threat-lv">ELEVATED</span></span>
+    <span>AGENTS: <span class="text-white" id="agent-count">5/5 ONLINE</span></span>
+  </div>
+</header>
+
+<!-- ==================== 主布局 ==================== -->
+<div class="flex flex-1 overflow-hidden relative z-10" style="height: calc(100vh - 48px);">
+
+  <!-- ========== 左侧面板 ========== -->
+  <aside class="w-[340px] min-w-[340px] border-r border-gray-800/70 bg-panel/70 backdrop-blur flex flex-col">
+    
+    <!-- 场景输入区 -->
+    <div class="p-4 border-b border-gray-800/50">
+      <h2 class="text-[10px] text-muted font-mono mb-3 tracking-wider"><i class="fa-solid fa-terminal mr-2"></i>SCENARIO_INPUT</h2>
+      
+      <!-- 预设场景 -->
+      <div class="grid grid-cols-2 gap-1.5 mb-3">
+        <div class="preset-card active p-1.5 rounded border border-gray-700/50 text-[10px] font-mono text-gray-400" data-preset="0" onclick="selectPreset(0)">
+          <i class="fa-solid fa-car mr-1"></i>汽车降价
+        </div>
+        <div class="preset-card p-1.5 rounded border border-gray-700/50 text-[10px] font-mono text-gray-400" data-preset="1" onclick="selectPreset(1)">
+          <i class="fa-solid fa-users-slash mr-1"></i>裁员控本
+        </div>
+        <div class="preset-card p-1.5 rounded border border-gray-700/50 text-[10px] font-mono text-gray-400" data-preset="2" onclick="selectPreset(2)">
+          <i class="fa-solid fa-tag mr-1"></i>全国提价
+        </div>
+        <div class="preset-card p-1.5 rounded border border-gray-700/50 text-[10px] font-mono text-gray-400" data-preset="3" onclick="selectPreset(3)">
+          <i class="fa-solid fa-rocket mr-1"></i>出海扩张
+        </div>
+      </div>
+
+      <textarea id="scenario-input" class="w-full h-28 bg-dark border border-gray-700 rounded-lg p-3 text-sm text-gray-200 focus:border-accent focus:outline-none resize-none font-sans placeholder-gray-600 transition-all duration-300" placeholder="输入你的商业决策场景...">作为一家新势力车企，为冲刺Q3销量，我计划下周将旗舰车型直降 20%，请各位推演后果。</textarea>
+      
+      <!-- 按钮组 -->
+      <div class="flex gap-2 mt-3">
+        <button id="start-btn" onclick="startSimulation()" class="flex-1 bg-accent/10 border border-accent text-accent hover:bg-accent hover:text-dark transition-all duration-300 py-2.5 rounded-lg font-bold tracking-wider text-sm flex justify-center items-center gap-2 group">
+          <i class="fa-solid fa-play group-hover:scale-110 transition-transform"></i> 启动全维推演
+        </button>
+        <button id="pause-btn" onclick="togglePause()" class="hidden w-10 bg-warning/10 border border-warning/30 text-warning hover:bg-warning/20 transition-all duration-300 rounded-lg flex justify-center items-center" title="暂停/继续">
+          <i class="fa-solid fa-pause text-sm"></i>
+        </button>
+      </div>
+
+      <!-- 快捷键提示 -->
+      <p class="text-[9px] text-gray-700 font-mono mt-2 text-center">Ctrl+Enter 启动 · Space 暂停/继续 · Esc 关闭报告</p>
+
+      <!-- 推演进度 -->
+      <div id="progress-section" class="hidden mt-3">
+        <div class="flex justify-between text-[10px] font-mono text-muted mb-1">
+          <span id="progress-label">ROUND 0/5</span>
+          <span id="progress-pct">0%</span>
+        </div>
+        <div class="h-1 bg-gray-800 rounded-full overflow-hidden">
+          <div class="progress-bar h-full bg-gradient-to-r from-accent to-ceo rounded-full" id="progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent 状态列表 -->
+    <div class="p-4 flex-1 overflow-y-auto">
+      <h2 class="text-[10px] text-muted font-mono mb-3 tracking-wider"><i class="fa-solid fa-microchip mr-2"></i>NEURAL_AGENTS</h2>
+      <div class="space-y-2" id="agent-list"></div>
+      
+      <!-- 实时指标 -->
+      <div class="mt-6 pt-4 border-t border-gray-800/50">
+        <h2 class="text-[10px] text-muted font-mono mb-3 tracking-wider"><i class="fa-solid fa-chart-line mr-2"></i>SYS_METRICS</h2>
+        <div class="space-y-2 text-[10px] font-mono">
+          <div class="flex justify-between"><span class="text-muted">CONFIDENCE</span><span class="text-accent" id="metric-confidence">--</span></div>
+          <div class="flex justify-between"><span class="text-muted">RISK_INDEX</span><span class="text-danger" id="metric-risk">--</span></div>
+          <div class="flex justify-between"><span class="text-muted">TOKENS_USED</span><span class="text-gray-400" id="metric-tokens">--</span></div>
+          <div class="flex justify-between"><span class="text-muted">LATENCY</span><span class="text-gray-400" id="metric-latency">--</span></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== 右侧主区 ========== -->
+  <main class="flex-1 flex flex-col bg-dark/60 relative">
+    
+    <!-- 推演日志 -->
+    <div id="chat-container" class="flex-1 overflow-y-auto px-6 py-6 space-y-4 pb-28">
+      <div class="text-center text-gray-600 font-mono text-sm mt-16" id="idle-state">
+        <div class="inline-block mb-6">
+          <i class="fa-solid fa-shield-halved text-5xl opacity-20"></i>
+        </div>
+        <p class="text-lg text-gray-500 tracking-wider">SYSTEM IDLE</p>
+        <p class="text-xs text-gray-700 mt-2">AWAITING SCENARIO INITIALIZATION...</p>
+        <div class="mt-6 flex justify-center gap-2">
+          <span class="w-1.5 h-1.5 bg-gray-700 rounded-full animate-pulse"></span>
+          <span class="w-1.5 h-1.5 bg-gray-700 rounded-full animate-pulse" style="animation-delay:0.2s"></span>
+          <span class="w-1.5 h-1.5 bg-gray-700 rounded-full animate-pulse" style="animation-delay:0.4s"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统警告条 -->
+    <div id="sys-warning" class="absolute top-4 left-1/2 -translate-x-1/2 bg-danger/90 text-white px-6 py-2.5 rounded-full font-mono text-sm shadow-[0_0_30px_rgba(255,42,42,0.5)] flex items-center gap-3 transition-all duration-500 z-30 opacity-0 translate-y-[-200%] pointer-events-none">
+      <i class="fa-solid fa-triangle-exclamation animate-pulse"></i>
+      <span id="warning-text"></span>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="h-10 border-t border-gray-800/70 bg-panel/60 backdrop-blur flex items-center px-4 justify-between font-mono text-[11px] text-muted">
+      <div id="sim-status" class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-gray-600" id="status-dot"></span>
+        STATUS: STANDBY
+      </div>
+      <div class="flex items-center gap-4">
+        <span id="sim-time" class="text-gray-600">--</span>
+        <button id="report-btn" onclick="showReport()" class="hidden bg-gradient-to-r from-accent to-ceo text-dark px-5 py-1 rounded-full font-bold text-xs hover:shadow-[0_0_20px_rgba(0,240,255,0.3)] transition-all duration-300">
+          <i class="fa-solid fa-file-contract mr-1"></i>查看决策报告
+        </button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ==================== 报告弹窗 ==================== -->
+<div id="report-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex justify-center items-center p-4">
+  <div id="report-inner" class="bg-panel border border-gray-700 w-full max-w-[700px] rounded-2xl shadow-2xl overflow-hidden">
+    <div class="h-1 bg-gradient-to-r from-accent via-purple-500 to-danger"></div>
+    <div class="p-5 border-b border-gray-800 flex justify-between items-center">
+      <h2 class="text-lg font-bold text-white flex items-center gap-2">
+        <i class="fa-solid fa-file-shield text-accent"></i> 决策沙盘推演报告
+        <span class="text-[10px] font-mono text-muted bg-gray-800 px-2 py-0.5 rounded">TOP SECRET</span>
+      </h2>
+      <div class="flex items-center gap-2">
+        <button onclick="exportReport()" class="text-gray-500 hover:text-accent transition-colors text-sm font-mono" title="导出报告">
+          <i class="fa-solid fa-download mr-1"></i>EXPORT
+        </button>
+        <button onclick="closeReport()" class="text-gray-500 hover:text-white transition-colors text-xl"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+    <div class="p-6 max-h-[65vh] overflow-y-auto space-y-5 text-sm text-gray-300" id="report-body">
+      <!-- 结论 -->
+      <div id="report-summary" class="p-4 rounded-xl border"></div>
+      
+      <!-- 雷达图 + 风险 -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-dark/50 rounded-xl border border-gray-800 p-4 flex flex-col items-center">
+          <h4 class="text-xs font-mono text-muted mb-3">RISK RADAR</h4>
+          <div id="radar-container" class="w-full flex justify-center"></div>
+        </div>
+        <div id="report-risks" class="bg-dark/50 rounded-xl border border-gray-800 p-4 space-y-3"></div>
+      </div>
+      
+      <!-- Plan B -->
+      <div id="report-planb" class="bg-dark/50 rounded-xl border border-gray-800 p-4"></div>
+      
+      <!-- 推演元数据 -->
+      <div class="flex gap-4 text-[10px] font-mono text-muted pt-2 border-t border-gray-800">
+        <span id="report-time"></span>
+        <span id="report-rounds"></span>
+        <span id="report-score"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== JS 核心 ==================== -->
+<script>
+// ============ 粒子背景 ============
+const canvas = document.getElementById('particle-canvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+let particleCount = 60;
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+class Particle {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random() * canvas.width;
+    this.y = Math.random() * canvas.height;
+    this.vx = (Math.random() - 0.5) * 0.4;
+    this.vy = (Math.random() - 0.5) * 0.4;
+    this.size = Math.random() * 1.5 + 0.5;
+    this.opacity = Math.random() * 0.5 + 0.1;
+    this.flicker = Math.random() * 0.02;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    this.opacity += this.flicker;
+    if (this.opacity > 0.6 || this.opacity < 0.05) this.flicker *= -1;
+    if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) this.reset();
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(0,240,255,${this.opacity})`;
+    ctx.fill();
+  }
+}
+for (let i = 0; i < particleCount; i++) particles.push(new Particle());
+function animateParticles() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  particles.forEach(p => { p.update(); p.draw(); });
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 140) {
+        ctx.beginPath();
+        ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = `rgba(0,240,255,${0.06 * (1 - dist / 140)})`;
+        ctx.stroke();
+      }
+    }
+  }
+  requestAnimationFrame(animateParticles);
+}
+animateParticles();
+
+// ============ 数据定义 ============
+const agents = [
+  { id: 'cfo', name: 'Alina (CFO)', role: '首席财务官', color: 'text-cfo', border: 'border-cfo', icon: 'fa-coins' },
+  { id: 'pr', name: 'Marcus (PR/Legal)', role: '公关法务', color: 'text-pr', border: 'border-pr', icon: 'fa-scale-balanced' },
+  { id: 'rival', name: 'Nemesis-X', role: '竞品行为拟态', color: 'text-rival', border: 'border-rival', icon: 'fa-skull' },
+  { id: 'consumer', name: 'User-Persona', role: '目标客群画像', color: 'text-consumer', border: 'border-consumer', icon: 'fa-user-group' },
+  { id: 'ceo', name: 'Chairman (AI)', role: '决策大脑', color: 'text-ceo', border: 'border-ceo', icon: 'fa-crown' }
+];
+
+const colorMap = { cfo: '#a855f7', pr: '#3b82f6', rival: '#ef4444', consumer: '#10b981', ceo: '#f59e0b' };
+
+const presets = [
+  { label: '汽车降价战', text: '作为一家新势力车企，为冲刺Q3销量，我计划下周将旗舰车型直降 20%，请各位推演后果。' },
+  { label: 'AI公司裁员', text: '作为一家AI创业公司，为应对融资寒冬，我计划裁员30%以将现金流跑道延长至18个月。请各位推演后果。' },
+  { label: '餐饮全国提价', text: '作为连锁餐饮品牌CEO，面对原材料成本上涨，我计划将全国门店菜单价格统一上调15%。请各位推演后果。' },
+  { label: '出海扩张', text: '作为国内排名前三的SaaS企业，我计划投入5亿人民币进军东南亚市场，与当地巨头正面竞争。请各位推演后果。' }
+];
+
+// ============ 动态响应生成引擎 ============
+function generateResponses(scenario) {
+  const lower = scenario.toLowerCase();
+  const p = {
+    price_cut: /降价|打折|优惠|促销|价格战|低价/,
+    layoff: /裁员|优化|缩减|砍人|人力/,
+    price_hike: /涨价|提价|上调/,
+    expansion: /出海|扩张|海外|国际市场|东南亚|欧洲|美国/
+  };
+  const ctx = {
+    isPriceCut: p.price_cut.test(lower),
+    isLayoff: p.layoff.test(lower),
+    isPriceHike: p.price_hike.test(lower),
+    isExpansion: p.expansion.test(lower)
+  };
+
+  const cfo = [], pr = [], rival = [], consumer = [], ceo = [];
+
+  if (ctx.isPriceCut) {
+    cfo.push("警告。价格直降将彻底击穿我们的毛利防线。根据财务模型测算，此举将导致单品毛利率从当前的18%骤降至-7%，单车亏损约3.2万元。按此趋势，公司现金流将在4个月内断裂。");
+    cfo.push("从财务角度，降价20%意味着我们需要在销量上增长至少300%才能维持同等利润——这在当前市场环境下几乎不可能实现。");
+    pr.push("且慢！必须考虑老用户的感受。上个月刚提车的用户将面临资产大幅贬值，社媒上已经出现了维权群。法务团队预计将面临全国至少15个城市的联合维权和门店聚集事件。");
+    pr.push("品牌信任度一旦受损，修复成本将是降价带来的短期销量收益的10倍以上。特别是新能源车企，用户对'保值率'的敏感度远超传统燃油车。");
+    rival.push("如果你们敢降价，说明你们急了。作为你们最大的竞品，我明天就会投放水军通稿，宣称你们降价是因为'核心电池组件缩水'或'智能驾驶算法存在安全隐患'。");
+    rival.push("我们还会针对你们的薄弱环节——售后网络覆盖不足——发起精准打击。让持币待购的用户宁愿多花2万买我们的车，也不愿冒险买一辆'即将倒闭的公司的车'。");
+    consumer.push("降价20%？看起来很诱人，但我更担心的是：你们公司会不会倒闭？售后怎么办？保值率怎么办？既然今天能降20%，下个月是不是还能降？我决定再等等看。");
+    consumer.push("而且，我朋友刚买了你们的车，他现在气得要命。作为消费者，我确实看重价格，但更看重品牌稳定性和售后保障。你们这样搞，我反而不敢买了。");
+    ceo.push("推演结论清晰：直接降价是品牌自杀行为。我们听到了CFO对现金流断裂的担忧、PR对品牌危机的预警、竞品落井下石的策略，以及消费者持币观望的心理。");
+    ceo.push("我建议启动Plan B：维持指导价不变，但推出限时'3年免息+赠送高阶智驾包'的变相优惠方案。同时向老车主发放等额权益包以维护品牌口碑。");
+  } else if (ctx.isLayoff) {
+    cfo.push("裁员30%确实能立即节省约40%的人力成本，但遣散费和法律合规成本将一次性吃掉本季度全部利润。更重要的是，核心研发人员的流失可能导致产品迭代停滞。");
+    cfo.push("从财务模型看，裁员后现金流跑道延长至18个月，但如果核心人员流失导致产品竞争力下降，18个月后我们面临的将是更严峻的生存危机。");
+    pr.push("大规模裁员必然引发舆论危机。'AI公司裁员30%'这个标题本身就会成为科技媒体的头条，引发'AI泡沫破裂'的叙事。员工在脉脉、小红书的爆料将严重损害雇主品牌。");
+    pr.push("而且，如果被裁员工中有人掌握核心代码或商业机密，竞业限制协议的执行将是一场漫长的法律战。");
+    rival.push("你们裁员的消息对我们来说是天赐良机。我们的人事部门已经在联系你们的核心骨干，开出30%的涨薪条件。同时，我们会向你们的客户传递'该公司经营困难'的信号。");
+    consumer.push("作为你们产品的用户，我最关心的是：裁员之后产品还有人维护吗？客服还有人接吗？新功能还更新吗？如果你们缩减研发团队，我可能要考虑迁移到竞品了。");
+    ceo.push("推演结论：裁员是必要的止血手段，但执行方式至关重要。我们需要确保核心人才不流失、对外沟通有温度、产品迭代不受影响。");
+    ceo.push("建议：1）分阶段裁员，首批不超过15%；2）为被裁员工提供超出市场标准的补偿方案；3）CEO亲自向全员和外界沟通，保持透明。");
+  } else if (ctx.isPriceHike) {
+    cfo.push("提价15%对利润率的提升是立竿见影的。但需注意，如果客户流失率超过20%，总利润反而会下降。我们需要精确测算价格弹性系数。");
+    pr.push("在全国消费降级的大背景下提价，我们需要极其谨慎的公关策略。消费者会自发地在社交媒体上发起'抵制'话题，我们需要准备好舆情应对预案。");
+    rival.push("你们涨价，我们正好可以趁机打出'不涨价承诺'的营销牌。我们会在你们提价生效的当天，在你们门店周边投放对比广告，直接截流你们的客户。");
+    consumer.push("涨价？现在经济这么差，你们还涨价？隔壁XX品牌上个月刚搞了买一送一。我虽然是你们的老客户，但这个价格我真的要考虑换品牌了。");
+    ceo.push("推演结论：提价可行但需要配套策略。单纯的涨价会引发消费者反弹和竞品截流。");
+    ceo.push("建议：采用'产品升级+价格调整'的组合策略，让消费者感知到价值提升而非单纯的涨价。同时保留1-2款引流产品不涨价。");
+  } else if (ctx.isExpansion) {
+    cfo.push("5亿的出海预算相当于我们全年净利润的60%。海外市场的获客成本通常是国内的3-5倍，且回款周期更长。如果18个月内无法实现正向现金流，这将是灾难性的。");
+    pr.push("出海面临的政治风险不容忽视。数据合规、本地化审查、地缘政治摩擦——任何一个环节出问题都可能演变成外交事件。法务团队需要提前评估目标市场的监管环境。");
+    rival.push("你们想出海？我们在东南亚已经深耕了3年，当地合作伙伴关系、政府关系和用户认知都不是你们短期能追上的。我们会用价格战和独家协议把你们挡在门外。");
+    consumer.push("你们花5亿去海外扩张，但国内用户的服务体验呢？客服响应越来越慢，Bug修复越来越不及时。作为用户，我希望你们先把国内的产品做好，而不是好高骛远。");
+    ceo.push("推演结论：出海是大势所趋，但5亿的投入需要更谨慎的节奏。建议先以轻资产模式（合作/代理）进入1-2个试点市场，验证产品-市场匹配后再重投入。");
+    ceo.push("国内基本盘不能丢，出海团队需要独立于国内业务运营，避免资源分散。");
+  } else {
+    cfo.push("从财务角度审视，这项决策将带来显著的成本结构变化。我需要看到更详细的财务模型和敏感性分析，才能给出精确的风险评估。");
+    pr.push("在对外沟通层面，我们需要一个精心设计的叙事框架。任何决策都可能被媒体和公众从不同角度解读，我们必须掌控话语权。");
+    rival.push("你们的每一步动作都在我们的监控之下。我们会利用你们的决策失误，在你们最脆弱的市场环节发动精准打击。不要低估竞争对手的反应速度。");
+    consumer.push("作为消费者，我只关心三件事：价格、质量、服务。你们做任何决策，如果最终影响到这三样中的任何一样，我都会毫不犹豫地转向竞品。");
+    ceo.push("推演完成。综合各方意见，这项决策需要在执行前进行更充分的准备和风险对冲。没有完美的决策，只有充分准备的决策。");
+    ceo.push("建议：1）成立专项工作组；2）制定分阶段执行计划；3）设置明确的止损线和监控指标。");
+  }
+
+  return { cfo, pr, rival, consumer, ceo };
+}
+
+function generateReport(scenario) {
+  const lower = scenario.toLowerCase();
+  const p = {
+    price_cut: /降价|打折|优惠|促销|价格战|低价/,
+    layoff: /裁员|优化|缩减|砍人|人力/,
+    price_hike: /涨价|提价|上调/,
+    expansion: /出海|扩张|海外|国际市场|东南亚|欧洲|美国/
+  };
+
+  if (p.price_cut.test(lower)) return {
+    summary: '强烈不建议执行直接降价策略。降价将引发毛利率击穿、品牌贬值、老用户维权、竞品落井下石和消费者持币观望的多重连锁反应。',
+    conclusion: 'NEGATIVE',
+    risks: [
+      { name: '毛利率击穿', level: 95, desc: '单品毛利从+18%降至-7%，现金流4个月内断裂' },
+      { name: '品牌贬值', level: 88, desc: '二手车价格崩盘，老车主集体维权，品牌溢价归零' },
+      { name: '竞品攻击', level: 82, desc: '竞品将发起质量抹黑战，价格战升级为信任战' },
+      { name: '消费者观望', level: 75, desc: '降价信号引发持币待购心理，实际销量不升反降' },
+      { name: '渠道冲突', level: 70, desc: '经销商利润归零，门店大面积退网风险' }
+    ],
+    planB: ['推出"青春版"精简配置车型，实现变相降价且不伤害品牌调性', '向老车主发放等额智驾包或终身质保作为安抚', '联合金融机构推出3年免息贷款，降低购车门槛而非指导价', '推出限时置换补贴，以旧换新锁定存量用户'],
+    score: 28
+  };
+  if (p.layoff.test(lower)) return {
+    summary: '裁员是必要的止血手段，但需采用分阶段、有温度的执行策略。核心风险在于人才流失和雇主品牌受损。',
+    conclusion: 'CAUTIOUS',
+    risks: [
+      { name: '核心人才流失', level: 90, desc: '研发骨干被竞品挖角，产品迭代停滞' },
+      { name: '雇主品牌受损', level: 85, desc: '裁员新闻引发负面舆论，后续招聘困难' },
+      { name: '团队士气崩溃', level: 78, desc: '幸存者综合症导致生产力下降30%以上' },
+      { name: '竞业限制风险', level: 65, desc: '被裁员工可能携带核心代码/客户资源跳槽竞品' },
+      { name: '客户信心动摇', level: 72, desc: '客户质疑公司持续服务能力，续约率下降' }
+    ],
+    planB: ['分阶段裁员，首批不超过15%，避免一次性冲击过大', '提供超出市场标准的N+3补偿方案，维护雇主品牌', 'CEO亲自召开全员大会，保持透明沟通', '优先保留核心研发和客户成功团队，优先裁减非核心岗位'],
+    score: 35
+  };
+  if (p.price_hike.test(lower)) return {
+    summary: '提价策略需配合产品升级和品牌重塑，单纯的涨价将引发客户流失和竞品截流。建议采用"价值升级"的叙事框架。',
+    conclusion: 'CAUTIOUS',
+    risks: [
+      { name: '客户流失', level: 82, desc: '价格敏感型客户大规模转向竞品' },
+      { name: '竞品截流', level: 78, desc: '竞品趁机推出"不涨价"营销，抢夺市场份额' },
+      { name: '舆情反弹', level: 75, desc: '社交媒体抵制话题升温，品牌形象受损' },
+      { name: '销量下滑', level: 70, desc: '短期销量下降可能超过利润率提升的收益' },
+      { name: '加盟商反弹', level: 65, desc: '终端门店面临客流量下降，加盟商信心动摇' }
+    ],
+    planB: ['产品升级+价格调整组合策略，让消费者感知价值提升', '保留1-2款引流产品不涨价，维持价格锚点', '分区域、分品类逐步调价，避免一次性全面涨价', '在涨价的同时升级服务质量，提升整体消费体验'],
+    score: 42
+  };
+  if (p.expansion.test(lower)) return {
+    summary: '出海是长期战略方向，但5亿重投入需要更谨慎的节奏。建议先从轻资产模式切入，验证PMF后再逐步加码。',
+    conclusion: 'CAUTIOUS',
+    risks: [
+      { name: '资金消耗过快', level: 85, desc: '海外获客成本是国内的3-5倍，5亿预算可能不够' },
+      { name: '本地化挑战', level: 80, desc: '产品、运营、合规的本地化远比预期复杂' },
+      { name: '地缘政治风险', level: 75, desc: '数据合规、贸易摩擦等不可控因素' },
+      { name: '国内资源分散', level: 72, desc: '管理层精力分散，国内基本盘可能松动' },
+      { name: '竞争壁垒', level: 78, desc: '当地巨头已建立深度护城河，新进入者难以突破' }
+    ],
+    planB: ['先以轻资产模式（合作/代理）进入1-2个试点市场', '独立出海团队，不占用国内业务的研发和运营资源', '12个月内验证PMF，设置明确的ROI里程碑和止损线', '利用国内积累的技术和运营优势，寻找差异化切入点'],
+    score: 45
+  };
+  return {
+    summary: '综合多方意见，该决策需要在执行前进行更充分的准备和风险对冲。建议成立专项工作组，制定分阶段执行计划。',
+    conclusion: 'NEUTRAL',
+    risks: [
+      { name: '市场不确定性', level: 70, desc: '宏观环境和竞争格局存在变数' },
+      { name: '执行风险', level: 68, desc: '组织能力和资源调配可能不足' },
+      { name: '财务压力', level: 65, desc: '短期财务指标可能承压' },
+      { name: '竞争反应', level: 72, desc: '竞品可能采取针对性反制措施' },
+      { name: '品牌影响', level: 60, desc: '对外沟通策略需要精心设计' }
+    ],
+    planB: ['成立专项工作组，进行深度可行性分析', '制定分阶段执行计划，设置明确的里程碑和止损线', '准备多套风险应对预案', '进行小范围试点测试后再全面推广'],
+    score: 50
+  };
+}
+
+// ============ 初始化 Agent 列表 ============
+function initAgents() {
+  const list = document.getElementById('agent-list');
+  list.innerHTML = agents.map(a => `
+    <div id="agent-card-${a.id}" class="flex items-center gap-3 p-3 bg-dark/50 border border-gray-800 rounded-lg transition-all duration-500">
+      <div id="avatar-${a.id}" class="w-9 h-9 rounded-lg border border-gray-700 flex justify-center items-center bg-panel transition-all duration-300" style="font-size:14px">
+        <i class="fa-solid ${a.icon} text-gray-500"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-bold ${a.color} truncate">${a.name}</div>
+        <div class="text-[10px] text-muted font-mono truncate">${a.role}</div>
+      </div>
+      <div id="status-${a.id}" class="text-[9px] font-mono text-gray-600 bg-gray-800/50 px-2 py-0.5 rounded whitespace-nowrap">IDLE</div>
+    </div>
+  `).join('');
+}
+
+// ============ Agent 状态控制 ============
+function setAgentStatus(id, status) {
+  const card = document.getElementById(`agent-card-${id}`);
+  const avatar = document.getElementById(`avatar-${id}`);
+  const statusLabel = document.getElementById(`status-${id}`);
+  const agent = agents.find(a => a.id === id);
+  const c = colorMap[id];
+
+  if (status === 'thinking') {
+    avatar.style.borderColor = c;
+    avatar.style.boxShadow = `0 0 12px ${c}40`;
+    avatar.classList.add('pulse-active');
+    avatar.innerHTML = `<i class="fa-solid fa-microchip ${agent.color} animate-spin"></i>`;
+    statusLabel.innerText = 'CALCULATING';
+    statusLabel.style.color = c;
+    statusLabel.style.background = `${c}15`;
+    statusLabel.style.border = `1px solid ${c}40`;
+    statusLabel.classList.add('animate-pulse');
+    card.style.borderColor = `${c}30`;
+    card.classList.remove('agent-speaking');
+    card.style.setProperty('--glow-color', `${c}40`);
+  } else if (status === 'speaking') {
+    avatar.style.borderColor = c;
+    avatar.style.boxShadow = `0 0 24px ${c}80`;
+    avatar.classList.remove('pulse-active');
+    avatar.innerHTML = `<i class="fa-solid fa-comment-dots ${agent.color}"></i>`;
+    statusLabel.innerText = 'SPEAKING';
+    statusLabel.style.color = c;
+    statusLabel.style.background = `${c}20`;
+    statusLabel.style.border = `1px solid ${c}50`;
+    statusLabel.classList.remove('animate-pulse');
+    card.style.borderColor = `${c}60`;
+    card.style.background = `${c}10`;
+    card.style.setProperty('--glow-color', `${c}50`);
+    card.classList.add('agent-speaking');
+  } else {
+    avatar.style.borderColor = '#374151';
+    avatar.style.boxShadow = 'none';
+    avatar.classList.remove('pulse-active');
+    avatar.innerHTML = `<i class="fa-solid ${agent.icon} text-gray-500"></i>`;
+    statusLabel.innerText = 'IDLE';
+    statusLabel.style.color = '#6b7280';
+    statusLabel.style.background = 'rgba(31,41,55,0.5)';
+    statusLabel.style.border = '1px solid transparent';
+    statusLabel.classList.remove('animate-pulse');
+    card.style.borderColor = '#1f2937';
+    card.style.background = 'rgba(8,8,15,0.5)';
+    card.classList.remove('agent-speaking');
+  }
+}
+
+// ============ 消息渲染（含平滑滚动） ============
+function addMessage(agentId, text) {
+  const container = document.getElementById('chat-container');
+  const agent = agents.find(a => a.id === agentId);
+  const msgId = 'msg-' + Math.random().toString(36).substr(2, 9);
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + String(Math.floor(Math.random() * 999)).padStart(3, '0');
+  const isCEO = agentId === 'ceo';
+  const c = colorMap[agentId];
+
+  container.insertAdjacentHTML('beforeend', `
+    <div class="msg-enter flex flex-col ${isCEO ? 'items-center' : 'items-start'} mb-5 w-full ${isCEO ? 'max-w-2xl mx-auto' : 'max-w-[80%]'}">
+      <div class="flex items-center gap-2 mb-1.5">
+        <span class="font-bold ${agent.color} text-xs">${agent.name}</span>
+        <span class="text-[10px] text-gray-600 font-mono">[${time}]</span>
+      </div>
+      <div id="${msgId}" class="p-4 rounded-xl text-sm text-gray-200 leading-relaxed w-full ${isCEO ? 'bg-panel/80 border border-ceo/40 shadow-[0_0_20px_rgba(245,158,11,0.1)] text-center' : 'bg-panel/40 border border-gray-800/50'}" style="border-left: ${isCEO ? '' : `3px solid ${c}`}">
+        <span class="typing-cursor"></span>
+      </div>
+    </div>
+  `);
+  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+
+  const textElement = document.getElementById(msgId);
+  let i = 0;
+  const speed = 15 + Math.random() * 10;
+
+  return new Promise(resolve => {
+    const interval = setInterval(() => {
+      textElement.innerHTML = escapeHTML(text.substring(0, i)) + '<span class="typing-cursor"></span>';
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      i++;
+      if (i > text.length) {
+        clearInterval(interval);
+        textElement.innerHTML = escapeHTML(text);
+        resolve();
+      }
+    }, speed);
+  });
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ============ 系统警告 ============
+function showWarning(text) {
+  const warning = document.getElementById('sys-warning');
+  document.getElementById('warning-text').innerText = text;
+  warning.style.opacity = '1';
+  warning.style.transform = 'translate(-50%, 0)';
+  warning.style.pointerEvents = 'auto';
+  warning.classList.add('glitch-text');
+  setTimeout(() => warning.classList.remove('glitch-text'), 400);
+  setTimeout(() => {
+    warning.style.opacity = '0';
+    warning.style.transform = 'translate(-50%, -200%)';
+    warning.style.pointerEvents = 'none';
+  }, 3500);
+}
+
+// ============ 系统指标更新（动态增长动画） ============
+function animateNumber(el, target, suffix = '') {
+  const current = parseInt(el.innerText) || 0;
+  if (current === target) { el.innerText = target + suffix; return; }
+  const step = Math.max(1, Math.abs(target - current) / 15);
+  const direction = target > current ? 1 : -1;
+  let val = current;
+  const interval = setInterval(() => {
+    val += step * direction;
+    if ((direction > 0 && val >= target) || (direction < 0 && val <= target)) {
+      val = target;
+      clearInterval(interval);
+    }
+    el.innerText = Math.round(val) + suffix;
+  }, 50);
+}
+
+function updateMetrics(round, total) {
+  document.getElementById('metric-confidence').innerText = Math.floor(40 + Math.random() * 30) + '%';
+  document.getElementById('metric-risk').innerText = 'Lv.' + Math.floor(3 + Math.random() * 4);
+  document.getElementById('metric-tokens').innerText = Math.floor(1200 + round * 800 + Math.random() * 400).toLocaleString();
+  document.getElementById('metric-latency').innerText = Math.floor(200 + Math.random() * 300) + 'ms';
+  const loadTarget = Math.floor(20 + round * 12 + Math.random() * 10);
+  animateNumber(document.getElementById('sys-load'), loadTarget, '%');
+  document.getElementById('threat-lv').innerText = round >= 3 ? 'CRITICAL' : round >= 2 ? 'ELEVATED' : 'GUARDED';
+  document.getElementById('threat-lv').className = round >= 3 ? 'text-danger' : round >= 2 ? 'text-warning' : 'text-accent';
+}
+
+// ============ 进度条 ============
+function updateProgress(round, total) {
+  const pct = Math.round((round / total) * 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-pct').innerText = pct + '%';
+  document.getElementById('progress-label').innerText = `ROUND ${round}/${total}`;
+}
+
+// ============ 预设选择 ============
+function selectPreset(index) {
+  document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+  document.querySelector(`[data-preset="${index}"]`).classList.add('active');
+  document.getElementById('scenario-input').value = presets[index].text;
+  updateHash();
+}
+
+// ============ 雷达图绘制（生长动画） ============
+function drawRadar(risks, animate = true) {
+  const container = document.getElementById('radar-container');
+  const size = 160;
+  const cx = size / 2, cy = size / 2, r = 60;
+  const n = risks.length;
+  const angleStep = (Math.PI * 2) / n;
+
+  const targetLevels = risks.map(r => r.level / 100);
+
+  function buildSVG(levels) {
+    let svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`;
+    [1, 0.66, 0.33].forEach(scale => {
+      const points = [];
+      for (let i = 0; i < n; i++) {
+        const angle = angleStep * i - Math.PI / 2;
+        points.push(`${cx + r * scale * Math.cos(angle)},${cy + r * scale * Math.sin(angle)}`);
+      }
+      svg += `<polygon points="${points.join(' ')}" fill="none" stroke="rgba(0,240,255,0.1)" stroke-width="0.5"/>`;
+    });
+    for (let i = 0; i < n; i++) {
+      const angle = angleStep * i - Math.PI / 2;
+      svg += `<line x1="${cx}" y1="${cy}" x2="${cx + r * Math.cos(angle)}" y2="${cy + r * Math.sin(angle)}" stroke="rgba(0,240,255,0.08)" stroke-width="0.5"/>`;
+    }
+    const dataPoints = levels.map((lv, i) => {
+      const angle = angleStep * i - Math.PI / 2;
+      const dist = r * lv;
+      return `${cx + dist * Math.cos(angle)},${cy + dist * Math.sin(angle)}`;
+    });
+    svg += `<polygon id="radar-polygon" points="${dataPoints.join(' ')}" fill="rgba(0,240,255,0.1)" stroke="#00f0ff" stroke-width="1.5"/>`;
+    levels.forEach((lv, i) => {
+      const angle = angleStep * i - Math.PI / 2;
+      const dist = r * lv;
+      svg += `<circle cx="${cx + dist * Math.cos(angle)}" cy="${cy + dist * Math.sin(angle)}" r="3" fill="#00f0ff"/>`;
+    });
+    risks.forEach((risk, i) => {
+      const angle = angleStep * i - Math.PI / 2;
+      const lr = r + 18;
+      const x = cx + lr * Math.cos(angle);
+      const y = cy + lr * Math.sin(angle);
+      const anchor = x < cx - 5 ? 'end' : x > cx + 5 ? 'start' : 'middle';
+      svg += `<text x="${x}" y="${y}" text-anchor="${anchor}" dominant-baseline="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono, monospace">${risk.name}</text>`;
+    });
+    svg += '</svg>';
+    return svg;
+  }
+
+  if (!animate) {
+    container.innerHTML = buildSVG(targetLevels);
+    return;
+  }
+
+  // 生长动画
+  container.innerHTML = buildSVG(new Array(n).fill(0));
+  const startTime = performance.now();
+  const duration = 800;
+
+  function animateRadar(time) {
+    const elapsed = time - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    // easeOutCubic
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const currentLevels = targetLevels.map(lv => lv * eased);
+    container.innerHTML = buildSVG(currentLevels);
+    if (progress < 1) {
+      requestAnimationFrame(animateRadar);
+    }
+  }
+  requestAnimationFrame(animateRadar);
+}
+
+// ============ 报告弹窗 ============
+function showReport() {
+  if (!currentReport) return;
+  const modal = document.getElementById('report-modal');
+  const inner = document.getElementById('report-inner');
+
+  const conclusion = currentReport.conclusion;
+  const conclusionStyles = {
+    NEGATIVE: { bg: 'bg-danger/10', border: 'border-danger/40', icon: '⛔', label: '强烈反对', labelBg: 'bg-danger/80', text: 'text-white' },
+    CAUTIOUS: { bg: 'bg-warning/10', border: 'border-warning/40', icon: '⚠️', label: '谨慎执行', labelBg: 'bg-warning/80', text: 'text-dark' },
+    NEUTRAL: { bg: 'bg-accent/10', border: 'border-accent/40', icon: 'ℹ️', label: '中性评估', labelBg: 'bg-accent/80', text: 'text-dark' }
+  };
+  const s = conclusionStyles[conclusion] || conclusionStyles.NEUTRAL;
+
+  const summary = document.getElementById('report-summary');
+  summary.className = `p-4 rounded-xl border ${s.border} ${s.bg}`;
+  summary.innerHTML = `
+    <div class="flex items-center gap-2 mb-2">
+      <h3 class="text-accent text-xs font-mono">EXECUTIVE SUMMARY</h3>
+      <span class="text-[10px] font-mono ${s.labelBg} ${s.text} px-2 py-0.5 rounded">${s.label}</span>
+    </div>
+    <p class="text-white font-bold text-base">${s.icon} ${currentReport.summary}</p>
+  `;
+
+  drawRadar(currentReport.risks);
+
+  const risksDiv = document.getElementById('report-risks');
+  risksDiv.innerHTML = `
+    <h4 class="text-xs font-mono text-warning mb-3"><i class="fa-solid fa-triangle-exclamation mr-1"></i>CORE RISKS</h4>
+    ${currentReport.risks.map(r => `
+      <div class="mb-2">
+        <div class="flex justify-between text-[11px] mb-1">
+          <span class="text-gray-300">${r.name}</span>
+          <span class="font-mono ${r.level > 80 ? 'text-danger' : r.level > 60 ? 'text-warning' : 'text-accent'}">${r.level}%</span>
+        </div>
+        <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div class="risk-bar h-full rounded-full" style="width:0%;background:${r.level > 80 ? '#ef4444' : r.level > 60 ? '#ffb000' : '#00f0ff'}"></div>
+        </div>
+        <p class="text-[10px] text-muted mt-0.5">${r.desc}</p>
+      </div>
+    `).join('')}
+  `;
+
+  const planbDiv = document.getElementById('report-planb');
+  planbDiv.innerHTML = `
+    <h4 class="text-xs font-mono text-accent mb-3"><i class="fa-solid fa-lightbulb mr-1"></i>ALTERNATIVE STRATEGIES (PLAN B)</h4>
+    <div class="grid grid-cols-2 gap-2">
+      ${currentReport.planB.map((p, i) => `
+        <div class="flex items-start gap-2 p-2 bg-dark/30 rounded-lg border border-gray-800">
+          <span class="text-accent font-mono text-xs">0${i+1}</span>
+          <span class="text-xs text-gray-300">${p}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  document.getElementById('report-time').innerHTML = `<i class="fa-regular fa-clock mr-1"></i>${new Date().toLocaleString('zh-CN')}`;
+  document.getElementById('report-rounds').innerHTML = `<i class="fa-solid fa-rotate mr-1"></i>5轮推演`;
+  document.getElementById('report-score').innerHTML = `<i class="fa-solid fa-gauge mr-1"></i>综合评分: <span class="text-accent font-bold">${currentReport.score}/100</span>`;
+
+  modal.classList.remove('hidden');
+  modal.classList.add('modal-show');
+  modal.classList.remove('modal-hide');
+  inner.classList.remove('modal-hide');
+
+  setTimeout(() => {
+    document.querySelectorAll('.risk-bar').forEach(bar => { bar.style.width = '0%'; });
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.risk-bar').forEach((bar, i) => {
+        bar.style.width = currentReport.risks[i].level + '%';
+      });
+    });
+  }, 300);
+}
+
+function closeReport() {
+  const modal = document.getElementById('report-modal');
+  const inner = document.getElementById('report-inner');
+  modal.classList.add('modal-hide');
+  inner.classList.add('modal-hide');
+  setTimeout(() => {
+    modal.classList.add('hidden');
+    modal.classList.remove('modal-show');
+  }, 300);
+}
+
+document.getElementById('report-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeReport();
+});
+
+// ============ 导出报告 ============
+function exportReport() {
+  if (!currentReport) return;
+  const lines = [];
+  lines.push('═══════════════════════════════════');
+  lines.push('  WAR-ROOM AI - 决策沙盘推演报告');
+  lines.push('═══════════════════════════════════');
+  lines.push('');
+  lines.push('【执行摘要】');
+  lines.push(currentReport.summary);
+  lines.push('');
+  lines.push('【核心风险】');
+  currentReport.risks.forEach((r, i) => {
+    lines.push(`  ${i+1}. ${r.name} (风险等级: ${r.level}%)`);
+    lines.push(`     ${r.desc}`);
+  });
+  lines.push('');
+  lines.push('【替代方案 (Plan B)】');
+  currentReport.planB.forEach((p, i) => {
+    lines.push(`  ${i+1}. ${p}`);
+  });
+  lines.push('');
+  lines.push(`综合评分: ${currentReport.score}/100`);
+  lines.push(`生成时间: ${new Date().toLocaleString('zh-CN')}`);
+  lines.push('═══════════════════════════════════');
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `WarRoom_Report_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============ URL Hash 分享 ============
+function updateHash() {
+  const scenario = document.getElementById('scenario-input').value.trim();
+  if (scenario) {
+    try {
+      window.location.hash = '#' + btoa(unescape(encodeURIComponent(scenario)));
+    } catch(e) {}
+  }
+}
+
+function loadFromHash() {
+  if (window.location.hash && window.location.hash.length > 1) {
+    try {
+      const scenario = decodeURIComponent(escape(atob(window.location.hash.slice(1))));
+      if (scenario) {
+        document.getElementById('scenario-input').value = scenario;
+        // 取消预设选中
+        document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+      }
+    } catch(e) {}
+  }
+}
+
+// 输入时更新hash
+document.getElementById('scenario-input').addEventListener('input', updateHash);
+
+// ============ 暂停/继续 ============
+let isPaused = false;
+let pauseResolve = null;
+
+function togglePause() {
+  if (isPaused) {
+    isPaused = false;
+    if (pauseResolve) { pauseResolve(); pauseResolve = null; }
+    const btn = document.getElementById('pause-btn');
+    btn.innerHTML = '<i class="fa-solid fa-pause text-sm"></i>';
+    btn.classList.remove('pause-pulse');
+    document.getElementById('sim-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-accent animate-pulse" id="status-dot"></span> STATUS: RESUMING...';
+  } else {
+    isPaused = true;
+    const btn = document.getElementById('pause-btn');
+    btn.innerHTML = '<i class="fa-solid fa-play text-sm"></i>';
+    btn.classList.add('pause-pulse');
+    document.getElementById('sim-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-warning pause-pulse" id="status-dot"></span> STATUS: PAUSED';
+  }
+}
+
+function checkPause() {
+  if (isPaused) {
+    return new Promise(resolve => { pauseResolve = resolve; });
+  }
+  return Promise.resolve();
+}
+
+// ============ 主推演流程 ============
+let currentReport = null;
+let isSimulating = false;
+
+async function startSimulation() {
+  if (isSimulating) return;
+  isSimulating = true;
+  isPaused = false;
+
+  const scenario = document.getElementById('scenario-input').value.trim();
+  if (!scenario) {
+    showWarning('ERROR: 场景输入不能为空');
+    isSimulating = false;
+    return;
+  }
+
+  // 自动关闭报告
+  closeReport();
+
+  // 启动特效：屏幕抖动 + 标题glitch
+  document.getElementById('app-body').classList.add('screen-shake');
+  document.getElementById('header-title').classList.add('glitch-text');
+  setTimeout(() => {
+    document.getElementById('app-body').classList.remove('screen-shake');
+    document.getElementById('header-title').classList.remove('glitch-text');
+  }, 500);
+
+  // 更新hash
+  updateHash();
+
+  // 重置UI
+  const btn = document.getElementById('start-btn');
+  const pauseBtn = document.getElementById('pause-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> 推演进行中...`;
+  btn.className = 'flex-1 bg-gray-800 text-gray-500 py-2.5 rounded-lg font-bold tracking-wider text-sm flex justify-center items-center gap-2 cursor-not-allowed';
+  pauseBtn.classList.remove('hidden');
+
+  document.getElementById('chat-container').innerHTML = '';
+  document.getElementById('sim-status').innerHTML = '<span class="w-2 h-2 rounded-full bg-accent animate-pulse" id="status-dot"></span> STATUS: INITIALIZING...';
+  document.getElementById('report-btn').classList.add('hidden');
+  document.getElementById('sim-time').innerText = '';
+  document.getElementById('progress-section').classList.remove('hidden');
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('metric-confidence').innerText = '--';
+  document.getElementById('metric-risk').innerText = '--';
+  document.getElementById('metric-tokens').innerText = '--';
+  document.getElementById('metric-latency').innerText = '--';
+
+  agents.forEach(a => setAgentStatus(a.id, 'idle'));
+
+  const responses = generateResponses(scenario);
+  const report = generateReport(scenario);
+  currentReport = report;
+
+  const startTime = Date.now();
+
+  const steps = [
+    { agent: 'cfo', text: responses.cfo, warnings: [] },
+    { agent: 'pr', text: responses.pr, warnings: [] },
+    { agent: 'rival', text: responses.rival, warnings: ['CRITICAL: 监测到竞品异常行为模式'] },
+    { agent: 'consumer', text: responses.consumer, warnings: [] },
+    { agent: 'ceo', text: responses.ceo, warnings: [] }
+  ];
+
+  const totalSteps = steps.length;
+
+  for (let i = 0; i < totalSteps; i++) {
+    await checkPause();
+    const step = steps[i];
+
+    updateProgress(i + 1, totalSteps);
+    updateMetrics(i + 1, totalSteps);
+
+    const thinkDelay = 800 + Math.random() * 1200;
+    setAgentStatus(step.agent, 'thinking');
+    document.getElementById('sim-status').innerHTML = `<span class="w-2 h-2 rounded-full bg-warning animate-pulse" id="status-dot"></span> STATUS: ${agents.find(a=>a.id===step.agent).name} CALCULATING...`;
+    await sleep(thinkDelay);
+    await checkPause();
+
+    setAgentStatus(step.agent, 'speaking');
+    document.getElementById('sim-status').innerHTML = `<span class="w-2 h-2 rounded-full bg-accent animate-pulse" id="status-dot"></span> STATUS: ${agents.find(a=>a.id===step.agent).name} SPEAKING...`;
+
+    for (let j = 0; j < step.text.length; j++) {
+      await checkPause();
+      await addMessage(step.agent, step.text[j]);
+      if (j < step.text.length - 1) await sleep(300 + Math.random() * 400);
+    }
+
+    if (step.warnings.length > 0) {
+      await sleep(400);
+      await checkPause();
+      step.warnings.forEach(w => showWarning(w));
+    }
+
+    setAgentStatus(step.agent, 'idle');
+    await sleep(400 + Math.random() * 600);
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  document.getElementById('sim-status').innerHTML = `<span class="w-2 h-2 rounded-full bg-green-500" id="status-dot"></span> STATUS: COMPLETED`;
+  document.getElementById('sim-time').innerText = `SIM_TIME: ${elapsed}s`;
+  document.getElementById('report-btn').classList.remove('hidden');
+  document.getElementById('report-btn').classList.add('animate-pulse');
+  animateNumber(document.getElementById('sys-load'), 12, '%');
+  document.getElementById('threat-lv').innerText = 'CONTAINED';
+  document.getElementById('threat-lv').className = 'text-accent';
+  updateProgress(totalSteps, totalSteps);
+  updateMetrics(totalSteps, totalSteps);
+
+  pauseBtn.classList.add('hidden');
+  pauseBtn.classList.remove('pause-pulse');
+  btn.disabled = false;
+  btn.innerHTML = `<i class="fa-solid fa-rotate-right"></i> 重新推演`;
+  btn.className = 'flex-1 bg-accent/10 border border-accent text-accent hover:bg-accent hover:text-dark transition-all duration-300 py-2.5 rounded-lg font-bold tracking-wider text-sm flex justify-center items-center gap-2';
+
+  isSimulating = false;
+  isPaused = false;
+
+  setTimeout(() => showReport(), 1500);
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// ============ 键盘快捷键 ============
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    startSimulation();
+  }
+  if (e.key === ' ' || e.code === 'Space') {
+    if (isSimulating) {
+      e.preventDefault();
+      togglePause();
+    }
+  }
+  if (e.key === 'Escape') {
+    closeReport();
+  }
+});
+
+// ============ 初始化 ============
+initAgents();
+loadFromHash();
+
+// 动态系统负载
+setInterval(() => {
+  if (!isSimulating) {
+    document.getElementById('sys-load').innerText = Math.floor(15 + Math.random() * 20) + '%';
+  }
+}, 3000);
+
+console.log(`
+╔══════════════════════════════════════════╗
+║   WAR-ROOM AI v2.0 - 高维沙盘推演系统  ║
+║   Multi-Agent Decision Simulation      ║
+║   Ctrl+Enter 启动 · Space 暂停 · Esc   ║
+╚══════════════════════════════════════════╝
+`);
+</script>
+</body>
+</html>

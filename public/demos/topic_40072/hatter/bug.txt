@@ -1,0 +1,724 @@
+一、高严重度问题（High）
+H1. clearCloudToken 函数未定义 — 运行时错误
+行号：3864-3869（调用处 3866）
+类别：错误处理缺失 / 功能 bug
+描述：cloudApi._handleAuthExpired 调用了 clearCloudToken()，但整个文件只定义了 logout()（3752-3755）和 setCloudToken/getCloudToken，从未定义 clearCloudToken。当云端返回 401 且 data.code === 'TOKEN_EXPIRED' 时，会抛出 ReferenceError: clearCloudToken is not defined，导致登录过期处理失败，用户卡在已过期会话中。
+修复建议：将 clearCloudToken() 改为 logout()，或新增 const clearCloudToken = logout;。
+H2. 云服务器使用 HTTP 明文传输 — 安全漏洞
+行号：3743
+类别：安全 / 敏感信息泄露
+描述：const CLOUD_SERVER = 'http://8.137.196.81:3000'; 使用 HTTP 协议且为裸 IP。登录（3782-3799）、注册（3764-3781）的密码、所有对话同步的 Bearer Token、对话内容均以明文传输，易被中间人攻击窃取。同时硬编码 IP 不利于维护。
+修复建议：改为 HTTPS 域名，强制服务端启用 TLS；密码应使用 bcrypt 等单向哈希后传输（即便 HTTPS 也建议）。
+H3. API Key 通过公共文本数据库分发且明文缓存 — 安全漏洞
+行号：7287-7298、9850
+类别：安全 / 敏感信息泄露
+描述：fetchKey 从 https://api.textdb.online/maoziaikey 和 maoziapikey 拉取 DeepSeek / 阿里云 API Key，并明文写入 localStorage（hatter_ds_apikey、hatter_aliyun_apikey、dreamhat_aliyun_apikey）。任何人访问该 URL 都能拿到 Key，且 localStorage 可被任意同源脚本读取，存在严重 Key 泄露与盗刷风险。
+修复建议：改为后端代理调用，Key 仅保留在服务端；前端不接触原始 Key。
+H4. currentSessionId 空指针解引用
+行号：5618
+类别：空指针 / 错误处理
+描述：saveCurrentSession 中 if (isPrivateMode || currentSessionId.startsWith('private_')) return;，但 currentSessionId 初始值为 null（4021）。在 loadApiKeys 完成前若任何路径触发 saveCurrentSession，会抛 Cannot read properties of null (reading 'startsWith')。
+修复建议：加 if (!currentSessionId) return; 守卫。
+H5. 全局 Token 计数存在竞态与丢更新
+行号：4588-4595
+类别：竞态条件
+描述：pushGlobalTokens 先本地 globalTotalTokens += addAmount，再 fetch 写回 textdb.online。这是典型的 read-modify-write 竞态：多端并发会互相覆盖。且 fetch(url) 无响应处理、无错误重试，写入失败仅 console.warn。
+修复建议：改为原子递增接口（如 POST /increment?key=...&by=N）；或用后端计数。
+H6. 登录角色动画的 mousemove/touchmove 监听永不移除 — 性能/内存泄漏
+行号：8799-8810
+类别：事件监听泄漏 / 性能
+描述：initLoginCharacters 在 document 上注册了 mousemove 和 touchmove 监听且从不 removeEventListener。即使登录弹窗关闭，每次鼠标移动都会执行 updatePupils（含 4 次 getBoundingClientRect，触发强制布局）。在低端设备上会显著拖慢主线程。
+修复建议：弹窗关闭时移除监听；或仅在 cloudLoginOverlay 打开时注册，关闭时移除。
+H7. syncFromCloud 双向同步存在数据丢失竞态
+行号：3897-3940
+类别：竞态条件 / 数据持久化
+描述：流程为「上传全部本地 → 拉取全部云端 → 用云端覆盖本地」。若两台设备同时同步，A 设备上传后 B 设备上传会覆盖 A 的版本，A 拉取时拿到 B 的旧数据再覆盖本地，导致 A 的新会话丢失。无锁、无版本号、无冲突解决。
+修复建议：引入服务端版本号 / 时间戳冲突合并；或限制单设备在线。
+H8. sendMessage 中 isProcessing 检查与设置之间存在窗口
+行号：6730-6835
+类别：竞态条件
+描述：if (isProcessing) return; 在 6730 行，但 isProcessing = true 在 6835 行。中间有大量异步等待（如 showTruncateChoice 6786、checkContentViolation 6858 之前的同步流程）。用户在等待截断滑块期间点击建议 chip（5540-5544 直接调 sendMessage）可绕过检查，触发并发发送。
+修复建议：在函数入口立即 isProcessing = true，所有 early return 路径重置为 false。
+H9. 私密模式下仍向 AI 上报违规检测
+行号：6858、7163-7201
+类别：隐私 / 安全
+描述：checkContentViolation(finalUserMessage) 在 sendMessage 中无条件调用（6858），将私密模式下的用户消息发送到 DeepSeek 做违规判断。私密模式承诺"对话不会被保存"，但内容仍外发至第三方。
+修复建议：if (isPrivateMode) return; 跳过违规检测，或在隐私模式下仅本地规则匹配。
+H10. printWin 可能被浏览器拦截导致后续 .document.write 抛错
+行号：6480-6483
+类别：错误处理缺失 / 空指针
+描述：const printWin = window.open('', '_blank'); 在弹窗被拦截时返回 null，随后 printWin.document.write(...) 抛 Cannot read properties of null。Agent 流程会进入 catch 但用户无任何提示。
+修复建议：if (!printWin) { showToast('弹窗被拦截，请允许弹窗后重试'); return; }。
+二、中严重度问题（Medium）
+M1. syncToCloud 在 saveCurrentSession 中未 await
+行号：5625
+类别：异步逻辑
+描述：saveCurrentSession 是同步函数，末尾调用 syncToCloud()（async）但不 await。云端保存为 fire-and-forget，若用户快速连续发消息，云端写入顺序不可控，可能覆盖最新数据。
+修复建议：将 saveCurrentSession 改为 async 并 await；或用队列串行化云端写入。
+M2. loadApiKeys().then(...) 中 createNewSession 可能覆盖已有会话
+行号：6661-6674
+类别：状态管理 / 竞态
+描述：初始化流程 loadApiKeys().then(() => { loadSessions(); createNewSession(); ... })。createNewSession 会生成新 currentSessionId 并清空历史。若用户在 loadSessions 后、createNewSession 前点击侧边栏某会话，loadSession 设置 currentSessionId，随后 createNewSession 又覆盖之，导致用户选中的会话被丢弃。
+修复建议：初始化完成前禁用所有交互；或 createNewSession 仅在无当前会话时执行。
+M3. welcomeRAF 永不取消 — 持续 RAF 循环
+行号：9599-9639、9659
+类别：性能 / 内存泄漏
+描述：startWelcomeTypewriter 启动的 requestAnimationFrame(welcomeAnimate) 循环一旦开始永不停止，即使欢迎页已隐藏（dom.welcomeGuide.style.display = 'none'）。每帧都在操作 DOM。
+修复建议：在 updateWelcomeGuide 隐藏欢迎页时 cancelAnimationFrame(welcomeRAF)；显示时再启动。
+M4. 多个 setInterval/setTimeout 未在卸载时清理
+行号：4514（agentElapsedTimer）、7885（speedUpdateTimer）、7850（diCollapseTimer）、4131（toast._timeout）、4830（stopBtnTimer）
+类别：内存泄漏 / 定时器堆积
+描述：除绘画模块在 beforeunload 清理（9918）外，主流程的定时器均未在 beforeunload 清理。speedUpdateTimer 在 stopSpeedDisplay 中清理，但若页面在流式中途关闭则泄漏。
+修复建议：统一在 beforeunload 清理所有定时器。
+M5. document.addEventListener('click', ...) 多次注册未去重
+行号：7758、7811、7968、8694
+类别：事件监听堆积
+描述：四处独立的 document.addEventListener('click', ...) 用于关闭不同下拉菜单。虽不会重复触发（每处逻辑独立），但每次页面初始化都新增 4 个全局 click 监听，且无法移除。
+修复建议：合并为单一 document click 处理器，统一调度。
+M6. escapeHTML 用于属性值时不足
+行号：4125、4167、4769 等
+类别：XSS
+描述：escapeHTML 使用 div.textContent = s; return div.innerHTML;，仅转义 &、<、>，不转义 ' 和 "。在 4167 行 msgEl.innerHTML = \...escapeHTML(fileName)... 
+‘
+ˋ
+ 中fileName被插入到文本节点位置，目前安全；但5142行‘langTag.innerHTML= 
+.
+ˋ
+ ..style="background:{info.color};"...`中info.color来自硬编码表，安全。然而模式存在风险：一旦未来将escapeHTML` 结果拼入属性值，会因未转义引号导致 XSS。
+修复建议：提供 escapeAttr 函数额外转义 " 和 '，属性值统一使用。
+M7. extraHtml 中图片 src 未严格校验
+行号：5191-5197
+类别：XSS
+描述：<img ... src="${img.startsWith('data:') ? img : 'data:image/png;base64,' + img}" /> 直接拼入 innerHTML。若 img 为恶意字符串（如 data:text/html,<script>...），虽 <img src> 不执行脚本，但 data: URL 可用于钓鱼。且 img 来自 conversationHistory，历史可被导入（9256）。
+修复建议：严格校验 img 必须匹配 ^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=]+$。
+M8. appendMessage 中 agentBadgeHtml 直接拼入 innerHTML
+行号：5206、5212、5214、5216
+类别：XSS
+描述：agentBadgeHtml 包含 getAgentIcon(info.icon, info.color) 的 SVG 字符串，info 来自硬编码 AGENT_INFO，目前安全。但 timeHtml 中 timeStr 来自 new Date(timestamp).toLocaleString(...)，理论上安全。整体依赖数据源可信，缺乏纵深防御。
+修复建议：所有动态拼接 innerHTML 处统一过 DOMPurify.sanitize。
+M9. callDeepSeekAI 中 messages 拼接遗漏 agent 消息内容
+行号：6655-6661
+类别：逻辑问题
+描述：messages = [...conversationHistory.filter(m => m.role !== 'system' && !m.agent)]，过滤掉所有 agent 消息，然后单独把 agent 消息摘要塞进一个 system 消息（6660）。但 conversationHistory 中 user 消息可能包含 [补充信息]（6257）等 agent 流程产生的用户消息，这些被保留并发送，可能导致上下文混乱。
+修复建议：明确区分 agent 流程产生的消息与正常用户消息。
+M10. retryLastMessage 中 agent 路径未重置 isProcessing
+行号：6996-6999
+类别：状态不一致
+描述：if (agentModeEnabled) { await runAgentPipeline(...); return; } 直接 return，未进入下面的 isProcessing = true 分支。runAgentPipeline 内部会设置 isProcessing，但若 runAgentPipeline 因 if (isProcessing) return;（6172）提前返回，则 isProcessing 永远不会被设置，按钮状态可能错乱。
+修复建议：检查 runAgentPipeline 的 early return 条件，确保状态一致。
+M11. compressConversation 失败时静默截断历史
+行号：7268
+类别：数据丢失
+描述：catch(e) { if (conversationHistory.length > 50) conversationHistory = conversationHistory.slice(-50); } 压缩失败时直接砍掉前半部分历史，无任何提示，用户可能丢失重要对话。
+修复建议：失败时不截断，仅提示用户重试。
+M12. deductCredit 失败时静默吞错
+行号：7196
+类别：错误处理
+描述：deductCredit(points, result.reason || '违规内容请求').catch(() => {}); 完全吞掉错误。若扣分接口失败，违规用户不会被扣分，且无日志。
+修复建议：至少 console.warn 记录，或在下次启动时重试。
+M13. extractMemoryEntries 中 replace_id 与 replace_ids 顺序处理可能导致重复
+行号：7351-7355
+类别：逻辑问题
+描述：先按 replace_id 删除一条，再按 replace_ids 删除多条。若 AI 同时返回两者且指向同一 id，第二次 filter 不会报错但会做无用功。更严重的是，删除后未检查 duplicate（7356），若新条目与已存在条目重复，会被跳过，但旧条目已被删除，导致信息丢失。
+修复建议：先收集所有待删除 id，统一过滤，再判重。
+M14. maybeExtractMemory 是 fire-and-forget
+行号：7374-7383
+类别：竞态条件
+描述：extractMemoryEntries().then(newEntries => { ... }) 不 await。若用户快速发 5 条消息，可能同时触发多次提取，每次都基于同一份 userMemory.entries 计算，后到的覆盖先到的，导致部分新记忆丢失。
+修复建议：用 isExtracting 标志串行化，或加入队列。
+M15. localStorage.setItem 异常未全面捕获
+行号：5611、5623、7302、8086-8091
+类别：数据持久化
+描述：saveSessions = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(userSessions)); 无 try-catch。当 localStorage 满（QuotaExceededError）时抛错。saveCurrentSession 中调 saveSessions 有 try-catch（5623），但 togglePinSession（5758）、deleteSession（5629）等直接调 saveSessions 无保护。
+修复建议：saveSessions 内部统一 try-catch 并 toast 提示。
+M16. loadSessions 过滤逻辑可能丢弃合法会话
+行号：5610
+类别：逻辑问题
+描述：userSessions = userSessions.filter(s => s.history && s.history.some(m => m.role !== 'system')); 要求会话必须含非 system 消息。若会话仅有 system 消息（异常但可能存在），会被静默丢弃，用户无感知。
+修复建议：保留但标记，或提示用户。
+M17. renderSessionList 每次都重新绑定事件
+行号：5745-5751
+类别：性能 / 事件监听堆积
+描述：每次 renderSessionList 都 innerHTML = ... 重建列表，再 forEach 绑定 click。旧监听随旧 DOM 被 GC，但频繁重建大量会话项时性能差。
+修复建议：用事件委托（在 sessionList 上绑一次 click，通过 e.target.closest 分发）。
+M18. highlightTextNodes 中 regex.lastIndex 状态污染
+行号：5793、5805、5807
+类别：逻辑问题
+描述：regex 是 /g 标志的正则，regex.test(str)（5793）会更新 lastIndex。接着在 nodes.forEach 中 regex.lastIndex = 0（5805）重置，但 node.textContent.replace(regex, ...)（5807）又会更新 lastIndex。多次调用 searchMessages 时若 regex 复用，可能漏匹配。
+修复建议：每次搜索新建 regex，或确保每次使用前 lastIndex = 0。
+M19. pdfExport 容器未在异常路径清理
+行号：7590-7612
+类别：内存泄漏 / DOM 泄漏
+描述：container 添加到 body，仅在 then/catch 中移除。若 html2pdf 链抛出未捕获异常（如 html2pdf is not a function），container 永久残留。且 setTimeout 400ms 内若用户关闭页面，container 也残留。
+修复建议：用 try/finally 确保移除；或加超时兜底。
+M20. dpInit 重复调用 dpFetchServerTime
+行号：9821-9823、9887
+类别：性能 / 逻辑
+描述：dpInit 中先 await dpFetchServerTime()（9823）仅用于检测，然后 dpInitPoints 内部又调一次（9821）。dpOnGenerate 中又调 dpInitPoints（9887）。每次生成图片都重复请求时间 API，浪费网络。
+修复建议：缓存服务器时间，仅在过期后重新获取。
+M21. dpPollTask 错误后继续轮询
+行号：9877-9878
+类别：逻辑问题
+描述：catch(error) { ... dpStopProgress(); dpHideGeneratingAnimation(); if (pollAttempts >= 8) { dpStopPolling(); return; } if (isPolling) pollingTimer = setTimeout(attemptPoll, POLL_INTERVAL_MS); } 错误后停止了进度动画和生成动画，但仍继续轮询。状态不一致：UI 显示已停止，后台仍在请求。
+修复建议：错误后要么完全停止，要么保持轮询但 UI 显示"重试中"。
+M22. voiceStatusEl 重复创建未清理
+行号：9377-9387
+类别：DOM 泄漏
+描述：if (!voiceStatusEl) { voiceStatusEl = document.createElement('div'); ... btnVoice.appendChild(voiceStatusEl); } 仅创建一次。但 hideVoiceStatus 只是 display = 'none'，元素残留。若 btnVoice 被重新渲染（不会，但理论上），元素会孤立。
+修复建议：当前实现可接受，但建议 hideVoiceStatus 后延迟移除。
+M23. mediaRecorder.onstop 中 sendAudioToAsr 未 await
+行号：9424-9430
+类别：异步逻辑
+描述：mediaRecorder.onstop = () => { ... sendAudioToAsr(audioBlob, mimeType); ... } 不 await。若用户在识别完成前再次点击录音，asrFinalText/asrPartialText 会被新录音覆盖，导致识别结果混乱。
+修复建议：用 isRecognizing 标志阻塞新录音。
+M24. userInput 自动高度计算可能抖动
+行号：8017
+类别：UI 一致性
+描述：dom.userInput.style.height = '24px'; dom.userInput.style.height = Math.min(dom.userInput.scrollHeight, 140) + 'px'; 每次输入都先重置为 24px 再设为实际高度，可能导致视觉抖动（尤其有过渡动画时）。
+修复建议：使用 auto 或 scrollHeight 直接判断，避免重置。
+M25. visualViewport 监听强制设置 body 高度
+行号：9239-9247
+类别：UI 一致性
+描述：document.body.style.height = vv.height + 'px'; 在 resize/scroll 时设置 body 高度为视口高度。但 CSS 中 body { height: 100dvh; }（142）已处理。重复设置可能与 dvh 计算冲突，导致移动端布局错乱。
+修复建议：仅在小键盘弹出时调整，或移除（依赖 dvh）。
+M26. agentElapsedTimer 在 stopGeneration 中未清理
+行号：7134-7148
+类别：定时器泄漏
+描述：stopGeneration 中 if (agentPipelineActive) { ... stopElapsedTimer(); ... }，但 stopElapsedTimer 只清 agentElapsedTimer。若用户在非 Agent 流式（如普通 callDeepSeekAI）中停止，speedUpdateTimer（7885）不会被立即清理，需等 finally 中 stopSpeedDisplay。期间定时器仍在跑。
+修复建议：stopGeneration 中显式调 stopSpeedDisplay()。
+M27. loadPreviousSession 在隐私模式下未阻止
+行号：5634-5640
+类别：逻辑问题
+描述：if (isPrivateMode) { if (!await showConfirm('切换对话将退出隐私模式，当前对话不会被保存。')) return; } 仅确认，未实际退出隐私模式。loadSession 内部会设 isPrivateMode = false（5649），但若用户取消确认，隐私模式仍保留。逻辑正确但提示误导（"将退出"实际是"可能退出"）。
+修复建议：提示改为"切换对话将退出隐私模式"。
+M28. escapeHTML 在 escapeHtmlEntities 中重复定义
+行号：4125、5334
+类别：代码质量 / 重复
+描述：escapeHTML（4125）用 DOM 方式，escapeHtmlEntities（5334）用字符串替换。两者用途不同但功能重叠，维护易混淆。
+修复建议：统一为一个函数。
+M29. Math.random().toString(36).substr(2,6) 使用已废弃 API
+行号：5693、7358
+类别：代码质量
+描述：String.prototype.substr 已废弃，未来浏览器可能移除。
+修复建议：改用 substring(2, 8) 或 slice(2, 8)。
+M30. AbortSignal.timeout 兼容性
+行号：7185、9153、9166、9176、9187、9195、9203
+类别：兼容性
+描述：AbortSignal.timeout(5000) 在 Safari < 15.4、iOS Safari < 15.4 不支持。若用户用旧版 iOS，这些 fetch 会因 AbortSignal.timeout is not a function 抛错。
+修复建议：封装 withTimeout(signal, ms) 兼容旧浏览器。
+三、低严重度问题（Low）
+L1. 魔法数字遍布
+行号：5223（300）、4857（200）、7185（5000）、9153（15000）、9700（12 * 60 * 1000）、9706（40）、5305（250000）等
+类别：代码质量
+描述：大量硬编码数字未提取为命名常量，如用户消息折叠阈值 300、压缩最小消息数 12、各种超时时间。
+修复建议：集中到顶部 const CONFIG = { ... }。
+L2. showConfirm 与 showTruncateChoice 共用 confirmOverlay 状态
+行号：4133-4150、4151-4294
+类别：UI 一致性 / 状态管理
+描述：两者都操作 confirmOverlay、confirmOk、confirmCancel、confirmIcon、confirmMsg。若 showTruncateChoice 显示期间某处触发 showConfirm（理论上不会，但代码无防护），会互相覆盖 DOM 和回调。
+修复建议：加互斥锁 isConfirmShowing。
+L3. showConfirm 的 overlay.onclick 重复绑定
+行号：4149
+类别：事件监听堆积
+描述：每次 showConfirm 都 overlay.onclick = e => ...，覆盖前一次。若同时有两个 confirm（不可能但代码无防护），后者的 overlay 点击会触发前者的 cleanup。
+修复建议：使用 addEventListener 并在 cleanup 中 removeEventListener。
+L4. showInput 中 fieldEl.onkeydown 覆盖式绑定
+行号：4330
+类别：事件监听
+描述：fieldEl.onkeydown = e => ... 每次覆盖。若 showInput 被并发调用（不可能但无防护），后者的回车处理会覆盖前者。
+修复建议：同 L3。
+L5. attachActionBar 中 messageDiv.dataset.index 解析未防御 NaN
+行号：5434、5454、5502、5504、5506
+类别：错误处理
+描述：const idx = parseInt(messageDiv.dataset.index); 若 dataset.index 为空或非数字，idx 为 NaN。后续 conversationHistory[idx] 返回 undefined，msg?.content 兜底为 ''，不会崩溃但行为异常（复制空内容、引用空消息）。
+修复建议：if (isNaN(idx) || idx < 0 || idx >= conversationHistory.length) return;。
+L6. appendMessage 中 index 参数可能为 undefined
+行号：5174、5291
+类别：错误处理
+描述：appendMessage(role, content, reasoning, index, ...) 中 index 用于 div.dataset.index = index。若调用方未传（如 6221 appendMessage('assistant', visionText, null, conversationHistory.length - 1, ...) 实际传了，但 6343 等处也传了），目前都传了。但函数签名无默认值，防御性不足。
+修复建议：index = index ?? -1。
+L7. renderStreaming 中 div.innerHTML = html 重建破坏事件绑定
+行号：5365
+类别：性能 / UI 一致性
+描述：流式渲染时每次 chunk 都 div.innerHTML = html，导致所有子节点（包括 reasoning block 的 toggle 按钮）被重建。用户在流式过程中点击"展开/收起思考"会立即被下一帧覆盖。
+修复建议：增量更新，仅追加新内容；或保留 reasoning block 引用，仅更新内容部分。
+L8. fixUnclosedFences 误判行内代码
+行号：5302-5307
+类别：逻辑问题
+描述：const matches = text.match(/^```/gm); 匹配行首三个反引号。但 Markdown 中行内代码 `code` 不会触发。然而若用户内容中有一行正好是 ```（如代码示例），会被误判为未闭合代码块，追加 `\n````。
+修复建议：解析代码块时考虑嵌套与转义。
+L9. processSubscripts 误替换化学式外的下划线
+行号：5309
+类别：逻辑问题
+描述：text.replace(/([A-Za-z])_(\d+)/g, '$1<sub>$2</sub>') 会将 user_1、var_2 等代码标识符替换为 user<sub>1</sub>。虽有 processSubscriptsSafe 保护代码块，但行内代码 `user_1` 之外的下划线仍会被误替换（如 Markdown 链接 [text_1](url)）。
+修复建议：仅在数学/化学上下文中替换，或更严格匹配（如要求前后是化学元素）。
+L10. protectMath 占位符可被内容伪造
+行号：5325-5333
+类别：安全
+描述：占位符 MATHPLACEHOLDER${idx}ENDMATHPLACEHOLDER。若用户输入内容包含该字符串，restoreMath 会错误替换为 mathBlocks[idx]，可能注入任意 HTML（虽经 sanitize）。
+修复建议：使用更随机的占位符（含特殊字符）。
+L11. renderMarkdown 中 restoreMath 在 sanitize 之后
+行号：5341
+类别：安全
+描述：return restoreMath(sanitize(html), mathBlocks); 先 sanitize 再还原数学。但 mathBlocks 中的原始数学公式未经 sanitize，escapeHtmlEntities 仅转义 &<>，未转义 "。若数学公式中含 "，还原后可能在属性中注入。
+修复建议：还原后再次 sanitize，或对 mathBlocks 严格校验。
+L12. addCopyButtons 中 navigator.clipboard 可能不可用
+行号：5031、5147
+类别：兼容性
+描述：navigator.clipboard.writeText(code).then(...) 在非 HTTPS 或非安全上下文下 navigator.clipboard 为 undefined，会抛错。代码中 5441-5447 有 fallback，但 5031、5147 没有。
+修复建议：统一封装 copyText 函数含 fallback。
+L13. searchMessages 中 clearHighlights 破坏 DOM 结构
+行号：5782-5790
+类别：UI 一致性
+描述：parent.replaceChild(document.createTextNode(el.textContent), el); parent.normalize(); 将高亮 span 替换为文本节点并合并。若高亮 span 内有子元素（理论上不会，但 highlight-text 只含文本），会丢失。normalize() 合并相邻文本节点，但若父节点有其他子元素，合并行为可能不符预期。
+修复建议：仅替换文本节点，不调用 normalize。
+L14. loadSession 中 sessionTokens = session.tokens || 0 不准确
+行号：5667
+类别：数据一致性
+描述：加载会话时直接用保存的 tokens，但保存后可能又有新消息未计入。sessionTokens 与实际 estimateConversationTokens() 偏差会累积。
+修复建议：加载后重新估算 sessionTokens = estimateConversationTokens()。
+L15. cleanHistoryForStorage 中 image: true 标记不一致
+行号：5612-5616
+类别：数据一致性
+描述：保存时将 image/images 替换为 image: true 表示"有图但已过期"。但 appendMessage（5191-5197）中 img === true 显示"图片已过期"。而 renderFullConversation（5709）中 const imgs = msg.images || (msg.image ? [msg.image] : null); 将 image: true 转为 [true]，再传给 appendMessage。逻辑链路正确但脆弱，任何一处改动都可能破坏。
+修复建议：用独立字段 hasImage: true 而非复用 image。
+L16. exportToPDF 中 body.innerHTML = renderMarkdown(m.content) 未 sanitize
+行号：7567
+类别：XSS
+描述：renderMarkdown 内部已 sanitize（5341），但 PDF 导出的 container 在 postRenderContent 后直接交给 html2pdf。若 sanitize 配置不严（如允许 target="_blank"），PDF 中可能含恶意链接。
+修复建议：PDF 导出时用更严格的 sanitize 配置。
+L17. exportMarkdown 中 m.content 未转义
+行号：7994-8006
+类别：数据一致性
+描述：md += \用户: ${m.content}\n\n`;直接拼接。若m.content含 Markdown 特殊字符（如**、#`），导出的 Markdown 格式错乱。
+修复建议：对用户内容用反引号包裹或转义。
+L18. importData 未校验数据结构
+行号：9253-9258
+类别：安全 / 数据一致性
+描述：const data = JSON.parse(e.target.result); if (data.sessions) { userSessions = data.sessions; ... } 直接赋值，未校验 sessions 是否为数组、每项是否有 id/history 等字段。恶意导入文件可破坏数据结构，导致后续渲染崩溃。
+修复建议：校验数据 schema，拒绝非法数据。
+L19. loadApiKeys 中 cached 未校验
+行号：7289-7290
+类别：安全
+描述：let cached = localStorage.getItem(cacheKey); if (cached) return cached; 直接返回缓存值。若缓存被篡改（如含空格、换行），后续 Authorization: Bearer ${apiKey} 会发送错误 header。
+修复建议：校验 Key 格式（如长度、字符集）。
+L20. fetchGlobalTokens 中 parseInt 未校验上限
+行号：4578
+类别：逻辑问题
+描述：const num = parseInt(text.trim(), 10); if (!isNaN(num) && num >= 0) { globalTotalTokens = num; ... } 仅校验 >= 0，无上限。若 textdb.online 被篡改返回超大数字，globalTotalTokens 异常。
+修复建议：加 num <= 1e12 上限。
+L21. pushGlobalTokens 中 encodeURIComponent(String(globalTotalTokens)) 多余
+行号：4592
+类别：代码质量
+描述：String(globalTotalTokens) 转字符串后 encodeURIComponent，但数字转字符串无特殊字符，encodeURIComponent 无意义。
+修复建议：移除 encodeURIComponent。
+L22. updateTokenDisplay 中 percent.toFixed(4) 精度过高
+行号：4550
+类别：UI 一致性
+描述：dom.tokenPercent.textContent = percent.toFixed(4) + '%'; 显示如 0.0040%。对用户无意义，且 TOKEN_LIMIT = 250000 时 1 token 即 0.0004%，4 位小数仅在前几个 token 时有意义。
+修复建议：动态精度，< 1% 显示 2 位，>= 1% 显示 1 位。
+L23. updateButtonStates 中 stopBtnTimer 注释与代码不符
+行号：4825-4833
+类别：代码质量
+描述：注释"延迟3秒显示暂停按钮"，实际 setTimeout(..., 1000) 是 1 秒。
+修复建议：统一注释与代码。
+L24. applyAgentModeUI 与 applyRoleplayModeUI 重复代码
+行号：4333-4350、4382-4396
+类别：代码质量 / 重复
+描述：两函数几乎相同，仅 ids 列表和 toast 文案不同。el._savedOnclick 逻辑完全重复。
+修复建议：抽取 lockButtons(ids, toastMsg) 公共函数。
+L25. enterRoleplayMode 与 toggleAgentMode 中状态恢复逻辑重复
+行号：4357-4381、4397-4433
+类别：代码质量 / 重复
+描述：退出模式时恢复 originalThinkMode、originalTemperature、更新 diThinkLabel、diTempLabel 等逻辑在多处重复（4369-4376、4421-4428、5653-5657、5688-5692）。
+修复建议：抽取 restoreOriginalState() 函数。
+L26. sendMessage 与 retryLastMessage 中搜索逻辑大量重复
+行号：6861-6953、7004-7097
+类别：代码质量 / 重复
+描述：两处搜索状态 div 创建、callWebSearch 调用、结果卡片渲染逻辑几乎完全相同（约 90 行重复）。
+修复建议：抽取 performWebSearch(intent, signal) 函数。
+L27. searchResultCount 用 Math.random() 模拟搜索结果数
+行号：6908、7052、7907
+类别：UI 一致性 / 诚实性
+描述：searchResultCount = Math.floor(Math.random() * 3) + 1; 随机生成"已搜索到 N 条相关内容"。这是欺骗性 UI，用户以为是真的搜索结果数。
+修复建议：从 callWebSearch 返回真实结果数，或移除此提示。
+L28. streamLabel 全局状态被多处修改
+行号：4063、6860、6907、6915、6958、7010、7051、7059、7099、7869、7900、7936
+类别：状态管理 / 全局变量污染
+描述：streamLabel 是全局变量，被 startSpeedDisplay、updateSpeedDisplay、callWebSearch 回调等多处修改。状态机复杂，难以追踪当前应显示什么。
+修复建议：封装为状态机或 reducer。
+L29. contentStarted 全局状态未在每次发送前重置
+行号：4064、6672、7870、7888
+类别：状态管理
+描述：contentStarted 在 startSpeedDisplay 中重置为 false（7870），但 callDeepSeekAI 中 if (!contentStarted) { ... contentStarted = true; ... }（6672）的分支逻辑复杂，若上次发送异常中断未重置，下次发送可能跳过速度显示初始化。
+修复建议：每次 callDeepSeekAI 入口显式重置。
+L30. dom.btnThemeToggle 实际指向 btnSettings
+行号：4007
+类别：命名不一致
+描述：btnThemeToggle: $('btnSettings') 命名误导。btnSettings 实际打开设置面板（含主题、记忆、信用分等），并非仅主题切换。
+修复建议：重命名为 btnSettings。
+L31. BRAND_NAMES 中 privacy 显示为 'Private'
+行号：7734
+类别：UI 一致性
+描述：隐私模式下品牌名显示英文 Private，但 privacyBanner 显示中文"隐私对话"。中英混排。
+修复建议：统一为中文"隐私"。
+L32. mode-dropdown 中 data-mode="draw" 与 data-mode="mathdraw" 未在 BRAND_NAMES 中
+行号：7734、7795-7803
+类别：逻辑完整性
+描述：下拉菜单含 draw、mathdraw、mbti 选项，但 updateModeDropdown 仅处理 normal/agent/privacy/roleplay。点击 draw 等会触发 dpToggle() 或跳转，但 updateModeDropdown 不会高亮这些。
+修复建议：扩展 BRAND_NAMES 或在点击 draw 时不高亮。
+L33. cycleThinkMode 中 thinkModes.indexOf 可能返回 -1
+行号：7658
+类别：错误处理
+描述：const nextIndex = (thinkModes.indexOf(currentThinkMode) + 1) % thinkModes.length; 若 currentThinkMode 被设为非法值（如 null），indexOf 返回 -1，nextIndex = 0，重置为 direct。虽是容错，但无提示。
+修复建议：加 if (nextIndex < 0) currentThinkMode = 'direct';。
+L34. toggleTemperature 中 findIndex 可能返回 -1
+行号：7690-7691
+类别：错误处理
+描述：let idx = TEMP_PRESETS.findIndex(p => p.value === temperature); idx = (idx + 1) % TEMP_PRESETS.length; 若 temperature 不在预设中（如 0.5），idx = -1，(idx+1) % 5 = 0，跳到第一个。无提示。
+修复建议：加默认值处理。
+L35. openTempModal 中 originalTemperature 被覆盖
+行号：7635
+类别：状态管理
+描述：originalTemperature = temperature; 在 openTempModal 中赋值。但 originalTemperature 也用于 toggleAgentMode（4359）和 enterRoleplayMode（4402）保存原温度。若用户打开温度弹窗后进入 Agent 模式，originalTemperature 会被覆盖为当前温度，退出 Agent 时恢复错误。
+修复建议：用不同变量名 tempModalOriginal。
+L36. closeTempModal(false) 未恢复 dom.tempValue 显示
+行号：7641-7645
+类别：UI 一致性
+描述：取消时 dom.tempSlider.value = originalTemperature; 恢复滑块，但未更新 dom.tempValue.textContent 和 dom.tempDesc.textContent。UI 显示取消前的值。
+修复建议：取消时同步更新显示。
+L37. memoryModal 中 memoryToggle 未在关闭时同步
+行号：7646-7650
+类别：UI 一致性
+描述：openMemoryModal 中 toggle.checked = memoryEnabled，但关闭弹窗时未同步。若用户切换 toggle 后关闭，状态已保存（9272），但下次打开时才同步 UI。
+修复建议：当前实现可接受，但建议关闭时也同步。
+L38. clearAllMemoryBtn 未清空 userMemory.summary
+行号：9275
+类别：逻辑完整性
+描述：userMemory.entries = []; userMemory.summary = ''; userMemory.summary_time = null; 已清空 summary，但 showMemorySummary() 在 summary 为空时隐藏 section（7439）。逻辑正确。
+修复建议：无需修改，记录为已正确处理。
+L39. generateMemorySummary 中 btn.disabled = false 在 catch 外
+行号：7431-7433
+类别：错误处理
+描述：catch(e) { showToast('摘要生成失败'); } btn.disabled = false; btn.innerHTML = origHTML; 在 try-catch 之外恢复按钮。若 try 中抛出未捕获异常（理论上不会），按钮永久禁用。当前实现正确，但 finally 更安全。
+修复建议：用 finally。
+L40. extractMemoryBtn 点击处理中 btn.innerHTML 恢复不完整
+行号：9276-9302
+类别：UI 一致性
+描述：btn.innerHTML = svgIcon + '提取中...'; 保存 origHTML，最后 btn.innerHTML = origHTML;。但 svgIcon 是 btn.querySelector('svg')?.outerHTML，若按钮 SVG 在提取过程中被其他逻辑修改（不会，但理论上），恢复可能错位。
+修复建议：用 cloneNode 保存原始按钮。
+L41. dpRenderHistory 中时间格式化不含时区标识
+行号：9805
+类别：UI 一致性
+描述：date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) 显示上海时间，但用户若在其他时区，时间可能与本地感知不符。
+修复建议：显示时区或用相对时间。
+L42. dpDownloadImage 中 fetch 可能因 CORS 失败
+行号：9901
+类别：错误处理
+描述：fetch(dpResultImage.src).then(r => ...) 阿里云图片 URL 可能不带 CORS 头，fetch 失败后 fallback 到 window.open。逻辑正确，但 fetch 失败无提示。
+修复建议：加 console.warn 或直接用 window.open。
+L43. dpOnGenerate 中 dpInitPoints 重复调用
+行号：9887
+类别：性能
+描述：await dpInitPoints(); 在生成前再次初始化点数。但 dpInit 已调用过（9927）。重复调用会重新计算恢复点数，可能导致已扣的点数被"恢复"。
+修复建议：仅在点数未就绪或长时间未更新时调用。
+L44. dpPollTask 中 pollAttempts 在 dpStopPolling 后未重置
+行号：9780、9873
+类别：状态管理
+描述：dpStopPolling 中 isPolling = false 但未重置 pollAttempts。下次生成时 pollAttempts = 0（9873）会重置，但若用户在轮询中查看历史，pollAttempts 残留。
+修复建议：dpStopPolling 中重置 pollAttempts = 0。
+L45. dpInit 中 dpFetchServerTime 失败后仍继续
+行号：9922-9924
+类别：错误处理
+描述：try { await dpFetchServerTime(); } catch(e) {} 静默吞错。若时间同步失败，timeSyncFailed = true，后续 dpInitPoints 会显示"服务初始化失败"。逻辑正确，但用户无感知原因。
+修复建议：toast 提示"时间同步失败"。
+L46. beforeunload 中 e.returnValue = '' 可能被现代浏览器忽略
+行号：6657
+类别：兼容性
+描述：现代浏览器（Chrome 119+）对 beforeunload 提示越来越严格，e.returnValue = '' 可能不显示提示。
+修复建议：用 e.preventDefault() 兜底；或移除（用户体验更好）。
+L47. window.addEventListener('beforeunload', ...) 在绘画模块重复注册
+行号：6657、9918
+类别：事件监听
+描述：主流程和绘画模块都注册了 beforeunload。两者都会执行，无冲突，但代码冗余。
+修复建议：合并为单一 handler。
+L48. visibilitychange 中 dpInitPoints 可能在后台触发
+行号：9919
+类别：性能
+描述：if (document.visibilityState === 'visible' && pointsReady && !timeSyncFailed) dpInitPoints(); 页面可见时重新初始化点数。但 dpInitPoints 是 async，若用户快速切前后台，可能并发调用。
+修复建议：加 isInitializing 标志。
+L49. welcomeAnimate 中 welcomeAccum 累积可能导致跳字
+行号：9602-9608
+类别：UI 一致性
+描述：welcomeAccum += t - welcomeLastTime; 若页面后台一段时间后回到前台，t - welcomeLastTime 巨大，welcomeAccum 累积，while 循环会一次性输出多个字符（受 WELCOME_MAX_PER_FRAME = 3 限制，最多 3 个）。虽有限制，但后台时间长会"跳字"。
+修复建议：if (t - welcomeLastTime > 1000) welcomeAccum = 0; 重置。
+L50. welcomeAppend 创建 span 但删除时 el.removeChild(el.lastChild) 可能误删
+行号：9592-9597、9626
+类别：逻辑问题
+描述：el.removeChild(el.lastChild); 假设 el 的最后一个子节点是 welcomeAppend 创建的 span。但若其他逻辑向 welcomeTitle 添加子节点（不会，但无防护），会误删。
+修复建议：维护字符 span 数组，按索引删除。
+L51. loadApiKeys 失败时 apiKeysLoaded 仍为 true
+行号：7287-7298
+类别：错误处理
+描述：apiKeysLoaded = true; 在 fetchKey 都完成后无条件设置。若两个 fetch 都失败（网络错误），DEEPSEEK_API_KEY 和 ALIYUN_API_KEY 为空字符串，但 apiKeysLoaded = true。后续 updateButtonStates 中 !apiKeysLoaded 为 false，按钮可点击，但发送时 callDeepSeekAI 中 if (!DEEPSEEK_API_KEY) 才提示。
+修复建议：apiKeysLoaded = true 仅在至少一个 Key 加载成功时设置。
+L52. loadCreditScore 中 creditHistory 解析未校验数组
+行号：4074、8079
+类别：数据一致性
+描述：creditHistory = h ? JSON.parse(h) : []; 未校验 JSON.parse(h) 是否为数组。若 localStorage 被篡改为非数组（如 "{}"），后续 creditHistory.slice(-50) 等数组方法会抛错。
+修复建议：if (!Array.isArray(creditHistory)) creditHistory = [];。
+L53. saveCreditScore 中 creditHistory.slice(-50) 限制历史长度
+行号：8089
+类别：数据一致性
+描述：保存时截断为最近 50 条，但 creditHistory 变量本身未截断。内存中可能保留更多，下次保存又截断。逻辑正确但内存占用略高。
+修复建议：保存后同步 creditHistory = creditHistory.slice(-50)。
+L54. tryRecoverCreditAsync 中 creditCleanDays 计算不准确
+行号：8127
+类别：逻辑问题
+描述：creditCleanDays += Math.floor(gained / 5); 假设 5 分/天。但 CREDIT_RECOVERY_INTERVAL = 24*60*60*1000/5 是 4.8 小时恢复 1 分，即 5 分/天。gained 是恢复的总分数，gained / 5 是恢复的天数。逻辑正确，但若 gained 不是 5 的倍数（如恢复 7 分），Math.floor(7/5) = 1，少算 0.4 天。累积误差。
+修复建议：用浮点累计，显示时取整。
+L55. fetchCreditServerTime 中 controller.abort() 仅在循环外触发
+行号：8054-8072
+类别：逻辑问题
+描述：const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 5000); 5 秒后 abort。但循环中每个 API 请求都用同一 controller.signal。若第一个 API 卡 5 秒被 abort，后续 API 不会尝试。注释"尝试下一个 API"不成立。
+修复建议：每个 API 用独立 controller，或用 Promise.race 加超时。
+L56. checkContentViolation 中 AbortSignal.timeout(5000) 与 signal 混用
+行号：7185
+类别：逻辑问题
+描述：signal: AbortSignal.timeout(5000) 5 秒超时。但 checkContentViolation 是 fire-and-forget（6858 不 await），若用户在 5 秒内停止生成，违规检测仍继续。
+修复建议：传入 abortController.signal，与主流程联动。
+L57. cloudApi 中 _handleAuthExpired 调用 showToast 但 showToast 在 cloudApi 定义之后
+行号：3757-3870、4126
+类别：代码质量
+描述：cloudApi 在 3757 定义，showToast 在 4126 定义。由于 JS 函数提升和闭包，_handleAuthExpired 调用 showToast 时已定义（运行时）。但代码顺序误导。
+修复建议：调整定义顺序，或用函数声明提升。
+L58. cloudApi.headers() 中 getCloudToken() 可能为空字符串
+行号：3758-3763
+类别：安全
+描述：'Authorization': \Bearer ${getCloudToken()}`若 token 为空，header 为Bearer `（带空格）。服务端可能接受或拒绝，行为不确定。
+修复建议：if (!getCloudToken()) throw new Error('Not logged in');。
+L59. isLoggedIn 仅检查 token 存在性
+行号：3751
+类别：安全
+描述：const isLoggedIn = () => !!getCloudToken(); 不校验 token 有效性。过期 token 仍视为已登录，直到 API 返回 401。
+修复建议：可接受（依赖服务端校验），但建议本地存过期时间。
+L60. syncToCloud 中 cleanHistoryForStorage 可能抛错
+行号：3875、5612-5616
+类别：错误处理
+描述：cleanHistoryForStorage 用解构 const { image, image_mime, images, image_mimes, ...rest } = msg;。若 msg 为 null（异常但可能），解构抛错。syncToCloud 无 try-catch。
+修复建议：cleanHistoryForStorage 中 if (!msg) return msg;。
+L61. handleDropFiles 中 processDragFile 异步但未 await
+行号：9349-9355
+类别：异步逻辑
+描述：for (let i = 0; i < files.length; i++) { ... processDragFile(files[i]); } processDragFile 内部有 FileReader.onload（异步）。循环不等待，多个文件并发读取，pendingTextFiles.push 顺序不确定。
+修复建议：用 for...of + await，或接受并发但排序。
+L62. processDragFile 中图片与文件互斥逻辑不完整
+行号：9320-9334
+类别：逻辑完整性
+描述：if (file.type.startsWith('image/')) { if (pendingTextFiles.length > 0) { clearTextFile(); ... } ... } 拖入图片时清空文件。但若同时拖入多个文件（含图片和文本），循环中第一个图片清空文本，第二个文本又被加入，状态混乱。
+修复建议：先分类所有文件，再统一处理。
+L63. isTextFileLike 中 .gitignore 判断不准确
+行号：9313
+类别：逻辑问题
+描述：file.name === '.gitignore' 仅匹配 .gitignore，不匹配 .gitconfig、.npmrc 等其他 dotfile。
+修复建议：用 file.name.startsWith('.') 或扩展列表。
+L64. readLargeFileChunked 递归可能栈溢出
+行号：4734-4755
+类别：性能
+描述：reader.onload = ev => { ... readLargeFileChunked(file, ext, end, accumulated, idx); } 递归调用。文件越大递归越深（每 200KB 一次）。2MB 文件约 10 层，安全；但若 MAX_FILE_SIZE 调大，可能栈溢出。
+修复建议：改用循环 + Promise。
+L65. handleTextFileSelect 中 dom.textFileInput.value = '' 在循环前清空
+行号：4691
+类别：逻辑问题
+描述：dom.textFileInput.value = ''; 在循环前清空 input。若循环中 addFileToUploadList 失败（如超上限），input 已清空，用户需重新选择。
+修复建议：循环成功后再清空。
+L66. addFileToUploadList 中 clearVisionImage 副作用
+行号：4672
+类别：副作用
+描述：if (pendingVisionImages.length > 0) { clearVisionImage(); showToast('已移除图片，文件与图片不可同时上传'); } 添加文件时静默清空图片。clearVisionImage 内部调 deactivateAllModes（5015），可能重置 activeMode，影响后续逻辑。
+修复建议：仅清空图片数组，不调 deactivateAllModes。
+L67. renderFilePreview 中 f.content.split('\n')[0]?.substring(0, 80) 可能报错
+行号：4778
+类别：错误处理
+描述：(f.content || '').split('\n')[0]?.substring(0, 80) || '' 用了可选链。但 split 总返回数组，[0] 不会是 undefined（至少有空字符串）。?. 多余但无害。
+修复建议：移除 ?.，简化。
+L68. buildFileMessageContent 中 file.content 未截断
+行号：4804-4815
+类别：逻辑问题
+描述：header += \```extForCode\n{file.content}\n````直接拼入完整内容。但file.content 可能超 25 万字符（MAX_FILE_CONTENT）。截断逻辑在 sendMessage（6785）中处理，buildFileMessageContent` 未用。
+修复建议：标记为未使用函数或删除。
+L69. updateButtonStates 中 canSend 逻辑在 vision 模式下允许仅图片
+行号：4823
+类别：逻辑完整性
+描述：const canSend = activeMode === 'vision' ? (hasText || hasImage) : (hasText || hasFile); vision 模式下有图片即可发送。但 sendMessage 中 if (activeMode === 'vision' && !rawContent && pendingVisionImages.length === 0) return;（6770）允许仅图片。逻辑一致，但 callVisionAI 中 userMsg.content 可能为空（6601），AI 收到空文本+图片。
+修复建议：vision 模式下若无文本，默认 请描述这张图片。
+L70. dom.btnAction 的 disabled 状态在 isProcessing 时被覆盖
+行号：4827-4833
+类别：UI 一致性
+描述：if (isProcessing) { ... dom.btnAction.disabled = true; ... stopBtnTimer = setTimeout(() => { if (isProcessing) dom.btnAction.disabled = false; }, 1000); } 1 秒后启用按钮（用于停止）。但若 1 秒内 isProcessing 变为 false（如快速完成），按钮被错误启用为停止按钮。
+修复建议：setTimeout 内检查 isProcessing 状态并同步 UI 类名。
+L71. toggleWebSearch 中 dom.btnWebSearch 与 $('btnWebSearchInline') 状态同步
+行号：4843-4849
+类别：UI 一致性
+描述：dom.btnWebSearch.classList.toggle('active', webSearchEnabled); 和 inlineBtn.classList.toggle('active', webSearchEnabled); 同步两个按钮。但 dom.btnWebSearch 指向 $('btnWebSearchInline')（4008），实际是同一元素。
+修复建议：移除重复操作。
+L72. judgeSearchIntent 中 contextText 截断为 200 字符
+行号：4857
+类别：逻辑问题
+描述：m.content.substring(0, 200) 每条消息截断 200 字符。长消息上下文丢失，可能导致意图判断不准。
+修复建议：增大到 500 或动态调整。
+L73. callWebSearch 中 enable_search: true 与 forced_search: true 重复
+行号：4920-4924
+类别：代码质量
+描述：enable_search: true 和 search_options: { forced_search: true, search_strategy: 'turbo' } 同时设置。根据阿里云文档，forced_search 已隐含 enable_search。
+修复建议：移除 enable_search。
+L74. callOmniSight 中 imageBase64s.map(img => ({ type: 'image_url', image_url: { url: img } })) 未校验 img 格式
+行号：5925
+类别：安全
+描述：img 直接作为 url。若 img 不含 data: 前缀（如纯 base64），API 可能拒绝或行为异常。
+修复建议：img.startsWith('data:') ? img : 'data:image/png;base64,' + img。
+L75. callNexusMind 中 isDecisionOnly 仅在 prompt 中提示
+行号：5982
+类别：逻辑问题
+描述：${isDecisionOnly ? '\n特别注意：你当前只需要判断是否需要再次搜索...' : ''} 仅文字提示。AI 可能不遵循，仍输出完整规划。
+修复建议：解析时对 isDecisionOnly 模式严格校验 JSON 字段。
+L76. tryParsePlan 中正则匹配中文关键词脆弱
+行号：6581-6591
+类别：逻辑问题
+描述：const searchMatch = text.match(/需要搜索|需要联网搜索|需要检索/); 匹配中文关键词。AI 输出"无需搜索"也会匹配到"需要搜索"。
+修复建议：用更严格的否定匹配，如 (?!不)需要搜索。
+L77. tryParsePlan 中 kwMatch 正则含全角引号
+行号：6584
+类别：逻辑问题
+描述：/关键词[：:]\s*["""\u201c\u201d]([^""""\u201c\u201d]+)["""\u201c\u201d]/ 匹配各种引号。但字符类 [""""\u201c\u201d] 中 " 重复，正则虽不报错但冗余。
+修复建议：去重引号字符。
+L78. runAgentPipeline 中 currentStreamCtx 在重写时未清理旧 wrapper
+行号：6354-6355
+类别：内存泄漏
+描述：bodyDiv.innerHTML = ''; d = ''; streamRAF = 0; currentStreamCtx = { wrapper, bodyDiv, ... }; 重写时旧 currentStreamCtx 被覆盖。若上次流式未完成（如校验失败重写），旧 wrapper 的 streamRAF 可能未取消。
+修复建议：重写前 cancelAnimationFrame(streamRAF)。
+L79. runAgentPipeline 中 agentContext 字段清理不完整
+行号：6403-6405
+类别：状态管理
+描述：agentContext.verifyFailed = undefined; agentContext.synthesistDraft = undefined; agentContext.prevSubAnswers = undefined; 用 undefined 清理。但 buildAgentContextBlock 中 if (ctx.verifyFailed) 判断 falsy，undefined 可行。然而 agentContext.subAnswerTexts 未清理，下个子任务会继承。
+修复建议：显式 delete 或重置为初始值。
+L80. runAgentPipeline 中 userMessage += \\n[用户补充]：${userAnswer}`` 修改入参
+行号：6260
+类别：副作用
+描述：userMessage 是函数参数，被修改。若调用方复用变量（如 6105 runAgentPipeline(userMsg.content, ...)），userMsg.content 不受影响（字符串不可变），但若调用方传变量，后续使用会受影响。
+修复建议：用局部变量 let currentUserMessage = userMessage;。
+L81. callHatter 函数定义但未使用
+行号：6154-6169
+类别：代码质量
+描述：callHatter 定义但全文件无调用（Agent 流程中用 callLLMStream 直接调）。死代码。
+修复建议：删除。
+L82. showOutputFormatChoice 与 showInput 共用 inputOverlay
+行号：5574-5609、4295-4332
+类别：UI 一致性
+描述：两者都操作 inputOverlay、inputMsg、inputField、inputOptions、inputOk、inputCancel。若同时触发（不会，但无防护），互相覆盖。
+修复建议：加互斥锁。
+L83. showOutputFormatChoice 中 fieldEl.style.display = 'none' 后 okBtn.onclick 检查 fieldEl.value
+行号：5587、5602-5606
+类别：逻辑问题
+描述：fieldEl.value = ''; fieldEl.style.display = 'none'; 隐藏输入框。但 okBtn.onclick 中 const val = fieldEl.value.trim(); if (!val) return; 检查值。用户必须先点选项才能填值。若用户直接点确认，val 为空，return 无提示。
+修复建议：禁用确认按钮直到选择选项，或提示"请选择格式"。
+L84. appendMessage 中 isSummary 判断用 content.startsWith('[对话摘要]')
+行号：5176
+类别：逻辑问题
+描述：const isSummary = role === 'user' && content.startsWith('[对话摘要]'); 用字符串前缀判断。若用户消息正好以 [对话摘要] 开头（如引用），会被误判为摘要。
+修复建议：用独立字段 msg.isSummary: true。
+L85. truncateConversation 中 truncatedBackup 被覆盖
+行号：5554-5560
+类别：数据丢失
+描述：truncatedBackup = conversationHistory.slice(fromIndex); 直接覆盖。若已有未恢复的 truncatedBackup，旧备份丢失。
+修复建议：合并备份 truncatedBackup = [...(truncatedBackup || []), ...slice]。
+L86. showUndoBanner 中 $('undoTruncateBtn') 未防御 null
+行号：5567
+类别：错误处理
+描述：$('undoTruncateBtn').onclick = ... 若 undoTruncateBtn 不存在（DOM 未渲染），抛错。
+修复建议：const btn = $('undoTruncateBtn'); if (btn) btn.onclick = ...;。
+L87. editMessage 中 truncateConversation(index) 语义不符
+行号：5509-5512
+类别：逻辑问题
+描述：editMessage 调 truncateConversation(index) 截断从 index 开始的消息。但编辑语义应是"截断从 index+1 开始"，保留 index 供编辑。当前实现是删除 index 及之后，用户需重新输入。
+修复建议：truncateConversation(index) 改为保留 index，或注释说明"编辑即删除原消息"。
+L88. deleteMessage 中 truncateConversation(index) 删除 index 及之后
+行号：5513-5516
+类别：逻辑问题
+描述：提示"确定删除这条消息及之后的所有对话吗？"，实际 truncateConversation(index) 删除 index 及之后。语义一致，但用户可能只想删一条。
+修复建议：提供"仅删此条"选项。
+L89. loadSession 中 dom.sidebar.classList.contains('open') 检查在 currentSessionId 设置后
+行号：5669-5670
+类别：逻辑问题
+描述：if (dom.sidebar.classList.contains('open')) toggleSidebar(false); 在加载会话后关闭侧边栏。但 toggleSidebar(false) 会触发 renderSessionList（5765），此时 currentSessionId 已更新，高亮正确。
+修复建议：逻辑正确，记录为已正确处理。
+L90. createNewSession 中 clearTextFile 调用两次
+行号：5663、5698
+类别：代码质量
+描述：deactivateAllModes(); clearTextFile();（5663）和 clearTextFile();（5698）重复。第二次无副作用但冗余。
+修复建议：移除第二次。
+L91. createNewSession 中 clearVisionImage 在 deactivateAllModes 后
+行号：5680
+类别：逻辑问题
+描述：deactivateAllModes(); clearVisionImage(); deactivateAllModes 内部调 clearVisionImage（4949），第二次冗余。
+修复建议：移除 clearVisionImage。
+L92. renderFullConversation 中 dom.chatMessages.querySelectorAll('.message, .undo-banner, .suggest-chips').forEach(el => el.remove()) 可能移除欢迎页
+行号：5705
+类别：UI 一致性
+描述：welcomeGuide 不在 .message 等选择器中，不会被移除。正确。但 updateWelcomeGuide（5700 调用）会根据 conversationHistory.length 显示/隐藏。
+修复建议：逻辑正确。
+L93. updateWelcomeGuide 中 candidates.sort((a, b) => b.lastTime - a.lastTime) 修改原数组
+行号：4633
+类别：副作用
+描述：userSessions.filter(...) 返回新数组，sort 修改新数组。无副作用。正确。
+修复建议：无需修改。
+L94. defaultTitle 中 substring(0, 20) 限制标题长度
+行号：4642
+类别：UI 一致性
+描述：标题限制 20 字符。但 generateTitle 中 substring(0, 15)（7155）限制 15 字符。两处不一致。
+修复建议：统一为常量 MAX_TITLE_LENGTH。
+L95. getTemperatureDesc 中阈值与 TEMP_PRESETS 不一致
+行号：4641、4029-4035
+类别：UI 一致性
+描述：getTemperatureDesc 阈值为 0.3/0.6/0.8/1.2/1.6，TEMP_PRESETS 值为 0.1/0.4/0.7/1.0/1.2。getTemperatureDesc(0.7) 返回"平衡"，TEMP_PRESETS 中 0.7 标签也是"平衡"。一致。但 getTemperatureDesc(0.5) 返回"精确"，TEMP_PRESETS 无 0.5。
+修复建议：统一阈值或用 TEMP_PRESETS.find 查找。
+L96. openModelModal 中 modelOptionList 未防御 null
+行号：7625
+类别：错误处理
+描述：$('modelOptionList').innerHTML = ... 若元素不存在，抛错。
+修复建议：加 null 检查。
+L97. setupModal 中 overlay.addEventListener('click', ...) 未防御 null
+行号：7616-7622
+类别：错误处理
+描述：const overlay = $(overlayId); ... overlay.addEventListener(...) 若 overlayId 对应元素不存在，抛错。
+修复建议：if (!overlay) return;。
+L98. setupModal('modelModal', null, null, 'closeModelModalBtn') 中 openBtn 为 null
+行号：7261
+类别：代码质量
+描述：if (openBtn && openFn) openBtn.addEventListener('click', openFn); 防御了 null。但传 null 参数无意义。
+修复建议：移除 null 参数或重构。
+L99. closeTempModal 中 save 参数默认 true
+行号：7641
+类别：代码质量
+描述：const closeTempModal = (save = true) => { ... } 默认保存。但调用处 $('closeTempModalBtn').addEventListener('click', () => closeTempModal(true));（9262）显式传 true。$('tempModal').addEventListener('click', e => { if (e.target === $('tempModal')) closeTempModal(false); });（9263）点遮罩取消。逻辑正确。
+修复建议：无需修改。
+L100. dom.tempSlider.addEventListener('input', ...) 中 parseFloat 未防御 NaN
+行号：9264-9268
+类别：错误处理
+描述：const val = parseFloat(dom.tempSlider.value); 若滑块值为空，val 为 NaN。val.toFixed(1) 抛错。
+修复建议：if (isNaN(val)) return;。
+四、其他观察
+O1. 代码组织
+单文件 9933 行，含 HTML、CSS、JS。维护困难。建议拆分为 index.html、styles.css、app.js、agent.js、cloud.js、draw.js 等模块。
+O2. 无单元测试
+复杂逻辑如 tryParsePlan、tryParseClarify、estimateTokens、generateMathQuestion 等无测试覆盖。
+O3. 无构建工具
+直接 <script src="cdn"> 加载所有依赖，无打包、无 tree-shaking、无版本锁定（除 marked 等指定版本）。
+O4. 可访问性（a11y）不足
+多处 <button> 无 aria-label（如 5428 的 action-capsule）。
+<div class="session-item" ...> 用 div 模拟按钮，无 role="button"、tabindex。
+颜色对比度未校验（如 --text-tertiary: #aeaeb2 在白底上对比度低）。
+O5. CSP 缺失
+无 Content-Security-Policy 头，允许任意内联脚本和外部资源加载。
+O6. 重试与超时策略不统一
+有的 fetch 用 AbortSignal.timeout，有的用 AbortController + setTimeout，有的无超时。

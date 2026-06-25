@@ -1,0 +1,20 @@
+package dao.impl;
+import bean.AnesthesiaRecord;
+import dao.AnesthesiaRecordDAO;
+import util.JDBCUtil;
+import java.sql.*;
+import java.util.*;
+
+public class AnesthesiaRecordDAOImpl implements AnesthesiaRecordDAO {
+    private <T> List<T> queryList(String sql, java.util.function.Function<ResultSet,T> mapper, Object... params) {
+        List<T> list = new ArrayList<>();
+        try (JDBCUtil.QueryResult qr = JDBCUtil.executeQuery(sql, params)) { ResultSet rs = qr.getResultSet(); while(rs.next()) list.add(mapper.apply(rs)); } catch(Exception e){ e.printStackTrace(); }
+        return list;
+    }
+    @Override public int insert(AnesthesiaRecord a){return JDBCUtil.executeInsert("INSERT INTO anesthesia_record(surgery_id,surgery_no,patient_id,patient_name,asa_grade,anesthesia_method,pre_anesthesia_visit,induction_drugs,maintenance_drugs,vital_signs_monitor,fluid_input,blood_loss_ml,urine_output_ml,anesthesia_start_time,anesthesia_end_time,recovery_status,pacu_stay_min,complications,post_anesthesia_instruction,anesthesiologist_id,anesthesiologist_name,signature)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",a.getSurgeryId(),a.getSurgeryNo(),a.getPatientId(),a.getPatientName(),a.getAsaGrade(),a.getAnesthesiaMethod(),a.getPreAnesthesiaVisit(),a.getInductionDrugs(),a.getMaintenanceDrugs(),a.getVitalSignsMonitor(),a.getFluidInput(),a.getBloodLossMl(),a.getUrineOutputMl(),a.getAnesthesiaStartTime(),a.getAnesthesiaEndTime(),a.getRecoveryStatus(),a.getPacuStayMin(),a.getComplications(),a.getPostAnesthesiaInstruction(),a.getAnesthesiologistId(),a.getAnesthesiologistName(),a.getSignature());}
+    @Override public int update(AnesthesiaRecord a){return JDBCUtil.executeUpdate("UPDATE anesthesia_record SET vital_signs_monitor=?,fluid_input=?,blood_loss_ml=?,urine_output_ml=?,anesthesia_end_time=?,recovery_status=?,pacu_stay_min=?,complications=?,post_anesthesia_instruction=?,signature=?WHERE id=?",a.getVitalSignsMonitor(),a.getFluidInput(),a.getBloodLossMl(),a.getUrineOutputMl(),a.getAnesthesiaEndTime(),a.getRecoveryStatus(),a.getPacuStayMin(),a.getComplications(),a.getPostAnesthesiaInstruction(),a.getSignature(),a.getId());}
+    @Override public AnesthesiaRecord findById(int id){List<AnesthesiaRecord>l=queryList("SELECT*FROM anesthesia_record WHERE id=?",this::mapAR,id);return l.isEmpty()?null:l.get(0);}
+    @Override public List<AnesthesiaRecord> findBySurgeryId(int surgeryId){return queryList("SELECT*FROM anesthesia_record WHERE surgery_id=?",this::mapAR,surgeryId);}
+    @Override public List<AnesthesiaRecord> findAll(){return queryList("SELECT*FROM anesthesia_record ORDER BY create_time DESC",this::mapAR);}
+    private AnesthesiaRecord mapAR(ResultSet rs){try{AnesthesiaRecord a=new AnesthesiaRecord();a.setId(rs.getInt("id"));a.setSurgeryId(rs.getInt("surgery_id"));a.setSurgeryNo(rs.getString("surgery_no"));a.setPatientId(rs.getInt("patient_id"));a.setPatientName(rs.getString("patient_name"));a.setAsaGrade(rs.getString("asa_grade"));a.setAnesthesiaMethod(rs.getString("anesthesia_method"));a.setPreAnesthesiaVisit(rs.getString("pre_anesthesia_visit"));a.setInductionDrugs(rs.getString("induction_drugs"));a.setMaintenanceDrugs(rs.getString("maintenance_drugs"));a.setVitalSignsMonitor(rs.getString("vital_signs_monitor"));a.setFluidInput(rs.getString("fluid_input"));a.setBloodLossMl(rs.getInt("blood_loss_ml"));a.setUrineOutputMl(rs.getInt("urine_output_ml"));a.setAnesthesiaStartTime(rs.getTimestamp("anesthesia_start_time"));a.setAnesthesiaEndTime(rs.getTimestamp("anesthesia_end_time"));a.setRecoveryStatus(rs.getString("recovery_status"));a.setPacuStayMin(rs.getInt("pacu_stay_min"));a.setComplications(rs.getString("complications"));a.setPostAnesthesiaInstruction(rs.getString("post_anesthesia_instruction"));a.setAnesthesiologistId(rs.getInt("anesthesiologist_id"));a.setAnesthesiologistName(rs.getString("anesthesiologist_name"));a.setSignature(rs.getString("signature"));a.setCreateTime(rs.getTimestamp("create_time"));a.setUpdateTime(rs.getTimestamp("update_time"));return a;}catch(SQLException e){return null;}}
+}

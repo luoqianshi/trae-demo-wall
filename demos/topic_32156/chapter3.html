@@ -1,0 +1,119 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第3章：SelectionDAG 的数据结构</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="grid-bg"></div>
+    <div class="container">
+        <nav class="navbar">
+            <a href="index.html" class="navbar-brand">
+                <img src="images/llvm-dragon.svg" alt="LLVM">
+                <span>SelectionDAG</span>
+            </a>
+            <div class="navbar-links">
+                <a href="chapter2.html">上一章</a>
+                <a href="chapter4.html">下一章</a>
+            </div>
+        </nav>
+
+        <header class="blog-header">
+            <h1>第3章：SelectionDAG 的数据结构</h1>
+            <p class="subtitle">LLVM SelectionDAG 入门系列</p>
+        </header>
+
+        <div class="blog-content">
+            <div class="section">
+                <h2>3. SelectionDAG 的数据结构</h2>
+                <p>SelectionDAG 不是一整份程序对应一个 DAG，而是：</p>
+                <div class="summary-box">
+                    <h4>核心概念</h4>
+                    <p>每个基本块通常对应一个 SelectionDAG。</p>
+                </div>
+                <p>也就是说，一个函数里的多个 basic block，会被分别构造成多个 DAG。</p>
+
+                <h3>3.1 MVT 和 EVT</h3>
+                <p>理解 SelectionDAG，首先要理解它的类型系统。</p>
+                <p><code>MVT</code> 是 <code>Machine Value Type</code>，表示机器值类型。它是一组 SelectionDAG 后端能讨论的基础类型，例如：</p>
+                <ul>
+                    <li>整数：<code>i1</code>、<code>i32</code>、<code>i128</code></li>
+                    <li>浮点：<code>f16</code>、<code>bf16</code>、<code>f80</code></li>
+                    <li>向量：<code>v2i32</code>、<code>v128bf16</code></li>
+                    <li>特殊类型：<code>Other</code>、<code>Glue</code></li>
+                </ul>
+                <p>但每个目标架构只支持其中一部分。比如某个目标可能支持 <code>i32</code>，但不支持 <code>i128</code>。</p>
+                <p><code>EVT</code> 是 <code>Extended Value Type</code>，可以理解为 MVT 的扩展版。它包含：</p>
+                <ul>
+                    <li>所有 MVT；</li>
+                    <li>LLVM IR 中支持的整数、浮点、向量类型；</li>
+                    <li>一些目标机器未必原生支持的奇怪类型，比如 <code>i3</code>、<code>v99i99</code>。</li>
+                </ul>
+                <p>但 EVT 并不包含 LLVM IR 的所有类型，比如 <code>struct</code> 和 <code>array</code> 就不在 SelectionDAG 类型集合里。因此结构体相关操作在构建 DAG 时通常要被拆开。</p>
+
+                <h3>3.2 SDNode：DAG 的节点</h3>
+                <p><code>SDNode</code> 是 SelectionDAG 的基本节点。每个节点通常包含：</p>
+                <ul>
+                    <li><code>Opcode</code>：说明这个节点做什么，例如 <code>ISD::ADD</code>、<code>ISD::MUL</code>、<code>ISD::Constant</code>；</li>
+                    <li>一个或多个结果；</li>
+                    <li>零个或多个操作数；</li>
+                    <li>其他附加信息，例如常量值、flags、内存访问信息等。</li>
+                </ul>
+                <p>比如下面这段 IR：</p>
+                <div class="code-block" data-lang="llvm">
+                    <pre>%y = add i32 %a, 5
+%z = mul i32 %y, 3
+br label %join</pre>
+                </div>
+                <p>在 DAG 中可能会出现：</p>
+                <ul>
+                    <li><code>ISD::Constant 5</code></li>
+                    <li><code>ISD::ADD</code></li>
+                    <li><code>ISD::Constant 3</code></li>
+                    <li><code>ISD::MUL</code></li>
+                    <li><code>ISD::BR</code></li>
+                </ul>
+
+                <h3>3.3 SDValue：节点的输出</h3>
+                <p><code>SDValue</code> 表示某个 <code>SDNode</code> 的一个输出结果。</p>
+                <p>为什么不是一个节点只有一个输出？因为 SelectionDAG 里的节点可以有多个结果。比如一个节点可能同时产生：</p>
+                <ul>
+                    <li>一个普通值；</li>
+                    <li>一个 chain；</li>
+                    <li>一个 glue。</li>
+                </ul>
+                <p>所以 <code>SDValue</code> 通常包含两件事：</p>
+                <ul>
+                    <li>它来自哪个 <code>SDNode</code>；</li>
+                    <li>它是这个节点的第几个结果。</li>
+                </ul>
+
+                <h3>3.4 SDUse：节点的输入</h3>
+                <p><code>SDUse</code> 表示某个节点使用了另一个节点产生的值，也就是 DAG 边上的"输入关系"。</p>
+                <p>它包含：</p>
+                <ul>
+                    <li>被使用的 <code>SDValue</code>；</li>
+                    <li>使用这个值的 <code>SDNode</code>；</li>
+                    <li>这是用户节点的第几个 operand。</li>
+                </ul>
+                <p>可以简单理解为：</p>
+                <div class="flow-chart">
+                    <pre>SDNode 产生 SDValue
+SDUse 把 SDValue 接到另一个 SDNode 的输入上</pre>
+                </div>
+                <img src="images/dag-structure.svg" alt="SelectionDAG 数据结构关系图" class="section-image">
+                <p class="image-caption">配图：SelectionDAG 数据结构关系图</p>
+            </div>
+
+            <div class="nav-links">
+                <a href="chapter2.html">← 上一章</a>
+                <a href="index.html">返回首页</a>
+                <a href="chapter4.html">下一章 →</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

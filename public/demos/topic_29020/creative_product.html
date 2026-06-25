@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auto-Orchestrator · AI 迭代开发编排器</title>
+<style>
+  /* ============ 基础重置 ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow-x: hidden; }
+  body {
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+    background: #0a0a0a;
+    color: #f0f0f0;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+
+  /* ============ 全局光晕背景 ============ */
+  .ambient-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 50% 0%, #1a1a2e 0%, #0a0a0a 50%, #000 100%);
+  }
+  .ambient-bg::before, .ambient-bg::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.4;
+    animation: drift 20s ease-in-out infinite alternate;
+  }
+  .ambient-bg::before {
+    width: 600px; height: 600px;
+    background: #4f46e5;
+    top: -200px; left: -100px;
+  }
+  .ambient-bg::after {
+    width: 500px; height: 500px;
+    background: #ec4899;
+    bottom: -150px; right: -100px;
+    animation-delay: -10s;
+  }
+  @keyframes drift {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(100px, 100px) scale(1.2); }
+  }
+
+  /* ============ 顶部 HUD ============ */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 18px 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    background: rgba(10, 10, 10, 0.4);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .logo {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .logo-dot {
+    width: 8px; height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    box-shadow: 0 0 12px #10b981;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+  .version {
+    font-size: 11px;
+    color: #888;
+    font-family: 'SF Mono', Monaco, monospace;
+    padding: 3px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+  }
+
+  /* ============ Hero ============ */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 120px 32px 80px;
+    position: relative;
+  }
+  .hero-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .eyebrow {
+    font-size: 12px;
+    color: #888;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+    opacity: 0;
+    animation: fadeUp 1s 0.2s forwards;
+  }
+  .hero-title {
+    font-size: clamp(48px, 9vw, 140px);
+    font-weight: 800;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    margin-bottom: 24px;
+    background: linear-gradient(180deg, #ffffff 0%, #888 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    opacity: 0;
+    animation: fadeUp 1s 0.4s forwards;
+  }
+  .hero-subtitle {
+    font-size: clamp(16px, 1.8vw, 22px);
+    color: #aaa;
+    max-width: 640px;
+    margin-bottom: 56px;
+    opacity: 0;
+    animation: fadeUp 1s 0.6s forwards;
+  }
+  .hero-actions {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    opacity: 0;
+    animation: fadeUp 1s 0.8s forwards;
+  }
+  .btn {
+    padding: 14px 28px;
+    border-radius: 100px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+  }
+  .btn-primary {
+    background: #fff;
+    color: #000;
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(255, 255, 255, 0.2); }
+  .btn-ghost {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ============ 实时编排可视化 ============ */
+  .stage {
+    padding: 100px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .section-head {
+    margin-bottom: 64px;
+  }
+  .section-eyebrow {
+    font-size: 11px;
+    color: #10b981;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .section-title {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+  .section-desc {
+    font-size: 16px;
+    color: #888;
+    max-width: 600px;
+  }
+
+  /* ============ 5 阶段时间线 ============ */
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+    margin-top: 80px;
+    position: relative;
+  }
+  .stage-card {
+    padding: 32px 24px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative;
+    transition: all 0.4s;
+  }
+  .stage-card:first-child { border-left: none; }
+  .stage-card:hover { background: rgba(255, 255, 255, 0.02); }
+  .stage-num {
+    font-size: 11px;
+    color: #10b981;
+    font-family: 'SF Mono', Monaco, monospace;
+    margin-bottom: 16px;
+    letter-spacing: 2px;
+  }
+  .stage-icon {
+    font-size: 32px;
+    margin-bottom: 20px;
+    display: block;
+  }
+  .stage-name {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .stage-role {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 16px;
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    display: inline-block;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .stage-desc {
+    font-size: 13px;
+    color: #aaa;
+    line-height: 1.6;
+  }
+  .stage.active {
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, transparent 100%);
+  }
+  .stage.active::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #10b981, transparent);
+    animation: scan 2s linear infinite;
+  }
+  @keyframes scan {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* ============ 终端演示 ============ */
+  .terminal-section {
+    padding: 100px 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .terminal {
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  }
+  .terminal-bar {
+    padding: 12px 16px;
+    background: #111;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .term-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+  }
+  .term-dot.r { background: #ff5f57; }
+  .term-dot.y { background: #febc2e; }
+  .term-dot.g { background: #28c840; }
+  .term-title {
+    margin-left: 12px;
+    font-size: 12px;
+    color: #666;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .terminal-body {
+    padding: 28px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    min-height: 420px;
+  }
+  .prompt-line { color: #10b981; }
+  .comment { color: #555; }
+  .keyword { color: #c084fc; }
+  .string { color: #fbbf24; }
+  .func { color: #60a5fa; }
+  .var { color: #f0f0f0; }
+  .output { color: #888; }
+  .check { color: #10b981; }
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 16px;
+    background: #10b981;
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: 4px;
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  /* ============ 数据指标 ============ */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin: 80px 0;
+  }
+  .metric {
+    padding: 48px 32px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .metric:first-child { border-left: none; }
+  .metric-value {
+    font-size: 48px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 12px;
+    background: linear-gradient(180deg, #fff, #888);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .metric-label {
+    font-size: 13px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ============ 门禁系统展示 ============ */
+  .gates-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    margin-top: 60px;
+  }
+  .gate {
+    padding: 32px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    transition: all 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+  .gate::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 4px; height: 100%;
+    background: var(--accent, #10b981);
+  }
+  .gate:hover { border-color: rgba(255, 255, 255, 0.15); transform: translateY(-4px); }
+  .gate-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    margin-bottom: 16px;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .gate-name {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .gate-desc {
+    font-size: 14px;
+    color: #888;
+    line-height: 1.6;
+  }
+
+  /* ============ Live Code Demo ============ */
+  .code-section {
+    padding: 100px 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .code-block {
+    background: #0d0d0d;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-top: 40px;
+  }
+  .code-header {
+    padding: 14px 20px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .code-filename {
+    font-size: 13px;
+    color: #888;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .code-status {
+    font-size: 11px;
+    color: #10b981;
+    font-family: 'SF Mono', Monaco, monospace;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .code-content {
+    padding: 24px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .code-content .line { display: block; }
+  .code-content .indent { padding-left: 24px; }
+  .code-content .indent2 { padding-left: 48px; }
+
+  /* ============ 决策点提示 ============ */
+  .decision-popup {
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    background: rgba(20, 20, 20, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 12px;
+    padding: 20px 24px;
+    max-width: 340px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    transform: translateY(120%);
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .decision-popup.show { transform: translateY(0); }
+  .decision-label {
+    font-size: 10px;
+    color: #10b981;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .decision-text {
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 12px;
+  }
+  .decision-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .decision-btn {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .decision-btn:hover { background: rgba(16, 185, 129, 0.2); border-color: #10b981; }
+
+  /* ============ Footer ============ */
+  .footer {
+    padding: 60px 32px;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    color: #666;
+    font-size: 13px;
+  }
+  .footer a { color: #10b981; text-decoration: none; }
+
+  /* ============ 响应式 ============ */
+  @media (max-width: 768px) {
+    .timeline { grid-template-columns: 1fr; }
+    .stage-card { border-left: none; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+    .stage-card:first-child { border-top: none; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .metric:nth-child(3) { border-left: none; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+    .metric:nth-child(4) { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+    .gates-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ============ 滚动显示动画 ============ */
+  .reveal {
+    opacity: 0;
+    transform: translateY(40px);
+    transition: opacity 0.8s, transform 0.8s;
+  }
+  .reveal.in {
+    opacity: 1;
+    transform: translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<div class="ambient-bg"></div>
+
+<!-- 顶部 HUD -->
+<nav class="topbar">
+  <div class="logo">
+    <span class="logo-dot"></span>
+    <span>Auto-Orchestrator</span>
+  </div>
+  <div class="version">v2.4.0</div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow">AI · DRIVEN · ITERATIVE</div>
+    <h1 class="hero-title">从一句话<br>到完整项目</h1>
+    <p class="hero-subtitle">
+      一个让 AI 自动跑完整个软件项目的编排系统。<br>
+      需求分析 → 设计 → 编码 → 评审 → 修复 → 总结 · 全程 5 阶段自动流转。
+    </p>
+    <div class="hero-actions">
+      <button class="btn btn-primary" onclick="document.querySelector('.terminal-section').scrollIntoView({behavior:'smooth'})">
+        查看运行演示 →
+      </button>
+      <button class="btn btn-ghost" onclick="document.querySelector('.gates-grid').scrollIntoView({behavior:'smooth'})">
+        探索门禁系统
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- 核心数据 -->
+<section style="padding: 0 32px;">
+  <div class="metrics reveal">
+    <div class="metric">
+      <div class="metric-value" data-target="5">0</div>
+      <div class="metric-label">自动阶段</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" data-target="2">0</div>
+      <div class="metric-label">决策点</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" data-target="4">0</div>
+      <div class="metric-label">增强等级</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value" data-target="7">0</div>
+      <div class="metric-label">门禁模块</div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 阶段时间线 -->
+<section class="stage">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">// PIPELINE</div>
+    <h2 class="section-title">5 阶段循环</h2>
+    <p class="section-desc">不同阶段使用不同的 AI 角色 —— 分析型 Work 角色负责思考，执行型 Solo 角色负责落地。</p>
+  </div>
+
+  <div class="timeline reveal">
+    <div class="stage-card active">
+      <div class="stage-num">01</div>
+      <span class="stage-icon">📐</span>
+      <div class="stage-name">需求与设计</div>
+      <div class="stage-role">work · 分析型</div>
+      <p class="stage-desc">生成 8 节结构化设计文档，明确目标、架构、模块边界。</p>
+    </div>
+    <div class="stage-card">
+      <div class="stage-num">02</div>
+      <span class="stage-icon">⚡</span>
+      <div class="stage-name">代码实现</div>
+      <div class="stage-role">solo · 执行型</div>
+      <p class="stage-desc">按设计写代码，每个文件完整产出，AST 静态分析实时验证。</p>
+    </div>
+    <div class="stage-card">
+      <div class="stage-num">03</div>
+      <span class="stage-icon">🔍</span>
+      <div class="stage-name">代码评审</div>
+      <div class="stage-role">work · 分析型</div>
+      <p class="stage-desc">架构 / 质量 / 健壮性多维度评审，输出问题清单与改进建议。</p>
+    </div>
+    <div class="stage-card">
+      <div class="stage-num">04</div>
+      <span class="stage-icon">🛠</span>
+      <div class="stage-name">修复与优化</div>
+      <div class="stage-role">solo · 执行型</div>
+      <p class="stage-desc">按评审意见精确改代码，避免过度工程化，保持变更可追溯。</p>
+    </div>
+    <div class="stage-card">
+      <div class="stage-num">05</div>
+      <span class="stage-icon">📊</span>
+      <div class="stage-name">本轮总结</div>
+      <div class="stage-role">work · 分析型</div>
+      <p class="stage-desc">打分 + 已完成清单 + 待改进 + 下一轮建议，支持多轮迭代。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 终端演示 -->
+<section class="terminal-section">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">// LIVE DEMO</div>
+    <h2 class="section-title">三行代码启动一个项目</h2>
+    <p class="section-desc">在 Trae CN 对话中，AI 会自动接管 5 阶段循环。你只需在 2 个决策点拍板。</p>
+  </div>
+
+  <div class="terminal reveal">
+    <div class="terminal-bar">
+      <span class="term-dot r"></span>
+      <span class="term-dot y"></span>
+      <span class="term-dot g"></span>
+      <span class="term-title">trae-cn · python — trae_skill.py</span>
+    </div>
+    <div class="terminal-body" id="terminal">
+      <div class="prompt-line"><span class="output">&gt;&gt;&gt; </span><span class="keyword">from</span> <span class="var">trae_skill</span> <span class="keyword">import</span> <span class="func">launch</span></div>
+      <div class="prompt-line"><span class="output">&gt;&gt;&gt; </span><span class="func">launch</span>(<span class="string">"Todo 助手"</span>, <span class="string">"命令行 Todo 工具，支持增删改查"</span>)</div>
+      <br>
+      <div class="output">──────────────────────────────────────────</div>
+      <div class="output">  <span class="check">✓</span> 项目目录已创建   <span class="output">projects/todo-assistant/</span></div>
+      <div class="output">  <span class="check">✓</span> 阶段 1 已启动     <span class="output">→ iter-001 / 01_requirement_design</span></div>
+      <div class="output">  <span class="check">✓</span> AI 正在生成设计文档 <span class="cursor"></span></div>
+      <div class="output">──────────────────────────────────────────</div>
+      <br>
+      <div class="output"><span class="check">◆</span> iter-001 / 阶段 1 · <span class="check">设计完成</span></div>
+      <div class="output">  <span class="output">├── 目标：CLI 工具，支持增删改查</span></div>
+      <div class="output">  <span class="output">├── 架构：单文件 + JSON 存储</span></div>
+      <div class="output">  <span class="output">└── 评分：<span class="check">92/100</span></span></div>
+      <br>
+      <div class="output">⚠  <span class="check">决策点 1</span>  · 等待用户批准设计</div>
+      <div class="output">   <span class="output">[ 批准 ]</span>   <span class="output">[ 重做 ]</span>   <span class="output">[ 放弃 ]</span></div>
+      <br>
+      <div class="output"><span class="check">◆</span> iter-001 / 阶段 2 · <span class="check">代码已生成</span></div>
+      <div class="output">  <span class="output">├── main.py        ( 84 行 )</span></div>
+      <div class="output">  <span class="output">├── storage.py     ( 42 行 )</span></div>
+      <div class="output">  <span class="output">└── tests/         ( 12 用例 )</span></div>
+      <br>
+      <div class="output">⚠  <span class="check">决策点 2</span>  · 是否开启下一轮迭代？</div>
+      <div class="output">   <span class="output">[ 下一轮 ]</span>   <span class="output">[ 结束 ]</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 门禁系统 -->
+<section class="stage" style="background: rgba(255,255,255,0.01); max-width: none; padding: 100px 32px;">
+  <div style="max-width: 1400px; margin: 0 auto;">
+    <div class="section-head reveal">
+      <div class="section-eyebrow">// GATE SYSTEM</div>
+      <h2 class="section-title">P0-P4 增强门禁</h2>
+      <p class="section-desc">从 AST 静态分析到跨模型对抗审查，每一层都让代码更接近生产标准。</p>
+    </div>
+
+    <div class="gates-grid reveal">
+      <div class="gate" style="--accent: #10b981;">
+        <div class="gate-tag">P0</div>
+        <div class="gate-name">AST 静态分析</div>
+        <p class="gate-desc">真实代码分析，无 AI 幻觉。基于 AST 的类型注解、注释密度、复杂度评分。</p>
+      </div>
+      <div class="gate" style="--accent: #10b981;">
+        <div class="gate-tag">P0</div>
+        <div class="gate-name">运行时验证</div>
+        <p class="gate-desc">编译检查 + pytest 测试。代码不仅要写得漂亮，还要跑得起来。</p>
+      </div>
+      <div class="gate" style="--accent: #3b82f6;">
+        <div class="gate-tag">P1</div>
+        <div class="gate-name">依赖真实性</div>
+        <p class="gate-desc">PyPI API 验证包的存在与版本，杜绝 AI 编造不存在的依赖。</p>
+      </div>
+      <div class="gate" style="--accent: #3b82f6;">
+        <div class="gate-tag">P1</div>
+        <div class="gate-name">语义熵检测</div>
+        <p class="gate-desc">AST 结构变化检测，识别"原地踏步"的无效迭代，避免无尽空转。</p>
+      </div>
+      <div class="gate" style="--accent: #a855f7;">
+        <div class="gate-tag">P2</div>
+        <div class="gate-name">跨模型对抗</div>
+        <p class="gate-desc">用不同模型互审代码，结构 vs 合规性双视角对抗，发现单一视角盲区。</p>
+      </div>
+      <div class="gate" style="--accent: #a855f7;">
+        <div class="gate-tag">P2</div>
+        <div class="gate-name">意图达成检查</div>
+        <p class="gate-desc">验证代码是否真的实现了原始需求，匹配度量化打分。</p>
+      </div>
+      <div class="gate" style="--accent: #ec4899;">
+        <div class="gate-tag">P3</div>
+        <div class="gate-name">证据存储</div>
+        <p class="gate-desc">SQLite + SHA256 不可变审计日志，每一次评审都有迹可循。</p>
+      </div>
+      <div class="gate" style="--accent: #ec4899;">
+        <div class="gate-tag">P3</div>
+        <div class="gate-name">API 网关 + RBAC</div>
+        <p class="gate-desc">企业级 API 网关 + 角色权限控制，可直接接入团队工作流。</p>
+      </div>
+      <div class="gate" style="--accent: #f59e0b;">
+        <div class="gate-tag">P4</div>
+        <div class="gate-name">安全表达式求值</div>
+        <p class="gate-desc">策略 DSL 不再依赖 eval，policy engine 沙箱化执行。</p>
+      </div>
+      <div class="gate" style="--accent: #f59e0b;">
+        <div class="gate-tag">P4</div>
+        <div class="gate-name">结构化日志</div>
+        <p class="gate-desc">全链路 JSON 日志，配套升级意图检查器与实质性跨审核。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 代码示例 -->
+<section class="code-section">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">// SOURCE CODE</div>
+    <h2 class="section-title">清晰、克制、可扩展</h2>
+    <p class="section-desc">用 Python 写就的编排器核心，5 阶段状态机 + 决策门禁 + 模板渲染。</p>
+  </div>
+
+  <div class="code-block reveal">
+    <div class="code-header">
+      <div class="code-filename">orchestrator/api.py</div>
+      <div class="code-status">
+        <span class="logo-dot"></span> PASSING · 7 GATES
+      </div>
+    </div>
+    <div class="code-content">
+<span class="line"><span class="comment"># 一键启动：AI 自动接管 5 阶段循环</span></span>
+<span class="line"><span class="keyword">def</span> <span class="func">begin</span>(project_name, requirement, base_dir=<span class="string">"projects"</span>):</span>
+<span class="line indent">project = <span class="func">create_project</span>(project_name, requirement, base_dir)</span>
+<span class="line indent">iteration = <span class="func">start_iteration</span>(project, <span class="string">"iter-001"</span>)</span>
+<span class="line indent"><span class="keyword">return</span> <span class="func">get_current_action</span>(iteration)</span>
+<span class="line"></span>
+<span class="line"><span class="comment"># 阶段推进：每完成一步，AI 提交产物</span></span>
+<span class="line"><span class="keyword">def</span> <span class="func">on_stage_completed</span>(artifact_content):</span>
+<span class="line indent"><span class="func">save_artifact</span>(current_stage, artifact_content)</span>
+<span class="line indent"><span class="func">advance_state_machine</span>()</span>
+<span class="line indent"><span class="keyword">return</span> <span class="func">get_next_action</span>()</span>
+<span class="line"></span>
+<span class="line"><span class="comment"># 决策点：只有 2 个 —— 你来拍板</span></span>
+<span class="line"><span class="keyword">def</span> <span class="func">on_user_decision</span>(decision):</span>
+<span class="line indent"><span class="keyword">if</span> decision == <span class="string">"批准"</span>:</span>
+<span class="line indent2"><span class="func">proceed_to_next_stage</span>()</span>
+<span class="line indent"><span class="keyword">elif</span> decision == <span class="string">"下一轮"</span>:</span>
+<span class="line indent2"><span class="func">start_new_iteration</span>()</span>
+<span class="line indent"><span class="keyword">elif</span> decision.startswith(<span class="string">"重做"</span>):</span>
+<span class="line indent2"><span class="func">redo_with_feedback</span>(decision)</span>
+    </div>
+  </div>
+</section>
+
+<!-- 设计原则 -->
+<section class="stage">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">// PHILOSOPHY</div>
+    <h2 class="section-title">五种克制，<br>胜过一千种堆叠</h2>
+  </div>
+
+  <div class="gates-grid reveal">
+    <div class="gate" style="--accent: #fff;">
+      <div class="gate-name">01 · 文件系统即数据库</div>
+      <p class="gate-desc">不用数据库。所有状态用 YAML + Markdown 持久化，可直接 git 管理。</p>
+    </div>
+    <div class="gate" style="--accent: #fff;">
+      <div class="gate-name">02 · 决策点驱动</div>
+      <p class="gate-desc">只有 2 个点需要人参与，其余全自动。AI 不喧宾夺主。</p>
+    </div>
+    <div class="gate" style="--accent: #fff;">
+      <div class="gate-name">03 · 角色切换</div>
+      <p class="gate-desc">Work 角色分析思考，Solo 角色执行落地，对应不同的 prompt 模板。</p>
+    </div>
+    <div class="gate" style="--accent: #fff;">
+      <div class="gate-name">04 · 完全可追溯</div>
+      <p class="gate-desc">每轮迭代的所有产物保留，3 个月后回看也能复盘当时思路。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <p>Auto-Orchestrator · v2.4.0 · 让 AI 跑完整个软件项目</p>
+  <p style="margin-top: 8px;">Built with Trae CN · 创意产物 · 2026</p>
+</footer>
+
+<!-- 决策点弹窗 -->
+<div class="decision-popup" id="decisionPopup">
+  <div class="decision-label">⚠ DECISION POINT</div>
+  <div class="decision-text">阶段 1 设计已完成 · 是否批准继续实现？</div>
+  <div class="decision-actions">
+    <button class="decision-btn" onclick="closePopup()">批准</button>
+    <button class="decision-btn" onclick="closePopup()">重做</button>
+    <button class="decision-btn" onclick="closePopup()">放弃</button>
+  </div>
+</div>
+
+<script>
+  // ============ 滚动揭示动画 ============
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) entry.target.classList.add('in');
+    });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // ============ 数字滚动动画 ============
+  const numObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const el = entry.target;
+        const target = +el.dataset.target;
+        let current = 0;
+        const step = target / 30;
+        const interval = setInterval(() => {
+          current += step;
+          if (current >= target) {
+            current = target;
+            clearInterval(interval);
+          }
+          el.textContent = Math.floor(current) + (target >= 10 ? '' : '');
+        }, 40);
+        numObserver.unobserve(el);
+      }
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll('.metric-value').forEach(el => numObserver.observe(el));
+
+  // ============ 决策点弹窗（5 秒后弹出，10 秒后收起）============
+  setTimeout(() => {
+    document.getElementById('decisionPopup').classList.add('show');
+    setTimeout(() => {
+      document.getElementById('decisionPopup').classList.remove('show');
+    }, 10000);
+  }, 5000);
+
+  function closePopup() {
+    document.getElementById('decisionPopup').classList.remove('show');
+  }
+
+  // ============ 阶段卡片 hover 联动 ============
+  const cards = document.querySelectorAll('.stage-card');
+  cards.forEach(card => {
+    card.addEventListener('mouseenter', () => {
+      cards.forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>

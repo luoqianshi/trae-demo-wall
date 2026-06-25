@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DIGIT FAI — 首件检验报告软件</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+
+        :root {
+            --bg: #0b0d13;
+            --surface: #12151e;
+            --surface2: #191d2a;
+            --surface3: #1f2436;
+            --border: #282e42;
+            --border-light: #343b54;
+            --accent: #4af0c0;
+            --accent2: #3dd4a8;
+            --accent-dim: #1e6b52;
+            --accent-glow: rgba(74,240,192,0.08);
+            --danger: #ff5c5c;
+            --warn: #f0a04a;
+            --info: #5b9aff;
+            --text: #e2e5ed;
+            --text2: #a0a6b8;
+            --text3: #5c6380;
+            --sel: rgba(74,240,192,0.1);
+            --bubble-stroke: #4af0c0;
+            --bubble-fill: rgba(20,23,31,0.92);
+            --radius: 6px;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;user-select:none;font-size:13px}
+
+        /* ====== LAYOUT ====== */
+        .app{display:grid;grid-template-rows:46px 1fr 0px 26px;grid-template-columns:200px 1fr 280px;height:100vh;transition:grid-template-rows .2s}
+        .app.table-open{grid-template-rows:46px 1fr 220px 26px}
+        .header{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:8px;z-index:50}
+        .panel-left{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+        .viewer-area{position:relative;overflow:hidden;background:var(--bg)}
+        .panel-right{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+        .panel-bottom{grid-column:1/-1;background:var(--surface);border-top:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column}
+        .status-bar{grid-column:1/-1;background:var(--surface2);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:16px;font-size:11px;color:var(--text3);font-family:'JetBrains Mono',monospace}
+
+        /* ====== HEADER ====== */
+        .brand{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:12px;color:var(--bg);background:var(--accent);padding:3px 8px;border-radius:3px;letter-spacing:.04em;flex-shrink:0}
+        .brand-sub{font-size:12px;color:var(--text3);margin-left:4px}
+        .toolbar{display:flex;gap:4px;align-items:center;flex:1;margin-left:12px}
+        .toolbar .sep{width:1px;height:22px;background:var(--border);margin:0 4px}
+
+        .btn{font-family:'Noto Sans SC',sans-serif;font-size:11px;font-weight:500;padding:5px 11px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+        .btn:hover{border-color:var(--accent-dim);background:var(--accent-glow)}
+        .btn:active{transform:scale(.97)}
+        .btn:disabled{opacity:.3;pointer-events:none}
+        .btn-accent{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+        .btn-accent:hover{background:#5cffd4;border-color:#5cffd4}
+        .btn-sm{padding:3px 8px;font-size:10px}
+        .btn-icon{width:28px;height:28px;padding:0;justify-content:center;font-size:14px}
+        .btn-danger{border-color:var(--danger);color:var(--danger)}
+        .btn-danger:hover{background:rgba(255,92,92,.1)}
+        #fileInput{display:none}
+
+        /* ====== LEFT PANEL ====== */
+        .lp-section{padding:10px 12px;border-bottom:1px solid var(--border)}
+        .lp-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);margin-bottom:8px}
+        .page-list{display:flex;flex-direction:column;gap:3px}
+        .page-item{padding:5px 8px;border:1px solid transparent;border-radius:4px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--text2);transition:all .12s}
+        .page-item:hover{border-color:var(--border);color:var(--text)}
+        .page-item.active{border-color:var(--accent-dim);background:var(--accent-glow);color:var(--accent)}
+        .page-item .pg-num{font-family:'JetBrains Mono',monospace;font-size:10px;min-width:18px}
+        .tool-list{display:flex;flex-direction:column;gap:2px}
+        .tool-item{padding:6px 8px;border:1px solid transparent;border-radius:4px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--text2);transition:all .12s}
+        .tool-item:hover{border-color:var(--border);color:var(--text)}
+        .tool-item.active{border-color:var(--accent-dim);background:var(--accent-glow);color:var(--accent)}
+        .tool-item .ti-icon{font-size:15px;width:20px;text-align:center}
+        .lp-scroll{flex:1;overflow-y:auto}
+
+        /* ====== VIEWER ====== */
+        .viewer-scroll{width:100%;height:100%;overflow:auto;display:flex;align-items:center;justify-content:center}
+        .viewer-wrapper{position:relative;display:inline-block;box-shadow:0 2px 30px rgba(0,0,0,.5);flex-shrink:0;margin:20px}
+        #pdfCanvas{display:block}
+        #bubbleSvg{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
+        #bubbleSvg .bubble-group{pointer-events:all;cursor:move}
+        #bubbleSvg .bubble-circle{transition:fill .15s}
+        #bubbleSvg .bubble-group:hover .bubble-circle{fill:var(--accent-glow);stroke-width:2}
+
+        .sel-rect{position:absolute;border:1.5px solid var(--accent);background:var(--sel);pointer-events:none;display:none;z-index:10}
+        .sel-rect.active{display:block}
+        .sel-rect .sh{position:absolute;width:6px;height:6px;background:var(--accent);border:1px solid var(--bg);border-radius:1px}
+        .sel-rect .sh.tl{top:-3px;left:-3px}.sel-rect .sh.tr{top:-3px;right:-3px}
+        .sel-rect .sh.bl{bottom:-3px;left:-3px}.sel-rect .sh.br{bottom:-3px;right:-3px}
+
+        .zoom-bar{position:absolute;bottom:10px;left:10px;display:none;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:2px;z-index:20}
+        .zoom-bar.show{display:flex}
+        .zoom-bar .zb{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--text);cursor:pointer;border-radius:3px;font-size:13px;font-family:'JetBrains Mono',monospace}
+        .zoom-bar .zb:hover{background:var(--surface2)}
+        .zoom-bar .zl{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);padding:0 6px;display:flex;align-items:center;min-width:36px;justify-content:center}
+
+        .drop-overlay{position:absolute;inset:0;background:rgba(74,240,192,.05);border:2px dashed var(--accent);display:none;align-items:center;justify-content:center;z-index:100}
+        .drop-overlay.active{display:flex}
+        .drop-overlay span{font-size:14px;color:var(--accent);font-weight:500}
+
+        .empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);text-align:center;z-index:5}
+        .empty-state.hidden{display:none}
+        .empty-state .ei{width:52px;height:52px;border:2px dashed var(--border);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px;opacity:.4}
+        .empty-state h2{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--text)}
+        .empty-state p{font-size:12px;line-height:1.6}
+
+        /* ====== RIGHT PANEL ====== */
+        .rp-section{padding:10px 12px;border-bottom:1px solid var(--border)}
+        .rp-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);margin-bottom:8px}
+        .rp-scroll{flex:1;overflow-y:auto}
+        .prop-row{display:flex;align-items:center;justify-content:space-between;padding:3px 0;gap:6px}
+        .prop-row label{font-size:11px;color:var(--text3);flex-shrink:0}
+        .prop-row input,.prop-row select{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;width:100px;outline:none}
+        .prop-row input:focus,.prop-row select:focus{border-color:var(--accent-dim)}
+        .prop-row input[type=color]{width:32px;height:24px;padding:1px;cursor:pointer}
+
+        .gdt-palette{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:6px}
+        .gdt-btn{font-size:16px;padding:5px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text);cursor:pointer;text-align:center;transition:all .12s}
+        .gdt-btn:hover{border-color:var(--accent-dim);background:var(--accent-glow)}
+        .gdt-btn.active{border-color:var(--accent);color:var(--accent)}
+
+        .ocr-settings .prop-row{padding:4px 0}
+        .rot-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:6px}
+        .rot-btn{font-family:'JetBrains Mono',monospace;font-size:9px;padding:4px 0;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text3);cursor:pointer;text-align:center;transition:all .12s;line-height:1.3}
+        .rot-btn:hover{border-color:var(--accent-dim);color:var(--text)}
+        .rot-btn.active{border-color:var(--accent);background:var(--accent-glow);color:var(--accent)}
+        .rot-btn .ri{display:block;font-size:13px;margin-bottom:1px}
+
+        /* ====== DIMENSION TABLE ====== */
+        .dt-header{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+        .dt-header .dt-title{font-size:11px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:8px}
+        .dt-header .dt-count{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent);background:var(--accent-glow);border:1px solid var(--accent-dim);padding:1px 6px;border-radius:3px}
+        .dt-header .dt-actions{display:flex;gap:4px}
+        .dt-scroll{flex:1;overflow:auto}
+        .dt-table{width:100%;border-collapse:collapse;font-size:11px}
+        .dt-table th{position:sticky;top:0;background:var(--surface2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);padding:5px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;z-index:2}
+        .dt-table td{padding:4px 8px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap;cursor:pointer}
+        .dt-table tr:hover td{background:var(--accent-glow)}
+        .dt-table tr.selected td{background:var(--sel);border-color:var(--accent-dim)}
+        .dt-table td[contenteditable]{outline:none}
+        .dt-table td[contenteditable]:focus{background:var(--surface3);box-shadow:inset 0 0 0 1px var(--accent-dim)}
+        .dt-table .dim-num{color:var(--accent);font-weight:600;text-align:center;min-width:28px}
+        .dt-table .dim-val{color:var(--text);font-weight:600}
+        .dt-table .dim-tol{color:var(--warn)}
+        .dt-table .dim-gdt{color:var(--info);font-size:14px}
+        .dt-table .dim-type{color:var(--text2);font-size:10px}
+        .dt-empty{text-align:center;padding:30px;color:var(--text3);font-size:12px}
+
+        /* ====== TOAST ====== */
+        .toast{position:fixed;top:58px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--surface2);border:1px solid var(--accent-dim);color:var(--accent);font-size:11px;padding:6px 16px;border-radius:5px;z-index:300;opacity:0;transition:all .2s;pointer-events:none;font-family:'JetBrains Mono',monospace}
+        .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+        /* ====== SCROLLBAR ====== */
+        ::-webkit-scrollbar{width:5px;height:5px}
+        ::-webkit-scrollbar-track{background:transparent}
+        ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+        ::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+
+        .sdot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;vertical-align:middle}
+        .sdot.g{background:var(--accent)}.sdot.y{background:var(--warn);animation:blink 1s infinite}.sdot.r{background:var(--danger)}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+        /* ====== MODAL ====== */
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+        .modal-bg.show{display:flex}
+        .modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;min-width:380px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+        .modal h3{font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text)}
+        .modal .m-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;gap:8px}
+        .modal .m-row label{font-size:12px;color:var(--text2)}
+        .modal .m-row input,.modal .m-row select{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;width:180px;outline:none}
+        .modal .m-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+    </style>
+</head>
+<body>
+<div class="app" id="app">
+    <!-- HEADER -->
+    <header class="header">
+        <span class="brand">DIGIT FAI</span>
+        <span class="brand-sub">首件检验报告</span>
+        <div class="toolbar">
+            <button class="btn" id="btnOpen"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> 打开PDF</button>
+            <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp"/>
+            <div class="sep"></div>
+            <button class="btn btn-accent" id="btnAutoBubble" disabled>◎ 自动气泡</button>
+            <button class="btn" id="btnToggleTool" disabled>🎯 框选识别</button>
+            <div class="sep"></div>
+            <button class="btn" id="btnToggleTable" disabled>📊 尺寸表</button>
+            <div class="sep"></div>
+            <button class="btn" id="btnExport" disabled>↓ 导出</button>
+            <button class="btn" id="btnSaveProject">💾 保存</button>
+            <button class="btn" id="btnLoadProject">📂 载入</button>
+            <input type="file" id="projectInput" accept=".json" style="display:none"/>
+        </div>
+    </header>
+
+    <!-- LEFT PANEL -->
+    <aside class="panel-left">
+        <div class="lp-section">
+            <div class="lp-title">页面</div>
+            <div class="page-list" id="pageList"><div style="color:var(--text3);font-size:11px;padding:8px 0;">未加载文件</div></div>
+        </div>
+        <div class="lp-section lp-scroll">
+            <div class="lp-title">工具</div>
+            <div class="tool-list" id="toolList">
+                <div class="tool-item active" data-tool="select"><span class="ti-icon">↖</span>选择/移动</div>
+                <div class="tool-item" data-tool="ocr"><span class="ti-icon">🔍</span>框选OCR识别</div>
+                <div class="tool-item" data-tool="bubble"><span class="ti-icon">◎</span>放置气泡</div>
+                <div class="tool-item" data-tool="autobubble"><span class="ti-icon">⚡</span>自动识别气泡</div>
+            </div>
+            <div style="margin-top:16px">
+                <div class="lp-title">OCR 预览</div>
+                <div id="ocrPreview" style="width:100%;aspect-ratio:2/1;background:var(--bg);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden">
+                    <span style="font-size:10px;color:var(--text3)">框选后显示</span>
+                </div>
+                <div id="ocrResult" style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:16px;color:var(--accent);min-height:24px;font-weight:600"></div>
+                <div id="ocrConf" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-top:2px"></div>
+                <button class="btn btn-sm" id="btnAddFromOCR" style="width:100%;margin-top:6px;justify-content:center;display:none" onclick="app.addDimensionFromOCR()">+ 添加到尺寸表</button>
+            </div>
+            <div style="margin-top:16px" class="ocr-settings">
+                <div class="lp-title">OCR 设置</div>
+                <div class="prop-row"><label>分段模式</label><select id="optPSM"><option value="7">单行</option><option value="8">单词</option><option value="13" selected>原始行</option></select></div>
+                <div class="prop-row"><label>放大倍数</label><select id="optScale"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option><option value="4">4x</option></select></div>
+                <div class="prop-row"><label>二值化</label><input type="number" id="optThresh" value="140" min="0" max="255" step="5" style="width:60px"/></div>
+                <div class="prop-row"><label>反色</label><select id="optInvert"><option value="0">关</option><option value="1">开</option></select></div>
+                <div style="margin-top:6px"><div class="lp-title">文字方向</div></div>
+                <div class="rot-grid" id="rotGrid">
+                    <div class="rot-btn active" data-rot="auto"><span class="ri">◎</span>自动</div>
+                    <div class="rot-btn" data-rot="0"><span class="ri">→</span>0°</div>
+                    <div class="rot-btn" data-rot="90"><span class="ri">↑</span>90°</div>
+                    <div class="rot-btn" data-rot="180"><span class="ri">←</span>180°</div>
+                    <div class="rot-btn" data-rot="270"><span class="ri">↓</span>270°</div>
+                </div>
+                <div style="margin-top:8px"><div class="lp-title">OCR 语言</div></div>
+                <div class="prop-row"><label>语言包</label><select id="optLang"><option value="eng" selected>English</option><option value="chi_sim">中文简体</option><option value="jpn">日本語</option><option value="deu">Deutsch</option><option value="kor">한국어</option></select></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- VIEWER -->
+    <div class="viewer-area" id="dropZone">
+        <div class="drop-overlay" id="dropOverlay"><span>释放文件</span></div>
+        <div class="empty-state" id="emptyState">
+            <div class="ei">📐</div>
+            <h2>打开工程图纸</h2>
+            <p>拖放 PDF / 图片到此处<br>支持 PDF、PNG、JPG、TIF、BMP</p>
+        </div>
+        <div class="viewer-scroll" id="viewerScroll" style="display:none">
+            <div class="viewer-wrapper" id="viewerWrapper">
+                <canvas id="pdfCanvas"></canvas>
+                <svg id="bubbleSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+                <div class="sel-rect" id="selRect">
+                    <div class="sh tl"></div><div class="sh tr"></div>
+                    <div class="sh bl"></div><div class="sh br"></div>
+                </div>
+            </div>
+        </div>
+        <div class="zoom-bar" id="zoomBar">
+            <button class="zb" onclick="app.zoomBy(-0.2)">−</button>
+            <span class="zl" id="zoomLevel">100%</span>
+            <button class="zb" onclick="app.zoomBy(0.2)">+</button>
+            <button class="zb" onclick="app.zoomFit()">⊡</button>
+        </div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <aside class="panel-right">
+        <div class="rp-section">
+            <div class="rp-title">零件信息</div>
+            <div class="prop-row"><label>零件号</label><input id="infoPN" placeholder="Part No." style="width:120px"/></div>
+            <div class="prop-row"><label>图号</label><input id="infoDWG" placeholder="DWG No." style="width:120px"/></div>
+            <div class="prop-row"><label>版本</label><input id="infoREV" placeholder="Rev" style="width:50px"/></div>
+            <div class="prop-row"><label>材料</label><input id="infoMAT" placeholder="Material" style="width:120px"/></div>
+        </div>
+        <div class="rp-section" id="bubbleProps" style="display:none">
+            <div class="rp-title">气泡属性</div>
+            <div class="prop-row"><label>编号</label><input id="bpNum" type="number" style="width:50px" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>数值</label><input id="bpVal" placeholder="125.4" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>上偏差</label><input id="bpUpper" placeholder="+0.2" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>下偏差</label><input id="bpLower" placeholder="-0.1" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>类型</label>
+                <select id="bpType" onchange="app.updateSelectedBubble()">
+                    <option value="linear">线性</option><option value="diameter">直径⌀</option>
+                    <option value="radius">半径R</option><option value="angle">角度∠</option>
+                    <option value="gdt">GD&T</option>
+                </select>
+            </div>
+            <div class="prop-row"><label>GD&T</label><input id="bpGDT" placeholder="符号" style="width:50px;font-size:16px;text-align:center" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>颜色</label><input id="bpColor" type="color" value="#4af0c0" onchange="app.updateSelectedBubble()"/></div>
+            <div class="prop-row"><label>备注</label><input id="bpNotes" placeholder="Notes" style="width:120px" onchange="app.updateSelectedBubble()"/></div>
+            <div style="margin-top:8px;display:flex;gap:4px">
+                <button class="btn btn-sm btn-danger" style="flex:1;justify-content:center" onclick="app.deleteSelected()">删除</button>
+            </div>
+        </div>
+        <div class="rp-section">
+            <div class="rp-title">GD&T 符号</div>
+            <div class="gdt-palette" id="gdtPalette">
+                <div class="gdt-btn" data-sym="⌀" title="直径">⌀</div>
+                <div class="gdt-btn" data-sym="⊕" title="位置度">⊕</div>
+                <div class="gdt-btn" data-sym="⊥" title="垂直度">⊥</div>
+                <div class="gdt-btn" data-sym="∥" title="平行度">∥</div>
+                <div class="gdt-btn" data-sym="∠" title="角度">∠</div>
+                <div class="gdt-btn" data-sym="○" title="圆度">○</div>
+                <div class="gdt-btn" data-sym="◎" title="同轴度">◎</div>
+                <div class="gdt-btn" data-sym="⌒" title="面轮廓">⌒</div>
+                <div class="gdt-btn" data-sym="⌓" title="对称度">⌓</div>
+                <div class="gdt-btn" data-sym="↗" title="圆跳动">↗</div>
+            </div>
+        </div>
+        <div class="rp-section rp-scroll" style="flex:1">
+            <div class="rp-title">识别日志</div>
+            <div id="logArea" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);line-height:1.7;max-height:100%;overflow-y:auto"></div>
+        </div>
+    </aside>
+
+    <!-- BOTTOM PANEL (Dimension Table) -->
+    <div class="panel-bottom" id="panelBottom">
+        <div class="dt-header">
+            <div class="dt-title">尺寸列表 <span class="dt-count" id="dtCount">0</span></div>
+            <div class="dt-actions">
+                <button class="btn btn-sm" onclick="app.addEmptyDimension()">+ 添加行</button>
+                <button class="btn btn-sm" onclick="app.exportCSV()">CSV</button>
+                <button class="btn btn-sm btn-accent" onclick="app.exportExcel()">Excel</button>
+                <button class="btn btn-sm" onclick="app.exportBubbleImage()">导出气泡图</button>
+            </div>
+        </div>
+        <div class="dt-scroll">
+            <table class="dt-table" id="dtTable">
+                <thead>
+                    <tr>
+                        <th style="width:36px">#</th>
+                        <th>名义值</th>
+                        <th>上偏差</th>
+                        <th>下偏差</th>
+                        <th>类型</th>
+                        <th>GD&T</th>
+                        <th>实测值</th>
+                        <th>判定</th>
+                        <th>备注</th>
+                        <th style="width:30px"></th>
+                    </tr>
+                </thead>
+                <tbody id="dtBody"></tbody>
+            </table>
+            <div class="dt-empty" id="dtEmpty">暂无尺寸数据 — 使用 OCR 框选识别或自动气泡功能添加</div>
+        </div>
+    </div>
+
+    <!-- STATUS BAR -->
+    <footer class="status-bar">
+        <span><span class="sdot g" id="statusDot"></span><span id="statusText">就绪</span></span>
+        <span id="stPage">—</span>
+        <span id="stZoom">—</span>
+        <span id="stDims">尺寸: 0</span>
+        <span id="stBubbles">气泡: 0</span>
+        <span style="margin-left:auto">Tesseract.js v5 · PDF.js</span>
+    </footer>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-bg" id="exportModal">
+    <div class="modal">
+        <h3>导出选项</h3>
+        <div class="m-row"><label>气泡图格式</label>
+            <select id="expImgFmt"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="bmp">BMP</option></select>
+        </div>
+        <div class="m-row"><label>气泡图缩放</label>
+            <select id="expImgScale"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option></select>
+        </div>
+        <div class="m-actions">
+            <button class="btn" onclick="document.getElementById('exportModal').classList.remove('show')">取消</button>
+            <button class="btn" onclick="app.exportCSV()">导出 CSV</button>
+            <button class="btn" onclick="app.exportExcel()">导出 Excel</button>
+            <button class="btn btn-accent" onclick="app.exportBubbleImage()">导出气泡图</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============================================================
+   MAIN APPLICATION
+   ============================================================ */
+const app = window.app = {
+    // ---- State ----
+    pdf: null,
+    page: 1,
+    total: 0,
+    scale: 2.0,
+    tool: 'select',
+    rotation: 'auto',
+    ocrBusy: false,
+    selecting: false,
+    selStart: null,
+    selEnd: null,
+    dims: [],           // dimension records
+    bubbles: [],        // bubble objects
+    selectedBubbleId: null,
+    nextBubbleNum: 1,
+    lastOCRResult: null,
+    textItems: [],      // vector PDF text items for current page
+
+    /* ============================
+       INITIALIZATION
+       ============================ */
+    init() {
+        this.canvas = document.getElementById('pdfCanvas');
+        this.ctx = this.canvas.getContext('2d', {willReadFrequently:true});
+        this.svg = document.getElementById('bubbleSvg');
+        this.selRect = document.getElementById('selRect');
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        this.bindEvents();
+        this.log('应用就绪，等待加载文件');
+    },
+
+    /* ============================
+       EVENT BINDING
+       ============================ */
+    bindEvents() {
+        const $ = id => document.getElementById(id);
+
+        // File
+        $('btnOpen').onclick = () => $('fileInput').click();
+        $('fileInput').addEventListener('change', e => { if(e.target.files[0]) this.loadFile(e.target.files[0]); });
+
+        // Drag & drop
+        const dz = $('dropZone');
+        let dc = 0;
+        dz.addEventListener('dragenter', e => { e.preventDefault(); dc++; $('dropOverlay').classList.add('active'); });
+        dz.addEventListener('dragleave', e => { e.preventDefault(); dc--; if(dc<=0){dc=0;$('dropOverlay').classList.remove('active');} });
+        dz.addEventListener('dragover', e => e.preventDefault());
+        dz.addEventListener('drop', e => { e.preventDefault(); dc=0; $('dropOverlay').classList.remove('active'); if(e.dataTransfer.files[0]) this.loadFile(e.dataTransfer.files[0]); });
+
+        // Tools
+        document.getElementById('toolList').addEventListener('click', e => {
+            const item = e.target.closest('.tool-item');
+            if(!item) return;
+            const tool = item.dataset.tool;
+            if(tool === 'autobubble') { this.autoBubble(); return; }
+            this.setTool(tool);
+        });
+
+        // Rotation
+        $('rotGrid').addEventListener('click', e => {
+            const btn = e.target.closest('.rot-btn');
+            if(!btn) return;
+            $('rotGrid').querySelectorAll('.rot-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            this.rotation = btn.dataset.rot === 'auto' ? 'auto' : parseInt(btn.dataset.rot);
+        });
+
+        // GD&T palette
+        $('gdtPalette').addEventListener('click', e => {
+            const btn = e.target.closest('.gdt-btn');
+            if(!btn) return;
+            const sym = btn.dataset.sym;
+            const inp = $('bpGDT');
+            inp.value = sym;
+            this.updateSelectedBubble();
+        });
+
+        // Canvas selection / bubble placement
+        this.canvas.addEventListener('mousedown', e => this.onCanvasMouseDown(e));
+        this.canvas.addEventListener('mousemove', e => this.onCanvasMouseMove(e));
+        this.canvas.addEventListener('mouseup', e => this.onCanvasMouseUp(e));
+        this.canvas.addEventListener('contextmenu', e => { e.preventDefault(); this.cancelSelection(); });
+
+        // Bubble SVG dragging
+        this.svg.addEventListener('mousedown', e => this.onBubbleMouseDown(e));
+        document.addEventListener('mousemove', e => this.onBubbleDragMove(e));
+        document.addEventListener('mouseup', e => this.onBubbleDragEnd(e));
+
+        // Zoom
+        $('zoomBar').querySelector('.zb');
+
+        // Table toggle
+        $('btnToggleTable').onclick = () => {
+            const appEl = document.getElementById('app');
+            appEl.classList.toggle('table-open');
+        };
+
+        // Export
+        $('btnExport').onclick = () => $('exportModal').classList.add('show');
+
+        // Auto bubble button
+        $('btnAutoBubble').onclick = () => this.autoBubble();
+
+        // Toggle tool button
+        $('btnToggleTool').onclick = () => this.setTool(this.tool === 'ocr' ? 'select' : 'ocr');
+
+        // Save/Load project
+        $('btnSaveProject').onclick = () => this.saveProject();
+        $('btnLoadProject').onclick = () => $('projectInput').click();
+        $('projectInput').addEventListener('change', e => { if(e.target.files[0]) this.loadProjectFile(e.target.files[0]); });
+
+        // Keyboard
+        document.addEventListener('keydown', e => {
+            if(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.isContentEditable) return;
+            if(e.key === 'Escape') { this.cancelSelection(); this.deselectBubble(); }
+            if(e.key === 'Delete' || e.key === 'Backspace') { if(this.selectedBubbleId !== null) this.deleteSelected(); }
+            if(e.key === '+' || e.key === '=') { e.preventDefault(); this.zoomBy(0.2); }
+            if(e.key === '-') { e.preventDefault(); this.zoomBy(-0.2); }
+        });
+
+        document.addEventListener('dragover', e => e.preventDefault());
+        document.addEventListener('drop', e => e.preventDefault());
+    },
+
+    /* ============================
+       FILE LOADING
+       ============================ */
+    async loadFile(file) {
+        const name = file.name.toLowerCase();
+        if(name.endsWith('.pdf')) {
+            await this.loadPDF(file);
+        } else if(/\.(png|jpe?g|tif{1,2}|bmp)$/.test(name)) {
+            await this.loadImage(file);
+        } else {
+            this.toast('不支持的文件格式');
+        }
+    },
+
+    async loadPDF(file) {
+        this.log('加载 PDF: ' + file.name);
+        this.setStatus('y', '加载中...');
+        try {
+            const buf = await file.arrayBuffer();
+            this.pdf = await pdfjsLib.getDocument({data:buf}).promise;
+            this.total = this.pdf.numPages;
+            this.page = 1;
+            this.isImage = false;
+            this.showViewer();
+            this.renderPageList();
+            await this.renderPage();
+            this.log(`PDF 加载成功，${this.total} 页`, 'ok');
+            this.setStatus('g', '就绪');
+            this.enableButtons();
+        } catch(err) {
+            this.log('加载失败: '+err.message, 'err');
+            this.setStatus('r', '错误');
+        }
+    },
+
+    async loadImage(file) {
+        this.log('加载图片: ' + file.name);
+        this.setStatus('y', '加载中...');
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = async () => {
+            this.pdf = null;
+            this.isImage = true;
+            this.imageEl = img;
+            this.total = 1;
+            this.page = 1;
+            this.showViewer();
+            this.renderPageList();
+            await this.renderImagePage();
+            this.log('图片加载成功', 'ok');
+            this.setStatus('g', '就绪');
+            this.enableButtons();
+            URL.revokeObjectURL(url);
+        };
+        img.src = url;
+    },
+
+    showViewer() {
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('viewerScroll').style.display = '';
+        document.getElementById('zoomBar').classList.add('show');
+        document.getElementById('app').classList.add('table-open');
+    },
+
+    enableButtons() {
+        document.getElementById('btnAutoBubble').disabled = false;
+        document.getElementById('btnToggleTool').disabled = false;
+        document.getElementById('btnToggleTable').disabled = false;
+        document.getElementById('btnExport').disabled = false;
+    },
+
+    renderPageList() {
+        const el = document.getElementById('pageList');
+        el.innerHTML = '';
+        for(let i = 1; i <= this.total; i++) {
+            const d = document.createElement('div');
+            d.className = 'page-item' + (i === this.page ? ' active' : '');
+            d.innerHTML = `<span class="pg-num">${i}</span>第 ${i} 页`;
+            d.onclick = () => { this.page = i; this.renderPage(); this.renderPageList(); };
+            el.appendChild(d);
+        }
+    },
+
+    async renderPage() {
+        if(this.isImage) return this.renderImagePage();
+        if(!this.pdf) return;
+        const page = await this.pdf.getPage(this.page);
+        const dpr = window.devicePixelRatio || 1;
+        const viewport = page.getViewport({scale: this.scale * dpr});
+        this.canvas.width = viewport.width;
+        this.canvas.height = viewport.height;
+        this.canvas.style.width = (viewport.width/dpr)+'px';
+        this.canvas.style.height = (viewport.height/dpr)+'px';
+        await page.render({canvasContext:this.ctx, viewport}).promise;
+
+        // Update SVG overlay
+        const dw = viewport.width/dpr, dh = viewport.height/dpr;
+        this.svg.setAttribute('width', dw);
+        this.svg.setAttribute('height', dh);
+        this.svg.setAttribute('viewBox', `0 0 ${dw} ${dh}`);
+
+        this.updateZoomLevel();
+        this.renderBubbles();
+        this.cancelSelection();
+
+        // Extract text items for vector PDF auto-bubble
+        await this.extractTextItems();
+    },
+
+    async renderImagePage() {
+        const img = this.imageEl;
+        const dpr = window.devicePixelRatio || 1;
+        const w = img.width * this.scale;
+        const h = img.height * this.scale;
+        this.canvas.width = w * dpr;
+        this.canvas.height = h * dpr;
+        this.canvas.style.width = w + 'px';
+        this.canvas.style.height = h + 'px';
+        this.ctx.imageSmoothingEnabled = true;
+        this.ctx.imageSmoothingQuality = 'high';
+        this.ctx.drawImage(img, 0, 0, w*dpr, h*dpr);
+
+        this.svg.setAttribute('width', w);
+        this.svg.setAttribute('height', h);
+        this.svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+        this.updateZoomLevel();
+        this.renderBubbles();
+        this.textItems = [];
+    },
+
+    /* ============================
+       TEXT EXTRACTION (Vector PDF)
+       ============================ */
+    async extractTextItems() {
+        this.textItems = [];
+        if(!this.pdf) return;
+        try {
+            const page = await this.pdf.getPage(this.page);
+            const tc = await page.getTextContent();
+            const vp = page.getViewport({scale:1});
+            const dpr = window.devicePixelRatio || 1;
+            const s = this.scale;
+            this.textItems = tc.items.filter(i => i.str.trim()).map(item => ({
+                text: item.str.trim(),
+                x: item.transform[4] * s,
+                y: (vp.height - item.transform[5]) * s,
+                w: item.width * s,
+                h: (item.height || Math.abs(item.transform[3])) * s,
+                fontSize: Math.abs(item.transform[0]) * s
+            }));
+            this.log(`提取到 ${this.textItems.length} 个文本项`, 'info');
+        } catch(e) {
+            this.log('文本提取失败: '+e.message, 'warn');
+        }
+    },
+
+    /* ============================
+       TOOL MANAGEMENT
+       ============================ */
+    setTool(tool) {
+        this.tool = tool;
+        document.querySelectorAll('#toolList .tool-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.tool === tool);
+        });
+        this.canvas.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+        document.getElementById('btnToggleTool').textContent = tool === 'ocr' ? '↖ 选择模式' : '🎯 框选识别';
+    },
+
+    /* ============================
+       CANVAS MOUSE EVENTS
+       ============================ */
+    getCanvasPos(e) {
+        const r = this.canvas.getBoundingClientRect();
+        return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) };
+    },
+
+    onCanvasMouseDown(e) {
+        if(!this.pdf && !this.isImage) return;
+        if(this.ocrBusy) return;
+        const pos = this.getCanvasPos(e);
+
+        if(this.tool === 'bubble') {
+            this.placeBubbleAt(pos.x, pos.y);
+            return;
+        }
+        if(this.tool === 'ocr') {
+            this.selecting = true;
+            this.selStart = pos;
+            this.selEnd = {...pos};
+            this.selRect.classList.add('active');
+            this.updateSelUI();
+        }
+    },
+
+    onCanvasMouseMove(e) {
+        if(!this.selecting) return;
+        this.selEnd = this.getCanvasPos(e);
+        this.updateSelUI();
+    },
+
+    onCanvasMouseUp() {
+        if(!this.selecting) return;
+        this.selecting = false;
+        const w = Math.abs(this.selEnd.x - this.selStart.x);
+        const h = Math.abs(this.selEnd.y - this.selStart.y);
+        if(w < 4 || h < 4) { this.cancelSelection(); return; }
+        this.performOCR();
+    },
+
+    updateSelUI() {
+        const x = Math.min(this.selStart.x, this.selEnd.x);
+        const y = Math.min(this.selStart.y, this.selEnd.y);
+        const w = Math.abs(this.selEnd.x - this.selStart.x);
+        const h = Math.abs(this.selEnd.y - this.selStart.y);
+        this.selRect.style.left = x+'px'; this.selRect.style.top = y+'px';
+        this.selRect.style.width = w+'px'; this.selRect.style.height = h+'px';
+    },
+
+    cancelSelection() {
+        this.selRect.classList.remove('active');
+        this.selStart = this.selEnd = null;
+    },
+
+    /* ============================
+       ZOOM
+       ============================ */
+    zoomBy(d) { this.scale = Math.max(0.3, Math.min(6, this.scale+d)); this.renderPage(); },
+    zoomFit() {
+        if(!this.pdf && !this.isImage) return;
+        const area = document.getElementById('viewerScroll');
+        if(this.isImage) {
+            const s = Math.min((area.clientWidth-40)/this.imageEl.width, (area.clientHeight-40)/this.imageEl.height, 4);
+            this.scale = s; this.renderPage();
+        } else {
+            this.pdf.getPage(this.page).then(p => {
+                const vp = p.getViewport({scale:1});
+                const s = Math.min((area.clientWidth-40)/vp.width, (area.clientHeight-40)/vp.height, 4);
+                this.scale = s; this.renderPage();
+            });
+        }
+    },
+    updateZoomLevel() { document.getElementById('zoomLevel').textContent = Math.round(this.scale*100)+'%'; },
+
+    /* ============================
+       OCR ENGINE (Core - preserved)
+       ============================ */
+    cropRotateAndPreprocess(angle) {
+        const dpr = window.devicePixelRatio || 1;
+        const scaleFactor = parseInt(document.getElementById('optScale').value);
+        const threshold = parseInt(document.getElementById('optThresh').value);
+        const invert = document.getElementById('optInvert').value === '1';
+
+        const sx = Math.min(this.selStart.x, this.selEnd.x) * dpr;
+        const sy = Math.min(this.selStart.y, this.selEnd.y) * dpr;
+        const sw = Math.abs(this.selEnd.x - this.selStart.x) * dpr;
+        const sh = Math.abs(this.selEnd.y - this.selStart.y) * dpr;
+
+        const isSwap = (angle === 90 || angle === 270);
+        const outW = Math.round((isSwap ? sh : sw) * scaleFactor);
+        const outH = Math.round((isSwap ? sw : sh) * scaleFactor);
+
+        const off = document.createElement('canvas');
+        off.width = outW; off.height = outH;
+        const oc = off.getContext('2d', {willReadFrequently:true});
+        oc.fillStyle = '#fff'; oc.fillRect(0,0,outW,outH);
+        oc.save();
+        oc.imageSmoothingEnabled = true; oc.imageSmoothingQuality = 'high';
+
+        if(angle === 0) { oc.drawImage(this.canvas, sx,sy,sw,sh, 0,0,outW,outH); }
+        else if(angle === 90) { oc.translate(outW,0); oc.rotate(Math.PI/2); oc.drawImage(this.canvas, sx,sy,sw,sh, 0,0,sh*scaleFactor,sw*scaleFactor); }
+        else if(angle === 180) { oc.translate(outW,outH); oc.rotate(Math.PI); oc.drawImage(this.canvas, sx,sy,sw,sh, 0,0,outW,outH); }
+        else if(angle === 270) { oc.translate(0,outH); oc.rotate(-Math.PI/2); oc.drawImage(this.canvas, sx,sy,sw,sh, 0,0,sh*scaleFactor,sw*scaleFactor); }
+        oc.restore();
+
+        const imgData = oc.getImageData(0,0,outW,outH);
+        const d = imgData.data;
+        for(let i=0;i<d.length;i+=4){
+            let gray = d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+            if(invert) gray = 255-gray;
+            const v = gray < threshold ? 0 : 255;
+            d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+        }
+        oc.putImageData(imgData,0,0);
+        return off;
+    },
+
+    async ocrOnce(canvas, psm, lang) {
+        const result = await Tesseract.recognize(canvas, lang || 'eng', {
+            tessedit_char_whitelist: '0123456789.+-/°⌀⊕⊥∥∠○◎⌒⌓↗ ',
+            tessedit_pageseg_mode: psm
+        });
+        return { text: (result.data.text||'').trim(), confidence: result.data.confidence };
+    },
+
+    extractDigits(raw) {
+        let t = raw.replace(/[^0-9.+\-\/±°]/g,' ').replace(/\s+/g,' ').trim();
+        const m = t.match(/\d+\.?\d*/);
+        return m ? m[0] : '';
+    },
+
+    async performOCR() {
+        if(this.ocrBusy) return;
+        this.ocrBusy = true;
+        const psm = document.getElementById('optPSM').value;
+        const lang = document.getElementById('optLang').value;
+        const t0 = performance.now();
+
+        this.setStatus('y', '识别中...');
+
+        try {
+            let best = {text:'', confidence:0, angle:0, raw:''};
+            let previewCanvas = null;
+
+            if(this.rotation === 'auto') {
+                this.log('自动检测方向...', 'info');
+                for(const angle of [0,90,180,270]) {
+                    this.setStatus('y', `检测 ${angle}°...`);
+                    const processed = this.cropRotateAndPreprocess(angle);
+                    const result = await this.ocrOnce(processed, psm, lang);
+                    const digits = this.extractDigits(result.text);
+                    this.log(`  ${angle}° → "${result.text}" → "${digits}" (${result.confidence.toFixed(1)}%)`);
+                    const score = digits ? result.confidence + 1000 : result.confidence;
+                    const bestScore = best.text ? best.confidence + 1000 : best.confidence;
+                    if(score > bestScore) { best = {text:digits, confidence:result.confidence, angle, raw:result.text}; previewCanvas = processed; }
+                }
+            } else {
+                const processed = this.cropRotateAndPreprocess(this.rotation);
+                const result = await this.ocrOnce(processed, psm, lang);
+                best = {text:this.extractDigits(result.text), confidence:result.confidence, angle:this.rotation, raw:result.text};
+                previewCanvas = processed;
+            }
+
+            const elapsed = ((performance.now()-t0)/1000).toFixed(2);
+
+            // Update preview
+            if(previewCanvas) {
+                const prev = document.getElementById('ocrPreview');
+                const img = new Image(); img.src = previewCanvas.toDataURL('image/png');
+                prev.innerHTML = ''; prev.appendChild(img);
+            }
+
+            document.getElementById('ocrResult').textContent = best.text || '—';
+            document.getElementById('ocrConf').textContent = best.text ? `${best.confidence.toFixed(1)}% · ${best.angle}° · ${elapsed}s` : '未识别到数字';
+
+            this.lastOCRResult = best.text ? {
+                value: best.text, angle: best.angle, confidence: best.confidence,
+                x: (Math.min(this.selStart.x, this.selEnd.x) + Math.abs(this.selEnd.x-this.selStart.x)/2),
+                y: (Math.min(this.selStart.y, this.selEnd.y) + Math.abs(this.selEnd.y-this.selStart.y)/2)
+            } : null;
+
+            document.getElementById('btnAddFromOCR').style.display = best.text ? '' : 'none';
+
+            if(best.text) {
+                this.log(`识别成功: "${best.text}" @${best.angle}° (${best.confidence.toFixed(1)}%, ${elapsed}s)`, 'ok');
+            } else {
+                this.log('未识别到数字', 'warn');
+            }
+            this.setStatus('g', `完成 ${elapsed}s`);
+        } catch(err) {
+            this.log('OCR 错误: '+err.message, 'err');
+            this.setStatus('r', '错误');
+        }
+        this.ocrBusy = false;
+    },
+
+    addDimensionFromOCR() {
+        if(!this.lastOCRResult) return;
+        const r = this.lastOCRResult;
+        const parsed = this.parseDimensionString(r.value);
+        const dim = {
+            id: Date.now(),
+            num: this.nextBubbleNum++,
+            nominal: parsed.nominal,
+            upperTol: parsed.upper,
+            lowerTol: parsed.lower,
+            type: parsed.type,
+            gdt: '',
+            measured: '',
+            result: '',
+            notes: '',
+            color: '#4af0c0',
+            pageX: r.x,
+            pageY: r.y,
+            bubbleX: r.x + 40,
+            bubbleY: r.y - 40
+        };
+        this.dims.push(dim);
+        this.addBubbleSVG(dim);
+        this.renderTable();
+        this.toast(`已添加尺寸 #${dim.num}: ${dim.nominal}`);
+        this.log(`添加尺寸 #${dim.num}: ${dim.nominal} ${dim.upperTol||''} ${dim.lowerTol||''}`, 'ok');
+    },
+
+    /* ============================
+       DIMENSION PARSER
+       ============================ */
+    parseDimensionString(text) {
+        text = text.replace(/[oO]/g,'0').replace(/[lI](?=\d)/g,'1').trim();
+        let type = 'linear';
+        let nominal = '', upper = '', lower = '';
+
+        // Diameter
+        if(/[øØϕΦ]/.test(text)) type = 'diameter';
+        else if(/^[rR]\s*\d/.test(text)) type = 'radius';
+        else if(/[°]/.test(text)) type = 'angle';
+
+        // Clean
+        let clean = text.replace(/[øØϕΦrR°]/g,'').trim();
+
+        // Pattern: number +upper -lower
+        let m = clean.match(/(\d+\.?\d*)\s*[+＋]\s*(\d+\.?\d*)\s*[-–—]\s*(\d+\.?\d*)/);
+        if(m) { nominal=m[1]; upper='+'+m[2]; lower='-'+m[3]; return {nominal,upper,lower,type}; }
+
+        // Pattern: number ±number
+        m = clean.match(/(\d+\.?\d*)\s*[±]\s*(\d+\.?\d*)/);
+        if(m) { nominal=m[1]; upper='+'+m[2]; lower='-'+m[2]; return {nominal,upper,lower,type}; }
+
+        // Pattern: just number
+        m = clean.match(/(\d+\.?\d*)/);
+        if(m) { nominal=m[1]; return {nominal,upper:'',lower:'',type}; }
+
+        return {nominal:text, upper:'',lower:'',type};
+    },
+
+    /* ============================
+       AUTO BUBBLE
+       ============================ */
+    async autoBubble() {
+        if(!this.pdf && !this.isImage) return;
+        this.setStatus('y', '自动识别中...');
+        this.log('开始自动气泡识别...', 'info');
+        const t0 = performance.now();
+
+        try {
+            let found = [];
+
+            // Method 1: Vector PDF text extraction
+            if(this.textItems.length > 0) {
+                this.log(`向量PDF模式: ${this.textItems.length} 个文本项`, 'info');
+                found = this.autoBubbleFromText();
+            }
+
+            // Method 2: OCR grid scan for image PDFs / images
+            if(found.length === 0) {
+                this.log('位图模式: OCR 网格扫描...', 'info');
+                found = await this.autoBubbleFromOCR();
+            }
+
+            // Place bubbles
+            let added = 0;
+            for(const f of found) {
+                // Avoid duplicates - check if similar dimension already exists
+                const dup = this.dims.some(d => d.nominal === f.nominal && d.page === this.page);
+                if(dup) continue;
+
+                const dim = {
+                    id: Date.now() + added,
+                    num: this.nextBubbleNum++,
+                    nominal: f.nominal,
+                    upperTol: f.upper || '',
+                    lowerTol: f.lower || '',
+                    type: f.type || 'linear',
+                    gdt: f.gdt || '',
+                    measured: '',
+                    result: '',
+                    notes: '',
+                    color: '#4af0c0',
+                    page: this.page,
+                    pageX: f.x,
+                    pageY: f.y,
+                    bubbleX: f.x + 30 + Math.random()*20,
+                    bubbleY: f.y - 30 - Math.random()*20
+                };
+                this.dims.push(dim);
+                this.addBubbleSVG(dim);
+                added++;
+            }
+
+            const elapsed = ((performance.now()-t0)/1000).toFixed(2);
+            this.renderTable();
+            this.log(`自动识别完成: 新增 ${added} 个尺寸 (${elapsed}s)`, 'ok');
+            this.toast(`已添加 ${added} 个气泡`);
+            this.setStatus('g', `完成 — ${added} 个尺寸`);
+        } catch(err) {
+            this.log('自动识别错误: '+err.message, 'err');
+            this.setStatus('r', '错误');
+        }
+    },
+
+    autoBubbleFromText() {
+        const items = this.textItems;
+        const numericItems = items.filter(i => /\d/.test(i.text));
+        const results = [];
+        const used = new Set();
+
+        for(const item of numericItems) {
+            if(used.has(item)) continue;
+
+            // Gather nearby items
+            const group = [item];
+            used.add(item);
+
+            for(const other of items) {
+                if(used.has(other)) continue;
+                const dx = Math.abs(other.x - item.x);
+                const dy = Math.abs(other.y - item.y);
+                if(dx < 120 && dy < 40) {
+                    if(/[+±\-–—]/.test(other.text) || /\d/.test(other.text) || /[øØϕrR]/.test(other.text)) {
+                        group.push(other);
+                        used.add(other);
+                    }
+                }
+            }
+
+            // Sort by position and combine
+            group.sort((a,b) => a.x - b.x || a.y - b.y);
+            const combined = group.map(g => g.text).join(' ');
+            const parsed = this.parseDimensionString(combined);
+
+            if(parsed.nominal && /\d/.test(parsed.nominal)) {
+                results.push({
+                    nominal: parsed.nominal,
+                    upper: parsed.upper,
+                    lower: parsed.lower,
+                    type: parsed.type,
+                    x: item.x + (item.w || 0)/2,
+                    y: item.y
+                });
+            }
+        }
+        return results;
+    },
+
+    async autoBubbleFromOCR() {
+        // Grid scan using OCR
+        const dpr = window.devicePixelRatio || 1;
+        const cw = this.canvas.width / dpr;
+        const ch = this.canvas.height / dpr;
+        const cellW = 150, cellH = 60, stepX = 120, stepY = 40;
+        const psm = document.getElementById('optPSM').value;
+        const lang = document.getElementById('optLang').value;
+        const results = [];
+
+        const origSel = {start: this.selStart, end: this.selEnd};
+
+        for(let y = 0; y < ch - cellH; y += stepY) {
+            for(let x = 0; x < cw - cellW; x += stepX) {
+                this.selStart = {x, y};
+                this.selEnd = {x: x+cellW, y: y+cellH};
+
+                // Quick crop
+                const processed = this.cropRotateAndPreprocess(0);
+                try {
+                    const result = await this.ocrOnce(processed, psm, lang);
+                    const digits = this.extractDigits(result.text);
+                    if(digits && result.confidence > 50) {
+                        const parsed = this.parseDimensionString(result.text);
+                        if(parsed.nominal) {
+                            results.push({
+                                nominal: parsed.nominal,
+                                upper: parsed.upper,
+                                lower: parsed.lower,
+                                type: parsed.type,
+                                x: x + cellW/2,
+                                y: y + cellH/2
+                            });
+                        }
+                    }
+                } catch(e) { /* skip */ }
+            }
+            this.setStatus('y', `扫描 ${Math.round(y/ch*100)}%...`);
+        }
+
+        this.selStart = origSel.start;
+        this.selEnd = origSel.end;
+        return results;
+    },
+
+    /* ============================
+       BUBBLE SVG MANAGEMENT
+       ============================ */
+    addBubbleSVG(dim) {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        g.setAttribute('class', 'bubble-group');
+        g.setAttribute('data-id', dim.id);
+        g.setAttribute('transform', `translate(${dim.bubbleX},${dim.bubbleY})`);
+
+        // Leader line
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+        line.setAttribute('x2', dim.pageX - dim.bubbleX);
+        line.setAttribute('y2', dim.pageY - dim.bubbleY);
+        line.setAttribute('stroke', dim.color || '#4af0c0');
+        line.setAttribute('stroke-width', '1');
+        line.setAttribute('stroke-dasharray', '3,2');
+        line.setAttribute('class', 'bubble-line');
+
+        // Circle
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', 0); circle.setAttribute('cy', 0);
+        circle.setAttribute('r', 13);
+        circle.setAttribute('fill', 'rgba(20,23,31,0.92)');
+        circle.setAttribute('stroke', dim.color || '#4af0c0');
+        circle.setAttribute('stroke-width', '1.5');
+        circle.setAttribute('class', 'bubble-circle');
+
+        // Text
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', 0); text.setAttribute('y', 1);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('fill', dim.color || '#4af0c0');
+        text.setAttribute('font-family', "'JetBrains Mono', monospace");
+        text.setAttribute('font-size', '10');
+        text.setAttribute('font-weight', '600');
+        text.textContent = dim.num;
+
+        g.appendChild(line);
+        g.appendChild(circle);
+        g.appendChild(text);
+        this.svg.appendChild(g);
+        this.updateStatusBar();
+    },
+
+    renderBubbles() {
+        this.svg.innerHTML = '';
+        const pageDims = this.dims.filter(d => !d.page || d.page === this.page);
+        for(const dim of pageDims) {
+            this.addBubbleSVG(dim);
+        }
+    },
+
+    removeBubbleSVG(id) {
+        const el = this.svg.querySelector(`[data-id="${id}"]`);
+        if(el) el.remove();
+    },
+
+    updateBubblePosition(id, bx, by) {
+        const dim = this.dims.find(d => d.id === id);
+        if(!dim) return;
+        dim.bubbleX = bx; dim.bubbleY = by;
+        const g = this.svg.querySelector(`[data-id="${id}"]`);
+        if(!g) return;
+        g.setAttribute('transform', `translate(${bx},${by})`);
+        const line = g.querySelector('.bubble-line');
+        if(line) {
+            line.setAttribute('x2', dim.pageX - bx);
+            line.setAttribute('y2', dim.pageY - by);
+        }
+    },
+
+    /* ============================
+       BUBBLE INTERACTION
+       ============================ */
+    dragState: null,
+
+    onBubbleMouseDown(e) {
+        const g = e.target.closest('.bubble-group');
+        if(!g) return;
+        e.preventDefault(); e.stopPropagation();
+        const id = parseInt(g.dataset.id);
+        this.selectBubble(id);
+        const dim = this.dims.find(d => d.id === id);
+        if(!dim) return;
+        const pt = this.svgPoint(e);
+        this.dragState = { id, offsetX: pt.x - dim.bubbleX, offsetY: pt.y - dim.bubbleY };
+    },
+
+    onBubbleDragMove(e) {
+        if(!this.dragState) return;
+        const pt = this.svgPoint(e);
+        const nx = pt.x - this.dragState.offsetX;
+        const ny = pt.y - this.dragState.offsetY;
+        this.updateBubblePosition(this.dragState.id, nx, ny);
+    },
+
+    onBubbleDragEnd() { this.dragState = null; },
+
+    svgPoint(e) {
+        const pt = this.svg.createSVGPoint();
+        pt.x = e.clientX; pt.y = e.clientY;
+        const ctm = this.svg.getScreenCTM().inverse();
+        return pt.matrixTransform(ctm);
+    },
+
+    selectBubble(id) {
+        this.selectedBubbleId = id;
+        const dim = this.dims.find(d => d.id === id);
+        if(!dim) return;
+        document.getElementById('bubbleProps').style.display = '';
+        document.getElementById('bpNum').value = dim.num;
+        document.getElementById('bpVal').value = dim.nominal;
+        document.getElementById('bpUpper').value = dim.upperTol;
+        document.getElementById('bpLower').value = dim.lowerTol;
+        document.getElementById('bpType').value = dim.type;
+        document.getElementById('bpGDT').value = dim.gdt || '';
+        document.getElementById('bpColor').value = dim.color || '#4af0c0';
+        document.getElementById('bpNotes').value = dim.notes || '';
+
+        // Highlight in table
+        document.querySelectorAll('#dtBody tr').forEach(tr => tr.classList.remove('selected'));
+        const tr = document.querySelector(`#dtBody tr[data-id="${id}"]`);
+        if(tr) tr.classList.add('selected');
+    },
+
+    deselectBubble() {
+        this.selectedBubbleId = null;
+        document.getElementById('bubbleProps').style.display = 'none';
+        document.querySelectorAll('#dtBody tr').forEach(tr => tr.classList.remove('selected'));
+    },
+
+    updateSelectedBubble() {
+        if(this.selectedBubbleId === null) return;
+        const dim = this.dims.find(d => d.id === this.selectedBubbleId);
+        if(!dim) return;
+        dim.num = parseInt(document.getElementById('bpNum').value) || dim.num;
+        dim.nominal = document.getElementById('bpVal').value;
+        dim.upperTol = document.getElementById('bpUpper').value;
+        dim.lowerTol = document.getElementById('bpLower').value;
+        dim.type = document.getElementById('bpType').value;
+        dim.gdt = document.getElementById('bpGDT').value;
+        dim.color = document.getElementById('bpColor').value;
+        dim.notes = document.getElementById('bpNotes').value;
+
+        // Update bubble visual
+        const g = this.svg.querySelector(`[data-id="${dim.id}"]`);
+        if(g) {
+            g.querySelector('text').textContent = dim.num;
+            g.querySelector('.bubble-circle').setAttribute('stroke', dim.color);
+            g.querySelector('.bubble-line').setAttribute('stroke', dim.color);
+            g.querySelector('text').setAttribute('fill', dim.color);
+        }
+        this.renderTable();
+    },
+
+    deleteSelected() {
+        if(this.selectedBubbleId === null) return;
+        const id = this.selectedBubbleId;
+        this.dims = this.dims.filter(d => d.id !== id);
+        this.removeBubbleSVG(id);
+        this.deselectBubble();
+        this.renderTable();
+        this.toast('已删除');
+    },
+
+    /* ============================
+       PLACE BUBBLE (Manual)
+       ============================ */
+    placeBubbleAt(x, y) {
+        const dim = {
+            id: Date.now(),
+            num: this.nextBubbleNum++,
+            nominal: '',
+            upperTol: '',
+            lowerTol: '',
+            type: 'linear',
+            gdt: '',
+            measured: '',
+            result: '',
+            notes: '',
+            color: '#4af0c0',
+            page: this.page,
+            pageX: x,
+            pageY: y,
+            bubbleX: x + 35,
+            bubbleY: y - 35
+        };
+        this.dims.push(dim);
+        this.addBubbleSVG(dim);
+        this.renderTable();
+        this.selectBubble(dim.id);
+        this.toast(`气泡 #${dim.num} 已放置，请在右侧填写数值`);
+    },
+
+    /* ============================
+       DIMENSION TABLE
+       ============================ */
+    renderTable() {
+        const tbody = document.getElementById('dtBody');
+        const empty = document.getElementById('dtEmpty');
+        document.getElementById('dtCount').textContent = this.dims.length;
+        document.getElementById('stDims').textContent = '尺寸: ' + this.dims.length;
+
+        if(this.dims.length === 0) {
+            tbody.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+
+        tbody.innerHTML = this.dims.map(dim => {
+            const tolStr = dim.upperTol || dim.lowerTol ? `${dim.upperTol}/${dim.lowerTol}` : '—';
+            const typeLabels = {linear:'线性',diameter:'⌀直径',radius:'R半径',angle:'∠角度',gdt:'GD&T'};
+            const passStr = dim.measured ? (this.checkPass(dim) ? '<span style="color:var(--accent)">✓</span>' : '<span style="color:var(--danger)">✗</span>') : '—';
+            return `<tr data-id="${dim.id}" onclick="app.selectBubble(${dim.id})">
+                <td class="dim-num">${dim.num}</td>
+                <td class="dim-val" contenteditable="true" data-field="nominal">${dim.nominal}</td>
+                <td class="dim-tol" contenteditable="true" data-field="upperTol">${dim.upperTol||''}</td>
+                <td class="dim-tol" contenteditable="true" data-field="lowerTol">${dim.lowerTol||''}</td>
+                <td class="dim-type">${typeLabels[dim.type]||dim.type}</td>
+                <td class="dim-gdt">${dim.gdt||''}</td>
+                <td contenteditable="true" data-field="measured" style="color:var(--text)">${dim.measured||''}</td>
+                <td>${passStr}</td>
+                <td contenteditable="true" data-field="notes" style="color:var(--text2)">${dim.notes||''}</td>
+                <td><button class="btn btn-sm btn-danger" style="padding:2px 5px;font-size:9px" onclick="event.stopPropagation();app.deleteDim(${dim.id})">×</button></td>
+            </tr>`;
+        }).join('');
+
+        // Bind inline editing
+        tbody.querySelectorAll('td[contenteditable]').forEach(td => {
+            td.addEventListener('blur', () => {
+                const tr = td.closest('tr');
+                const id = parseInt(tr.dataset.id);
+                const field = td.dataset.field;
+                const dim = this.dims.find(d => d.id === id);
+                if(dim && field) {
+                    dim[field] = td.textContent.trim();
+                    if(field === 'nominal' || field === 'upperTol' || field === 'lowerTol') {
+                        // Update bubble if needed
+                    }
+                    this.renderTable();
+                }
+            });
+            td.addEventListener('keydown', e => {
+                if(e.key === 'Enter') { e.preventDefault(); td.blur(); }
+            });
+        });
+    },
+
+    checkPass(dim) {
+        if(!dim.measured || !dim.nominal) return false;
+        const nom = parseFloat(dim.nominal);
+        const meas = parseFloat(dim.measured);
+        if(isNaN(nom) || isNaN(meas)) return false;
+        let upper = 0, lower = 0;
+        if(dim.upperTol) upper = parseFloat(dim.upperTol.replace('+',''));
+        if(dim.lowerTol) lower = parseFloat(dim.lowerTol.replace('-',''));
+        if(dim.upperTol && dim.upperTol.includes('±')) { upper = parseFloat(dim.upperTol.replace('±','')); lower = -upper; }
+        return meas >= nom + lower && meas <= nom + upper;
+    },
+
+    addEmptyDimension() {
+        const dim = {
+            id: Date.now(),
+            num: this.nextBubbleNum++,
+            nominal: '', upperTol: '', lowerTol: '',
+            type: 'linear', gdt: '', measured: '', result: '', notes: '',
+            color: '#4af0c0', page: this.page,
+            pageX: 100, pageY: 100, bubbleX: 140, bubbleY: 60
+        };
+        this.dims.push(dim);
+        this.addBubbleSVG(dim);
+        this.renderTable();
+        this.selectBubble(dim.id);
+    },
+
+    deleteDim(id) {
+        this.dims = this.dims.filter(d => d.id !== id);
+        this.removeBubbleSVG(id);
+        if(this.selectedBubbleId === id) this.deselectBubble();
+        this.renderTable();
+    },
+
+    /* ============================
+       EXPORT
+       ============================ */
+    exportCSV() {
+        if(this.dims.length === 0) { this.toast('无数据可导出'); return; }
+        const pn = document.getElementById('infoPN').value;
+        const dwg = document.getElementById('infoDWG').value;
+        const rev = document.getElementById('infoREV').value;
+
+        let csv = '\uFEFF'; // BOM for Excel UTF-8
+        csv += `FAI 首件检验报告\n`;
+        csv += `零件号,${pn}\n图号,${dwg}\n版本,${rev}\n\n`;
+        csv += '序号,名义值,上偏差,下偏差,类型,GD&T,实测值,判定,备注\n';
+
+        for(const dim of this.dims) {
+            const pass = dim.measured ? (this.checkPass(dim) ? 'PASS' : 'FAIL') : '';
+            csv += `${dim.num},${dim.nominal},${dim.upperTol},${dim.lowerTol},${dim.type},${dim.gdt},${dim.measured},${pass},${dim.notes}\n`;
+        }
+
+        this.download(csv, `FAI_Report_${dwg||'export'}.csv`, 'text/csv;charset=utf-8');
+        this.toast('CSV 已导出');
+        this.log('导出 CSV', 'ok');
+    },
+
+    exportExcel() {
+        if(this.dims.length === 0) { this.toast('无数据可导出'); return; }
+        const pn = document.getElementById('infoPN').value;
+        const dwg = document.getElementById('infoDWG').value;
+        const rev = document.getElementById('infoREV').value;
+        const mat = document.getElementById('infoMAT').value;
+
+        const wb = XLSX.utils.book_new();
+
+        // Header data
+        const headerData = [
+            ['FAI 首件检验报告 / First Article Inspection Report'],
+            [],
+            ['零件号 Part No.', pn, '', '图号 DWG No.', dwg],
+            ['版本 Rev.', rev, '', '材料 Material', mat],
+            ['日期 Date', new Date().toLocaleDateString('zh-CN')],
+            [],
+            ['序号\nBalloon', '名义值\nNominal', '上偏差\nUpper Tol', '下偏差\nLower Tol', '类型\nType', 'GD&T', '实测值\nMeasured', '判定\nResult', '备注\nNotes']
+        ];
+
+        for(const dim of this.dims) {
+            const pass = dim.measured ? (this.checkPass(dim) ? 'PASS' : 'FAIL') : '';
+            headerData.push([dim.num, dim.nominal, dim.upperTol, dim.lowerTol, dim.type, dim.gdt, dim.measured, pass, dim.notes]);
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(headerData);
+
+        // Column widths
+        ws['!cols'] = [
+            {wch:8},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:12},{wch:8},{wch:15}
+        ];
+
+        // Merge title
+        ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:8}}];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'FAI Report');
+        XLSX.writeFile(wb, `FAI_Report_${dwg||'export'}.xlsx`);
+        this.toast('Excel 已导出');
+        this.log('导出 Excel', 'ok');
+    },
+
+    exportBubbleImage() {
+        if(!this.pdf && !this.isImage) { this.toast('请先加载图纸'); return; }
+        const fmt = document.getElementById('expImgFmt').value;
+        const scale = parseInt(document.getElementById('expImgScale').value);
+
+        // Create export canvas
+        const dpr = window.devicePixelRatio || 1;
+        const cw = parseInt(this.canvas.style.width);
+        const ch = parseInt(this.canvas.style.height);
+        const expCanvas = document.createElement('canvas');
+        expCanvas.width = cw * scale;
+        expCanvas.height = ch * scale;
+        const ec = expCanvas.getContext('2d');
+        ec.imageSmoothingEnabled = true;
+        ec.imageSmoothingQuality = 'high';
+
+        // Draw PDF/image
+        ec.drawImage(this.canvas, 0, 0, this.canvas.width, this.canvas.height, 0, 0, expCanvas.width, expCanvas.height);
+
+        // Draw bubbles
+        const s = scale; // scale factor from display to export
+        for(const dim of this.dims) {
+            if(dim.page && dim.page !== this.page) continue;
+            const bx = dim.bubbleX * s;
+            const by = dim.bubbleY * s;
+            const tx = dim.pageX * s;
+            const ty = dim.pageY * s;
+
+            // Leader line
+            ec.beginPath();
+            ec.moveTo(bx, by); ec.lineTo(tx, ty);
+            ec.strokeStyle = dim.color || '#4af0c0';
+            ec.lineWidth = 1.5 * s;
+            ec.setLineDash([4*s, 3*s]);
+            ec.stroke();
+            ec.setLineDash([]);
+
+            // Circle
+            ec.beginPath();
+            ec.arc(bx, by, 14*s, 0, Math.PI*2);
+            ec.fillStyle = 'rgba(20,23,31,0.92)';
+            ec.fill();
+            ec.strokeStyle = dim.color || '#4af0c0';
+            ec.lineWidth = 2*s;
+            ec.stroke();
+
+            // Number
+            ec.fillStyle = dim.color || '#4af0c0';
+            ec.font = `600 ${11*s}px 'JetBrains Mono', monospace`;
+            ec.textAlign = 'center';
+            ec.textBaseline = 'middle';
+            ec.fillText(dim.num.toString(), bx, by + 1*s);
+        }
+
+        // Download
+        const mimeType = fmt === 'jpeg' ? 'image/jpeg' : fmt === 'bmp' ? 'image/bmp' : 'image/png';
+        expCanvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `bubble_diagram.${fmt}`;
+            a.click(); URL.revokeObjectURL(url);
+        }, mimeType, 0.95);
+
+        this.toast('气泡图已导出');
+        this.log(`导出气泡图 (${fmt}, ${scale}x)`, 'ok');
+    },
+
+    download(content, filename, type) {
+        const blob = new Blob([content], {type});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        a.click(); URL.revokeObjectURL(url);
+    },
+
+    /* ============================
+       PROJECT SAVE/LOAD
+       ============================ */
+    saveProject() {
+        const data = {
+            version: '1.0',
+            date: new Date().toISOString(),
+            info: {
+                partNo: document.getElementById('infoPN').value,
+                dwgNo: document.getElementById('infoDWG').value,
+                rev: document.getElementById('infoREV').value,
+                material: document.getElementById('infoMAT').value
+            },
+            dims: this.dims,
+            nextBubbleNum: this.nextBubbleNum
+        };
+        const json = JSON.stringify(data, null, 2);
+        this.download(json, `FAI_Project_${data.info.dwgNo||'project'}.json`, 'application/json');
+        this.toast('项目已保存');
+        this.log('保存项目', 'ok');
+    },
+
+    async loadProjectFile(file) {
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            document.getElementById('infoPN').value = data.info?.partNo || '';
+            document.getElementById('infoDWG').value = data.info?.dwgNo || '';
+            document.getElementById('infoREV').value = data.info?.rev || '';
+            document.getElementById('infoMAT').value = data.info?.material || '';
+            this.dims = data.dims || [];
+            this.nextBubbleNum = data.nextBubbleNum || (this.dims.length + 1);
+            this.renderBubbles();
+            this.renderTable();
+            this.toast('项目已载入');
+            this.log(`载入项目: ${this.dims.length} 个尺寸`, 'ok');
+        } catch(err) {
+            this.toast('载入失败: ' + err.message);
+            this.log('载入失败: ' + err.message, 'err');
+        }
+    },
+
+    /* ============================
+       UI UTILITIES
+       ============================ */
+    log(msg, type='') {
+        const el = document.getElementById('logArea');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry ' + type;
+        const ts = new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        entry.textContent = `[${ts}] ${msg}`;
+        el.appendChild(entry);
+        el.scrollTop = el.scrollHeight;
+    },
+
+    setStatus(color, text) {
+        const dot = document.getElementById('statusDot');
+        dot.className = 'sdot ' + color;
+        document.getElementById('statusText').textContent = text;
+    },
+
+    updateStatusBar() {
+        document.getElementById('stPage').textContent = `页 ${this.page}/${this.total}`;
+        document.getElementById('stZoom').textContent = `缩放 ${Math.round(this.scale*100)}%`;
+        document.getElementById('stBubbles').textContent = '气泡: ' + this.dims.filter(d => !d.page || d.page === this.page).length;
+    },
+
+    toast(msg) {
+        const el = document.getElementById('toast');
+        el.textContent = msg;
+        el.classList.add('show');
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.classList.remove('show'), 2200);
+    }
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => app.init());
+
+})();
+</script>
+</body>
+</html>

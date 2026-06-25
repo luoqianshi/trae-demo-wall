@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>屏幕实时翻译 - 桌面模拟演示 (眼动预判版)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  overflow: hidden; height: 100vh;
+  user-select: none; background: #0078d4;
+}
+
+/* ===== 桌面 ===== */
+.desktop {
+  width: 100vw; height: calc(100vh - 48px);
+  background: url('https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=minimalist%20windows%2011%20desktop%20wallpaper%2C%20abstract%20gradient%20light%20blue%20to%20soft%20green%2C%20clean%20and%20modern&image_size=square_hd') center/cover no-repeat;
+  position: relative; overflow: hidden;
+}
+.desktop-icons {
+  position: absolute; top: 20px; left: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.desktop-icon {
+  display: flex; flex-direction: column; align-items: center;
+  width: 80px; padding: 10px 6px; border-radius: 6px;
+  cursor: pointer; transition: all 0.15s; text-align: center;
+}
+.desktop-icon:hover { background: rgba(255,255,255,0.3); }
+.desktop-icon:active { background: rgba(255,255,255,0.5); }
+.desktop-icon .icon-img {
+  width: 48px; height: 48px; font-size: 36px;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 4px;
+}
+.desktop-icon .icon-label {
+  font-size: 11px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  word-break: break-all; line-height: 1.3;
+}
+
+/* ===== 任务栏 ===== */
+.taskbar {
+  height: 48px; background: linear-gradient(180deg, #f0f0f0 0%, #d4d4d4 100%);
+  display: flex; align-items: center; padding: 0 8px;
+  border-top: 1px solid #e0e0e0; position: relative; z-index: 1000;
+}
+.taskbar .start-btn {
+  width: 40px; height: 40px; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer;
+}
+.taskbar .start-btn:hover { background: rgba(0,0,0,0.1); }
+.taskbar .task-item {
+  height: 36px; padding: 0 12px; margin: 0 2px;
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.7); border-radius: 4px;
+  font-size: 12px; cursor: pointer; border: 1px solid #ccc;
+}
+.taskbar .task-item:hover { background: rgba(255,255,255,0.9); }
+.taskbar .task-item.active { background: #fff; border-color: #999; }
+.taskbar .time { margin-left: auto; font-size: 11px; color: #333; padding: 0 8px; }
+.taskbar .mode-indicator {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-right: 8px;
+  background: #555; color: #fff; display: none;
+}
+.taskbar .mode-indicator.eye { background: #7b5; display: inline-block; }
+.taskbar .mode-indicator.pre { background: #2b5797; display: inline-block; }
+.taskbar .mode-indicator.overlay { background: #e65100; display: inline-block; }
+.taskbar .mode-indicator.game { background: #6a1b9a; display: inline-block; }
+
+/* ===== 悬浮球 ===== */
+.floating-ball {
+  position: absolute; width: 52px; height: 52px; z-index: 9999;
+  background: radial-gradient(circle at 35% 35%, #5b9bd5, #2b5797);
+  border-radius: 50%; cursor: grab; display: flex;
+  align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 0 0 3px rgba(255,255,255,0.2);
+  transition: transform 0.1s, box-shadow 0.15s;
+  font-size: 20px; color: #fff; font-weight: bold;
+}
+.floating-ball:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.floating-ball:active { cursor: grabbing; }
+.floating-ball .ball-text { font-size: 11px; text-align: center; line-height: 1.2; pointer-events: none; }
+
+/* ===== 悬浮球菜单 ===== */
+.ball-menu {
+  position: absolute; z-index: 10000;
+  background: rgba(255,255,255,0.97); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  padding: 8px 0; min-width: 220px; display: none;
+  backdrop-filter: blur(10px);
+}
+.ball-menu.show { display: block; }
+.ball-menu .menu-item {
+  padding: 10px 16px; cursor: pointer; font-size: 13px;
+  transition: background 0.15s; display: flex; align-items: center; gap: 10px; color: #333;
+}
+.ball-menu .menu-item:hover { background: #f0f0f0; }
+.ball-menu .menu-divider { height: 1px; background: #e0e0e0; margin: 4px 0; }
+.ball-menu .menu-item.mode-switch { font-weight: bold; color: #2b5797; }
+.ball-menu .menu-item.overlay-mode { font-weight: bold; color: #e65100; }
+.ball-menu .menu-item.eye-mode { font-weight: bold; color: #7b5; }
+.ball-menu .menu-item.game-mode { font-weight: bold; color: #6a1b9a; }
+.ball-menu .menu-item.danger { color: #d32f2f; }
+
+/* ===== 窗口 ===== */
+.window {
+  position: absolute; background: #fff; border-radius: 8px 8px 0 0;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3); min-width: 400px;
+  min-height: 300px; display: none; flex-direction: column;
+  overflow: hidden; z-index: 5000;
+}
+.window.open { display: flex; }
+.window .titlebar {
+  height: 36px; background: #fafafa; display: flex;
+  align-items: center; padding: 0 4px 0 12px;
+  border-bottom: 1px solid #e0e0e0; cursor: move;
+}
+.window .titlebar .title { font-size: 12px; color: #333; flex: 1; }
+.window .titlebar .btn {
+  width: 36px; height: 28px; border: none; background: none;
+  cursor: pointer; font-size: 14px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+.window .titlebar .btn:hover { background: #e0e0e0; }
+.window .titlebar .btn.close:hover { background: #e81123; color: #fff; }
+.window .titlebar .zoom-btn {
+  width: 30px; font-size: 11px; font-weight: normal;
+}
+.window .titlebar .zoom-indicator {
+  font-size: 11px; color: #888; margin: 0 4px; min-width: 36px; text-align: center;
+}
+.window .content {
+  flex: 1; padding: 16px; overflow-y: auto;
+  font-size: 14px; line-height: 1.8; color: #333;
+  transition: font-size 0.25s ease;
+}
+
+/* ===== 半透明背景覆盖翻译 ===== */
+.window .content .doc-line {
+  position: relative; padding: 6px 0; margin: 2px 0;
+  transition: padding 0.25s ease, margin 0.25s ease;
+}
+.window .content .doc-line .original-text {
+  position: relative; z-index: 1; padding: 4px 8px;
+}
+.window .content .doc-line .trans-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255, 235, 59, 0.25); border-radius: 6px;
+  z-index: 0; pointer-events: none;
+  animation: fadeIn 0.3s ease;
+}
+.window .content .doc-line .trans-overlay.pre {
+  background: rgba(76, 175, 80, 0.22);
+}
+.window .content .doc-line .trans-text {
+  position: relative; z-index: 2; font-size: 12px;
+  color: #bf360c; padding: 2px 8px; margin-top: -2px;
+  font-weight: 500; letter-spacing: 0.5px;
+  animation: fadeIn 0.3s ease;
+}
+.window .content .doc-line .trans-text.pre {
+  color: #1b5e20;
+}
+
+/* 眼动模式：注视区域高亮 */
+.window .content .doc-line.gaze-focused {
+  box-shadow: 0 0 0 2px rgba(43, 87, 151, 0.5), 0 0 12px rgba(43, 87, 151, 0.2);
+  border-radius: 6px; z-index: 10;
+}
+.window .content .doc-line.gaze-preview {
+  box-shadow: 0 0 0 1px dashed rgba(123, 187, 85, 0.7);
+  border-radius: 6px;
+}
+.window .content .doc-line.gaze-preview .trans-overlay {
+  background: rgba(123, 187, 85, 0.15);
+}
+.window .content .doc-line.gaze-preview .trans-text {
+  color: #2e7d32; font-style: italic;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===== 游戏/漫画模式样式 ===== */
+.window.game-mode { background: #1a1a2e; }
+.window.game-mode .titlebar { background: #16213e; border-bottom-color: #0f3460; }
+.window.game-mode .titlebar .title { color: #e94560; }
+.window.game-mode .content { background: #1a1a2e; color: #e0e0e0; }
+.window.game-mode .content .doc-line .original-text { color: #ccc; font-family: 'Consolas', 'Courier New', monospace; }
+.window.game-mode .content .doc-line .trans-overlay {
+  background: rgba(233, 69, 96, 0.15); border-radius: 4px;
+}
+.window.game-mode .content .doc-line .trans-text {
+  color: #e94560; font-family: 'Microsoft YaHei', sans-serif; font-size: 11px;
+  text-shadow: 0 0 6px rgba(233, 69, 96, 0.4);
+}
+/* 漫画竖排文字 */
+.window.game-mode .content .doc-line.vertical {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  min-height: 120px; display: inline-block; margin: 4px;
+  border-right: 1px solid rgba(233, 69, 96, 0.2);
+}
+.window.game-mode .content .doc-line.vertical .trans-overlay {
+  background: rgba(233, 69, 96, 0.12);
+}
+.window.game-mode .content .doc-line.vertical .trans-text {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  padding: 4px 2px; margin-left: 4px;
+}
+
+/* 半透明覆盖模式 - 更明显的覆盖效果 */
+.window.overlay-mode .content .doc-line .trans-overlay {
+  background: rgba(255, 235, 59, 0.35); border-radius: 4px;
+  box-shadow: 0 0 8px rgba(255, 235, 59, 0.15);
+}
+.window.overlay-mode .content .doc-line .trans-text {
+  color: #bf360c; font-weight: 600;
+  font-size: 13px; letter-spacing: 0.8px;
+}
+.window.overlay-mode .content .doc-line .original-text {
+  opacity: 0.5; filter: blur(0.5px);
+}
+
+/* ===== 眼动注视光标 ===== */
+.gaze-cursor {
+  position: fixed; width: 28px; height: 28px; z-index: 30000;
+  border: 2px solid rgba(43, 87, 151, 0.8);
+  border-radius: 50%; pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: gazePulse 1.5s infinite;
+  display: none;
+}
+.gaze-cursor::after {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 6px; height: 6px; background: #2b5797;
+  border-radius: 50%; transform: translate(-50%, -50%);
+}
+.gaze-cursor.active { display: block; }
+@keyframes gazePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(43,87,151,0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(43,87,151,0); }
+}
+
+/* ===== 通知弹窗 ===== */
+.notification-dialog {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: #fff; border-radius: 12px; box-shadow: 0 12px 48px rgba(0,0,0,0.35);
+  z-index: 20000; padding: 0; display: none; width: 420px; overflow: hidden;
+}
+.notification-dialog.show { display: block; }
+.notification-dialog .dialog-header {
+  background: #2b5797; color: #fff; padding: 14px 20px; font-size: 15px;
+  font-weight: bold; display: flex; align-items: center; gap: 10px;
+}
+.notification-dialog .dialog-body {
+  padding: 20px; font-size: 13px; line-height: 1.6; color: #555;
+}
+.notification-dialog .dialog-body .highlight { color: #2b5797; font-weight: bold; }
+.notification-dialog .dialog-body .benefits {
+  margin: 10px 0; padding: 10px; background: #f0f7ff; border-radius: 8px; font-size: 12px;
+}
+.notification-dialog .dialog-body .benefits li {
+  list-style: '✓ '; padding: 3px 0; color: #2e7d32; margin-left: 16px;
+}
+.notification-dialog .dialog-footer {
+  display: flex; gap: 10px; justify-content: flex-end;
+  padding: 12px 20px; background: #fafafa; border-top: 1px solid #eee;
+}
+.notification-dialog .dialog-footer button {
+  padding: 8px 20px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.notification-dialog .dialog-footer .btn-primary {
+  background: #2b5797; color: #fff; font-weight: bold;
+}
+.notification-dialog .dialog-footer .btn-primary:hover { background: #1e3f6f; }
+.notification-dialog .dialog-footer .btn-secondary {
+  background: #f0f0f0; color: #555;
+}
+.notification-dialog .dialog-footer .btn-secondary:hover { background: #e0e0e0; }
+
+/* 进度条 */
+.progress-bar {
+  width: 100%; height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; margin: 10px 0;
+}
+.progress-bar .fill {
+  height: 100%; background: linear-gradient(90deg, #2b5797, #4caf50);
+  border-radius: 3px; transition: width 0.3s; width: 0%;
+}
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 80px; right: 20px; z-index: 30000;
+  background: #333; color: #fff; padding: 12px 20px; border-radius: 8px;
+  font-size: 13px; display: none; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  animation: slideUp 0.3s ease;
+}
+.toast.show { display: block; }
+.toast.success { background: #2e7d32; }
+.toast.info { background: #2b5797; }
+.toast.warn { background: #e65100; }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* 眼动缩放提示条 */
+.zoom-prompt {
+  position: absolute; top: 36px; left: 0; right: 0; z-index: 6000;
+  background: linear-gradient(135deg, #2b5797, #4caf50);
+  color: #fff; padding: 8px 16px; font-size: 12px;
+  display: none; align-items: center; justify-content: space-between;
+  animation: slideDown 0.3s ease;
+}
+.zoom-prompt.show { display: flex; }
+.zoom-prompt .prompt-text { display: flex; align-items: center; gap: 8px; }
+.zoom-prompt .prompt-btn {
+  background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 4px; padding: 4px 12px; font-size: 11px; cursor: pointer;
+  margin-left: 6px; transition: background 0.2s;
+}
+.zoom-prompt .prompt-btn:hover { background: rgba(255,255,255,0.35); }
+.zoom-prompt .prompt-close {
+  background: none; border: none; color: rgba(255,255,255,0.7);
+  cursor: pointer; font-size: 14px; padding: 2px 6px;
+}
+.zoom-prompt .prompt-close:hover { color: #fff; }
+@keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* 术语词典面板 */
+.term-panel {
+  position: fixed; top: 50%; right: 20px; transform: translateY(-50%);
+  background: rgba(255,255,255,0.95); border-radius: 12px;
+  padding: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  font-size: 12px; z-index: 15000; display: none; width: 220px;
+}
+.term-panel.show { display: block; }
+.term-panel h4 { color: #2b5797; margin-bottom: 8px; font-size: 13px; }
+.term-panel .term-item {
+  display: flex; justify-content: space-between; padding: 4px 0;
+  border-bottom: 1px solid #eee; font-size: 11px;
+}
+
+/* 眼动状态面板 */
+.eye-panel {
+  position: fixed; top: 60px; right: 20px; z-index: 15000;
+  background: rgba(0,0,0,0.8); border-radius: 10px;
+  padding: 12px 16px; font-size: 11px; color: #fff;
+  display: none; min-width: 180px;
+}
+.eye-panel.show { display: block; }
+.eye-panel .eye-status { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.eye-panel .dot { width: 8px; height: 8px; border-radius: 50%; }
+.eye-panel .dot.green { background: #4caf50; }
+.eye-panel .dot.yellow { background: #ff9800; }
+.eye-panel .dot.red { background: #f44336; }
+
+/* 遮罩层 */
+.overlay-mask {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.3); z-index: 19999; display: none;
+}
+.overlay-mask.show { display: block; }
+</style>
+</head>
+<body>
+
+<!-- 桌面 -->
+<div class="desktop" id="desktop">
+  <div class="desktop-icons">
+    <div class="desktop-icon" ondblclick="openDocument()" title="双击打开文档">
+      <div class="icon-img">📄</div>
+      <div class="icon-label">项目计划书<br>Project_Plan.docx</div>
+    </div>
+    <div class="desktop-icon" title="此电脑">
+      <div class="icon-img">💻</div>
+      <div class="icon-label">此电脑</div>
+    </div>
+    <div class="desktop-icon" title="回收站">
+      <div class="icon-img">🗑️</div>
+      <div class="icon-label">回收站</div>
+    </div>
+  </div>
+
+  <!-- 悬浮球 -->
+  <div class="floating-ball" id="floatingBall" style="right: 30px; top: 200px;">
+    <div class="ball-text">翻译</div>
+  </div>
+
+  <!-- 悬浮球菜单 -->
+  <div class="ball-menu" id="ballMenu">
+    <div class="menu-item" onclick="toggleTranslation()">
+      <span>👁️</span> <span id="toggleText">隐藏翻译</span>
+    </div>
+    <div class="menu-item mode-switch" onclick="toggleMode()">
+      <span>🔄</span> <span id="modeText">AI模式</span>
+    </div>
+    <div class="menu-item overlay-mode" onclick="toggleOverlayMode()">
+      <span>🎨</span> <span id="overlayText">半透明覆盖模式</span>
+    </div>
+    <div class="menu-item eye-mode" onclick="toggleEyeTracking()">
+      <span>👀</span> <span id="eyeText">开启眼动预判</span>
+    </div>
+    <div class="menu-item" onclick="selectROI()">
+      <span>✂️</span> <span>框选翻译区域</span>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-item game-mode" onclick="toggleGameMode()">
+      <span>🎮</span> <span id="gameText">游戏/漫画模式</span>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-item" onclick="showTerminology()">
+      <span>📚</span> <span>术语词库</span>
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-item danger" onclick="exitApp()">
+      <span>❌</span> <span>退出</span>
+    </div>
+  </div>
+
+  <!-- 文档窗口 -->
+  <div class="window" id="docWindow" style="left: 120px; top: 60px; width: 620px; height: 520px;">
+    <div class="titlebar" id="docTitlebar">
+      <span class="title">📄 Project_Plan.docx - 屏幕实时翻译</span>
+      <span class="zoom-indicator" id="zoomIndicator">100%</span>
+      <button class="btn zoom-btn" onclick="zoomOut()" title="缩小">🔍−</button>
+      <button class="btn zoom-btn" onclick="zoomIn()" title="放大">🔍+</button>
+      <button class="btn" onclick="minimizeWindow()">─</button>
+      <button class="btn close" onclick="closeWindow()">✕</button>
+    </div>
+    <div class="zoom-prompt" id="zoomPrompt">
+      <span class="prompt-text">👀 眼动预判模式下，放大文档可提升视线追踪精度</span>
+      <span>
+        <button class="prompt-btn" onclick="zoomIn(); dismissZoomPrompt();">🔍+ 放大</button>
+        <button class="prompt-close" onclick="dismissZoomPrompt()">✕</button>
+      </span>
+    </div>
+    <div class="content" id="docContent"></div>
+  </div>
+
+  <!-- 术语面板 -->
+  <div class="term-panel" id="termPanel">
+    <h4>📚 术语词库</h4>
+    <div class="term-item"><span>HP</span><span>→ 生命值</span></div>
+    <div class="term-item"><span>MP</span><span>→ 魔法值</span></div>
+    <div class="term-item"><span>ATK</span><span>→ 攻击力</span></div>
+    <div class="term-item"><span>Skill</span><span>→ 技能</span></div>
+    <div class="term-item"><span>Quest</span><span>→ 任务</span></div>
+    <div class="term-item"><span>Boss</span><span>→ Boss</span></div>
+    <div class="term-item"><span>Dungeon</span><span>→ 地下城</span></div>
+    <div class="term-item"><span>Buff</span><span>→ 增益</span></div>
+    <div class="term-item"><span>Debuff</span><span>→ 减益</span></div>
+    <div class="term-item"><span>Critical</span><span>→ 暴击</span></div>
+  </div>
+
+  <!-- 眼动状态面板 -->
+  <div class="eye-panel" id="eyePanel">
+    <div class="eye-status"><span class="dot green"></span> 摄像头: 已连接</div>
+    <div class="eye-status"><span class="dot green"></span> 瞳孔: 已锁定</div>
+    <div class="eye-status" id="gazeStatus"><span class="dot yellow"></span> 注视: 第3行</div>
+    <div class="eye-status" id="predictStatus"><span class="dot green"></span> 预判: 第4-5行</div>
+    <div style="margin-top:6px;color:#aaa;font-size:10px;">预判提前量: 250ms | 延迟: 0ms</div>
+  </div>
+</div>
+
+<!-- 通知弹窗 -->
+<div class="overlay-mask" id="overlayMask"></div>
+<div class="notification-dialog" id="notificationDialog">
+  <div class="dialog-header"><span>🔍</span> 检测到文档打开</div>
+  <div class="dialog-body">
+    <p>正在打开 <span class="highlight">Project_Plan.docx</span></p>
+    <p>是否提前读取文档并完成 <span class="highlight">全文预翻译</span>？</p>
+    <div class="benefits">
+      <ul>
+        <li>纯文本解析，无 OCR 错字，准确率 100%</li>
+        <li>文档打开前翻译完毕，浏览全程零延迟</li>
+        <li>一次翻译永久缓存，重复打开零等待</li>
+        <li>独立进程，不依赖 Office 组件</li>
+      </ul>
+    </div>
+    <div id="progressContainer" style="display:none;">
+      <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+      <span id="progressText" style="font-size:11px;color:#999;">正在解析文档...</span>
+    </div>
+  </div>
+  <div class="dialog-footer">
+    <button class="btn-secondary" onclick="cancelPreTranslate()">取消（使用OCR模式）</button>
+    <button class="btn-primary" onclick="confirmPreTranslate()">✓ 开始预翻译</button>
+  </div>
+</div>
+
+<!-- 眼动注视光标 -->
+<div class="gaze-cursor" id="gazeCursor"></div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- 任务栏 -->
+<div class="taskbar">
+  <div class="start-btn">🪟</div>
+  <div class="task-item" id="taskItem" style="display:none;">📄 Project_Plan.docx</div>
+  <span class="mode-indicator" id="modeIndicator"></span>
+  <div class="time" id="clock">12:00</div>
+</div>
+
+<script>
+// ===== 模拟文档数据 =====
+const docContent = [
+  "Project Plan: AI Translation System",
+  "1. Introduction",
+  "This document outlines the development plan for the next-generation AI-powered real-time screen translation system. The project aims to provide seamless translation for games, documents, and web content.",
+  "2. Core Features",
+  "The system will support real-time OCR recognition using PP-OCRv4, a lightweight deep learning model optimized for text detection and recognition. It will provide instant translation using both local offline models and cloud APIs.",
+  "3. Document Pre-Translation Module",
+  "When a user opens a Word document, the system will intercept the file open event and offer to pre-translate the entire document. This eliminates the need for real-time OCR during document browsing.",
+  "4. Translation Engine",
+  "The local translation engine uses NLLB-Tiny INT8 quantized model for fast offline translation. For complex sentences, the system can optionally use cloud APIs like DeepL for higher quality results.",
+  "5. Terminology System",
+  "A built-in terminology database ensures consistent translation of game-specific terms such as HP, MP, Skill, Quest, Boss, and Dungeon. Users can also import custom term lists.",
+  "6. Performance Optimization",
+  "The system employs frame differencing to skip unchanged frames, ByteTrack-style text tracking to avoid full-image OCR, and DXGI desktop duplication for GPU-accelerated screen capture.",
+  "7. Conclusion",
+  "This project represents a significant advancement in real-time translation technology. By combining document pre-translation, GPU-accelerated OCR, and intelligent caching, we deliver a seamless translation experience."
+];
+
+const translations = [
+  "项目计划：AI翻译系统",
+  "1. 引言",
+  "本文档概述了下一代AI驱动的实时屏幕翻译系统的开发计划。该项目旨在为游戏、文档和网页内容提供无缝翻译。",
+  "2. 核心功能",
+  "该系统将使用PP-OCRv4进行实时OCR识别，这是一个针对文本检测和识别优化的轻量级深度学习模型。它将使用本地离线模型和云端API提供即时翻译。",
+  "3. 文档预翻译模块",
+  "当用户打开Word文档时，系统将拦截文件打开事件，并提供全文预翻译选项。这消除了文档浏览期间对实时OCR的需求。",
+  "4. 翻译引擎",
+  "本地翻译引擎使用NLLB-Tiny INT8量化模型进行快速离线翻译。对于复杂句子，系统可以选择使用DeepL等云端API以获得更高质量的结果。",
+  "5. 术语系统",
+  "内置术语数据库确保游戏特定术语（如HP、MP、技能、任务、Boss、地下城）的一致翻译。用户还可以导入自定义术语列表。",
+  "6. 性能优化",
+  "系统采用帧差分跳过未变化的帧，使用ByteTrack风格文字跟踪避免全图OCR，并使用DXGI桌面复制实现GPU加速屏幕捕获。",
+  "7. 结论",
+  "该项目代表了实时翻译技术的重大进步。通过结合文档预翻译、GPU加速OCR和智能缓存，我们提供无缝的翻译体验。"
+];
+
+// ===== 状态 =====
+let translationVisible = true;
+let aiMode = false;
+let eyeTracking = false;
+let overlayMode = true;  // 默认开启半透明覆盖模式
+let gameMode = false;
+let translationCache = {};
+let documentOpen = false;
+let gazeLineIndex = 0;
+let gazeInterval = null;
+let previewLines = new Set();
+let currentZoom = 100;  // 当前缩放百分比
+let zoomPromptDismissed = false;  // 缩放提示是否已关闭
+
+// ===== 悬浮球拖动 =====
+const ball = document.getElementById('floatingBall');
+const ballMenu = document.getElementById('ballMenu');
+const desktop = document.getElementById('desktop');
+let isDragging = false, ballOffsetX = 0, ballOffsetY = 0;
+
+ball.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  isDragging = true;
+  const rect = ball.getBoundingClientRect();
+  ballOffsetX = e.clientX - rect.left;
+  ballOffsetY = e.clientY - rect.top;
+  ball.style.cursor = 'grabbing';
+  hideMenu();
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const dr = desktop.getBoundingClientRect();
+  let x = e.clientX - dr.left - ballOffsetX;
+  let y = e.clientY - dr.top - ballOffsetY;
+  x = Math.max(0, Math.min(x, dr.width - 52));
+  y = Math.max(0, Math.min(y, dr.height - 52));
+  ball.style.left = x + 'px'; ball.style.top = y + 'px'; ball.style.right = 'auto';
+});
+
+document.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; ball.style.cursor = 'grab'; } });
+ball.addEventListener('click', (e) => { if (!isDragging) { e.stopPropagation(); toggleMenu(); } });
+
+// ===== 菜单 =====
+function toggleMenu() {
+  const br = ball.getBoundingClientRect(), dr = desktop.getBoundingClientRect();
+  ballMenu.style.left = Math.max(5, br.left - dr.left - 200) + 'px';
+  ballMenu.style.top = Math.min(br.bottom - dr.top, dr.height - 400) + 'px';
+  ballMenu.classList.toggle('show');
+}
+function hideMenu() { ballMenu.classList.remove('show'); }
+document.addEventListener('click', (e) => { if (!ballMenu.contains(e.target) && e.target !== ball) hideMenu(); });
+
+// ===== 翻译开关 =====
+function toggleTranslation() {
+  translationVisible = !translationVisible;
+  document.getElementById('toggleText').textContent = translationVisible ? '隐藏翻译' : '显示翻译';
+  document.querySelectorAll('.trans-overlay,.trans-text').forEach(el => el.style.display = translationVisible ? '' : 'none');
+  showToast(translationVisible ? '翻译已显示' : '翻译已隐藏', 'info');
+  hideMenu();
+}
+
+// ===== 模式切换 =====
+function toggleMode() {
+  aiMode = !aiMode;
+  document.getElementById('modeText').textContent = aiMode ? '离线模式' : 'AI模式';
+  showToast(aiMode ? '已切换至AI模式（云端翻译）' : '已切换至离线模式（本地词典）', 'info');
+  hideMenu();
+}
+
+// ===== 眼动追踪 =====
+function toggleEyeTracking() {
+  eyeTracking = !eyeTracking;
+  const eyeText = document.getElementById('eyeText');
+  const gazeCursor = document.getElementById('gazeCursor');
+  const eyePanel = document.getElementById('eyePanel');
+  const modeIndicator = document.getElementById('modeIndicator');
+
+  if (eyeTracking) {
+    eyeText.textContent = '关闭眼动预判';
+    gazeCursor.classList.add('active');
+    eyePanel.classList.add('show');
+    modeIndicator.textContent = '眼动预判';
+    modeIndicator.className = 'mode-indicator eye';
+    startGazeSimulation();
+    showToast('眼动预判模式已开启 | 模拟注视→预判→预翻译', 'success');
+    showZoomPromptIfNeeded();
+  } else {
+    eyeText.textContent = '开启眼动预判';
+    gazeCursor.classList.remove('active');
+    eyePanel.classList.remove('show');
+    modeIndicator.className = 'mode-indicator';
+    stopGazeSimulation();
+    clearAllGazeHighlights();
+    showToast('眼动预判模式已关闭', 'info');
+  }
+  hideMenu();
+}
+
+function startGazeSimulation() {
+  if (!documentOpen) return;
+  const content = document.getElementById('docContent');
+  const lines = content.querySelectorAll('.doc-line');
+  if (lines.length === 0) return;
+
+  gazeLineIndex = 0;
+  previewLines.clear();
+
+  // 模拟眼球从上到下逐行扫描
+  gazeInterval = setInterval(() => {
+    if (!eyeTracking || !documentOpen) return;
+    
+    // 清除所有高亮
+    clearAllGazeHighlights();
+    previewLines.clear();
+
+    // 当前注视行
+    if (gazeLineIndex < lines.length) {
+      lines[gazeLineIndex].classList.add('gaze-focused');
+      updateGazeCursor(lines[gazeLineIndex]);
+    }
+
+    // 预判下一行（模拟250ms提前量）
+    const nextIdx = gazeLineIndex + 1;
+    if (nextIdx < lines.length) {
+      lines[nextIdx].classList.add('gaze-preview');
+      previewLines.add(nextIdx);
+      // 模拟预翻译：为预判行添加翻译（如果还没有）
+      const existingTrans = lines[nextIdx].querySelector('.trans-text');
+      if (!existingTrans) {
+        const transText = translationCache[docContent[nextIdx]] || translations[nextIdx] || '';
+        const overlay = document.createElement('div');
+        overlay.className = 'trans-overlay pre';
+        lines[nextIdx].appendChild(overlay);
+        const textEl = document.createElement('div');
+        textEl.className = 'trans-text pre';
+        textEl.textContent = transText;
+        lines[nextIdx].appendChild(textEl);
+      }
+    }
+
+    // 更新状态面板
+    document.getElementById('gazeStatus').innerHTML = `<span class="dot yellow"></span> 注视: 第${gazeLineIndex + 1}行`;
+    document.getElementById('predictStatus').innerHTML = `<span class="dot green"></span> 预判: 第${Math.min(nextIdx + 1, lines.length)}行`;
+
+    // 移动注视光标
+    gazeLineIndex++;
+    if (gazeLineIndex >= lines.length) {
+      gazeLineIndex = 0;
+      clearAllGazeHighlights();
+      previewLines.clear();
+    }
+  }, 800);
+}
+
+function stopGazeSimulation() {
+  if (gazeInterval) { clearInterval(gazeInterval); gazeInterval = null; }
+  clearAllGazeHighlights();
+}
+
+// ===== 半透明覆盖模式切换 =====
+function toggleOverlayMode() {
+  overlayMode = !overlayMode;
+  const overlayText = document.getElementById('overlayText');
+  const docWindow = document.getElementById('docWindow');
+  if (overlayMode) {
+    overlayText.textContent = '半透明覆盖模式';
+    docWindow.classList.add('overlay-mode');
+    showToast('已开启半透明覆盖模式 | 原文模糊+译文高亮覆盖', 'success');
+  } else {
+    overlayText.textContent = '标准显示模式';
+    docWindow.classList.remove('overlay-mode');
+    showToast('已切换为标准显示模式', 'info');
+  }
+  hideMenu();
+}
+
+// ===== 游戏/漫画模式切换 =====
+function toggleGameMode() {
+  gameMode = !gameMode;
+  const gameText = document.getElementById('gameText');
+  const docWindow = document.getElementById('docWindow');
+  const modeIndicator = document.getElementById('modeIndicator');
+  if (gameMode) {
+    gameText.textContent = '退出游戏/漫画模式';
+    docWindow.classList.add('game-mode');
+    docWindow.classList.remove('overlay-mode');
+    modeIndicator.textContent = '游戏模式';
+    modeIndicator.className = 'mode-indicator game';
+    // 更新标题栏为游戏风格
+    document.querySelector('#docWindow .titlebar .title').textContent = '🎮 Game UI - 实时翻译';
+    // 部分行切换为竖排显示（模拟漫画）
+    if (documentOpen) {
+      const lines = document.querySelectorAll('.doc-line');
+      lines.forEach((line, i) => {
+        if (i % 4 === 0 && i > 0) line.classList.add('vertical');
+        else line.classList.remove('vertical');
+      });
+    }
+    showToast('游戏/漫画模式已开启 | 暗色主题 + 竖排文字支持', 'success');
+  } else {
+    gameText.textContent = '游戏/漫画模式';
+    docWindow.classList.remove('game-mode');
+    if (overlayMode) docWindow.classList.add('overlay-mode');
+    modeIndicator.textContent = documentOpen ? (overlayMode ? '半透明覆盖' : 'OCR') : '';
+    modeIndicator.className = documentOpen ? 'mode-indicator ' + (overlayMode ? 'overlay' : '') : 'mode-indicator';
+    document.querySelector('#docWindow .titlebar .title').textContent = '📄 Project_Plan.docx - 屏幕实时翻译';
+    document.querySelectorAll('.doc-line.vertical').forEach(l => l.classList.remove('vertical'));
+    showToast('已退出游戏/漫画模式', 'info');
+  }
+  hideMenu();
+}
+
+// ===== 缩放功能 =====
+function zoomIn() {
+  currentZoom = Math.min(200, currentZoom + 25);
+  applyZoom();
+  showToast(`已放大至 ${currentZoom}%`, 'info');
+}
+
+function zoomOut() {
+  currentZoom = Math.max(50, currentZoom - 25);
+  applyZoom();
+  showToast(`已缩小至 ${currentZoom}%`, 'info');
+}
+
+function applyZoom() {
+  const content = document.getElementById('docContent');
+  const indicator = document.getElementById('zoomIndicator');
+  if (!content || !indicator) return;
+  const baseFontSize = 14 * (currentZoom / 100);
+  const basePadding = 6 * (currentZoom / 100);
+  content.style.fontSize = baseFontSize + 'px';
+  content.style.lineHeight = (1.8 * currentZoom / 100).toFixed(1);
+  document.querySelectorAll('.doc-line').forEach(l => {
+    l.style.padding = basePadding + 'px 0';
+    l.style.margin = (2 * currentZoom / 100) + 'px 0';
+  });
+  indicator.textContent = currentZoom + '%';
+}
+
+function dismissZoomPrompt() {
+  zoomPromptDismissed = true;
+  document.getElementById('zoomPrompt').classList.remove('show');
+}
+
+// ===== 眼动追踪缩放提示 =====
+function showZoomPromptIfNeeded() {
+  if (eyeTracking && documentOpen && !zoomPromptDismissed) {
+    document.getElementById('zoomPrompt').classList.add('show');
+    // 5秒后自动消失
+    setTimeout(() => {
+      if (document.getElementById('zoomPrompt').classList.contains('show')) {
+        document.getElementById('zoomPrompt').classList.remove('show');
+      }
+    }, 8000);
+  }
+}
+
+function clearAllGazeHighlights() {
+  document.querySelectorAll('.doc-line').forEach(l => {
+    l.classList.remove('gaze-focused', 'gaze-preview');
+  });
+}
+
+function updateGazeCursor(lineEl) {
+  const gazeCursor = document.getElementById('gazeCursor');
+  const rect = lineEl.getBoundingClientRect();
+  gazeCursor.style.left = (rect.left + 20) + 'px';
+  gazeCursor.style.top = (rect.top + rect.height / 2) + 'px';
+}
+
+// ===== ROI选择 =====
+function selectROI() {
+  hideMenu();
+  showToast('请用鼠标框选翻译区域（演示模式）', 'info');
+  desktop.style.cursor = 'crosshair';
+  setTimeout(() => { desktop.style.cursor = ''; showToast('区域已选择', 'success'); }, 2000);
+}
+
+// ===== 术语词库 =====
+function showTerminology() {
+  hideMenu();
+  document.getElementById('termPanel').classList.toggle('show');
+}
+
+// ===== 退出 =====
+function exitApp() {
+  hideMenu();
+  if (confirm('确定要退出屏幕实时翻译吗？')) {
+    stopGazeSimulation();
+    showToast('正在退出...', 'info');
+    setTimeout(() => document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:24px;color:#999;">程序已退出</div>', 500);
+  }
+}
+
+// ===== Toast =====
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg; toast.className = 'toast ' + type + ' show';
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// ===== 打开文档 =====
+function openDocument() {
+  if (documentOpen) return;
+  showNotification();
+}
+
+// ===== 通知弹窗 =====
+function showNotification() {
+  document.getElementById('overlayMask').classList.add('show');
+  document.getElementById('notificationDialog').classList.add('show');
+  document.getElementById('progressContainer').style.display = 'none';
+}
+function hideNotification() {
+  document.getElementById('overlayMask').classList.remove('show');
+  document.getElementById('notificationDialog').classList.remove('show');
+}
+
+// ===== 确认预翻译 =====
+function confirmPreTranslate() {
+  const pc = document.getElementById('progressContainer');
+  const pf = document.getElementById('progressFill');
+  const pt = document.getElementById('progressText');
+  pc.style.display = 'block';
+
+  const steps = [
+    { p: 10, text: '正在读取文档文件...' },
+    { p: 25, text: '解析 XML 段落结构...' },
+    { p: 40, text: '提取纯文本段落 (第 1-3 段)...' },
+    { p: 55, text: '流式翻译中 (第 4-6 段)...' },
+    { p: 70, text: '术语词库替换中...' },
+    { p: 85, text: '写入本地缓存数据库...' },
+    { p: 95, text: '生成原文-译文索引表...' },
+    { p: 100, text: '预翻译完成！' },
+  ];
+
+  let stepIdx = 0;
+  const iv = setInterval(() => {
+    if (stepIdx < steps.length) {
+      pf.style.width = steps[stepIdx].p + '%';
+      pt.textContent = steps[stepIdx].text;
+      stepIdx++;
+    } else {
+      clearInterval(iv);
+      docContent.forEach((t, i) => { translationCache[t] = translations[i] || ''; });
+      setTimeout(() => { hideNotification(); openDocWindow(true); }, 300);
+    }
+  }, 300);
+}
+
+// ===== 取消预翻译 =====
+function cancelPreTranslate() {
+  hideNotification();
+  showToast('已取消预翻译，将使用OCR实时翻译模式', 'info');
+  setTimeout(() => { openDocWindow(false); }, 500);
+}
+
+// ===== 打开文档窗口 =====
+function openDocWindow(preTranslated) {
+  documentOpen = true;
+  const win = document.getElementById('docWindow');
+  const content = document.getElementById('docContent');
+  const taskItem = document.getElementById('taskItem');
+  const modeIndicator = document.getElementById('modeIndicator');
+
+  win.classList.add('open');
+  // 应用当前模式
+  if (overlayMode) win.classList.add('overlay-mode');
+  if (gameMode) win.classList.add('game-mode');
+  taskItem.style.display = 'flex';
+  taskItem.classList.add('active');
+
+  if (preTranslated) {
+    modeIndicator.textContent = overlayMode ? '半透明覆盖' : '预翻译';
+    modeIndicator.className = overlayMode ? 'mode-indicator overlay' : 'mode-indicator pre';
+    showToast('预翻译模式：全文翻译已就绪，零延迟！', 'success');
+
+    content.innerHTML = docContent.map((text, i) => `
+      <div class="doc-line" id="line${i}">
+        <div class="trans-overlay pre"></div>
+        <div class="original-text">${text}</div>
+        <div class="trans-text pre">${translationCache[text] || '...'}</div>
+      </div>
+    `).join('');
+
+    if (eyeTracking) startGazeSimulation();
+  } else {
+    modeIndicator.textContent = 'OCR';
+    modeIndicator.className = 'mode-indicator';
+    showToast('OCR模式：正在逐行识别翻译...', 'info');
+
+    content.innerHTML = docContent.map((text, i) => `
+      <div class="doc-line" id="line${i}">
+        <div class="original-text">${text}</div>
+      </div>
+    `).join('');
+
+    simulateOCRTranslation(content);
+  }
+  showZoomPromptIfNeeded();
+}
+
+// ===== 模拟OCR翻译 =====
+function simulateOCRTranslation(content) {
+  let index = 0;
+  const iv = setInterval(() => {
+    if (index >= docContent.length) { clearInterval(iv); showToast('OCR翻译完成', 'success'); return; }
+    const lineEl = document.getElementById('line' + index);
+    if (lineEl) {
+      const overlay = document.createElement('div');
+      overlay.className = 'trans-overlay';
+      lineEl.appendChild(overlay);
+      const textEl = document.createElement('div');
+      textEl.className = 'trans-text';
+      const rawTrans = translationCache[docContent[index]] || translations[index] || '';
+      if (Math.random() < 0.15) {
+        textEl.textContent = '[OCR模糊] ' + rawTrans.slice(0, 8) + '...';
+        textEl.style.color = '#e65100';
+      } else {
+        textEl.textContent = rawTrans;
+      }
+      textEl.style.animation = 'fadeIn 0.3s ease';
+      lineEl.appendChild(textEl);
+    }
+    index++;
+  }, 400 + Math.random() * 600);
+}
+
+// ===== 窗口拖动 =====
+let winDragging = false, winOffX = 0, winOffY = 0;
+document.getElementById('docTitlebar').addEventListener('mousedown', (e) => {
+  if (e.target.tagName === 'BUTTON') return;
+  winDragging = true;
+  const win = document.getElementById('docWindow');
+  winOffX = e.clientX - win.offsetLeft;
+  winOffY = e.clientY - win.offsetTop;
+  win.style.cursor = 'move';
+});
+document.addEventListener('mousemove', (e) => {
+  if (!winDragging) return;
+  const win = document.getElementById('docWindow');
+  win.style.left = (e.clientX - winOffX) + 'px';
+  win.style.top = (e.clientY - winOffY) + 'px';
+});
+document.addEventListener('mouseup', () => { winDragging = false; document.getElementById('docWindow').style.cursor = ''; });
+
+// ===== 窗口操作 =====
+function minimizeWindow() {
+  document.getElementById('docWindow').style.display = 'none';
+  document.getElementById('taskItem').classList.remove('active');
+}
+function closeWindow() {
+  stopGazeSimulation();
+  document.getElementById('docWindow').classList.remove('open');
+  document.getElementById('taskItem').style.display = 'none';
+  document.getElementById('modeIndicator').className = 'mode-indicator';
+  documentOpen = false;
+  showToast('文档已关闭，缓存已保留', 'info');
+}
+document.getElementById('taskItem').addEventListener('click', () => {
+  const win = document.getElementById('docWindow');
+  if (win.style.display === 'none') { win.style.display = 'flex'; document.getElementById('taskItem').classList.add('active'); }
+});
+
+// ===== 时钟 =====
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+}
+setInterval(updateClock, 1000);
+updateClock();
+setTimeout(() => showToast('屏幕实时翻译已就绪 | 双击桌面文档开始体验 | 悬浮球菜单可开启眼动预判', 'info'), 800);
+</script>
+</body>
+</html>

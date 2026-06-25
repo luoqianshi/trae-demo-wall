@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>弹幕叠加层 - Live Danmaku (Demo)</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+    --bg: #0a0a0f; --bg2: #111118; --bg3: #1a1a25; --bg4: #222230;
+    --border: #2a2a38; --text: #e8e8f0; --text2: #8888a0; --text3: #555568;
+    --accent: #fb7299; --accent2: #00b5e5; --accent3: #00d68f;
+    --warn: #ffaa00; --danger: #eb4b4b; --radius: 8px; --radius-sm: 5px;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; user-select: none;
+}
+#titlebar {
+    height: 36px; display: flex; align-items: center; background: var(--bg2);
+    border-bottom: 1px solid var(--border); padding: 0 12px;
+}
+.tb-left { display: flex; align-items: center; gap: 8px; flex:1; }
+.tb-logo { color: var(--accent); font-size: 16px; }
+.tb-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.tb-ver { font-size: 10px; color: var(--text3); background: var(--bg3); padding: 1px 6px; border-radius: 10px; }
+.tb-center { display: flex; align-items: center; gap: 6px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; }
+.dot.gray { background: #555; } .dot.green { background: #00d68f; }
+#status-text { font-size: 11px; color: var(--text2); }
+.tb-right { display: flex; gap: 2px; }
+.tb-btn {
+    width: 32px; height: 26px; border: none; background: transparent;
+    color: var(--text2); font-size: 12px; cursor: pointer; border-radius: 4px;
+}
+.tb-btn:hover { background: var(--bg3); color: var(--text); }
+.tb-close:hover { background: var(--danger); color: #fff; }
+#main-layout { display: flex; height: calc(100vh - 36px); }
+#preview-panel {
+    flex: 1; display: flex; flex-direction: column;
+    border-right: 1px solid var(--border); min-width: 0;
+}
+#control-panel { width: 300px; overflow-y: auto; background: var(--bg2); }
+#control-panel::-webkit-scrollbar { width: 4px; }
+#control-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+#preview-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 14px; font-size: 12px; color: var(--text2); border-bottom: 1px solid var(--border);
+}
+#preview-area {
+    flex: 1; position: relative; background: #000;
+    display: flex; align-items: center; justify-content: center;
+}
+#preview-video { display: none; width: 100%; height: 100%; object-fit: contain; }
+#preview-canvas { display: none; position: absolute; top:0; left:0; width:100%; height:100%; }
+#preview-danmaku { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none; display: none; }
+#no-source { text-align: center; color: var(--text3); }
+.ns-icon { font-size: 40px; margin-bottom: 8px; }
+#no-source p { font-size: 13px; }
+#preview-stats {
+    display: flex; gap: 20px; padding: 8px 14px;
+    border-top: 1px solid var(--border); font-size: 12px; color: var(--text2);
+}
+#preview-stats b { color: var(--text); margin-left: 2px; }
+.chip {
+    padding: 3px 10px; border: 1px solid var(--accent2); background: rgba(0,181,229,0.1);
+    color: var(--accent2); border-radius: 20px; font-size: 11px; cursor: pointer;
+}
+.chip:hover { background: rgba(0,181,229,0.2); }
+.panel-section { padding: 12px; border-bottom: 1px solid var(--border); }
+.section-head {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; margin-bottom: 10px;
+}
+.section-icon { font-size: 15px; }
+.overlay-controls { display: flex; gap: 6px; margin-bottom: 8px; }
+.btn-prim {
+    flex: 1; padding: 10px 8px; border: 2px solid var(--border);
+    background: var(--bg3); border-radius: var(--radius); cursor: pointer;
+    display: flex; align-items: center; gap: 8px; color: var(--text2); transition: all 0.2s;
+}
+.btn-prim:hover { border-color: var(--accent2); }
+.btn-prim.active { border-color: var(--accent2); background: rgba(0,181,229,0.08); }
+.btn-prim.active .btn-label b { color: var(--accent2); }
+.btn-prim .btn-icon { font-size: 22px; }
+.btn-label { text-align: left; }
+.btn-label b { display: block; font-size: 12px; color: var(--text); }
+.btn-label small { font-size: 10px; color: var(--text3); }
+.overlay-extra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toggle-row { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text2); cursor: pointer; }
+.toggle-row input { accent-color: var(--accent2); }
+.btn-mini {
+    padding: 3px 10px; border: 1px solid var(--border); background: var(--bg3);
+    color: var(--text2); border-radius: var(--radius-sm); font-size: 11px; cursor: pointer;
+}
+.btn-mini:hover { border-color: var(--accent2); color: var(--text); }
+.setting-row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
+.setting-row label { font-size: 11px; color: var(--text2); min-width: 48px; }
+.setting-row label span { color: var(--accent2); }
+.setting-row input[type="range"] { flex: 1; accent-color: var(--accent2); height: 4px; }
+.input-sm {
+    flex: 1; padding: 5px 8px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-size: 11px; outline: none;
+}
+.input-sm:focus { border-color: var(--accent2); }
+select.input-sm { cursor: pointer; }
+.segmented { display: flex; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.seg-btn {
+    padding: 4px 14px; border: none; background: var(--bg3); color: var(--text2);
+    font-size: 11px; cursor: pointer; border-right: 1px solid var(--border);
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn.active { background: var(--accent2); color: #fff; }
+.color-palette { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.color-dot {
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent; transition: all 0.15s;
+}
+.color-dot:hover { transform: scale(1.15); }
+.color-dot.active { border-color: #fff; box-shadow: 0 0 8px currentColor; }
+.ai-presets { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.preset-btn {
+    padding: 3px 10px; border: 1px solid var(--border); background: var(--bg3);
+    color: var(--text2); border-radius: var(--radius-sm); font-size: 10px; cursor: pointer; transition: all 0.15s;
+}
+.preset-btn:hover { border-color: var(--accent2); color: var(--accent2); background: rgba(0,181,229,0.08); }
+.badge { font-size: 9px; padding: 1px 6px; border-radius: 8px; margin-left: auto; }
+.badge.off { background: var(--border); color: var(--text3); }
+.badge.on { background: rgba(0,214,143,0.15); color: var(--accent3); }
+.btn-full {
+    width: 100%; padding: 8px; border: none; border-radius: var(--radius);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    background: var(--accent2); color: #fff; transition: opacity 0.15s;
+}
+.btn-full:hover { opacity: 0.85; }
+.btn-full.running { background: var(--danger); }
+.ai-log { margin-top: 6px; font-size: 10px; color: var(--text3); min-height: 14px; }
+.ai-stats {
+    margin-top: 8px; padding: 8px; background: var(--bg3);
+    border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.ai-stats .stat-row {
+    display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11px;
+}
+.ai-stats .stat-row:not(:last-child) { border-bottom: 1px solid rgba(42,42,56,0.5); }
+.ai-stats .stat-label { color: var(--text2); }
+.ai-stats .stat-value { color: var(--accent2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; }
+.qa-btn {
+    padding: 6px; border: 1px solid var(--border); background: var(--bg3);
+    color: var(--text2); border-radius: var(--radius-sm); font-size: 11px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.qa-btn:hover { border-color: var(--accent); color: var(--text); background: var(--bg4); }
+.chat-input-row { display: flex; gap: 4px; }
+.chat-input-row input {
+    flex: 1; padding: 5px 8px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-size: 11px; outline: none;
+}
+.chat-input-row input:focus { border-color: var(--accent2); }
+.chat-input-row button {
+    padding: 5px 12px; border: none; background: var(--accent); color: #fff;
+    border-radius: var(--radius-sm); font-size: 11px; cursor: pointer;
+}
+.chat-input-row button:hover { opacity: 0.85; }
+#source-modal {
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.7); z-index: 200; display: flex;
+    align-items: center; justify-content: center;
+}
+.modal-box {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+    width: 500px; max-height: 70vh; overflow: hidden; display: flex; flex-direction: column;
+}
+.modal-head {
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+}
+.modal-head span { font-weight: 600; font-size: 14px; }
+.modal-head button {
+    background: none; border: none; color: var(--text2); font-size: 18px; cursor: pointer;
+}
+.source-list {
+    flex:1; overflow-y: auto; padding: 8px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.source-item {
+    padding: 8px; border: 1px solid var(--border); border-radius: var(--radius);
+    cursor: pointer; text-align: center; transition: all 0.15s;
+}
+.source-item:hover { border-color: var(--accent2); background: rgba(0,181,229,0.05); }
+.source-item img { width: 100%; border-radius: 4px; margin-bottom: 4px; }
+.source-item .src-name { font-size: 11px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-item .src-type { font-size: 9px; color: var(--text3); }
+
+/* 叠加层 */
+#overlay-container {
+    position: fixed; top:0; left:0; width:100vw; height:100vh;
+    z-index: 9999; background: transparent; display: none;
+}
+#overlay-container.active { display: block; pointer-events: none; }
+#overlay-canvas {
+    position: fixed; top:0; left:0; width:100vw; height:100vh;
+    pointer-events: none; z-index: 10000;
+}
+#overlay-passthrough {
+    position: fixed; top:0; left:0; width:100vw; height:100vh;
+    z-index: 9998; pointer-events: none;
+}
+#msg-panel{
+    position:fixed;top:12px;right:12px;z-index:10001;
+    width:260px;max-height:60vh;
+    background:rgba(10,10,18,0.82);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:10px;overflow:hidden;
+    display:flex;flex-direction:column;
+    font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+    backdrop-filter:blur(6px);
+    transition:opacity 0.4s, transform 0.3s;
+    pointer-events: auto;
+}
+#msg-panel.collapsed{opacity:0;transform:translateX(20px);pointer-events:none;}
+#msg-panel.dragging{cursor:grabbing;}
+.panel-head{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.06);
+    cursor:move;user-select:none;
+    font-size:11px;color:rgba(255,255,255,0.5);
+}
+.panel-head .count{color:rgba(0,214,143,0.8);font-weight:600;}
+.panel-head button{
+    background:none;border:none;color:rgba(255,255,255,0.35);cursor:pointer;
+    font-size:13px;padding:0 2px;line-height:1;
+}
+.panel-head button:hover{color:#fff;}
+.panel-head button.locked{color:#00d68f;}
+.panel-body{
+    flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0;
+    max-height:calc(60vh - 30px);
+}
+.panel-body::-webkit-scrollbar{width:3px;}
+.panel-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
+.msg-row{
+    display:flex;align-items:flex-start;gap:5px;padding:3px 10px;
+    font-size:11px;line-height:1.5;color:rgba(255,255,255,0.7);
+    animation:rowIn 0.25s ease-out;
+}
+@keyframes rowIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+.msg-row.fade-out{opacity:0.25;}
+.msg-row .icon{flex-shrink:0;font-size:12px;width:16px;text-align:center;}
+.msg-row .info{flex:1;min-width:0;word-break:break-all;}
+.msg-row .uname{font-weight:600;color:rgba(0,181,229,0.85);}
+.msg-row.gift .uname{color:rgba(255,230,0,0.85);}
+.msg-row.sc{
+    background:linear-gradient(135deg,rgba(255,140,0,0.12),rgba(255,184,0,0.08),rgba(255,230,0,0.05));
+    border-left:3px solid #ff8c00;
+    border-radius:0 6px 6px 0;
+    padding:5px 10px;
+    margin:2px 6px;
+    animation:scGlow 2s ease-in-out infinite;
+}
+@keyframes scGlow{
+    0%,100%{border-left-color:#ff8c00;box-shadow:inset 0 0 8px rgba(255,140,0,0.1)}
+    50%{border-left-color:#ffe600;box-shadow:inset 0 0 16px rgba(255,230,0,0.2)}
+}
+.msg-row.sc .uname{color:#ffe600;font-size:12px;}
+.msg-row.sc .amount{color:#ff8c00;font-weight:700;margin:0 4px;}
+.msg-row.sc .info{color:rgba(255,255,255,0.9);}
+.msg-row.join{color:rgba(255,255,255,0.4);font-size:10px;}
+.msg-row .time{font-size:9px;color:rgba(255,255,255,0.2);flex-shrink:0;}
+.panel-body:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.2);}
+#sc-drawer{
+    position:fixed; right:16px; top:50%;
+    transform:translateY(-50%);
+    z-index:10002; display:flex; flex-direction:column;
+    gap:10px; pointer-events: auto;
+    font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+}
+.sc-card{
+    background:rgba(20,20,30,0.92);
+    border-radius:10px; border-left:4px solid #ff5252;
+    padding:12px 14px; width:280px;
+    animation:scSlideIn 0.4s cubic-bezier(0.16,1,0.3,1);
+    pointer-events:auto;
+    box-shadow:0 4px 24px rgba(0,0,0,0.5);
+    position:relative; overflow:hidden;
+}
+.sc-card::after{
+    content:''; position:absolute; top:0;left:0;right:0;bottom:0;
+    background:linear-gradient(135deg,transparent 60%,rgba(255,82,82,0.08));
+    pointer-events:none;
+}
+.sc-card.removing{ animation:scSlideOut 0.35s ease-in forwards; }
+@keyframes scSlideIn{ from{transform:translateX(120%);opacity:0} to{transform:translateX(0);opacity:1} }
+@keyframes scSlideOut{ from{transform:translateX(0);opacity:1} to{transform:translateX(120%);opacity:0} }
+.sc-card .sc-price{
+    font-size:28px; font-weight:800;
+    background:linear-gradient(135deg,#ff5252,#ff8a80);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.sc-card .sc-price::before{content:'¥'; font-size:18px;}
+.sc-card .sc-user{ font-size:14px; font-weight:600; color:#ffe0e0; margin-bottom:4px; }
+.sc-card .sc-user .avatar{font-size:20px; margin-right:4px; vertical-align:middle;}
+.sc-card .sc-msg{ font-size:15px; color:#fff; line-height:1.4; margin-top:2px; word-break:break-all; }
+.sc-card .sc-bar{
+    position:absolute; bottom:0; left:0; height:3px;
+    background:#ff5252; border-radius:0 0 0 10px; transition:width 0.1s linear;
+}
+/* 弹幕预览框 */
+#danmaku-preview-box {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    height: 160px; overflow: hidden; display: flex; flex-direction: column;
+}
+#danmaku-preview-list {
+    flex: 1; overflow-y: auto; padding: 6px 8px;
+}
+#danmaku-preview-list::-webkit-scrollbar { width: 3px; }
+#danmaku-preview-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.danmaku-preview-item {
+    padding: 4px 6px; font-size: 11px; line-height: 1.4;
+    color: var(--text2); border-bottom: 1px solid rgba(42,42,56,0.3);
+    animation: previewIn 0.3s ease-out;
+    word-break: break-all;
+}
+.danmaku-preview-item:last-child { border-bottom: none; }
+.danmaku-preview-item .dp-user { color: var(--accent2); font-weight: 600; margin-right: 4px; }
+.danmaku-preview-item .dp-text { color: var(--text); }
+.danmaku-preview-item.dp-gift { color: var(--warn); }
+.danmaku-preview-item.dp-sc { color: #ffe600; background: rgba(255,140,0,0.08); border-radius: 4px; }
+#danmaku-preview-empty {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--text3); font-size: 12px;
+}
+@keyframes previewIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+    <div class="tb-left">
+        <span class="tb-logo">◆</span>
+        <span class="tb-title">弹幕叠加层</span>
+        <span class="tb-ver">v1.0 Demo</span>
+    </div>
+    <div class="tb-center">
+        <span id="status-dot" class="dot gray"></span>
+        <span id="status-text">就绪</span>
+    </div>
+    <div class="tb-right">
+        <button class="tb-btn" id="btn-min" title="最小化">─</button>
+        <button class="tb-btn" id="btn-max" title="最大化">□</button>
+        <button class="tb-btn tb-close" id="btn-close" title="关闭">✕</button>
+    </div>
+</div>
+
+<div id="main-layout">
+    <div id="preview-panel">
+        <div id="preview-header">
+            <span>画面预览</span>
+            <div id="source-controls">
+                <button class="chip" id="btn-select-source">选择窗口</button>
+            </div>
+        </div>
+        <div id="preview-area">
+            <video id="preview-video" autoplay muted></video>
+            <canvas id="preview-canvas"></canvas>
+            <div id="no-source">
+                <div class="ns-icon">📺</div>
+                <p>点击「选择窗口」捕获屏幕画面</p>
+            </div>
+            <canvas id="preview-danmaku"></canvas>
+        </div>
+        <div id="preview-stats">
+            <span>👁️ <b id="stat-viewers">0</b></span>
+            <span>💬 <b id="stat-danmaku">0</b></span>
+            <span>🎤 <b id="stat-audio">--</b></span>
+        </div>
+    </div>
+
+    <div id="control-panel">
+        <div class="panel-section">
+            <div class="section-head"><span class="section-icon">🪟</span><span>叠加层控制</span></div>
+            <div class="overlay-controls">
+                <button id="btn-preview-mode" class="btn-prim active">
+                    <span class="btn-icon">👁️</span>
+                    <div class="btn-label"><b>预览模式</b><small>窗口化调试</small></div>
+                </button>
+                <button id="btn-overlay-mode" class="btn-prim">
+                    <span class="btn-icon">🚀</span>
+                    <div class="btn-label"><b>启动叠加层</b><small>全屏透明弹幕</small></div>
+                </button>
+            </div>
+            <div class="overlay-extra">
+                <label class="toggle-row"><input type="checkbox" id="chk-passthrough" checked><span>鼠标穿透</span></label>
+                <button class="btn-mini" id="btn-test-danmaku">测试弹幕</button>
+                <button class="btn-mini" id="btn-clear-overlay">清空</button>
+            </div>
+        </div>
+
+        <!-- 弹幕预览 -->
+        <div class="panel-section">
+            <div class="section-head"><span class="section-icon">📺</span><span>弹幕预览</span></div>
+            <div id="danmaku-preview-box">
+                <div id="danmaku-preview-list"></div>
+                <div id="danmaku-preview-empty">暂无弹幕</div>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <div class="section-head"><span class="section-icon">💬</span><span>弹幕设置</span></div>
+            <div class="setting-row">
+                <label>密度</label>
+                <div class="segmented">
+                    <button class="seg-btn" data-value="low">低</button>
+                    <button class="seg-btn active" data-value="medium">中</button>
+                    <button class="seg-btn" data-value="high">高</button>
+                </div>
+            </div>
+            <div class="setting-row"><label>速度 <span id="speed-val">7</span></label><input type="range" id="speed-slider" min="3" max="18" value="7" step="1"></div>
+            <div class="setting-row"><label>字号 <span id="size-val">20</span></label><input type="range" id="size-slider" min="14" max="32" value="20" step="1"></div>
+            <div class="setting-row"><label>透明度 <span id="opacity-val">85%</span></label><input type="range" id="opacity-slider" min="30" max="100" value="85" step="5"></div>
+            <div class="color-palette" id="color-palette">
+                <span class="color-dot active" data-color="#ffffff" style="background:#fff"></span>
+                <span class="color-dot" data-color="#ffe600" style="background:#ffe600"></span>
+                <span class="color-dot" data-color="#00ff88" style="background:#00ff88"></span>
+                <span class="color-dot" data-color="#00bfff" style="background:#00bfff"></span>
+                <span class="color-dot" data-color="#ff69b4" style="background:#ff69b4"></span>
+                <span class="color-dot" data-color="#ff4444" style="background:#ff4444"></span>
+                <span class="color-dot" data-color="#b366ff" style="background:#b366ff"></span>
+                <span class="color-dot" data-color="#ff8c00" style="background:#ff8c00"></span>
+                <span class="color-dot" data-color="random" style="background:linear-gradient(135deg,#f00,#0f0,#00f)"></span>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <div class="section-head">
+                <span class="section-icon">🤖</span><span>AI 智能弹幕</span>
+                <span id="ai-badge" class="badge off">OFF</span>
+            </div>
+            <div class="setting-row"><label>API 地址</label><input type="text" id="ai-base-url" placeholder="https://api.openai.com/v1" class="input-sm"></div>
+            <div class="ai-presets">
+                <button class="preset-btn" data-url="https://api.openai.com/v1" data-model="gpt-4o">OpenAI</button>
+                <button class="preset-btn" data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+                <button class="preset-btn" data-url="https://api.xiaomimimo.com/v1" data-model="mimo-v2.5">小米MiMo</button>
+                <button class="preset-btn" data-url="https://api.moonshot.cn/v1" data-model="moonshot-v1-8k-vision-preview">Kimi</button>
+                <button class="preset-btn" data-url="https://dashscope.aliyuncs.com/compatible-mode/v1" data-model="qwen-vl-max">通义千问</button>
+            </div>
+            <div class="setting-row"><label>API Key</label><input type="password" id="ai-key" placeholder="sk-..." class="input-sm"></div>
+            <div class="setting-row"><label>模型</label><input type="text" id="ai-model" value="gpt-4o" class="input-sm"></div>
+            <div class="setting-row">
+                <label>频率</label>
+                <select id="ai-interval" class="input-sm">
+                    <option value="5">5秒</option><option value="10" selected>10秒</option>
+                    <option value="15">15秒</option><option value="30">30秒</option><option value="60">60秒</option>
+                </select>
+            </div>
+            <button id="btn-ai-toggle" class="btn-full">开启 AI 弹幕</button>
+            <div id="ai-log" class="ai-log"></div>
+            <div id="ai-stats" class="ai-stats" style="display:none">
+                <div class="stat-row"><span class="stat-label">⏱️ 运行时间</span><span class="stat-value" id="stat-runtime">00:00</span></div>
+                <div class="stat-row"><span class="stat-label">📊 调用次数</span><span class="stat-value" id="stat-calls">0</span></div>
+                <div class="stat-row"><span class="stat-label">📥 输入 Token</span><span class="stat-value" id="stat-prompt">0</span></div>
+                <div class="stat-row"><span class="stat-label">📤 输出 Token</span><span class="stat-value" id="stat-completion">0</span></div>
+                <div class="stat-row"><span class="stat-label">💰 总 Token</span><span class="stat-value" id="stat-total">0</span></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<div id="overlay-container">
+    <canvas id="overlay-canvas"></canvas>
+    <div id="overlay-passthrough"></div>
+    <div id="sc-drawer"></div>
+    <div id="msg-panel">
+        <div class="panel-head" id="panel-drag-handle">
+            <span>直播间消息 · <span class="count" id="msg-count">0</span></span>
+            <div><button id="btn-lock" title="锁定面板">🔓</button><button id="btn-panel-toggle" title="折叠">─</button></div>
+        </div>
+        <div class="panel-body" id="msg-list"></div>
+    </div>
+</div>
+
+<script src="demo-app.js"></script>
+</body>
+</html>

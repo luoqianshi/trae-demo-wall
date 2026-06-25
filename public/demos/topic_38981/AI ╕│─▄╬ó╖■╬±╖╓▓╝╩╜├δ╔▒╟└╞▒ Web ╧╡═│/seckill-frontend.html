@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI秒杀系统 - 用户抢购</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
+        .login-page { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-box { background: white; padding: 50px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 420px; text-align: center; }
+        .login-box h1 { font-size: 2rem; margin-bottom: 10px; background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .login-box p { color: #64748b; margin-bottom: 30px; }
+        .login-box .form-group { margin-bottom: 20px; text-align: left; }
+        .login-box label { display: block; margin-bottom: 8px; color: #475569; font-weight: 500; }
+        .login-box input { width: 100%; padding: 14px 16px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 1rem; transition: border-color 0.3s; }
+        .login-box input:focus { outline: none; border-color: #667eea; }
+        .login-box button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 10px; color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.2s; margin-top: 10px; }
+        .login-box button:hover { transform: translateY(-2px); }
+        .login-box .error { color: #ef4444; margin-top: 15px; font-size: 0.9rem; }
+        .login-box .register-link { margin-top: 20px; color: #64748b; }
+        .login-box .register-link a { color: #667eea; text-decoration: none; }
+
+        .main-page { display: none; }
+        .main-page.active { display: block; }
+        .header { background: white; border-radius: 16px; padding: 20px 30px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .header .logo { font-size: 1.4rem; font-weight: 700; background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header .user-info { display: flex; align-items: center; gap: 20px; }
+        .header .user-info span { color: #475569; font-weight: 500; }
+        .header .user-info .logout { padding: 8px 20px; background: #f87171; color: white; border-radius: 8px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s; }
+        .header .user-info .logout:hover { background: #ef4444; }
+        .header .filter-select { padding: 10px 15px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 0.9rem; cursor: pointer; outline: none; }
+        .header .filter-select:focus { border-color: #667eea; }
+
+        .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
+        .product-card { background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); transition: transform 0.3s, box-shadow 0.3s; }
+        .product-card:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,0,0,0.15); }
+        .product-card .cover { height: 200px; background: linear-gradient(135deg, #e2e8f0, #cbd5e1); position: relative; overflow: hidden; }
+        .product-card .cover img { width: 100%; height: 100%; object-fit: cover; }
+        .product-card .cover .type-badge { position: absolute; top: 15px; left: 15px; padding: 5px 12px; background: rgba(102, 126, 234, 0.9); color: white; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+        .product-card .cover .status-badge { position: absolute; top: 15px; right: 15px; padding: 5px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 500; }
+        .product-card .cover .status-badge.active { background: rgba(34, 197, 94, 0.9); color: white; }
+        .product-card .cover .status-badge.inactive { background: rgba(100, 116, 139, 0.9); color: white; }
+        .product-card .cover .status-badge.soldout { background: rgba(239, 68, 68, 0.9); color: white; }
+
+        .product-card .info { padding: 20px; }
+        .product-card .info h3 { font-size: 1.2rem; margin-bottom: 10px; color: #1e293b; }
+        .product-card .info .price { font-size: 1.8rem; font-weight: 700; color: #ef4444; margin-bottom: 15px; }
+        .product-card .info .desc { color: #64748b; font-size: 0.9rem; margin-bottom: 15px; line-height: 1.5; }
+        .product-card .info .stock { color: #22c55e; font-weight: 500; margin-bottom: 15px; }
+        .product-card .info .stock.low { color: #f97316; }
+        .product-card .info .stock.empty { color: #ef4444; }
+
+        .countdown { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .countdown .time-box { 
+            background: linear-gradient(135deg, #1e293b, #334155); 
+            color: white; 
+            width: 70px; 
+            height: 70px; 
+            border-radius: 12px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        .countdown .time-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        .countdown .time-box .num { 
+            font-size: 1.8rem; 
+            font-weight: 700; 
+            text-shadow: 0 2px 10px rgba(102, 126, 234, 0.5);
+        }
+        .countdown .time-box .label { 
+            font-size: 0.7rem; 
+            color: #94a3b8; 
+            margin-top: 2px;
+        }
+        .countdown .time-box.flip {
+            animation: flipAnimation 0.5s ease;
+        }
+        @keyframes flipAnimation {
+            0% { transform: rotateX(0deg); }
+            50% { transform: rotateX(-90deg); opacity: 0.5; }
+            100% { transform: rotateX(0deg); }
+        }
+        .countdown .soon { 
+            color: #f97316; 
+            font-size: 0.85rem; 
+            text-align: center; 
+            animation: pulseText 1s infinite;
+        }
+        @keyframes pulseText {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .countdown .ended { color: #ef4444; font-size: 0.85rem; text-align: center; }
+        .countdown .urgent .time-box {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            animation: urgentPulse 0.5s infinite;
+        }
+        @keyframes urgentPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        .countdown .urgent .time-box .num {
+            color: #fff;
+            text-shadow: 0 2px 10px rgba(239, 68, 68, 0.8);
+        }
+
+        .seckill-active-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            animation: badgePulse 1.5s infinite;
+        }
+        @keyframes badgePulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(249, 115, 22, 0); }
+        }
+
+        .product-card .info .buy-btn { width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .product-card .info .buy-btn.active { background: linear-gradient(135deg, #f97316, #ea580c); color: white; }
+        .product-card .info .buy-btn.active:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(249, 115, 22, 0.4); }
+        .product-card .info .buy-btn.disabled { background: #cbd5e1; color: #64748b; cursor: not-allowed; }
+        .product-card .info .buy-btn.soldout { background: #ef4444; color: white; cursor: not-allowed; }
+        .product-card .info .buy-btn.orderd { background: #22c55e; color: white; cursor: not-allowed; }
+
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: white; padding: 40px; border-radius: 20px; width: 400px; text-align: center; animation: modalIn 0.3s ease; }
+        @keyframes modalIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .modal .icon { font-size: 4rem; margin-bottom: 20px; }
+        .modal.success .icon { color: #22c55e; }
+        .modal.error .icon { color: #ef4444; }
+        .modal h3 { font-size: 1.4rem; margin-bottom: 10px; color: #1e293b; }
+        .modal p { color: #64748b; margin-bottom: 25px; }
+        .modal .btn { padding: 12px 30px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; border: none; transition: transform 0.2s; }
+        .modal .btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .modal .btn-primary:hover { transform: translateY(-2px); }
+
+        .captcha-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1001; }
+        .captcha-modal.active { display: flex; }
+        .captcha-box { background: white; padding: 30px; border-radius: 16px; width: 350px; text-align: center; }
+        .captcha-box h3 { margin-bottom: 20px; color: #1e293b; }
+        .captcha-box .captcha-img { width: 120px; height: 40px; margin: 0 auto 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s; }
+        .captcha-box .captcha-img:hover { transform: scale(1.05); }
+        .captcha-box input { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1rem; margin-bottom: 15px; text-align: center; letter-spacing: 5px; }
+        .captcha-box input:focus { outline: none; border-color: #667eea; }
+        .captcha-box .btn-group { display: flex; gap: 10px; }
+        .captcha-box .btn-group button { flex: 1; padding: 12px; border-radius: 8px; font-size: 0.9rem; cursor: pointer; border: none; }
+        .captcha-box .btn-cancel { background: #e2e8f0; color: #475569; }
+        .captcha-box .btn-confirm { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .captcha-box .refresh-btn { color: #64748b; font-size: 0.85rem; margin-bottom: 15px; cursor: pointer; }
+        .captcha-box .refresh-btn:hover { color: #667eea; }
+
+        .live-indicator { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; background: rgba(34, 197, 94, 0.2); border-radius: 20px; margin-left: 10px; }
+        .live-indicator .dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .live-indicator span { color: #22c55e; font-size: 0.8rem; }
+
+        .order-link { color: #667eea; text-decoration: none; padding: 8px 16px; border-radius: 6px; background: rgba(102, 126, 234, 0.1); margin-right: 10px; transition: all 0.3s; }
+        .order-link:hover { background: rgba(102, 126, 234, 0.2); }
+
+        .stock-flash { animation: stockFlash 0.5s ease; }
+        @keyframes stockFlash { 0% { background: rgba(249, 115, 22, 0.3); } 100% { background: transparent; } }
+
+        .empty-state { text-align: center; padding: 60px; background: white; border-radius: 16px; }
+        .empty-state .icon { font-size: 4rem; margin-bottom: 20px; color: #cbd5e1; }
+        .empty-state p { color: #64748b; }
+
+        @media (max-width: 768px) {
+            .header { flex-direction: column; gap: 15px; text-align: center; }
+            .products-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-page" id="loginPage">
+        <div class="login-box">
+            <h1>🎯 AI秒杀系统</h1>
+            <p>限时抢购，公平公正</p>
+            <div class="form-group">
+                <label>用户名</label>
+                <input type="text" id="loginUsername" placeholder="请输入用户名">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码">
+            </div>
+            <button onclick="handleLogin()">登录</button>
+            <div class="error" id="loginError"></div>
+            <div class="register-link">
+                还没有账号？<a href="#" onclick="showRegister()">立即注册</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-page" id="mainPage">
+        <div class="header">
+            <div class="logo">🎯 AI秒杀系统</div>
+            <div class="user-info">
+                <select class="filter-select" id="productFilter" onchange="handleFilterChange()">
+                    <option value="all">全部商品</option>
+                    <option value="normal">普通商品</option>
+                    <option value="ticket">演唱会门票</option>
+                </select>
+                <a href="order-list.html" class="order-link">我的订单</a>
+                <span id="userName">用户</span>
+                <div class="logout" onclick="handleLogout()">退出</div>
+            </div>
+        </div>
+
+        <div class="products-grid" id="productsGrid"></div>
+    </div>
+
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal" id="resultModalContent">
+            <div class="icon" id="modalIcon">🎉</div>
+            <h3 id="modalTitle">操作成功</h3>
+            <p id="modalMessage">恭喜您，操作成功！</p>
+            <button class="btn btn-primary" onclick="closeModal()">确定</button>
+        </div>
+    </div>
+
+    <div class="captcha-modal" id="captchaModal">
+        <div class="captcha-box">
+            <h3>🔒 请输入验证码</h3>
+            <img class="captcha-img" id="captchaImg" src="" alt="验证码" onclick="refreshCaptcha()">
+            <div class="refresh-btn" onclick="refreshCaptcha()">🔄 点击刷新验证码</div>
+            <input type="text" id="captchaInput" placeholder="请输入验证码" maxlength="4">
+            <div class="btn-group">
+                <button class="btn-cancel" onclick="closeCaptchaModal()">取消</button>
+                <button class="btn-confirm" onclick="confirmCaptcha()">确认抢购</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let token = localStorage.getItem('seckill_token');
+        let userInfo = null;
+        let products = [];
+        let myOrders = [];
+        let countdownTimers = [];
+        let socket = null;
+        let currentCaptchaId = null;
+        let pendingProductId = null;
+
+        function initWebSocket() {
+            socket = io();
+            
+            socket.on('connect', () => {
+                console.log('WebSocket已连接');
+                socket.emit('join', { userId: userInfo?.id, username: userInfo?.username });
+            });
+            
+            socket.on('stats-update', (stats) => {
+                console.log('实时数据更新:', stats);
+            });
+            
+            socket.on('stock-update', (data) => {
+                console.log('库存更新:', data);
+                const product = products.find(p => p.id === data.productId);
+                if (product && product.stock !== data.stock) {
+                    product.stock = data.stock;
+                    renderProducts();
+                    
+                    const stockEl = document.querySelector(`#countdown-${data.productId} .stock`);
+                    if (stockEl) {
+                        stockEl.classList.add('stock-flash');
+                        setTimeout(() => stockEl.classList.remove('stock-flash'), 500);
+                    }
+                }
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('WebSocket已断开');
+            });
+        }
+
+        function request(url, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            return fetch(`${API_BASE}${url}`, { ...options, headers }).then(res => res.json());
+        }
+
+        async function handleLogin() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            if (!username || !password) {
+                document.getElementById('loginError').textContent = '请输入用户名和密码';
+                return;
+            }
+
+            const res = await request('/users/login', {
+                method: 'POST',
+                body: JSON.stringify({ username, password })
+            });
+
+            if (res.code === 200) {
+                token = res.data.token;
+                userInfo = { id: res.data.id, username: res.data.username, role: res.data.role };
+                localStorage.setItem('seckill_token', token);
+                localStorage.setItem('seckill_user', JSON.stringify(userInfo));
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('mainPage').classList.add('active');
+                initWebSocket();
+                loadProducts();
+            } else {
+                document.getElementById('loginError').textContent = res.message || '登录失败';
+            }
+        }
+
+        async function handleRegister() {
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
+            const email = document.getElementById('regEmail').value;
+
+            if (!username || !password) {
+                document.getElementById('regError').textContent = '请输入用户名和密码';
+                return;
+            }
+
+            const res = await request('/users/register', {
+                method: 'POST',
+                body: JSON.stringify({ username, password, email })
+            });
+
+            if (res.code === 200) {
+                document.getElementById('regError').textContent = '注册成功，请登录';
+                document.getElementById('loginUsername').value = username;
+                document.getElementById('loginPassword').value = password;
+            } else {
+                document.getElementById('regError').textContent = res.message || '注册失败';
+            }
+        }
+
+        function showRegister() {
+            const loginBox = document.querySelector('.login-box');
+            loginBox.innerHTML = `
+                <h1>🎯 用户注册</h1>
+                <p>创建您的秒杀账号</p>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="regUsername" placeholder="请输入用户名">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="regPassword" placeholder="请输入密码">
+                </div>
+                <div class="form-group">
+                    <label>邮箱（选填）</label>
+                    <input type="email" id="regEmail" placeholder="请输入邮箱">
+                </div>
+                <button onclick="handleRegister()">注册</button>
+                <div class="error" id="regError"></div>
+                <div class="register-link">
+                    已有账号？<a href="#" onclick="showLogin()">立即登录</a>
+                </div>
+            `;
+        }
+
+        function showLogin() {
+            const loginBox = document.querySelector('.login-box');
+            loginBox.innerHTML = `
+                <h1>🎯 AI秒杀系统</h1>
+                <p>限时抢购，公平公正</p>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="loginUsername" placeholder="请输入用户名">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="loginPassword" placeholder="请输入密码">
+                </div>
+                <button onclick="handleLogin()">登录</button>
+                <div class="error" id="loginError"></div>
+                <div class="register-link">
+                    还没有账号？<a href="#" onclick="showRegister()">立即注册</a>
+                </div>
+            `;
+        }
+
+        function handleLogout() {
+            token = '';
+            userInfo = null;
+            localStorage.removeItem('seckill_token');
+            localStorage.removeItem('seckill_user');
+            countdownTimers.forEach(t => clearInterval(t));
+            countdownTimers = [];
+            document.getElementById('mainPage').classList.remove('active');
+            document.getElementById('loginPage').style.display = 'flex';
+        }
+
+        async function loadProducts() {
+            const [productsRes, ordersRes] = await Promise.all([
+                request('/products'),
+                request('/orders/my')
+            ]);
+
+            if (productsRes.code === 200) {
+                products = productsRes.data;
+            }
+            if (ordersRes.code === 200) {
+                myOrders = ordersRes.data;
+            }
+
+            renderProducts();
+        }
+
+        function handleFilterChange() {
+            renderProducts();
+        }
+
+        function renderProducts() {
+            const filter = document.getElementById('productFilter').value;
+            const filteredProducts = filter === 'all' ? products : products.filter(p => p.type === filter);
+            const grid = document.getElementById('productsGrid');
+
+            countdownTimers.forEach(t => clearInterval(t));
+            countdownTimers = [];
+
+            if (filteredProducts.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>暂无商品</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = filteredProducts.map(p => `
+                <div class="product-card">
+                    <div class="cover">
+                        <img src="${p.cover || 'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=product%20placeholder%20image&image_size=square'}" alt="${p.name}">
+                        <span class="type-badge">${p.type === 'normal' ? '普通商品' : '演唱会门票'}</span>
+                        <span class="status-badge ${getProductStatus(p)}">${getStatusText(p)}</span>
+                    </div>
+                    <div class="info">
+                        <h3>${p.name}</h3>
+                        <div class="price">¥${p.price.toFixed(2)}</div>
+                        <div class="desc">${p.description}</div>
+                        <div class="stock ${p.stock === 0 ? 'empty' : p.stock < 10 ? 'low' : ''}">
+                            剩余库存：${p.stock} 件
+                        </div>
+                        <div id="countdown-${p.id}">${renderCountdown(p)}</div>
+                        <button 
+                            class="buy-btn ${getBuyBtnClass(p)}" 
+                            onclick="handleBuy('${p.id}')"
+                            ${getBuyBtnDisabled(p) ? 'disabled' : ''}
+                        >
+                            ${getBuyBtnText(p)}
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+
+            filteredProducts.forEach(p => {
+                startCountdown(p);
+            });
+        }
+
+        function getProductStatus(product) {
+            if (product.status !== 'active') return 'inactive';
+            if (product.stock <= 0) return 'soldout';
+            return 'active';
+        }
+
+        function getStatusText(product) {
+            if (product.status !== 'active') return '未上架';
+            if (product.stock <= 0) return '已售罄';
+            return '热卖中';
+        }
+
+        function getBuyBtnClass(product) {
+            if (product.status !== 'active') return 'disabled';
+            if (product.stock <= 0) return 'soldout';
+            const hasOrdered = myOrders.some(o => o.productId === product.id);
+            if (hasOrdered) return 'orderd';
+            
+            const now = new Date();
+            const startTime = new Date(product.seckillStartTime);
+            if (now < startTime) return 'disabled';
+            
+            return 'active';
+        }
+
+        function getBuyBtnDisabled(product) {
+            return getBuyBtnClass(product) !== 'active';
+        }
+
+        function getBuyBtnText(product) {
+            if (product.status !== 'active') return '未上架';
+            if (product.stock <= 0) return '已售罄';
+            const hasOrdered = myOrders.some(o => o.productId === product.id);
+            if (hasOrdered) return '已抢购';
+            
+            const now = new Date();
+            const startTime = new Date(product.seckillStartTime);
+            if (now < startTime) return '敬请期待';
+            
+            return '立即抢购';
+        }
+
+        function renderCountdown(product) {
+            const now = new Date();
+            const startTime = new Date(product.seckillStartTime);
+            
+            if (product.status !== 'active' || product.stock <= 0) {
+                return '';
+            }
+            
+            if (now >= startTime) {
+                return '<div class="seckill-active-badge">🔥 秒杀进行中！</div><div class="countdown"><div class="soon">抓紧时间抢购！</div></div>';
+            }
+            
+            return '<div class="countdown" id="timer-' + product.id + '"><div class="time-box"><span class="num">--</span><span class="label">时</span></div><div class="time-box"><span class="num">--</span><span class="label">分</span></div><div class="time-box"><span class="num">--</span><span class="label">秒</span></div></div>';
+        }
+
+        let lastSeconds = {};
+        
+        function startCountdown(product) {
+            if (product.status !== 'active' || product.stock <= 0) return;
+            
+            const startTime = new Date(product.seckillStartTime);
+            const now = new Date();
+            
+            if (now >= startTime) return;
+            
+            lastSeconds[product.id] = -1;
+
+            const updateTimer = () => {
+                const now = new Date();
+                const diff = startTime - now;
+                
+                if (diff <= 0) {
+                    loadProducts();
+                    return;
+                }
+                
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                
+                const timerEl = document.getElementById('timer-' + product.id);
+                if (timerEl) {
+                    const isUrgent = diff < 60000;
+                    const urgentClass = isUrgent ? 'urgent' : '';
+                    const flipClass = seconds !== lastSeconds[product.id] ? 'flip' : '';
+                    lastSeconds[product.id] = seconds;
+                    
+                    timerEl.className = `countdown ${urgentClass}`;
+                    timerEl.innerHTML = `
+                        <div class="time-box ${flipClass}"><span class="num">${String(hours).padStart(2, '0')}</span><span class="label">时</span></div>
+                        <div class="time-box ${flipClass}"><span class="num">${String(minutes).padStart(2, '0')}</span><span class="label">分</span></div>
+                        <div class="time-box ${flipClass}"><span class="num">${String(seconds).padStart(2, '0')}</span><span class="label">秒</span></div>
+                    `;
+                }
+            };
+            
+            updateTimer();
+            const timer = setInterval(updateTimer, 1000);
+            countdownTimers.push(timer);
+        }
+
+        async function handleBuy(productId) {
+            const product = products.find(p => p.id === productId);
+            if (!product) return;
+
+            pendingProductId = productId;
+            
+            await refreshCaptcha();
+            
+            document.getElementById('captchaModal').classList.add('active');
+            document.getElementById('captchaInput').value = '';
+            document.getElementById('captchaInput').focus();
+        }
+
+        async function refreshCaptcha() {
+            const res = await request('/captcha/generate');
+            if (res.code === 200) {
+                currentCaptchaId = res.data.captchaId;
+                document.getElementById('captchaImg').src = res.data.image;
+            }
+        }
+
+        function closeCaptchaModal() {
+            document.getElementById('captchaModal').classList.remove('active');
+            pendingProductId = null;
+        }
+
+        async function confirmCaptcha() {
+            const captchaText = document.getElementById('captchaInput').value;
+            const currentProductId = pendingProductId;  // 在关闭模态框之前保存商品ID
+            
+            if (!captchaText) {
+                alert('请输入验证码');
+                return;
+            }
+
+            const verifyRes = await request('/captcha/verify', {
+                method: 'POST',
+                body: JSON.stringify({ captchaId: currentCaptchaId, captchaText })
+            });
+
+            if (verifyRes.code !== 200) {
+                alert(verifyRes.message || '验证码错误');
+                await refreshCaptcha();
+                document.getElementById('captchaInput').value = '';
+                return;
+            }
+
+            closeCaptchaModal();
+
+            const res = await request('/orders/seckill', {
+                method: 'POST',
+                body: JSON.stringify({ productId: currentProductId })  // 使用保存的商品ID
+            });
+
+            if (res.code === 200) {
+                showModal(true, '抢购成功！', `恭喜您成功抢购【${res.data.productName}】，订单号：${res.data.orderId}`);
+                const product = products.find(p => p.id === pendingProductId);
+                if (product) {
+                    product.stock = res.data.remainingStock;
+                }
+                myOrders.push({ productId: pendingProductId });
+                renderProducts();
+            } else {
+                showModal(false, '抢购失败', res.message);
+            }
+        }
+
+        function showModal(success, title, message) {
+            const modal = document.getElementById('resultModal');
+            const content = document.getElementById('resultModalContent');
+            
+            content.className = 'modal ' + (success ? 'success' : 'error');
+            document.getElementById('modalIcon').textContent = success ? '🎉' : '😢';
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalMessage').textContent = message;
+            
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('resultModal').classList.remove('active');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedUser = localStorage.getItem('seckill_user');
+            if (token && savedUser) {
+                userInfo = JSON.parse(savedUser);
+                document.getElementById('userName').textContent = userInfo.username;
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('mainPage').classList.add('active');
+                initWebSocket();
+                loadProducts();
+            }
+        });
+    </script>
+</body>
+</html>

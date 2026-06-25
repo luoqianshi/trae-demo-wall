@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>宠圈 - 游戏化城市探索大地图</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #121214;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        /* 手机外壳容器 */
+        .phone-container {
+            width: 390px;
+            height: 844px;
+            background: #F7F7F7;
+            border-radius: 44px;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+            overflow: hidden;
+            position: relative;
+            border: 10px solid #2d2e32;
+            display: flex;
+            flex-direction: column;
+        }
+        .font-mono-custom {
+            font-family: 'Chivo Mono', monospace;
+        }
+        
+        /* ================= 游戏化大地图样式 ================= */
+        .map-viewport {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            cursor: grab;
+            background-color: #f3f0e7;
+            touch-action: none; /* 禁止默认触摸滚动，交由 JS 处理 */
+        }
+        .map-viewport:active {
+            cursor: grabbing;
+        }
+
+        /* 纯 CSS 绘制的趣味插画风城市底图 (1200px * 1200px 的探索区域) */
+        .map-canvas {
+            position: absolute;
+            width: 1200px;
+            height: 1200px;
+            background-color: #F7F4EA;
+            /* 手绘感街道 + 公园绿地 + 纹理 */
+            background-image:
+                radial-gradient(circle at 25% 20%, rgba(212,237,184,0.55) 0%, transparent 40%),
+                radial-gradient(circle at 72% 35%, rgba(212,237,184,0.5) 0%, transparent 38%),
+                radial-gradient(circle at 18% 78%, rgba(243,233,210,0.45) 0%, transparent 35%),
+                /* 主街道 */
+                linear-gradient(#F0E6D2 12px, transparent 12px),
+                linear-gradient(90deg, #F0E6D2 12px, transparent 12px),
+                /* 次要街巷 */
+                linear-gradient(rgba(240,230,210,0.5) 6px, transparent 6px),
+                linear-gradient(90deg, rgba(240,230,210,0.5) 6px, transparent 6px),
+                /* 噪点纹理 */
+                radial-gradient(circle at 50% 50%, rgba(0,0,0,0.015) 1px, transparent 1px);
+            background-size:
+                1200px 1200px, 1200px 1200px, 1200px 1200px,
+                120px 120px, 120px 120px,
+                40px 40px, 40px 40px,
+                24px 24px;
+            will-change: transform;
+            transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .map-canvas.dragging { transition: none; }
+
+        /* 区域色块 */
+        .map-zone {
+            position: absolute;
+            border-radius: 28px;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.4), 0 8px 24px rgba(0,0,0,0.05);
+        }
+        .zone-park { background: linear-gradient(135deg, #D4EDB8 0%, #C5E6A6 100%); border: 2px dashed rgba(90,150,80,0.16); }
+        .zone-water { background: linear-gradient(135deg, #A8DEE6 0%, #95D3DE 100%); border: 2px solid rgba(120,180,195,0.18); }
+        .zone-sand { background: linear-gradient(135deg, #F3E9D2 0%, #E9DCC0 100%); border: 2px dashed rgba(180,160,120,0.18); }
+        .zone-urban { background: linear-gradient(135deg, #EDE8DE 0%, #E3DCCD 100%); border: 1px solid rgba(160,150,130,0.1); }
+
+        /* 等距建筑 */
+        .map-building {
+            position: absolute;
+            border-radius: 12px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.07), inset 0 -5px 0 rgba(0,0,0,0.04);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .map-building::before {
+            content: ''; position: absolute; top: -6px; left: 6px; right: 6px; height: 6px;
+            background: inherit; border-radius: 4px 4px 0 0; opacity: 0.8;
+        }
+        .roof-pink { background: #F8C3CD; }
+        .roof-blue { background: #A8D8EA; }
+        .roof-yellow { background: #FCE38A; }
+        .roof-green { background: #B8E0D2; }
+
+        /* 树木摇摆 */
+        .map-tree {
+            position: absolute;
+            font-size: 26px;
+            filter: drop-shadow(0 3px 4px rgba(0,0,0,0.07));
+            animation: treeSway 4s ease-in-out infinite;
+            transform-origin: bottom center;
+        }
+        @keyframes treeSway {
+            0%, 100% { transform: rotate(-2deg); }
+            50% { transform: rotate(2deg); }
+        }
+
+        /* 云朵飘动 */
+        .map-cloud {
+            position: absolute;
+            font-size: 38px;
+            opacity: 0.5;
+            filter: blur(0.5px);
+            animation: cloudFloat 22s linear infinite;
+        }
+        @keyframes cloudFloat {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(100px); }
+        }
+
+        /* SVG 河流与道路 */
+        .map-svg {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+        }
+        .river-path {
+            fill: none; stroke: #8EC9D4; stroke-width: 36;
+            stroke-linecap: round; opacity: 0.85;
+        }
+        .river-flow {
+            fill: none; stroke: rgba(255,255,255,0.5); stroke-width: 4;
+            stroke-dasharray: 14 18; stroke-linecap: round;
+            animation: riverFlow 3s linear infinite;
+        }
+        @keyframes riverFlow { to { stroke-dashoffset: -64; } }
+        .main-road {
+            fill: none; stroke: #F0E6D2; stroke-width: 24; stroke-linecap: round;
+        }
+        .main-road-inner {
+            fill: none; stroke: #E8DCC8; stroke-width: 18; stroke-linecap: round;
+        }
+
+        /* 缩放控制 */
+        .zoom-controls {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 30;
+        }
+        .zoom-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(6px);
+            border: 1px solid rgba(0,0,0,0.06);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #3A2E2A;
+            font-weight: 700;
+            transition: transform 0.15s, background 0.15s;
+            cursor: pointer;
+        }
+        .zoom-btn:active { transform: scale(0.92); background: #fff; }
+        .zoom-level {
+            text-align: center;
+            font-size: 9px;
+            font-weight: 800;
+            color: #666;
+            background: rgba(255,255,255,0.9);
+            padding: 3px 0;
+            border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.06);
+        }
+
+        /* ================= 艾尔登法环黄金留痕动效 ================= */
+        @keyframes elden-glow {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 4px #ffe66d); opacity: 0.9; }
+            50% { transform: scale(1.08); filter: drop-shadow(0 0 15px #ffb703); opacity: 1; }
+        }
+        .elden-mark {
+            animation: elden-glow 2s infinite ease-in-out;
+            transition: all 1s cubic-bezier(0.25, 1, 0.5, 1); /* 支持独立走动平滑过渡 */
+        }
+
+        /* 遛宠热点波纹 */
+        @keyframes ripple {
+            0% { transform: scale(0.6); opacity: 0.6; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+        .hotspot-ripple {
+            animation: ripple 3s infinite linear;
+        }
+
+        /* 轨迹虚线延伸 */
+        @keyframes dash {
+            to { stroke-dashoffset: -40; }
+        }
+        .route-path {
+            stroke-dasharray: 8, 4;
+            animation: dash 4s linear infinite;
+        }
+
+        /* 盲盒蛋壳震动 */
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10%, 30%, 50%, 70%, 90% { transform: translate(-5px, 3px) rotate(-1.5deg); }
+            20%, 40%, 60%, 80% { transform: translate(5px, -3px) rotate(1.5deg); }
+        }
+        .animate-shake {
+            animation: shake 0.5s infinite;
+        }
+        /* 蛋壳碎裂飞散 */
+        @keyframes break-left {
+            0% { transform: translateX(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateX(-160px) translateY(60px) rotate(-55deg); opacity: 0; }
+        }
+        @keyframes break-right {
+            0% { transform: translateX(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateX(160px) translateY(60px) rotate(55deg); opacity: 0; }
+        }
+        .egg-left-break { animation: break-left 1.2s forwards cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+        .egg-right-break { animation: break-right 1.2s forwards cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+    </style>
+</head>
+<body>
+
+<div id="app" class="phone-container select-none">
+    
+    <div class="h-10 bg-white/90 backdrop-blur px-6 flex justify-between items-center text-xs font-bold text-gray-700 z-50 shrink-0 border-b border-gray-100">
+        <div>12:00</div>
+        <div class="text-[10px] bg-[#FF6B6B]/10 text-[#FF6B6B] px-2 py-0.5 rounded-full font-black">宠圈定位已开启</div>
+        <div class="flex items-center space-x-1">
+            <span class="w-4 h-2.5 border border-gray-700 rounded-sm inline-block relative after:content-[''] after:w-0.5 after:h-1 after:bg-gray-700 after:absolute after:-right-1 after:top-0.5"></span>
+        </div>
+    </div>
+
+    <div class="flex-1 relative overflow-hidden">
+        
+        <div v-if="globalState.currentTab === 'explore'" class="w-full h-full flex flex-col relative">
+            
+            <div class="flex-1 map-viewport"
+                 :class="{ dragging: globalState.isDragging }"
+                 @mousedown="startDrag"
+                 @mousemove="onDrag"
+                 @mouseup="endDrag"
+                 @mouseleave="endDrag"
+                 @wheel="onWheel"
+                 @touchstart="handleTouchStart"
+                 @touchmove="handleTouchMove"
+                 @touchend="handleTouchEnd">
+
+                <div class="map-canvas"
+                     :class="{ dragging: globalState.isDragging }"
+                     :style="{ transform: `translate(${globalState.mapX}px, ${globalState.mapY}px) scale(${globalState.mapScale})` }">
+
+                    <!-- 区域色块 -->
+                    <div class="map-zone zone-park" style="left:60px;top:40px;width:420px;height:340px;"></div>
+                    <div class="map-zone zone-park" style="left:620px;top:120px;width:460px;height:380px;border-radius:50px;"></div>
+                    <div class="map-zone zone-park" style="left:200px;top:600px;width:420px;height:300px;"></div>
+                    <div class="map-zone zone-sand" style="left:780px;top:640px;width:360px;height:280px;"></div>
+                    <div class="map-zone zone-water" style="left:30px;top:460px;width:160px;height:160px;border-radius:50%;"></div>
+                    <div class="map-zone zone-water" style="left:1000px;top:260px;width:140px;height:140px;border-radius:50%;"></div>
+                    <div class="map-zone zone-urban" style="left:90px;top:50px;width:280px;height:160px;"></div>
+                    <div class="map-zone zone-urban" style="left:880px;top:60px;width:320px;height:180px;"></div>
+
+                    <!-- 河流 -->
+                    <svg class="map-svg" viewBox="0 0 1200 1200" preserveAspectRatio="none">
+                        <path class="river-path" d="M -40 480 Q 240 440 360 580 T 660 640 T 1000 540 T 1240 580" />
+                        <path class="river-flow" d="M -40 480 Q 240 440 360 580 T 660 640 T 1000 540 T 1240 580" />
+                    </svg>
+
+                    <!-- 道路主线 -->
+                    <svg class="map-svg" viewBox="0 0 1200 1200" preserveAspectRatio="none">
+                        <path class="main-road" d="M 0 320 L 1200 320" />
+                        <path class="main-road-inner" d="M 0 320 L 1200 320" />
+                        <path class="main-road" d="M 600 0 L 600 1200" />
+                        <path class="main-road-inner" d="M 600 0 L 600 1200" />
+                    </svg>
+
+                    <!-- 建筑 -->
+                    <div class="map-building roof-pink" style="left:140px;top:80px;width:80px;height:80px;"><span class="text-xl opacity-80">🏠</span></div>
+                    <div class="map-building roof-blue" style="left:260px;top:50px;width:90px;height:85px;"><span class="text-xl opacity-80">🏪</span></div>
+                    <div class="map-building roof-yellow" style="left:580px;top:120px;width:85px;height:75px;"><span class="text-xl opacity-80">🏥</span></div>
+                    <div class="map-building roof-green" style="left:980px;top:80px;width:100px;height:90px;"><span class="text-xl opacity-80">🏬</span></div>
+                    <div class="map-building roof-yellow" style="left:110px;top:440px;width:85px;height:85px;"><span class="text-xl opacity-80">🏡</span></div>
+                    <div class="map-building roof-pink" style="left:400px;top:400px;width:75px;height:75px;"><span class="text-xl opacity-80">☕</span></div>
+                    <div class="map-building roof-blue" style="left:900px;top:460px;width:90px;height:80px;"><span class="text-xl opacity-80">🏫</span></div>
+                    <div class="map-building roof-green" style="left:200px;top:760px;width:80px;height:80px;"><span class="text-xl opacity-80">🏠</span></div>
+                    <div class="map-building roof-yellow" style="left:680px;top:820px;width:110px;height:90px;"><span class="text-xl opacity-80">🏟️</span></div>
+                    <div class="map-building roof-pink" style="left:1040px;top:780px;width:80px;height:80px;"><span class="text-xl opacity-80">🏨</span></div>
+
+                    <!-- 树木 -->
+                    <div class="map-tree" style="left:90px;top:190px;animation-delay:0s;">🌳</div>
+                    <div class="map-tree" style="left:130px;top:230px;animation-delay:0.3s;">🌳</div>
+                    <div class="map-tree" style="left:460px;top:150px;animation-delay:0.6s;">🌳</div>
+                    <div class="map-tree" style="left:510px;top:200px;animation-delay:0.9s;">🌳</div>
+                    <div class="map-tree" style="left:680px;top:250px;animation-delay:1.2s;">🌳</div>
+                    <div class="map-tree" style="left:870px;top:190px;animation-delay:0.4s;">🌳</div>
+                    <div class="map-tree" style="left:1040px;top:290px;animation-delay:0.7s;">🌳</div>
+                    <div class="map-tree" style="left:60px;top:560px;animation-delay:1s;">🌳</div>
+                    <div class="map-tree" style="left:220px;top:510px;animation-delay:0.2s;">🌳</div>
+                    <div class="map-tree" style="left:560px;top:560px;animation-delay:0.5s;">🌳</div>
+                    <div class="map-tree" style="left:780px;top:520px;animation-delay:0.8s;">🌳</div>
+                    <div class="map-tree" style="left:1160px;top:540px;animation-delay:1.1s;">🌳</div>
+                    <div class="map-tree" style="left:140px;top:900px;animation-delay:0.3s;">🌳</div>
+                    <div class="map-tree" style="left:350px;top:950px;animation-delay:0.6s;">🌳</div>
+                    <div class="map-tree" style="left:560px;top:980px;animation-delay:0.9s;">🌳</div>
+                    <div class="map-tree" style="left:790px;top:930px;animation-delay:1.2s;">🌳</div>
+                    <div class="map-tree" style="left:990px;top:970px;animation-delay:0.4s;">🌳</div>
+                    <div class="map-tree" style="left:1140px;top:900px;animation-delay:0.7s;">🌳</div>
+
+                    <!-- 云朵 -->
+                    <div class="map-cloud" style="left:90px;top:60px;animation-delay:0s;">☁️</div>
+                    <div class="map-cloud" style="left:500px;top:110px;animation-delay:-7s;">☁️</div>
+                    <div class="map-cloud" style="left:880px;top:50px;animation-delay:-14s;">☁️</div>
+                    <div class="map-cloud" style="left:1100px;top:150px;animation-delay:-4s;">☁️</div>
+                    <div class="map-cloud" style="left:280px;top:420px;animation-delay:-10s;">☁️</div>
+                    <div class="map-cloud" style="left:760px;top:380px;animation-delay:-18s;">☁️</div>
+
+                    <!-- 地标标签 -->
+                    <div class="absolute top-[160px] left-[180px] text-xs font-black text-emerald-800/70 bg-white/80 backdrop-blur px-3 py-1.5 rounded-xl shadow-sm">🌳 阳光樱花树林</div>
+                    <div class="absolute top-[320px] left-[720px] text-xs font-black text-emerald-800/70 bg-white/80 backdrop-blur px-3 py-1.5 rounded-xl shadow-sm">🏞️ 萌宠中央湿地公园</div>
+                    <div class="absolute top-[720px] left-[380px] text-xs font-black text-amber-800/70 bg-white/80 backdrop-blur px-3 py-1.5 rounded-xl shadow-sm">☕ 柴犬露天集市大街</div>
+                    <div class="absolute top-[720px] left-[860px] text-xs font-black text-amber-800/70 bg-white/80 backdrop-blur px-3 py-1.5 rounded-xl shadow-sm">🏖️ 萌宠沙滩</div>
+
+                    <div v-for="spot in mockData.hotspots" :key="spot.id"
+                         :style="{ top: spot.y + 'px', left: spot.x + 'px' }"
+                         class="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+                         @click.stop="triggerHotspot(spot)">
+                        <div class="w-16 h-16 rounded-full bg-[#FF6B6B]/20 flex items-center justify-center relative">
+                            <div class="absolute inset-0 rounded-full bg-[#FF6B6B]/20 hotspot-ripple"></div>
+                            <div class="w-5 h-5 rounded-full bg-[#FF6B6B] shadow-lg border-2 border-white flex items-center justify-center text-[9px] text-white font-bold">🔥</div>
+                        </div>
+                    </div>
+
+                    <div v-for="mark in globalState.marks" :key="mark.id"
+                         :style="{ top: mark.y + 'px', left: mark.x + 'px' }"
+                         class="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer elden-mark z-20"
+                         @click.stop="openMark(mark)">
+                        <div class="bg-gradient-to-r from-amber-500 to-yellow-400 text-gray-900 font-bold px-2.5 py-1.5 rounded-xl shadow-lg border-2 border-white flex items-center space-x-1 text-[11px]">
+                            <span>📜</span>
+                            <span>{{ mark.user === '我的小破狗' ? '我的留痕' : '金色印记' }}</span>
+                        </div>
+                    </div>
+
+                    <div v-for="friend in globalState.nearbyFriendsData" :key="friend.id"
+                         :style="{ top: friend.y + 'px', left: friend.x + 'px' }"
+                         class="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 transition-all duration-1000 ease-out"
+                         @click.stop="clickFriendPaw(friend)">
+                        <div class="bg-[#4ECDC4] text-white p-2.5 rounded-full shadow-xl border-2 border-white animate-bounce flex items-center justify-center">
+                            🐾
+                        </div>
+                    </div>
+
+                    <svg v-if="globalState.isWalking" class="absolute inset-0 w-full h-full pointer-events-none">
+                        <path :d="globalState.trackPath" fill="none" stroke="#FF6B6B" stroke-width="5" stroke-linecap="round" class="route-path" />
+                    </svg>
+
+                    <div v-if="globalState.isWalking"
+                         :style="{ top: globalState.playerPet.y + 'px', left: globalState.playerPet.x + 'px' }"
+                         class="absolute -translate-x-1/2 -translate-y-1/2 z-30 transition-all duration-1000 ease-out">
+                        <div class="bg-gradient-to-tr from-[#FF6B6B] to-[#FFE66D] p-1 rounded-full shadow-2xl border-4 border-white animate-pulse">
+                            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl shadow-inner">🐶</div>
+                        </div>
+                        <div class="bg-gray-900/80 backdrop-blur text-[9px] text-white px-1.5 py-0.5 rounded-full font-bold mt-1 text-center whitespace-nowrap">
+                            探索中...
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="zoom-controls">
+                    <button @click.stop="zoomIn" class="zoom-btn" title="放大">+</button>
+                    <div class="zoom-level">{{ Math.round(globalState.mapScale * 100) }}%</div>
+                    <button @click.stop="zoomOut" class="zoom-btn" title="缩小">−</button>
+                    <button @click.stop="resetMapFocus" class="zoom-btn mt-1" title="回到中心">🎯</button>
+                </div>
+
+                <div v-if="globalState.activeMark" class="absolute bottom-6 left-4 right-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl shadow-2xl border-2 border-amber-300 z-40 transition-all animate-slide-up">
+                    <div class="flex justify-between items-start mb-1.5">
+                        <span class="text-xs font-black text-amber-600 flex items-center space-x-1">
+                            <span>✨</span> <span>艾尔登留痕·地下字条</span>
+                        </span>
+                        <button @click="globalState.activeMark = null" class="text-gray-400 hover:text-gray-600 text-base font-bold px-1">✕</button>
+                    </div>
+                    <p class="text-gray-800 text-sm font-bold leading-relaxed bg-amber-50/60 p-3 rounded-xl border border-amber-100">
+                        “{{ globalState.activeMark.content }}”
+                    </p>
+                    <div class="mt-2.5 flex justify-between text-[10px] text-gray-500 font-bold px-1">
+                        <span class="flex items-center space-x-0.5">👤 <span>宠友：{{ globalState.activeMark.user }}</span></span>
+                        <span>⏱️ {{ globalState.activeMark.time }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="!globalState.isWalking" class="bg-white px-6 pt-4 pb-6 rounded-t-[32px] shadow-2xl border-t border-gray-100 z-30 shrink-0">
+                <div class="grid grid-cols-3 gap-2 mb-4 bg-gray-50 p-3 rounded-2xl">
+                    <div class="text-center">
+                        <div class="text-[10px] text-gray-400 font-bold">今日探索步数</div>
+                        <div class="text-base font-bold font-mono-custom text-gray-800">{{ globalState.stats.steps }}</div>
+                    </div>
+                    <div class="text-center border-x border-gray-200">
+                        <div class="text-[10px] text-gray-400 font-bold">地图金痕</div>
+                        <div class="text-base font-bold font-mono-custom text-amber-500">{{ globalState.marks.length }} 个</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-[10px] text-gray-400 font-bold">雷达偶遇</div>
+                        <div class="text-base font-bold font-mono-custom text-[#4ECDC4]">{{ globalState.stats.encounters }} 次</div>
+                    </div>
+                </div>
+                <button @click="startWalking" class="w-full bg-[#FF6B6B] text-white py-4 rounded-[24px] font-black text-base shadow-lg shadow-[#FF6B6B]/30 active:scale-98 transition-all animate-pulse-btn flex items-center justify-center space-x-2">
+                    <span>🧭</span>
+                    <span>开始游戏化漫步</span>
+                </button>
+            </div>
+
+            <div v-else class="bg-white px-6 pt-4 pb-6 rounded-t-[32px] shadow-2xl border-t border-gray-200 z-30 shrink-0 flex flex-col space-y-4">
+                <div class="flex justify-between items-center bg-gray-900 text-white p-4 rounded-2xl font-mono-custom">
+                    <div>
+                        <div class="text-[9px] text-gray-400 font-bold">探索时长</div>
+                        <div class="text-xl font-bold text-yellow-400">{{ formatTime(globalState.walkingStats.time) }}</div>
+                    </div>
+                    <div class="w-px h-8 bg-gray-700"></div>
+                    <div>
+                        <div class="text-[9px] text-gray-400 font-bold">漫步里数</div>
+                        <div class="text-xl font-bold text-[#FF6B6B]">{{ globalState.walkingStats.distance.toFixed(3) }} 公里</div>
+                    </div>
+                    <div class="w-px h-8 bg-gray-700"></div>
+                    <div class="text-right">
+                        <div class="text-[9px] text-gray-400 font-bold">新增留痕</div>
+                        <div class="text-xl font-bold text-amber-400">+{{ globalState.walkingStats.newMarks }}</div>
+                    </div>
+                </div>
+
+                <div class="flex space-x-3">
+                    <button @click="globalState.showMarkPanel = true" class="flex-1 bg-amber-500 text-white py-3.5 rounded-[24px] font-black text-sm shadow-md active:scale-95 transition-transform flex items-center justify-center space-x-1">
+                        <span>✍️</span> <span>在当前点留痕</span>
+                    </button>
+                    <button @click="endWalking" class="flex-1 bg-gray-800 text-white py-3.5 rounded-[24px] font-black text-sm active:scale-95 transition-transform">
+                        🛑 结束并结算
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="globalState.showMarkPanel" class="absolute inset-0 bg-black/50 z-50 flex flex-col justify-end">
+                <div class="bg-white rounded-t-[32px] p-6 space-y-4 shadow-2xl animate-slide-up">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-base font-black text-gray-900">✍️ 在城市此地刻下你的“法环印记”</h3>
+                        <button @click="globalState.showMarkPanel = false" class="text-gray-400 text-xl font-bold">✕</button>
+                    </div>
+                    <textarea v-model="globalState.newMarkContent" placeholder="例如：‘注意看！右前方草丛经常有肥美的蝴蝶出没，我家柯基扑了半小时！’" class="w-full h-24 p-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"></textarea>
+                    
+                    <div class="w-20 h-20 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100">
+                        <span class="text-2xl">📸</span>
+                        <span class="text-[9px] font-bold mt-1">传现场图</span>
+                    </div>
+
+                    <button @click="submitMark" class="w-full bg-gradient-to-r from-amber-500 to-yellow-500 text-white py-3.5 rounded-[24px] font-black shadow-lg shadow-amber-500/20 active:scale-98 transition-transform">
+                        💡 凝聚并放置金色留痕
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="globalState.showSummary" class="absolute inset-0 bg-black/70 z-50 flex items-center justify-center p-6">
+                <div class="bg-white rounded-[32px] w-full p-6 text-center space-y-5 shadow-2xl relative overflow-hidden">
+                    <div class="absolute top-0 inset-x-0 h-2 bg-gradient-to-r from-[#FF6B6B] to-[#FFE66D]"></div>
+                    <div>
+                        <div class="text-4xl">🐾</div>
+                        <h3 class="text-lg font-black text-gray-900 mt-2">探索远征结算</h3>
+                        <p class="text-xs text-gray-400">你和毛孩子共同探索并点亮了未知区域</p>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 bg-gray-50 p-4 rounded-2xl font-mono-custom">
+                        <div>
+                            <div class="text-[9px] text-gray-400 font-bold">历时</div>
+                            <div class="text-base font-bold text-gray-800">{{ formatTime(globalState.walkingStats.time) }}</div>
+                        </div>
+                        <div>
+                            <div class="text-[9px] text-gray-400 font-bold">漫步里数</div>
+                            <div class="text-base font-bold text-[#FF6B6B]">{{ globalState.walkingStats.distance.toFixed(3) }}km</div>
+                        </div>
+                        <div>
+                            <div class="text-[9px] text-gray-400 font-bold">新增留痕</div>
+                            <div class="text-base font-bold text-amber-500">{{ globalState.walkingStats.newMarks }}个</div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <button @click="globalState.showSummary = false" class="w-full bg-[#4ECDC4] text-white py-3.5 rounded-[24px] font-black shadow-md active:scale-98 transition-transform">
+                            🚀 同步发布到宠友圈子
+                        </button>
+                        <button @click="globalState.showSummary = false" class="w-full bg-gray-100 text-gray-600 py-3.5 rounded-[24px] font-bold text-xs active:scale-98 transition-transform">
+                            返回大地图
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div v-if="globalState.currentTab !== 'explore'" class="w-full h-full flex flex-col items-center justify-center text-gray-400 bg-white p-6 text-center">
+            <div class="text-5xl mb-2">🚧</div>
+            <p class="font-black text-gray-800">【模块建造中】</p>
+            <p class="text-xs mt-2 text-gray-400 max-w-[240px]">初赛演示聚焦于"游戏化大地图城市探索"。请在下方切回 [探索] 体验宠物走动、地图拖拽和金色字条交互！</p>
+        </div>
+
+        <div v-if="globalState.toastMessage" class="absolute top-4 left-1/2 -translate-x-1/2 bg-gray-900/95 backdrop-blur text-white text-xs font-bold py-2.5 px-5 rounded-full shadow-xl z-50 text-center whitespace-nowrap border border-gray-800">
+            {{ globalState.toastMessage }}
+        </div>
+
+        <encounter-modal></encounter-modal>
+
+        <blind-box-open></blind-box-open>
+
+    </div>
+
+    <div class="h-16 bg-white border-t border-gray-100 flex justify-around items-center shrink-0 z-40">
+        <button @click="switchTab('explore')" :class="globalState.currentTab === 'explore' ? 'text-[#FF6B6B]' : 'text-gray-400'" class="flex flex-col items-center space-y-0.5">
+            <span class="text-xl">🧭</span>
+            <span class="text-[10px] font-black">探索</span>
+        </button>
+        <button @click="switchTab('circle')" :class="globalState.currentTab === 'circle' ? 'text-[#FF6B6B]' : 'text-gray-400'" class="flex flex-col items-center space-y-0.5">
+            <span class="text-xl">✨</span>
+            <span class="text-[10px] font-black">圈子</span>
+        </button>
+        <button @click="switchTab('profile')" :class="globalState.currentTab === 'profile' ? 'text-[#FF6B6B]' : 'text-gray-400'" class="flex flex-col items-center space-y-0.5">
+            <span class="text-xl">🐾</span>
+            <span class="text-[10px] font-black">我的</span>
+        </button>
+    </div>
+
+</div>
+
+<script>
+const { createApp, reactive, onMounted, onUnmounted } = Vue;
+
+// 1. Mock 模拟高能底图初始坐标数据
+const mockData = {
+    hotspots: [
+        { id: 1, x: 320, y: 240, name: '朝阳大草坪聚集地' },
+        { id: 2, x: 880, y: 380, name: '湿地公园宠物咖啡角' },
+        { id: 3, x: 520, y: 880, name: '柴犬集市网红打卡大道' }
+    ],
+    initialMarks: [
+        { id: 1, x: 420, y: 290, user: '可乐奶爸', content: '注意看！这片草地极度柔软，非常适合柯基或短腿犬打滚解压！', time: '1小时前' },
+        { id: 2, x: 790, y: 460, user: '布偶猫铲屎官', content: '这个角落新开了一家户外宠物友好补给点，提供免费的干净饮用水和拾便袋。', time: '30分钟前' },
+        { id: 3, x: 610, y: 820, user: '哈士奇拆迁队长', content: '绝了！大栅栏后面的老爷爷会悄悄给听话的路过狗狗发手工自制烘干肉干！别错过了！', time: '2小时前' }
+    ],
+    nearbyFriends: [
+        { id: 101, x: 380, y: 350, name: '大萌', petName: '雪球(萨摩耶)', distance: '120m' },
+        { id: 102, x: 580, y: 740, name: '阿强', petName: '橘子(中华田园猫)', distance: '280m' }
+    ]
+};
+
+// 2. 全局状态机模型
+const globalState = reactive({
+    currentTab: 'explore',
+    isWalking: false,
+    toastMessage: '',
+    activeMark: null,
+    showMarkPanel: false,
+    newMarkContent: '',
+    showSummary: false,
+
+    // 地图物理位置与缩放核心状态（初始居中定位）
+    mapX: -380,
+    mapY: -220,
+    mapScale: 1,
+    minScale: 0.5,
+    maxScale: 2.5,
+    isDragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    // 双指缩放状态
+    pinchStartDist: 0,
+    pinchStartScale: 1,
+
+    // 全局指标
+    stats: { steps: 5200, encounters: 2 },
+    walkingStats: { time: 0, distance: 0.0, newMarks: 0 },
+
+    // 动态可走动、可追加的数据源
+    marks: [...mockData.initialMarks],
+    nearbyFriendsData: [...mockData.nearbyFriends],
+
+    // 独立控制玩家宠物的坐标起算点
+    playerPet: { x: 450, y: 450 },
+    trackPath: 'M 450 450', // 动态SVG连线轨迹路径
+
+    // 页面C：偶遇机制
+    encounter: { show: false, activeFriend: null, interactionCount: 0 },
+
+    // 页面D：盲盒大蛋机制
+    blindBox: {
+        show: false, stage: 'closed',
+        petInfo: { name: '橘子', breed: '中华田园猫 🐱', avatar: '🐱', tag: '这只小猫性格极其傲娇高冷，但一旦建立漫步契约，会极度粘人！' }
+    }
+});
+
+function showToast(msg) {
+    globalState.toastMessage = msg;
+    setTimeout(() => { globalState.toastMessage = ''; }, 3500);
+}
+
+function formatTime(seconds) {
+    const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+    const s = String(seconds % 60).padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+const app = createApp({
+    setup() {
+        let walkTimer = null;
+        let roamTimer = null;
+
+        // ================= 核心高能逻辑：全地图拖拽 + 缩放算法 =================
+        const VIEW_W = 390; // 手机视口宽
+        const VIEW_H = 734; // 地图可视区域近似高 (844 - 顶部状态栏 44 - 底部导航 66)
+        const MAP_W = 1200;
+        const MAP_H = 1200;
+
+        // 限制地图坐标，保证缩放后边缘不露出太多空白
+        const clampMapBounds = () => {
+            const s = globalState.mapScale;
+            const minX = VIEW_W - MAP_W * s;
+            const minY = VIEW_H - MAP_H * s;
+            // 允许地图中心对准屏幕，所以上限为 0，下限为 view - map*scale
+            globalState.mapX = Math.max(minX, Math.min(0, globalState.mapX));
+            globalState.mapY = Math.max(minY, Math.min(0, globalState.mapY));
+        };
+
+        // 以屏幕某点为中心缩放，保持该点地图坐标不变
+        const zoomToPoint = (newScale, screenX, screenY) => {
+            const s0 = globalState.mapScale;
+            const s1 = Math.max(globalState.minScale, Math.min(globalState.maxScale, newScale));
+            // 该点在当前 scale 下的地图坐标
+            const mapX = (screenX - globalState.mapX) / s0;
+            const mapY = (screenY - globalState.mapY) / s0;
+            globalState.mapX = screenX - mapX * s1;
+            globalState.mapY = screenY - mapY * s1;
+            globalState.mapScale = s1;
+            clampMapBounds();
+        };
+
+        const zoomIn = () => zoomToPoint(globalState.mapScale * 1.2, VIEW_W / 2, VIEW_H / 2);
+        const zoomOut = () => zoomToPoint(globalState.mapScale / 1.2, VIEW_W / 2, VIEW_H / 2);
+        const setZoom = (scale) => zoomToPoint(scale, VIEW_W / 2, VIEW_H / 2);
+
+        const onWheel = (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            zoomToPoint(globalState.mapScale * delta, e.clientX - 15, e.clientY - 55);
+        };
+
+        // 鼠标拖拽
+        const startDrag = (e) => {
+            if (globalState.activeMark) return;
+            globalState.isDragging = true;
+            globalState.dragStartX = e.clientX - globalState.mapX;
+            globalState.dragStartY = e.clientY - globalState.mapY;
+        };
+        const onDrag = (e) => {
+            if (!globalState.isDragging) return;
+            globalState.mapX = e.clientX - globalState.dragStartX;
+            globalState.mapY = e.clientY - globalState.dragStartY;
+            clampMapBounds();
+        };
+        const endDrag = () => { globalState.isDragging = false; };
+
+        // 触摸：单指拖拽 + 双指缩放
+        const getTouchDist = (touches) => {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        };
+        const handleTouchStart = (e) => {
+            if (globalState.activeMark) return;
+            if (e.touches.length === 1) {
+                globalState.isDragging = true;
+                globalState.dragStartX = e.touches[0].clientX - globalState.mapX;
+                globalState.dragStartY = e.touches[0].clientY - globalState.mapY;
+            } else if (e.touches.length === 2) {
+                globalState.isDragging = false;
+                globalState.pinchStartDist = getTouchDist(e.touches);
+                globalState.pinchStartScale = globalState.mapScale;
+            }
+        };
+        const handleTouchMove = (e) => {
+            if (e.touches.length === 1 && globalState.isDragging) {
+                globalState.mapX = e.touches[0].clientX - globalState.dragStartX;
+                globalState.mapY = e.touches[0].clientY - globalState.dragStartY;
+                clampMapBounds();
+            } else if (e.touches.length === 2) {
+                e.preventDefault();
+                const dist = getTouchDist(e.touches);
+                const scale = globalState.pinchStartScale * (dist / globalState.pinchStartDist);
+                // 双指中心点
+                const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                zoomToPoint(scale, cx - 15, cy - 55);
+            }
+        };
+        const handleTouchEnd = (e) => {
+            if (e.touches.length === 0) globalState.isDragging = false;
+            else if (e.touches.length === 1) {
+                // 剩下一根手指时切换为拖拽模式
+                globalState.isDragging = true;
+                globalState.dragStartX = e.touches[0].clientX - globalState.mapX;
+                globalState.dragStartY = e.touches[0].clientY - globalState.mapY;
+            }
+        };
+
+        // 交互：查看和定位艾尔登印记
+        const openMark = (mark) => {
+            globalState.activeMark = mark;
+            // 优雅平移锁定，将字条定位到手机屏幕中央（考虑当前缩放）
+            const s = globalState.mapScale;
+            globalState.mapX = VIEW_W / 2 - mark.x * s;
+            globalState.mapY = VIEW_H / 2 - mark.y * s;
+            clampMapBounds();
+        };
+
+        const resetMapFocus = () => {
+            globalState.mapScale = 1;
+            globalState.mapX = -(MAP_W - VIEW_W) / 2;
+            globalState.mapY = -(MAP_H - VIEW_H) / 2;
+            showToast("🎯 已为您自动将视野对准城市探索核心区");
+        };
+
+        const switchTab = (tab) => {
+            if (globalState.isWalking) {
+                showToast("⚠️ 您正在远征探索中，请先【结束并结算】后再离开当前视野！");
+                return;
+            }
+            globalState.currentTab = tab;
+        };
+
+        const triggerHotspot = (spot) => {
+            showToast(`🔥 探索热点: 【${spot.name}】当前有 8 只毛孩子在进行飞盘追逐社交！`);
+        };
+
+        const clickFriendPaw = (friend) => {
+            globalState.encounter.activeFriend = friend;
+            globalState.encounter.interactionCount = 0;
+            globalState.encounter.show = true;
+            globalState.stats.encounters++;
+        };
+
+        // ================= 核心高能逻辑：进入游戏化漫步状态 =================
+        const startWalking = () => {
+            globalState.isWalking = true;
+            globalState.walkingStats.time = 0;
+            globalState.walkingStats.distance = 0.0;
+            globalState.walkingStats.newMarks = 0;
+            globalState.playerPet = { x: 450, y: 450 };
+            globalState.trackPath = 'M 450 450';
+
+            // 1. 每秒钟动态绘制更新
+            walkTimer = setInterval(() => {
+                globalState.walkingStats.time++;
+                globalState.walkingStats.distance += 0.003;
+                globalState.stats.steps += 4;
+
+                // 宠物在地图上自动向前推进游荡
+                const nextX = globalState.playerPet.x + (Math.random() * 20 - 9);
+                const nextY = globalState.playerPet.y + (Math.random() * 20 - 9);
+                globalState.playerPet.x = Math.max(50, Math.min(1150, nextX));
+                globalState.playerPet.y = Math.max(50, Math.min(1150, nextY));
+
+                // 动态拉长追加 SVG 红色探索虚线轨迹
+                globalState.trackPath += ` L ${globalState.playerPet.x} ${globalState.playerPet.y}`;
+
+                // 随缘触发：如果时间到了第10秒，且未开弹窗，自动抛出雷达遭遇！
+                if (globalState.walkingStats.time === 10 && !globalState.encounter.show) {
+                    clickFriendPaw(globalState.nearbyFriendsData[1]); // 自动触发阿强跟橘子的相遇
+                }
+            }, 1000);
+
+            showToast("🧭 探索启动！你与毛孩子已踏入未知战争迷雾，开始移动...");
+        };
+
+        const submitMark = () => {
+            if (!globalState.newMarkContent.trim()) {
+                showToast("❌ 必须在地下字条刻下有效文字信息哟！");
+                return;
+            }
+            // 实时机制：在玩家宠物当前的地图坐标位置实时扔下一枚新黄金图钉！
+            const newMark = {
+                id: Date.now(),
+                x: globalState.playerPet.x,
+                y: globalState.playerPet.y,
+                user: '我的小破狗',
+                content: globalState.newMarkContent,
+                time: '刚刚'
+            };
+            globalState.marks.push(newMark);
+            globalState.walkingStats.newMarks++;
+            globalState.newMarkContent = '';
+            globalState.showMarkPanel = false;
+            showToast("✨ 金色字条已成功刻入大地！其他路过的探索者拖拽地图将能查阅你留下的神迹。");
+        };
+
+        const endWalking = () => {
+            clearInterval(walkTimer);
+            globalState.isWalking = false;
+            globalState.showSummary = true;
+        };
+
+        // ================= 核心高能逻辑：地图生态活化（宠友定时器自主随机移动） =================
+        onMounted(() => {
+            roamTimer = setInterval(() => {
+                globalState.nearbyFriendsData.forEach(friend => {
+                    // 模拟附近的人在街区小范围散步走动
+                    friend.x += (Math.random() * 50 - 25);
+                    friend.y += (Math.random() * 50 - 25);
+                    // 确保在地图画布内
+                    friend.x = Math.max(100, Math.min(1100, friend.x));
+                    friend.y = Math.max(100, Math.min(1100, friend.y));
+                });
+            }, 4000); // 每4秒，NPC宠物自动变换身位，全生态沙盒模拟
+        });
+
+        onUnmounted(() => {
+            clearInterval(walkTimer);
+            clearInterval(roamTimer);
+        });
+
+        return {
+            globalState, mockData, formatTime, switchTab,
+            startDrag, onDrag, endDrag,
+            zoomIn, zoomOut, setZoom, onWheel,
+            handleTouchStart, handleTouchMove, handleTouchEnd,
+            openMark, resetMapFocus,
+            triggerHotspot, clickFriendPaw, startWalking, submitMark, endWalking
+        };
+    }
+});
+
+// ================= 组件注册：页面C (雷达偶遇) =================
+app.component('EncounterModal', {
+    template: `
+        <div v-if="globalState.encounter.show" class="absolute inset-0 bg-black/50 z-50 flex flex-col justify-end">
+            <div class="bg-gradient-to-b from-white to-[#F9F9FB] rounded-t-[36px] p-6 space-y-5 shadow-2xl relative overflow-hidden animate-slide-up">
+                <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#4ECDC4] via-[#FFE66D] to-[#FF6B6B]"></div>
+                
+                <div class="text-center space-y-1">
+                    <h3 class="text-lg font-black text-gray-900 flex items-center justify-center space-x-1">
+                        <span>✨</span> <span>雷达偶遇触发！</span>
+                    </h3>
+                    <p class="text-xs text-gray-500 font-medium">
+                        你与宠友 <span class="text-gray-800 font-bold">@{{ globalState.encounter.activeFriend?.name }}</span> 在相同坐标擦肩而过！
+                    </p>
+                </div>
+
+                <div class="bg-gray-50 rounded-2xl p-4 border border-gray-100 flex items-center space-x-4">
+                    <div class="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-2xl shadow-inner transition-all duration-700"
+                         :class="globalState.encounter.interactionCount >= 3 ? '' : 'blur-[6px]'">
+                        {{ globalState.blindBox.petInfo.avatar }}
+                    </div>
+                    <div class="flex-1">
+                        <div class="text-sm font-black text-gray-800">遭遇未知神秘宠物</div>
+                        <div class="text-xs text-gray-400 font-bold mt-0.5">品种：{{ globalState.encounter.activeFriend?.petName }}</div>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-[11px] font-black">
+                        <span class="text-[#FF6B6B]">探索契约进度：Lv.1 蛋壳期</span>
+                        <span class="text-gray-500">{{ globalState.encounter.interactionCount }}/3 次</span>
+                    </div>
+                    <div class="w-full h-3 bg-gray-100 rounded-full overflow-hidden p-0.5 border border-gray-200">
+                        <div class="h-full bg-gradient-to-r from-[#FF6B6B] to-[#FFE66D] rounded-full transition-all duration-300"
+                             :style="{ width: (globalState.encounter.interactionCount / 3) * 100 + '%' }"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 pt-1">
+                    <button @click="globalState.encounter.show = false" class="bg-gray-100 text-gray-500 py-3 rounded-[24px] font-bold text-xs active:scale-95 transition-transform">
+                        忽略擦肩
+                    </button>
+                    <button @click="sayHi" class="bg-[#4ECDC4] text-white py-3 rounded-[24px] font-black text-xs shadow-md active:scale-95 transition-transform flex items-center justify-center space-x-1">
+                        <span>👋</span> <span>发送信号</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `,
+    setup() {
+        const sayHi = () => {
+            if (globalState.encounter.interactionCount < 3) {
+                globalState.encounter.interactionCount++;
+                if (globalState.encounter.interactionCount === 3) {
+                    setTimeout(() => {
+                        globalState.encounter.show = false;
+                        globalState.blindBox.show = true; // 连续发出3次契约信号，无缝触发破壳！
+                        globalState.blindBox.stage = 'closed';
+                    }, 400);
+                } else {
+                    globalState.toastMessage = `🙋‍♂️ 信号已发射！契约点滴累积中 (${globalState.encounter.interactionCount}/3)`;
+                    setTimeout(() => { globalState.toastMessage = ''; }, 1800);
+                }
+            }
+        };
+        return { globalState, sayHi };
+    }
+});
+
+// ================= 组件注册：页面D (高燃破壳开箱) =================
+app.component('BlindBoxOpen', {
+    template: `
+        <div v-if="globalState.blindBox.show" class="absolute inset-0 bg-gradient-to-b from-gray-900 via-slate-900 to-black z-50 flex flex-col items-center justify-center p-6 text-white animate-fade-in">
+            
+            <div class="text-center space-y-1 mb-8">
+                <span class="bg-amber-400 text-gray-900 text-[10px] font-black px-3 py-1 rounded-full tracking-wider">羁绊揭晓</span>
+                <h2 class="text-2xl font-black mt-2">
+                    {{ globalState.blindBox.stage === 'broken' ? '✨ 羁绊真容解禁！' : '🐣 敲碎契约盲盒蛋' }}
+                </h2>
+                <p class="text-xs text-gray-400 max-w-[260px] mx-auto">
+                    {{ globalState.blindBox.stage === 'broken' ? '恭喜！你们的宠物在大地留痕中达成了共鸣' : '对方已接收并回礼！用力连续叩击蛋壳，打碎迷雾幻象' }}
+                </p>
+            </div>
+
+            <div class="w-72 h-80 relative flex items-center justify-center cursor-pointer" @click="handleEggClick">
+                
+                <div v-if="globalState.blindBox.stage !== 'broken'" 
+                     class="w-44 h-60 bg-gradient-to-br from-yellow-100 via-amber-200 to-amber-500 rounded-[50%/60%_60%_40%_40%] shadow-[inset_0_-25px_35px_rgba(0,0,0,0.3),0_25px_50px_rgba(0,0,0,0.5)] flex items-center justify-center border-4 border-white/30"
+                     :class="globalState.blindBox.stage === 'shaking' ? 'animate-shake' : ''">
+                    <span class="text-4xl filter drop-shadow">⚡</span>
+                </div>
+
+                <div v-else class="absolute inset-0 flex items-center justify-center animate-scale-up">
+                    <div class="w-64 bg-white text-gray-800 p-5 rounded-[28px] shadow-2xl border-2 border-amber-400 text-center space-y-4">
+                        <div class="w-20 h-20 bg-gradient-to-tr from-[#FFE66D] to-[#FF6B6B] rounded-full mx-auto flex items-center justify-center text-4xl shadow-md">
+                            {{ globalState.blindBox.petInfo.avatar }}
+                        </div>
+                        <div>
+                            <h4 class="text-base font-black text-gray-900">名称：{{ globalState.blindBox.petInfo.name }}</h4>
+                            <span class="inline-block bg-purple-100 text-purple-700 text-[10px] font-black px-2.5 py-0.5 rounded-full mt-1">
+                                {{ globalState.blindBox.petInfo.breed }}
+                            </span>
+                        </div>
+                        <p class="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl font-bold leading-relaxed">
+                            “{{ globalState.blindBox.petInfo.tag }}”
+                        </p>
+                        <div class="border-t border-gray-100 pt-3 text-[10px] text-gray-400 font-bold flex justify-between">
+                            <span>📅 遛宠习惯</span>
+                            <span class="text-gray-700">每天清晨/傍晚各 1 次</span>
+                        </div>
+                    </div>
+
+                    <div class="absolute w-24 h-60 bg-gradient-to-b from-amber-100 to-amber-300 rounded-l-[50%/60%_0_0_40%] egg-left-break left-6 pointer-events-none"></div>
+                    <div class="absolute w-24 h-60 bg-gradient-to-b from-amber-100 to-amber-300 rounded-r-[0_60%/60%_40%_0] egg-right-break right-6 pointer-events-none"></div>
+                </div>
+
+            </div>
+
+            <div class="w-full max-w-xs mt-10">
+                <button v-if="globalState.blindBox.stage === 'broken'" 
+                        @click="closeBlindBox" 
+                        class="w-full bg-gradient-to-r from-[#FF6B6B] to-[#FFE66D] text-gray-900 py-3.5 rounded-[24px] font-black text-sm shadow-xl active:scale-95 transition-transform">
+                    🤝 缔结联合探索盟约
+                </button>
+                <p v-else class="text-center text-xs text-gray-500 animate-pulse font-bold">
+                    💥 敲击蛋壳直至破裂解禁
+                </p>
+            </div>
+        </div>
+    `,
+    setup() {
+        const handleEggClick = () => {
+            if (globalState.blindBox.stage === 'closed') {
+                globalState.blindBox.stage = 'shaking';
+                setTimeout(() => { globalState.blindBox.stage = 'broken'; }, 1000);
+            }
+        };
+        const closeBlindBox = () => {
+            globalState.blindBox.show = false;
+            globalState.blindBox.stage = 'closed';
+            globalState.toastMessage = "🎉 结盟成功！该宠友已永久纳入您的“探索同盟白名单”。";
+            setTimeout(() => { globalState.toastMessage = ''; }, 3000);
+        };
+        return { globalState, handleEggClick, closeBlindBox };
+    }
+});
+
+app.mount('#app');
+</script>
+
+</body>
+</html>

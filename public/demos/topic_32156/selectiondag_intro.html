@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLVM SelectionDAG 入门：从 IR 到机器指令到底发生了什么？</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .blog-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+        }
+
+        .blog-header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 50px 40px;
+            text-align: center;
+        }
+
+        .blog-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+        }
+
+        .blog-header .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            font-style: italic;
+        }
+
+        .blog-content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            color: #2c3e50;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+            display: flex;
+            align-items: center;
+        }
+
+        .section h2::before {
+            content: '';
+            width: 8px;
+            height: 28px;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            margin-right: 15px;
+        }
+
+        .section h3 {
+            color: #34495e;
+            font-size: 1.4rem;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        .section p {
+            font-size: 1.05rem;
+            margin-bottom: 15px;
+            color: #555;
+            text-align: justify;
+        }
+
+        .section ul, .section ol {
+            margin-left: 30px;
+            margin-bottom: 20px;
+        }
+
+        .section li {
+            font-size: 1.05rem;
+            margin-bottom: 10px;
+            color: #555;
+        }
+
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block pre {
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            white-space: pre;
+        }
+
+        .code-block::before {
+            content: attr(data-lang);
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            color: #888;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .highlight {
+            background: linear-gradient(135deg, #fff5f5 0%, #fff0f0 100%);
+            border-left: 4px solid #e74c3c;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .highlight p {
+            margin: 0;
+            font-weight: 500;
+            color: #c0392b;
+            font-style: italic;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 1rem;
+        }
+
+        table th, table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .flow-chart {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .flow-chart pre {
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+            color: #444;
+            white-space: pre-wrap;
+            line-height: 1.8;
+        }
+
+        .summary-box {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+            border-left: 4px solid #4caf50;
+        }
+
+        .summary-box h4 {
+            color: #2e7d32;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .summary-box p {
+            margin: 0;
+            color: #388e3c;
+        }
+
+        .reference-list {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #eee;
+        }
+
+        .reference-list h3 {
+            margin-bottom: 20px;
+        }
+
+        .reference-list li {
+            font-style: italic;
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        .nav-links {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .nav-links a {
+            display: inline-flex;
+            align-items: center;
+            padding: 10px 20px;
+            background: #f5f5f5;
+            color: #667eea;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .nav-links a:hover {
+            background: #667eea;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .nav-links a svg {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 10px;
+            }
+
+            .blog-header {
+                padding: 30px 20px;
+            }
+
+            .blog-header h1 {
+                font-size: 1.8rem;
+            }
+
+            .blog-content {
+                padding: 25px;
+            }
+
+            .section h2 {
+                font-size: 1.4rem;
+            }
+
+            .section h3 {
+                font-size: 1.2rem;
+            }
+
+            .code-block {
+                padding: 15px;
+            }
+
+            .code-block pre {
+                font-size: 0.85rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="blog-card">
+            <div class="blog-header">
+                <h1>LLVM SelectionDAG 入门</h1>
+                <p class="subtitle">从 IR 到机器指令到底发生了什么？</p>
+            </div>
+
+            <div class="blog-content">
+                <div class="highlight">
+                </div>
+
+                <div class="section">
+                    <h2>1. 为什么要了解 SelectionDAG？</h2>
+                    <p>如果你写过 LLVM Pass，大概率比较熟悉 LLVM IR。但当 IR 进入后端，准备变成真正的机器指令时，事情会变复杂：</p>
+                    <ul>
+                        <li>不同 CPU/GPU 支持的类型不一样；</li>
+                        <li>同一个操作在不同目标上可能需要不同降级方式；</li>
+                        <li>有些目标架构有特殊指令，比如把 <code>mul + add</code> 合成一条 <code>mad</code>；</li>
+                        <li>最终生成代码的质量，很大程度取决于后端这一段如何处理。</li>
+                    </ul>
+                    <p>SelectionDAG 就是 LLVM 后端中非常重要的一套指令选择框架。很多目标都使用它，例如 <code>X86</code>、<code>NVPTX</code>、<code>MIPS</code>、<code>Hexagon</code> 等。</p>
+                    <div class="summary-box">
+                        <h4>一句话概括</h4>
+                        <p>SelectionDAG 是 LLVM 后端里介于 LLVM IR 和机器指令之间的一种 DAG 表示，用来完成类型合法化、操作合法化、DAG 优化、指令选择和调度等工作。</p>
+                    </div>
+                    <p>注意，LLVM 里还有另一个后端框架叫 <code>GlobalISel</code>，它可以看作 SelectionDAG 的替代方案之一，但本文只讨论 SelectionDAG。</p>
+                </div>
+
+                <div class="section">
+                    <h2>2. SelectionDAG 在编译流程中的位置</h2>
+                    <p>LLVM 常见编译流程可以粗略理解成：</p>
+                    <div class="flow-chart">
+                        <pre>Source Code
+   |
+Frontend
+   |
+LLVM IR
+   |
+opt
+   |
+LLVM IR
+   |
+llc
+   |
+Assembly / Machine Code</pre>
+                    </div>
+                    <p>SelectionDAG 主要工作在 <code>llc</code> 阶段，也就是 LLVM IR 被送进后端之后。</p>
+                    <p>在 SelectionDAG 视角里，后端大致会经历：</p>
+                    <div class="flow-chart">
+                        <pre>LLVM IR
+   |
+SelectionDAG Construction
+   |
+Type Legalization
+   |
+Operation Legalization
+   |
+DAG Combiner
+   |
+Instruction Selection
+   |
+Instruction Scheduling
+   |
+MachineIR / MachineInstr</pre>
+                    </div>
+                    <p>这里最核心的问题是：LLVM IR 很通用，但目标机器不通用。SelectionDAG 的工作就是把"通用表达"逐步变成"目标机器能接受的表达"。</p>
+                </div>
+
+                <div class="section">
+                    <h2>3. SelectionDAG 的数据结构</h2>
+                    <p>SelectionDAG 不是一整份程序对应一个 DAG，而是：</p>
+                    <div class="summary-box">
+                        <p>每个基本块通常对应一个 SelectionDAG。</p>
+                    </div>
+                    <p>也就是说，一个函数里的多个 basic block，会被分别构造成多个 DAG。</p>
+
+                    <h3>3.1 MVT 和 EVT</h3>
+                    <p>理解 SelectionDAG，首先要理解它的类型系统。</p>
+                    <p><code>MVT</code> 是 <code>Machine Value Type</code>，表示机器值类型。它是一组 SelectionDAG 后端能讨论的基础类型，例如：</p>
+                    <ul>
+                        <li>整数：<code>i1</code>、<code>i32</code>、<code>i128</code></li>
+                        <li>浮点：<code>f16</code>、<code>bf16</code>、<code>f80</code></li>
+                        <li>向量：<code>v2i32</code>、<code>v128bf16</code></li>
+                        <li>特殊类型：<code>Other</code>、<code>Glue</code></li>
+                    </ul>
+                    <p>但每个目标架构只支持其中一部分。比如某个目标可能支持 <code>i32</code>，但不支持 <code>i128</code>。</p>
+                    <p><code>EVT</code> 是 <code>Extended Value Type</code>，可以理解为 MVT 的扩展版。它包含：</p>
+                    <ul>
+                        <li>所有 MVT；</li>
+                        <li>LLVM IR 中支持的整数、浮点、向量类型；</li>
+                        <li>一些目标机器未必原生支持的奇怪类型，比如 <code>i3</code>、<code>v99i99</code>。</li>
+                    </ul>
+                    <p>但 EVT 并不包含 LLVM IR 的所有类型，比如 <code>struct</code> 和 <code>array</code> 就不在 SelectionDAG 类型集合里。因此结构体相关操作在构建 DAG 时通常要被拆开。</p>
+
+                    <h3>3.2 SDNode：DAG 的节点</h3>
+                    <p><code>SDNode</code> 是 SelectionDAG 的基本节点。每个节点通常包含：</p>
+                    <ul>
+                        <li><code>Opcode</code>：说明这个节点做什么，例如 <code>ISD::ADD</code>、<code>ISD::MUL</code>、<code>ISD::Constant</code>；</li>
+                        <li>一个或多个结果；</li>
+                        <li>零个或多个操作数；</li>
+                        <li>其他附加信息，例如常量值、flags、内存访问信息等。</li>
+                    </ul>
+                    <p>比如下面这段 IR：</p>
+                    <div class="code-block" data-lang="llvm">
+                        <pre>%y = add i32 %a, 5
+%z = mul i32 %y, 3
+br label %join</pre>
+                    </div>
+                    <p>在 DAG 中可能会出现：</p>
+                    <ul>
+                        <li><code>ISD::Constant 5</code></li>
+                        <li><code>ISD::ADD</code></li>
+                        <li><code>ISD::Constant 3</code></li>
+                        <li><code>ISD::MUL</code></li>
+                        <li><code>ISD::BR</code></li>
+                    </ul>
+
+                    <h3>3.3 SDValue：节点的输出</h3>
+                    <p><code>SDValue</code> 表示某个 <code>SDNode</code> 的一个输出结果。</p>
+                    <p>为什么不是一个节点只有一个输出？因为 SelectionDAG 里的节点可以有多个结果。比如一个节点可能同时产生：</p>
+                    <ul>
+                        <li>一个普通值；</li>
+                        <li>一个 chain；</li>
+                        <li>一个 glue。</li>
+                    </ul>
+                    <p>所以 <code>SDValue</code> 通常包含两件事：</p>
+                    <ul>
+                        <li>它来自哪个 <code>SDNode</code>；</li>
+                        <li>它是这个节点的第几个结果。</li>
+                    </ul>
+
+                    <h3>3.4 SDUse：节点的输入</h3>
+                    <p><code>SDUse</code> 表示某个节点使用了另一个节点产生的值，也就是 DAG 边上的"输入关系"。</p>
+                    <p>它包含：</p>
+                    <ul>
+                        <li>被使用的 <code>SDValue</code>；</li>
+                        <li>使用这个值的 <code>SDNode</code>；</li>
+                        <li>这是用户节点的第几个 operand。</li>
+                    </ul>
+                    <p>可以简单理解为：</p>
+                    <div class="flow-chart">
+                        <pre>SDNode 产生 SDValue
+SDUse 把 SDValue 接到另一个 SDNode 的输入上</pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>4. DAG 里不只是数据依赖：还有 Chain 和 Glue</h2>
+                    <p>普通 DAG 边可以表达数据依赖，比如 <code>mul</code> 必须等 <code>add</code> 的结果。</p>
+                    <p>但编译器还需要表达一些"不是普通数据值"的依赖。</p>
+
+                    <h3>4.1 跨基本块的数据流：CopyFromReg / CopyToReg</h3>
+                    <p>SelectionDAG 是按基本块构建的。那如果某个 SSA 值跨 basic block 使用怎么办？</p>
+                    <p>SelectionDAG 使用：</p>
+                    <ul>
+                        <li><code>CopyFromReg</code>：从寄存器读入一个在别处定义、当前块要用的值；</li>
+                        <li><code>CopyToReg</code>：把当前块定义的值写到寄存器，供别处使用。</li>
+                    </ul>
+                    <p>它们帮助 SelectionDAG 在基本块级别表示跨块数据流。</p>
+
+                    <h3>4.2 Chain：表达调度和副作用依赖</h3>
+                    <p>有些操作没有普通数据依赖，但顺序不能乱。例如：</p>
+                    <ul>
+                        <li>store 必须在某些 load/store 前后保持顺序；</li>
+                        <li>branch 通常要在基本块里的其他操作之后；</li>
+                        <li>call、volatile load/store 等带副作用操作不能随便重排。</li>
+                    </ul>
+                    <p>这时 SelectionDAG 使用 <code>chain</code> 值来表示非数据依赖。</p>
+                    <p>每个 basic block 的 DAG 通常会有一个 <code>EntryToken</code>，表示进入这个基本块的起点依赖。DAG 还会有一个 <code>root</code>，通常对应终结指令，例如 branch。</p>
+                    <p>对于多个 chain 需要汇合的情况，会用 <code>ISD::TokenFactor</code> 把多个依赖合并起来。</p>
+
+                    <h3>4.3 MemSDNode：表达内存访问信息</h3>
+                    <p>对于 load/store，DAG 中会使用 <code>MemSDNode</code> 记录内存相关信息，比如：</p>
+                    <ul>
+                        <li>访问大小；</li>
+                        <li>对齐；</li>
+                        <li>源 IR 指针；</li>
+                        <li>是否 volatile；</li>
+                        <li>读写关系。</li>
+                    </ul>
+                    <p>这些信息对合法化、优化和调度都很重要。</p>
+                </div>
+
+                <div class="section">
+                    <h2>5. 构建 SelectionDAG</h2>
+                    <p>SelectionDAG 构建阶段的目标是：</p>
+                    <div class="summary-box">
+                        <p>把每个 basic block 的 LLVM IR 转成 DAG 表示。</p>
+                    </div>
+                    <p>大多数 LLVM IR 指令和 SelectionDAG 节点之间有近似 1:1 的对应关系，但也有例外。</p>
+                    <p>一个典型例外是结构体：</p>
+                    <div class="code-block" data-lang="llvm">
+                        <pre>%l = load {i32, i1}, ptr %p1, align 8
+%v = extractvalue {i32, i1} %l, 0</pre>
+                    </div>
+                    <p>SelectionDAG 不直接支持 struct 类型，所以这类操作会被拆成元素级别的操作。例如一个结构体 load 可能变成两个 load：一个读 <code>i32</code>，另一个读 <code>i1</code>。</p>
+                    <p>还有一些操作目标相关性太强，无法完全由通用逻辑处理，例如函数调用约定。目标后端通常需要实现：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>SDValue TargetLowering::LowerCall(...);
+SDValue TargetLowering::LowerFormalArgs(...);
+SDValue TargetLowering::LowerReturn(...);</pre>
+                    </div>
+                    <p>这些 hook 用来处理 call、函数参数和返回值。</p>
+                </div>
+
+                <div class="section">
+                    <h2>6. 类型合法化：Type Legalization</h2>
+                    <p>LLVM IR 能表达很多类型，但目标机器不一定支持。</p>
+                    <p>类型合法化的目标是：</p>
+                    <div class="summary-box">
+                        <p>把目标不支持的类型降级成目标支持的类型。</p>
+                    </div>
+                    <p>例如：</p>
+                    <ul>
+                        <li>目标支持 <code>i32</code>，但不支持 <code>i24</code>；</li>
+                        <li>目标支持 <code>i64</code>，但不支持 <code>i128</code>；</li>
+                        <li>目标支持 <code>v4i8</code>，但不支持 <code>v3i8</code>。</li>
+                    </ul>
+                    <p>目标后端通过 <code>addRegisterClass(MVT)</code> 告诉 SelectionDAG：哪些 MVT 对当前目标是合法的。</p>
+                    <p>之后 SelectionDAG 会为各种类型建立一张 action 表，用不同策略处理非法类型。</p>
+                    <p>常见策略包括：</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>含义</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>TypeLegal</code></td>
+                                <td>目标原生支持这个类型</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypePromoteInteger</code></td>
+                                <td>把整数提升成更大的整数</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypeExpandInteger</code></td>
+                                <td>把整数拆成两个更小的整数</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypeSoftenFloat</code></td>
+                                <td>把浮点转换成同大小整数处理</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypePromoteFloat</code></td>
+                                <td>把浮点提升成更大的浮点</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypeScalarizeVector</code></td>
+                                <td>把单元素向量标量化</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypeSplitVector</code></td>
+                                <td>把向量拆成两半</td>
+                            </tr>
+                            <tr>
+                                <td><code>TypeWidenVector</code></td>
+                                <td>把向量扩宽成更大的合法向量</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p>举几个例子。</p>
+
+                    <h3>6.1 <code>i128</code> 加法拆成两个 <code>i64</code></h3>
+                    <p>如果目标不支持 <code>i128</code>，但支持 <code>i64</code>，那么：</p>
+                    <div class="flow-chart">
+                        <pre>i128 add
+   |
+low 64-bit add
+high 64-bit add with carry</pre>
+                    </div>
+                    <p>SelectionDAG 不只是"改类型"，它会真的生成新的 DAG 节点。</p>
+
+                    <h3>6.2 <code>i24</code> 提升到 <code>i32</code></h3>
+                    <p>如果目标不支持 <code>i24</code>，但支持 <code>i32</code>，可以把 <code>i24</code> 操作提升成 <code>i32</code> 操作。</p>
+                    <p>但提升后要注意高位不能污染结果，所以 SelectionDAG 会通过 mask 等操作保留低 24 位。</p>
+
+                    <h3>6.3 <code>v3i8</code> 扩宽成 <code>v4i8</code></h3>
+                    <p>某些目标更愿意用更宽的向量类型。例如 Hexagon 可以把 <code>v3i8</code> 扩宽成 <code>v4i8</code>，然后在合法向量类型上执行操作。</p>
+                    <p>目标后端可以重写：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>LegalizeTypeAction getPreferredVectorAction(MVT);</pre>
+                    </div>
+                    <p>来告诉 SelectionDAG 某个向量类型更适合怎么合法化。</p>
+                </div>
+
+                <div class="section">
+                    <h2>7. 操作合法化：Operation Legalization</h2>
+                    <p>类型合法了，不代表操作也合法。</p>
+                    <p>比如目标支持 <code>f16</code> 类型，但不一定支持 <code>f16</code> 上的除法。SelectionDAG 有 400 多个 opcode，不同目标不可能全部支持。</p>
+                    <p>操作合法化的目标是：</p>
+                    <div class="summary-box">
+                        <p>把 SelectionDAG 中目标不支持的 opcode 或 opcode + type 组合，变成目标支持的操作。</p>
+                    </div>
+                    <p>目标后端通过：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>setOperationAction(Opcode, MVT, LegalizeAction);</pre>
+                    </div>
+                    <p>告诉 SelectionDAG 某个操作该怎么处理。</p>
+                    <p>常见 <code>LegalizeAction</code> 包括：</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Action</th>
+                                <th>含义</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>Legal</code></td>
+                                <td>目标原生支持</td>
+                            </tr>
+                            <tr>
+                                <td><code>Promote</code></td>
+                                <td>用更大的类型执行</td>
+                            </tr>
+                            <tr>
+                                <td><code>Expand</code></td>
+                                <td>用其他合法操作模拟</td>
+                            </tr>
+                            <tr>
+                                <td><code>Custom</code></td>
+                                <td>调用目标后端自定义 hook</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <h3>7.1 Promote：用更大的类型做</h3>
+                    <p>NVPTX 示例中，<code>ISD::FDIV</code> 对 <code>f32</code> 是合法的，但对 <code>f16</code> 不合法。</p>
+                    <p>可以这样告诉 SelectionDAG：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>setOperationAction(ISD::FDIV, MVT::f16, Promote);</pre>
+                    </div>
+                    <p>于是 <code>f16</code> 除法可能会变成：</p>
+                    <div class="flow-chart">
+                        <pre>f16 -> f32
+f32 fdiv
+f32 -> f16</pre>
+                    </div>
+
+                    <h3>7.2 Expand：用其他操作模拟</h3>
+                    <p>MIPS 示例中，如果 <code>ISD::BSWAP</code> 对 <code>i32</code> 不合法，可以：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>setOperationAction(ISD::BSWAP, MVT::i32, Expand);</pre>
+                    </div>
+                    <p>然后用 shift、and、or 等合法操作模拟 byte swap。</p>
+
+                    <h3>7.3 Custom：交给目标后端自己降级</h3>
+                    <p>有时通用 Expand 不够，目标需要自定义逻辑。</p>
+                    <p>这时可以：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>setOperationAction(Opcode, MVT, Custom);</pre>
+                    </div>
+                    <p>SelectionDAG 遇到对应操作时会调用：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>LowerOperation()</pre>
+                    </div>
+                    <p>例如：</p>
+                    <ul>
+                        <li>NVPTX 可以把某些 <code>VECTOR_SHUFFLE</code> 降成目标特定的 <code>NVPTXISD::PRMT</code>；</li>
+                        <li>X86 可以把 <code>ISD::ABS</code> 自定义降成目标特定节点。</li>
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h2>8. DAGCombiner：SelectionDAG 里的 InstCombine</h2>
+                    <p>LLVM IR 层已经有很多优化，为什么 SelectionDAG 还要优化？</p>
+                    <p>原因有两个：</p>
+                    <ol>
+                        <li>构建 DAG 和合法化过程中会引入新的冗余；</li>
+                        <li>有些优化只有在目标相关语境下才知道值不值得做。</li>
+                    </ol>
+                    <p><code>DAGCombiner</code> 可以理解为：</p>
+                    <div class="summary-box">
+                        <p>SelectionDAG 版本的 InstCombine。</p>
+                    </div>
+                    <p>它会做通用 peephole，也会询问 <code>TargetLoweringInfo</code>，判断某些变换对当前目标是否划算。</p>
+                    <p>例如：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>// fold (fadd A, (fneg B)) -> (fsub A, B)
+if (SDValue NegN1 = TLI.getCheaperNegatedExpression(N1, DAG))
+  return DAG.getNode(ISD::FSUB, VT, N0, NegN1);</pre>
+                    </div>
+                    <p>目标也可以注册自己的 DAG combine：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>setTargetDAGCombine(Opcode);</pre>
+                    </div>
+                    <p>然后实现：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>PerformDAGCombine()</pre>
+                    </div>
+                    <p>典型用途包括：</p>
+                    <ul>
+                        <li>减少寄存器压力；</li>
+                        <li>利用目标特殊指令；</li>
+                        <li>消除目标上代价较高的操作。</li>
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h2>9. 指令选择：Instruction Selection</h2>
+                    <p>经过构建、合法化和 combine 之后，DAG 里很多节点仍然是通用节点，例如：</p>
+                    <ul>
+                        <li><code>ISD::ADD</code></li>
+                        <li><code>ISD::MUL</code></li>
+                        <li><code>ISD::LOAD</code></li>
+                    </ul>
+                    <p>指令选择阶段的目标是：</p>
+                    <div class="summary-box">
+                        <p>把通用 SDNode 替换成目标机器节点。</p>
+                    </div>
+                    <p>机器节点使用的是目标相关的 <code>MachineInstruction Opcode</code>。</p>
+                    <p>由于这件事高度目标相关，每个目标后端都要实现：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>virtual void Select(SDNode *N) = 0;</pre>
+                    </div>
+                    <p>但如果所有匹配逻辑都手写，会非常痛苦。所以 LLVM 使用 TableGen 自动生成大量匹配代码。</p>
+
+                    <h3>9.1 TableGen 需要三类东西</h3>
+                    <p>TableGen 指令选择一般需要描述：</p>
+                    <ol>
+                        <li><code>SDPatternOperator</code>：要在 DAG 里匹配什么；</li>
+                        <li><code>Instruction</code>：要生成哪条机器指令；</li>
+                        <li><code>Pattern</code>：从 DAG 模式到机器指令的映射。</li>
+                    </ol>
+                    <p>例如一个简化的 <code>add i32</code> 模式：</p>
+                    <div class="code-block" data-lang="tablegen">
+                        <pre>def add : SDNode<"ISD::ADD", SDTIntBinOp,
+                 [SDNPCommutative, SDNPAssociative]>;
+
+def ADDi32rr : NVPTXInst<
+  (outs Int32Regs:$dst),
+  (ins Int32Regs:$a, Int32Regs:$b),
+  "add.s32 \t$dst, $a, $b;">;
+
+def : Pattern<
+  (set Int32Regs:$dst,
+       (add (i32 Int32Regs:$a), (i32 Int32Regs:$b))),
+  (ADDi32rr Int32Regs:$dst, Int32Regs:$a, Int32Regs:$b)>;</pre>
+                    </div>
+                    <p>含义是：</p>
+                    <div class="flow-chart">
+                        <pre>ISD::ADD(i32 a, i32 b)
+   =>
+NVPTX::ADDi32rr</pre>
+                    </div>
+                    <p>目标后端也可以在 TableGen 匹配之前插入自定义逻辑：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>void NVPTXDAGToDAGISel::Select(SDNode *N) {
+  // Custom logic here
+  SelectCode(N); // TableGen based selection
+}</pre>
+                    </div>
+                    <p>SelectionDAG 指令选择会按拓扑顺序遍历 DAG。TableGen 模式之间也会按启发式排序，例如优先匹配更复杂的模式、优先生成更少指令等。</p>
+                </div>
+
+                <div class="section">
+                    <h2>10. 指令调度：Instruction Scheduling</h2>
+                    <p>指令选择后，DAG 里已经基本是机器节点。</p>
+                    <p>Instruction Scheduling 的输入是机器节点 DAG，输出是一条线性的机器指令序列。</p>
+                    <p>也就是说，它要决定：</p>
+                    <div class="flow-chart">
+                        <pre>DAG of machine nodes
+   =>
+linear sequence of machine instructions</pre>
+                    </div>
+                    <p>本文重点不展开调度。实际深入时可以继续看 LLVM 的 scheduling model、machine scheduler 等内容。</p>
+                </div>
+
+                <div class="section">
+                    <h2>11. 示例：为 PTX 支持 <code>mad</code> 指令</h2>
+                    <p>最后用 PDF 里的例子把流程串起来。</p>
+                    <p>PTX 里有一条 <code>mad</code> 指令，语义是：</p>
+                    <div class="flow-chart">
+                        <pre>mad(a, b, c) = a * b + c</pre>
+                    </div>
+                    <p>如果 LLVM IR 是：</p>
+                    <div class="code-block" data-lang="llvm">
+                        <pre>define i32 @foo(i32 %0, i32 %1, i32 %2) {
+  %mul = mul i32 %0, %1
+  %add = add i32 %mul, %2
+  ret i32 %add
+}</pre>
+                    </div>
+                    <p>我们希望后端不要生成普通的 <code>mul + add</code>，而是生成：</p>
+                    <div class="code-block" data-lang="ptx">
+                        <pre>mad.lo.s32 %r4, %r1, %r2, %r3;</pre>
+                    </div>
+                    <p>为什么？因为一条 <code>mad</code> 通常比两条指令延迟更低，也能减少寄存器压力。</p>
+
+                    <h3>11.1 先判断要改哪里</h3>
+                    <p>这个例子里不需要改类型合法化，也不需要改操作合法化，因为：</p>
+                    <ul>
+                        <li><code>mad</code> 支持的类型已经是合法类型；</li>
+                        <li><code>ISD::ADD</code> 和 <code>ISD::MUL</code> 本身也是合法操作。</li>
+                    </ul>
+                    <p>真正需要做的是两件事：</p>
+                    <ol>
+                        <li>DAG Combine：把 <code>add(mul(a, b), c)</code> 折叠成目标特定节点 <code>NVPTXISD::IMAD</code>；</li>
+                        <li>Instruction Selection：把 <code>NVPTXISD::IMAD</code> 选成机器指令 <code>NVPTX::MAD32rrr</code>。</li>
+                    </ol>
+
+                    <h3>11.2 注册目标特定 DAG Combine</h3>
+                    <p>因为我们想在看到 <code>ISD::ADD</code> 时检查它的第一个 operand 是不是 <code>ISD::MUL</code>，所以先注册：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>NVPTXTargetLowering::NVPTXTargetLowering() {
+  ...
+  setTargetDAGCombine(ISD::ADD);
+  ...
+}</pre>
+                    </div>
+                    <p>然后在 <code>PerformDAGCombine()</code> 里分发：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>SDValue NVPTXTargetLowering::PerformDAGCombine(SDNode *N) {
+  switch (N->getOpcode()) {
+  case ISD::ADD:
+    return PerformADDCombine(N);
+  ...
+  }
+}</pre>
+                    </div>
+
+                    <h3>11.3 把 <code>add + mul</code> 合成 <code>IMAD</code></h3>
+                    <p>简化后的 combine 逻辑如下：</p>
+                    <div class="code-block" data-lang="cpp">
+                        <pre>SDValue PerformADDCombine(SDNode *N) {
+  if (N->getOperand(0).getOpcode() != ISD::MUL)
+    return SDValue();
+
+  if (N->getValueType() != MVT::i32)
+    return SDValue();
+
+  return DAG.getNode(NVPTXISD::IMAD, N->getValueType(),
+                     N->getOperand(0).getOperand(0),
+                     N->getOperand(0).getOperand(1),
+                     N->getOperand(1));
+}</pre>
+                    </div>
+                    <p>它做的事情是：</p>
+                    <div class="flow-chart">
+                        <pre>ISD::ADD(ISD::MUL(a, b), c)
+   =>
+NVPTXISD::IMAD(a, b, c)</pre>
+                    </div>
+
+                    <h3>11.4 在 TableGen 中声明节点和机器指令</h3>
+                    <p>先声明目标特定 SDNode：</p>
+                    <div class="code-block" data-lang="tablegen">
+                        <pre>def SDTIMAD : SDTypeProfile<1, 3,
+  [SDTCisSameAs<0, 1>,
+   SDTCisSameAs<0, 2>,
+   SDTCisSameAs<0, 3>,
+   SDTCisInt<0>]>;
+
+def imad : SDNode<"NVPTXISD::IMAD", SDTIMAD>;</pre>
+                    </div>
+                    <p>再声明机器指令：</p>
+                    <div class="code-block" data-lang="tablegen">
+                        <pre>def MAD32rrr : NVPTXInst<
+  (outs Int32Regs:$dst),
+  (ins Int32Regs:$a, Int32Regs:$b, Int32Regs:$c),
+  "mad.lo.s32 \t$dst, $a, $b;">;</pre>
+                    </div>
+                    <p>这里需要注意：幻灯片里的 assembly string 展示为 <code>$dst, $a, $b</code>，但 <code>mad(a, b, c)</code> 和后面的 pattern 都是三个输入。阅读时应以三输入语义和 pattern 为准。</p>
+
+                    <h3>11.5 建立 Selection Pattern</h3>
+                    <p>最后写 pattern，让 TableGen 知道如何从 <code>imad</code> 选到机器指令：</p>
+                    <div class="code-block" data-lang="tablegen">
+                        <pre>def : Pattern<
+  (set Int32Regs:$dst,
+       (imad (i32 Int32Regs:$a),
+             (i32 Int32Regs:$b),
+             (i32 Int32Regs:$c))),
+  (MAD32rrr Int32Regs:$dst,
+            Int32Regs:$a,
+            Int32Regs:$b,
+            Int32Regs:$c)>;</pre>
+                    </div>
+                    <p>这样，整个路径就是：</p>
+                    <div class="flow-chart">
+                        <pre>LLVM IR:
+  add(mul(a, b), c)
+
+SelectionDAG:
+  ISD::ADD(ISD::MUL(a, b), c)
+
+DAG Combine:
+  NVPTXISD::IMAD(a, b, c)
+
+Instruction Selection:
+  NVPTX::MAD32rrr
+
+PTX:
+  mad.lo.s32</pre>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>12. 调试 SelectionDAG 的常用参数</h2>
+                    <p>PDF 最后给了几个非常实用的 debug-only 参数：</p>
+                    <div class="code-block" data-lang="bash">
+                        <pre>-debug-only=isel
+-debug-only=legalize-types
+-debug-only=legalizedag
+-debug-only=dagcombine</pre>
+                    </div>
+                    <p>如果你在调 LLVM 后端，可以用这些参数观察：</p>
+                    <ul>
+                        <li>指令选择发生了什么；</li>
+                        <li>类型合法化做了什么；</li>
+                        <li>操作合法化生成了哪些节点；</li>
+                        <li>DAG combine 是否触发。</li>
+                    </ul>
+                </div>
+
+                <div class="section">
+                    <h2>13. 总结</h2>
+                    <p>SelectionDAG 可以按下面这条主线理解：</p>
+                    <div class="flow-chart">
+                        <pre>把每个 basic block 的 LLVM IR 建成 DAG
+   |
+把目标不支持的类型变合法
+   |
+把目标不支持的操作变合法
+   |
+用 DAGCombiner 清理和做目标相关 peephole
+   |
+把通用 DAG 节点选择成机器节点
+   |
+调度成线性机器指令序列</pre>
+                    </div>
+                    <p>它最难的地方不在某个单独 API，而在于"通用逻辑"和"目标相关逻辑"之间的边界。遇到问题时，建议先问自己三个问题：</p>
+                    <ol>
+                        <li>这是类型不合法，还是操作不合法？</li>
+                        <li>这是通用 lowering 能解决，还是必须目标自定义？</li>
+                        <li>我需要的是 legalization，DAG combine，还是 instruction selection？</li>
+                    </ol>
+                    <p>如果能把问题放回这条流水线里，SelectionDAG 就会清晰很多。</p>
+                </div>
+
+                <div class="reference-list">
+                    <h3>参考</h3>
+                    <ul>
+                        <li>Justin M. Fargnoli, Alex E. MacLean, NVIDIA, <code>A Beginner's Guide to SelectionDAG</code>, 2024 LLVM Developers' Meeting</li>
+                        <li>LLVM Target-Independent Code Generator 文档</li>
+                        <li>LLVM Instruction Selector 文档</li>
+                        <li>LLVM 后端 legalizations 相关文章</li>
+                    </ul>
+                </div>
+
+                <div class="nav-links">
+                    <a href="#">上一篇</a>
+                    <a href="#">下一篇</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

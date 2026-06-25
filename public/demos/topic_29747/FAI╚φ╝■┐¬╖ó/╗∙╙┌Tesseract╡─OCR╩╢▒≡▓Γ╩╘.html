@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工程图纸数字识别</title>
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Tesseract.js -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@300;500;700&display=swap');
+
+        :root {
+            --bg: #0c0e14;
+            --surface: #14171f;
+            --surface-raised: #1c2030;
+            --border: #2a2f40;
+            --accent: #4af0c0;
+            --accent-dim: #2a9070;
+            --danger: #ff6b6b;
+            --text: #e8eaf0;
+            --text-muted: #6b7394;
+            --selection: rgba(74, 240, 192, 0.15);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .app {
+            display: grid;
+            grid-template-rows: 56px 1fr;
+            grid-template-columns: 1fr 340px;
+            height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+        }
+
+        .header h1 {
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            color: var(--text);
+        }
+
+        .header h1 span {
+            color: var(--accent);
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn {
+            font-family: 'Noto Sans SC', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 7px 16px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface-raised);
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            border-color: var(--accent-dim);
+            background: rgba(74, 240, 192, 0.06);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg);
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #5cffd4;
+            border-color: #5cffd4;
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Main canvas area */
+        .canvas-area {
+            position: relative;
+            overflow: auto;
+            background:
+                radial-gradient(ellipse at 30% 40%, rgba(74, 240, 192, 0.03) 0%, transparent 50%),
+                var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 4px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        #pdfCanvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        /* Selection rectangle */
+        .selection-rect {
+            position: absolute;
+            border: 2px solid var(--accent);
+            background: var(--selection);
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+        }
+
+        .selection-rect::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            border: 1px dashed rgba(74, 240, 192, 0.4);
+        }
+
+        /* Corner handles */
+        .selection-rect .corner {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 1px;
+        }
+
+        .selection-rect .corner.tl { top: -4px; left: -4px; }
+        .selection-rect .corner.tr { top: -4px; right: -4px; }
+        .selection-rect .corner.bl { bottom: -4px; left: -4px; }
+        .selection-rect .corner.br { bottom: -4px; right: -4px; }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-section h3 {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        /* Preview */
+        .preview-box {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .preview-box img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .preview-placeholder {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* OCR Result */
+        .result-area {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .result-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .result-card .label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .result-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--accent);
+            word-break: break-all;
+            line-height: 1.3;
+            min-height: 38px;
+        }
+
+        .result-confidence {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        .result-confidence .bar {
+            display: inline-block;
+            width: 60px;
+            height: 4px;
+            background: var(--border);
+            border-radius: 2px;
+            margin-left: 8px;
+            vertical-align: middle;
+            overflow: hidden;
+        }
+
+        .result-confidence .bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        /* Log */
+        .log-area {
+            max-height: 160px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.8;
+        }
+
+        .log-area .log-entry {
+            padding: 2px 0;
+        }
+
+        .log-area .log-entry.success { color: var(--accent); }
+        .log-area .log-entry.error { color: var(--danger); }
+
+        /* Status bar */
+        .status-bar {
+            padding: 12px 20px;
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-dot.ready { background: var(--accent); }
+        .status-dot.loading { background: #f0a04a; animation: pulse 1s infinite; }
+        .status-dot.error { background: var(--danger); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Drop zone overlay */
+        .drop-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(74, 240, 192, 0.08);
+            border: 2px dashed var(--accent);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            border-radius: 4px;
+        }
+
+        .drop-overlay.active { display: flex; }
+
+        .drop-overlay span {
+            font-size: 16px;
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        /* History list */
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .history-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+
+        .history-item:hover {
+            border-color: var(--accent-dim);
+        }
+
+        .history-item .num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .history-item .time {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .history-item .copy-btn {
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 6px;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            background: transparent;
+            transition: all 0.15s;
+        }
+
+        .history-item .copy-btn:hover {
+            color: var(--accent);
+            border-color: var(--accent-dim);
+        }
+
+        /* Zoom controls */
+        .zoom-controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            display: flex;
+            gap: 4px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px;
+            z-index: 20;
+        }
+
+        .zoom-btn {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .zoom-btn:hover {
+            background: var(--surface-raised);
+        }
+
+        .zoom-level {
+            display: flex;
+            align-items: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 0 8px;
+            min-width: 48px;
+            justify-content: center;
+        }
+
+        /* Settings row */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 0;
+        }
+
+        .setting-row label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .setting-row select,
+        .setting-row input[type="number"] {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 100px;
+        }
+
+        /* Hidden file input */
+        #fileInput { display: none; }
+
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1><span>DIGIT</span>OCR &mdash; 工程图纸数字识别</h1>
+            <div class="toolbar">
+                <button class="btn" id="btnOpen" onclick="document.getElementById('fileInput').click()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    打开 PDF
+                </button>
+                <input type="file" id="fileInput" accept=".pdf" />
+                <button class="btn" id="btnPrevPage" disabled>← 上页</button>
+                <button class="btn" id="btnNextPage" disabled>下页 →</button>
+                <span id="pageInfo" style="font-size:12px; color:var(--text-muted); font-family:'JetBrains Mono',monospace;"></span>
+            </div>
+        </header>
+
+        <!-- Canvas Area -->
+        <div class="canvas-area" id="canvasArea">
+            <div class="drop-overlay" id="dropOverlay">
+                <span>释放文件以打开</span>
+            </div>
+
+            <div class="empty-state" id="emptyState">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <path d="M9 3v18M3 9h18"/>
+                </svg>
+                <p>拖放 PDF 文件到此处<br>或点击「打开 PDF」按钮<br><br>
+                <span style="font-size:11px; opacity:0.5;">加载后在图纸上框选数字区域进行识别</span></p>
+            </div>
+
+            <div class="canvas-wrapper" id="canvasWrapper" style="display:none;">
+                <canvas id="pdfCanvas"></canvas>
+                <div class="selection-rect" id="selectionRect">
+                    <div class="corner tl"></div>
+                    <div class="corner tr"></div>
+                    <div class="corner bl"></div>
+                    <div class="corner br"></div>
+                </div>
+            </div>
+
+            <div class="zoom-controls" id="zoomControls" style="display:none;">
+                <button class="zoom-btn" onclick="zoom(-0.1)">−</button>
+                <span class="zoom-level" id="zoomLevel">100%</span>
+                <button class="zoom-btn" onclick="zoom(0.1)">+</button>
+                <button class="zoom-btn" onclick="resetZoom()">⊙</button>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3>识别结果</h3>
+                <div class="result-card">
+                    <div class="label">识别数值</div>
+                    <div class="result-value" id="resultValue">—</div>
+                    <div class="result-confidence" id="resultConfidence"></div>
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-primary" id="btnCopy" style="width:100%; justify-content:center;" disabled>
+                        复制结果
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>选区预览</h3>
+                <div class="preview-box" id="previewBox">
+                    <span class="preview-placeholder">框选区域后显示预览</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>参数设置</h3>
+                <div class="setting-row">
+                    <label>识别模式</label>
+                    <select id="ocrPsm">
+                        <option value="7">单行文本</option>
+                        <option value="8">单词</option>
+                        <option value="13" selected>原始行（推荐）</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <label>二值化阈值</label>
+                    <input type="number" id="threshold" value="128" min="0" max="255" step="1" />
+                </div>
+                <div class="setting-row">
+                    <label>图片缩放倍数</label>
+                    <select id="scaleFactor">
+                        <option value="1">1x</option>
+                        <option value="2" selected>2x</option>
+                        <option value="3">3x</option>
+                        <option value="4">4x</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="result-area">
+                <h3 style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:14px;">识别历史</h3>
+                <div id="historyList" class="history-list"></div>
+
+                <h3 style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin:16px 0 10px;">运行日志</h3>
+                <div class="log-area" id="logArea"></div>
+            </div>
+
+            <div class="status-bar">
+                <span>
+                    <span class="status-dot ready" id="statusDot"></span>
+                    <span id="statusText">就绪</span>
+                </span>
+                <span id="engineInfo" style="font-family:'JetBrains Mono',monospace;">Tesseract.js v5</span>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // ===================== State =====================
+        let pdfDoc = null;
+        let currentPage = 1;
+        let totalPages = 0;
+        let currentScale = 1.5;
+        let isSelecting = false;
+        let selStart = { x: 0, y: 0 };
+        let selEnd = { x: 0, y: 0 };
+        let ocrWorker = null;
+        let history = [];
+
+        const canvas = document.getElementById('pdfCanvas');
+        const ctx = canvas.getContext('2d');
+        const selRect = document.getElementById('selectionRect');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+
+        // ===================== PDF Loading =====================
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (e.target.files[0]) loadPDF(e.target.files[0]);
+        });
+
+        // Drag & drop
+        const canvasArea = document.getElementById('canvasArea');
+        canvasArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            document.getElementById('dropOverlay').classList.add('active');
+        });
+        canvasArea.addEventListener('dragleave', () => {
+            document.getElementById('dropOverlay').classList.remove('active');
+        });
+        canvasArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            document.getElementById('dropOverlay').classList.remove('active');
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.pdf')) loadPDF(file);
+        });
+
+        async function loadPDF(file) {
+            addLog('加载 PDF: ' + file.name, 'info');
+            setStatus('loading', '正在加载...');
+            const arrayBuffer = await file.arrayBuffer();
+            pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            totalPages = pdfDoc.numPages;
+            currentPage = 1;
+            document.getElementById('emptyState').style.display = 'none';
+            canvasWrapper.style.display = 'inline-block';
+            document.getElementById('zoomControls').style.display = 'flex';
+            updatePageButtons();
+            renderPage(currentPage);
+            addLog(`PDF 加载成功，共 ${totalPages} 页`, 'success');
+            setStatus('ready', '就绪 — 框选数字区域开始识别');
+        }
+
+        async function renderPage(pageNum) {
+            const page = await pdfDoc.getPage(pageNum);
+            const viewport = page.getViewport({ scale: currentScale * window.devicePixelRatio });
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            canvas.style.width = (viewport.width / window.devicePixelRatio) + 'px';
+            canvas.style.height = (viewport.height / window.devicePixelRatio) + 'px';
+
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
+            document.getElementById('zoomLevel').textContent = Math.round(currentScale * 100) + '%';
+            addLog(`渲染第 ${pageNum} 页，缩放 ${Math.round(currentScale * 100)}%`);
+        }
+
+        function updatePageButtons() {
+            document.getElementById('btnPrevPage').disabled = currentPage <= 1;
+            document.getElementById('btnNextPage').disabled = currentPage >= totalPages;
+        }
+
+        document.getElementById('btnPrevPage').addEventListener('click', () => {
+            if (currentPage > 1) { currentPage--; renderPage(currentPage); updatePageButtons(); }
+        });
+        document.getElementById('btnNextPage').addEventListener('click', () => {
+            if (currentPage < totalPages) { currentPage++; renderPage(currentPage); updatePageButtons(); }
+        });
+
+        // ===================== Zoom =====================
+        function zoom(delta) {
+            currentScale = Math.max(0.5, Math.min(5, currentScale + delta));
+            if (pdfDoc) renderPage(currentPage);
+        }
+
+        function resetZoom() {
+            currentScale = 1.5;
+            if (pdfDoc) renderPage(currentPage);
+        }
+
+        // ===================== Selection =====================
+        canvas.addEventListener('mousedown', (e) => {
+            if (!pdfDoc) return;
+            const rect = canvas.getBoundingClientRect();
+            isSelecting = true;
+            selStart = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+            selEnd = { ...selStart };
+            selRect.style.display = 'block';
+            updateSelRect();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isSelecting) return;
+            const rect = canvas.getBoundingClientRect();
+            selEnd = {
+                x: Math.max(0, Math.min(rect.width, e.clientX - rect.left)),
+                y: Math.max(0, Math.min(rect.height, e.clientY - rect.top))
+            };
+            updateSelRect();
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (!isSelecting) return;
+            isSelecting = false;
+
+            const w = Math.abs(selEnd.x - selStart.x);
+            const h = Math.abs(selEnd.y - selStart.y);
+            if (w < 5 || h < 5) {
+                selRect.style.display = 'none';
+                return;
+            }
+            performOCR();
+        });
+
+        function updateSelRect() {
+            const x = Math.min(selStart.x, selEnd.x);
+            const y = Math.min(selStart.y, selEnd.y);
+            const w = Math.abs(selEnd.x - selStart.x);
+            const h = Math.abs(selEnd.y - selStart.y);
+
+            selRect.style.left = x + 'px';
+            selRect.style.top = y + 'px';
+            selRect.style.width = w + 'px';
+            selRect.style.height = h + 'px';
+        }
+
+        // ===================== Image Preprocessing =====================
+        function cropAndPreprocess() {
+            const scale = parseInt(document.getElementById('scaleFactor').value);
+            const threshold = parseInt(document.getElementById('threshold').value);
+
+            const dpr = window.devicePixelRatio;
+            const sx = Math.min(selStart.x, selEnd.x) * dpr;
+            const sy = Math.min(selStart.y, selEnd.y) * dpr;
+            const sw = Math.abs(selEnd.x - selStart.x) * dpr;
+            const sh = Math.abs(selEnd.y - selStart.y) * dpr;
+
+            // Create scaled crop
+            const outW = sw * scale;
+            const outH = sh * scale;
+
+            const offscreen = document.createElement('canvas');
+            offscreen.width = outW;
+            offscreen.height = outH;
+            const offCtx = offscreen.getContext('2d');
+
+            // White background
+            offCtx.fillStyle = '#ffffff';
+            offCtx.fillRect(0, 0, outW, outH);
+
+            // Draw cropped region scaled up
+            offCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, outW, outH);
+
+            // Binarize (Otsu-like simple threshold)
+            const imageData = offCtx.getImageData(0, 0, outW, outH);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+                const val = gray < threshold ? 0 : 255;
+                data[i] = data[i+1] = data[i+2] = val;
+            }
+            offCtx.putImageData(imageData, 0, 0);
+
+            // Show preview
+            const previewBox = document.getElementById('previewBox');
+            const previewImg = document.createElement('img');
+            previewImg.src = offscreen.toDataURL('image/png');
+            previewBox.innerHTML = '';
+            previewBox.appendChild(previewImg);
+
+            return offscreen;
+        }
+
+        // ===================== OCR =====================
+        async function performOCR() {
+            const processedCanvas = cropAndPreprocess();
+            const psm = document.getElementById('ocrPsm').value;
+
+            setStatus('loading', '正在识别...');
+            addLog(`开始 OCR (PSM=${psm}, 白名单=0-9)`);
+            const startTime = performance.now();
+
+            try {
+                const result = await Tesseract.recognize(processedCanvas, 'eng', {
+                    // 只识别数字
+                    tessedit_char_whitelist: '0123456789.',
+                    tessedit_pageseg_mode: psm,
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            const pct = Math.round(m.progress * 100);
+                            setStatus('loading', `识别中 ${pct}%`);
+                        }
+                    }
+                });
+
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                let text = result.data.text.trim();
+                const confidence = result.data.confidence;
+
+                // Post-processing: extract only digits and dots
+                text = text.replace(/[^0-9.]/g, '');
+
+                // Remove leading/trailing dots, keep only valid number format
+                text = text.replace(/^\.+|\.+$/g, '');
+                // Remove duplicate dots
+                text = text.replace(/(\..*)\./g, '$1');
+
+                document.getElementById('resultValue').textContent = text || '—';
+                document.getElementById('resultConfidence').innerHTML = text ?
+                    `置信度 ${confidence.toFixed(1)}% <span class="bar"><span class="bar-fill" style="width:${confidence}%"></span></span>` : '';
+
+                document.getElementById('btnCopy').disabled = !text;
+                document.getElementById('btnCopy').onclick = () => {
+                    navigator.clipboard.writeText(text);
+                    addLog('已复制: ' + text, 'success');
+                };
+
+                if (text) {
+                    addHistory(text);
+                    addLog(`识别完成: "${text}" (${confidence.toFixed(1)}%, ${elapsed}s)`, 'success');
+                } else {
+                    addLog('未识别到数字', 'error');
+                }
+
+                setStatus('ready', `完成 — ${elapsed}s`);
+
+            } catch (err) {
+                addLog('识别出错: ' + err.message, 'error');
+                setStatus('error', '识别失败');
+            }
+        }
+
+        // ===================== History =====================
+        function addHistory(value) {
+            history.unshift({ value, time: new Date() });
+            if (history.length > 20) history.pop();
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = history.map((item, i) => `
+                <div class="history-item fade-in">
+                    <span class="num">${item.value}</span>
+                    <span class="time">${item.time.toLocaleTimeString()}</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('${item.value}')">复制</button>
+                </div>
+            `).join('');
+        }
+
+        // ===================== Logging =====================
+        function addLog(msg, type = '') {
+            const logArea = document.getElementById('logArea');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logArea.appendChild(entry);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        function setStatus(state, text) {
+            const dot = document.getElementById('statusDot');
+            dot.className = 'status-dot ' + state;
+            document.getElementById('statusText').textContent = text;
+        }
+
+        // ===================== Keyboard Shortcuts =====================
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' && currentPage > 1) {
+                currentPage--; renderPage(currentPage); updatePageButtons();
+            }
+            if (e.key === 'ArrowRight' && currentPage < totalPages) {
+                currentPage++; renderPage(currentPage); updatePageButtons();
+            }
+            if (e.key === '+' || e.key === '=') zoom(0.1);
+            if (e.key === '-') zoom(-0.1);
+        });
+    </script>
+</body>
+</html>

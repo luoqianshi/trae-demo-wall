@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 知识图谱 — 探索地图</title>
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --primary: #6366f1;
+            --accent: #06b6d4;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #0a0a1a; overflow: hidden; height: 100vh; width: 100vw;
+            cursor: grab; user-select: none; -webkit-user-select: none;
+            -webkit-font-smoothing: antialiased;
+        }
+        :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+        body.grabbing { cursor: grabbing; }
+        body.pointing { cursor: pointer; }
+        canvas { display: block; position: fixed; top: 0; left: 0; }
+
+        /* Controls overlay */
+        .controls {
+            position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; z-index: 10; align-items: center;
+        }
+        .ctrl-btn {
+            width: 44px; height: 44px; border-radius: 50%;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+            color: #fff; font-size: 20px; cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+            backdrop-filter: blur(10px); transition: color 0.2s, background 0.2s;
+        }
+        .ctrl-btn:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); }
+        .ctrl-btn:active { transform: scale(0.92); }
+        .zoom-level {
+            color: rgba(255,255,255,.6); font-size: 12px; font-weight: 600;
+            min-width: 50px; text-align: center;
+        }
+
+        /* Top bar */
+        .top-bar {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+            padding: 16px 24px; display: flex; justify-content: space-between;
+            align-items: center; pointer-events: none;
+        }
+        .top-bar > * { pointer-events: auto; }
+        .top-bar .logo {
+            font-size: 16px; font-weight: 700; color: #fff;
+            background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+            padding: 8px 18px; border-radius: 10px; backdrop-filter: blur(10px);
+            text-decoration: none; display: flex; align-items: center; gap: 8px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .top-bar .logo:hover { background: rgba(255,255,255,.12); }
+        .top-bar .nav-links { display: flex; gap: 8px; }
+        .top-bar .nav-links a {
+            font-size: 13px; font-weight: 600; color: rgba(255,255,255,.7);
+            text-decoration: none; padding: 8px 16px; border-radius: 8px;
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            transition: color 0.2s, background 0.2s;
+        }
+        .top-bar .nav-links a:hover { color: #fff; background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); }
+        .top-bar .nav-links a.highlight { background: linear-gradient(135deg, var(--primary), #8b5cf6); border-color: transparent; color: #fff; }
+
+        /* Tooltip */
+        .tooltip {
+            position: fixed; pointer-events: none; z-index: 20;
+            background: rgba(15,23,42,.92); border: 1px solid rgba(255,255,255,.2);
+            border-radius: 12px; padding: 14px 18px; color: #fff;
+            opacity: 0; transition: opacity 0.15s; font-size: 14px;
+            max-width: 260px; backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,.5);
+            transform: translate(-50%, -120%);
+        }
+        .tooltip.show { opacity: 1; }
+        .tooltip .tt-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+        .tooltip .tt-desc { font-size: 12px; color: rgba(255,255,255,.7); line-height: 1.5; }
+        .tooltip .tt-hint { font-size: 11px; color: var(--accent); margin-top: 6px; }
+
+        /* Legend */
+        .legend {
+            position: fixed; top: 96px; right: 20px; z-index: 10;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .legend-item {
+            display: flex; align-items: center; gap: 8px; font-size: 11px;
+            color: rgba(255,255,255,.6); padding: 6px 12px;
+            background: rgba(255,255,255,.04); border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.06);
+        }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+    <canvas id="mapCanvas"></canvas>
+    <div class="tooltip" id="tooltip"></div>
+
+    <div class="top-bar">
+        <a href="ai-knowledge-intro.html" class="logo">🕸️ AI 知识图谱教程</a>
+        <div class="nav-links">
+            <a href="ai-knowledge-intro.html">首页</a>
+            <a href="ai-basics.html">AI基础</a>
+            <a href="projects.html">实战项目</a>
+            <a href="interactive-tutorial.html">互动教程</a>
+            <a href="kg-optimization.html">架构指南</a>
+            <a href="explore.html" class="highlight">🗺 探索地图</a>
+        </div>
+    </div>
+
+    <div class="legend" id="legend">
+        <div class="legend-item"><span class="legend-dot" style="background:#a78bfa;"></span> 学习模块</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#06b6d4;"></span> 架构章节</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> 入口页面</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> AI基础入门</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#f43f5e;"></span> 实战项目</div>
+    </div>
+
+    <div class="controls">
+        <button class="ctrl-btn" id="btn-zoom-out" title="缩小">−</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="ctrl-btn" id="btn-zoom-in" title="放大">+</button>
+        <button class="ctrl-btn" id="btn-reset" title="重置视图" style="font-size:16px;">⌂</button>
+    </div>
+
+    <script>
+    (function() {
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        const tooltip = document.getElementById('tooltip');
+        const body = document.body;
+
+        // ========== Canvas setup (cap DPR at 1 for performance) ==========
+        const dpr = Math.min(devicePixelRatio || 1, 1);
+        let W, H;
+        function resize() {
+            W = window.innerWidth; H = window.innerHeight;
+            canvas.width = W * dpr; canvas.height = H * dpr;
+            canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        // ========== Camera state ==========
+        let camX = 0, camY = 0, zoom = 1;
+        let targetCamX = 0, targetCamY = 0, targetZoom = 1;
+
+        // ========== Node definitions ==========
+        const nodes = [
+            { id: 'root', x: 0, y: 0, r: 48, color: '#818cf8', label: 'AI 知识图谱教程', type: 'root', desc: '全部内容的中心入口', link: 'ai-knowledge-intro.html' },
+            { id: 'llm', x: 0, y: -280, r: 38, color: '#a78bfa', label: '大模型机制', icon: '🧠', type: 'module', desc: '下一词预测、温度采样、Transformer', link: 'interactive-tutorial.html#sec-llm' },
+            { id: 'prompt', x: 266, y: -86, r: 38, color: '#fbbf24', label: '提示词工程', icon: '✏️', type: 'module', desc: 'CRISPE 框架、风格对比、LLM API', link: 'interactive-tutorial.html#sec-prompt' },
+            { id: 'rag', x: 164, y: 226, r: 38, color: '#34d399', label: 'RAG 检索', icon: '📊', type: 'module', desc: '文档分块、相似度排序、向量检索', link: 'interactive-tutorial.html#sec-rag' },
+            { id: 'graph', x: -164, y: 226, r: 38, color: '#c084fc', label: '知识图谱', icon: '🕸️', type: 'module', desc: '实体关系、推理路径、图数据库', link: 'interactive-tutorial.html#sec-graph' },
+            { id: 'agent', x: -266, y: -86, r: 38, color: '#f472b6', label: 'Agent 决策', icon: '🤖', type: 'module', desc: '思考-行动-观察循环、工具调用', link: 'interactive-tutorial.html#sec-agent' },
+            { id: 'kg1', x: -380, y: 380, r: 30, color: '#06b6d4', label: '① 全景图', type: 'chapter', desc: '8层技术栈、企业5步路径', link: 'kg/overview.html' },
+            { id: 'kg2', x: -220, y: 440, r: 30, color: '#06b6d4', label: '② 构建流水线', type: 'chapter', desc: 'NER、实体对齐、知识融合', link: 'kg/pipeline.html' },
+            { id: 'kg3', x: -60, y: 460, r: 30, color: '#06b6d4', label: '③ 图嵌入', type: 'chapter', desc: 'TransE/RotatE、GNN、FAISS', link: 'kg/embedding.html' },
+            { id: 'kg4', x: 100, y: 440, r: 30, color: '#06b6d4', label: '④ 查询优化', type: 'chapter', desc: 'Cypher优化、分片、缓存', link: 'kg/query.html' },
+            { id: 'kg5', x: 260, y: 380, r: 30, color: '#06b6d4', label: '⑤ 大规模', type: 'chapter', desc: '分布式图数据库、监控', link: 'kg/scale.html' },
+            { id: 'kg6', x: 340, y: 260, r: 30, color: '#06b6d4', label: '⑥ LLM+KG', type: 'chapter', desc: 'Text-to-Cypher、GraphRAG', link: 'kg/llm-kg.html' },
+            { id: 'kg7', x: 300, y: 140, r: 30, color: '#06b6d4', label: '⑦ 趋势', type: 'chapter', desc: 'LLM原生KG、自演进图谱', link: 'kg/trends.html' },
+            { id: 'kg8', x: 180, y: 60, r: 30, color: '#06b6d4', label: '⑧ 案例', type: 'chapter', desc: '反欺诈、电商、智能问答', link: 'kg/cases.html' },
+            { id: 'kg9', x: 40, y: 10, r: 30, color: '#06b6d4', label: '⑨ 多模态', type: 'chapter', desc: 'CLIP/BLIP、图文检索', link: 'kg/multimodal.html' },
+            { id: 'intro', x: 0, y: -160, r: 32, color: '#f59e0b', label: '网站首页', icon: '🏠', type: 'entry', desc: '模块概览与学习路径', link: 'ai-knowledge-intro.html' },
+            { id: 'tutorial', x: 200, y: -200, r: 32, color: '#f59e0b', label: '互动教程', icon: '🎮', type: 'entry', desc: '7个可视化互动模块', link: 'interactive-tutorial.html' },
+            { id: 'guide', x: -200, y: -180, r: 32, color: '#f59e0b', label: '架构指南', icon: '📐', type: 'entry', desc: '9章工程实践指南', link: 'kg-optimization.html' },
+            { id: 'basics', x: 0, y: -240, r: 32, color: '#10b981', label: 'AI基础入门', icon: '💡', type: 'entry', desc: '零门槛理解AI核心概念', link: 'ai-basics.html' },
+            { id: 'projects', x: 0, y: -320, r: 30, color: '#f43f5e', label: '实战项目', icon: '🔧', type: 'entry', desc: '9个实战项目：含LangChain、Qwen微调、BYO系列', link: 'projects.html' },
+        ];
+
+        // ========== Pre-compute RGB colors ==========
+        function hexToRgb(hex) {
+            const n = parseInt(hex.replace('#',''), 16);
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+        function rgbStr(c, a) { return a != null ? `rgba(${c.r},${c.g},${c.b},${a})` : `rgb(${c.r},${c.g},${c.b})`; }
+        function lighten(c, pct) {
+            const a = Math.round(2.55 * pct);
+            return { r: Math.min(255, c.r + a), g: Math.min(255, c.g + a), b: Math.min(255, c.b + a) };
+        }
+        function darken(c, pct) {
+            const a = Math.round(2.55 * pct);
+            return { r: Math.max(0, c.r - a), g: Math.max(0, c.g - a), b: Math.max(0, c.b - a) };
+        }
+
+        nodes.forEach(n => {
+            n._rgb = hexToRgb(n.color);
+            n._light = lighten(n._rgb, 20);
+            n._dark = darken(n._rgb, 20);
+            n._stroke = lighten(n._rgb, 30);
+        });
+
+        // Pre-sort nodes by y for depth
+        const sortedNodes = [...nodes].sort((a, b) => a.y - b.y);
+
+        // ========== Edges ==========
+        const edges = [
+            { from: 'root', to: 'llm', strength: 'solid' },
+            { from: 'root', to: 'prompt', strength: 'solid' },
+            { from: 'root', to: 'rag', strength: 'solid' },
+            { from: 'root', to: 'graph', strength: 'solid' },
+            { from: 'root', to: 'agent', strength: 'solid' },
+            { from: 'llm', to: 'prompt', strength: 'dashed', label: '学习路径' },
+            { from: 'prompt', to: 'rag', strength: 'dashed', label: '学习路径' },
+            { from: 'rag', to: 'graph', strength: 'dashed', label: '学习路径' },
+            { from: 'graph', to: 'agent', strength: 'dashed', label: '学习路径' },
+            { from: 'graph', to: 'kg1', strength: 'solid' },
+            { from: 'graph', to: 'kg2', strength: 'solid' },
+            { from: 'graph', to: 'kg3', strength: 'solid' },
+            { from: 'graph', to: 'kg4', strength: 'solid' },
+            { from: 'graph', to: 'kg5', strength: 'solid' },
+            { from: 'graph', to: 'kg6', strength: 'solid' },
+            { from: 'graph', to: 'kg7', strength: 'solid' },
+            { from: 'graph', to: 'kg8', strength: 'solid' },
+            { from: 'graph', to: 'kg9', strength: 'solid' },
+            { from: 'kg1', to: 'kg2', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg2', to: 'kg3', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg3', to: 'kg4', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg4', to: 'kg5', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg5', to: 'kg6', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg6', to: 'kg7', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg7', to: 'kg8', strength: 'dashed', label: '阅读顺序' },
+            { from: 'kg8', to: 'kg9', strength: 'dashed', label: '阅读顺序' },
+            { from: 'root', to: 'tutorial', strength: 'dotted' },
+            { from: 'root', to: 'guide', strength: 'dotted' },
+            { from: 'root', to: 'intro', strength: 'dotted' },
+            { from: 'root', to: 'basics', strength: 'dotted' },
+            { from: 'root', to: 'projects', strength: 'dotted' },
+        ];
+
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n);
+
+        // ========== Projection ==========
+        function project(x, y) {
+            const isoX = (x - y) * 0.866;
+            const isoY = (x + y) * 0.5 - Math.sqrt(x*x + y*y) * 0.003;
+            return {
+                x: W / 2 + isoX * zoom + camX,
+                y: H / 2 + isoY * zoom + camY,
+                s: zoom
+            };
+        }
+
+        function drawEdge(from, to, strength) {
+            const p1 = project(from.x, from.y);
+            const p2 = project(to.x, to.y);
+            ctx.save();
+            ctx.globalAlpha = strength === 'solid' ? 0.32 : strength === 'dashed' ? 0.24 : 0.22;
+            ctx.strokeStyle = strength === 'solid' ? '#818cf8' : strength === 'dashed' ? '#38bdf8' : '#f59e0b';
+            ctx.lineWidth = strength === 'solid' ? 1.5 : 1;
+            if (strength === 'dashed') ctx.setLineDash([6, 6]);
+            else if (strength === 'dotted') ctx.setLineDash([2, 6]);
+            else ctx.setLineDash([]);
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+            if (strength === 'dashed' || strength === 'solid') {
+                const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+                const a = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                ctx.setLineDash([]);
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.beginPath();
+                ctx.moveTo(mx, my);
+                ctx.lineTo(mx - 6 * Math.cos(a - 0.5), my - 6 * Math.sin(a - 0.5));
+                ctx.lineTo(mx - 6 * Math.cos(a + 0.5), my - 6 * Math.sin(a + 0.5));
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function drawNode(node) {
+            const p = project(node.x, node.y);
+            const r = node.r * zoom;
+            if (p.x < -200 || p.x > W + 200 || p.y < -200 || p.y > H + 200) return;
+            ctx.save();
+
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath(); ctx.arc(p.x + r*0.15, p.y + r*0.15, r, 0, Math.PI*2); ctx.fill();
+
+            // Glow (no gradient object - just semi-transparent circle)
+            ctx.fillStyle = rgbStr(node._rgb, 0.15);
+            ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.5, 0, Math.PI*2); ctx.fill();
+
+            // Main circle - use flat color instead of gradient
+            ctx.fillStyle = rgbStr(node._rgb);
+            ctx.strokeStyle = rgbStr(node._stroke);
+            ctx.lineWidth = Math.max(1.5, 2 * zoom);
+            ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+
+            // Highlight (simulate gradient with a smaller lighter circle)
+            ctx.fillStyle = rgbStr(node._light, 0.5);
+            ctx.beginPath(); ctx.arc(p.x - r*0.2, p.y - r*0.2, r * 0.55, 0, Math.PI*2); ctx.fill();
+
+            // Inner ring for root
+            if (node.type === 'root') {
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = Math.max(1, 1.5 * zoom);
+                ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.7, 0, Math.PI*2); ctx.stroke();
+            }
+
+            // Icon
+            const fontSize = Math.max(8, r * 0.55);
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            if (node.icon) {
+                ctx.font = `${fontSize * 1.5}px sans-serif`;
+                ctx.fillText(node.icon, p.x, p.y - fontSize * 0.2);
+            }
+
+            // Label
+            const labelSize = Math.max(8, r * 0.32);
+            ctx.font = `600 ${labelSize}px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.fillText(node.label, p.x, p.y + r + labelSize * 1.8);
+            ctx.restore();
+        }
+
+        // ========== Background particles (reduced) ==========
+        const particles = [];
+        for (let i = 0; i < 30; i++) {
+            particles.push({
+                x: Math.random() * 3000 - 1500,
+                y: Math.random() * 3000 - 1500,
+                r: Math.random() * 1.5 + 0.5,
+                speed: Math.random() * 0.3 + 0.1,
+                opacity: Math.random() * 0.4 + 0.1
+            });
+        }
+
+        function drawParticles() {
+            ctx.fillStyle = '#818cf8';
+            particles.forEach(p => {
+                const scr = project(p.x, p.y);
+                if (scr.x < -50 || scr.x > W + 50 || scr.y < -50 || scr.y > H + 50) return;
+                ctx.globalAlpha = p.opacity;
+                ctx.beginPath(); ctx.arc(scr.x, scr.y, p.r * zoom, 0, Math.PI*2); ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        // ========== Grid ==========
+        function drawGrid() {
+            const gs = 80;
+            const ox = (camX % (gs * zoom)) / zoom;
+            const oy = (camY % (gs * zoom)) / zoom;
+            const sx = Math.floor((-W/2 - camX) / (gs * zoom));
+            const ex = Math.ceil((W/2 - camX) / (gs * zoom));
+            const sy = Math.floor((-H/2 - camY) / (gs * zoom));
+            const ey = Math.ceil((H/2 - camY) / (gs * zoom));
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+            ctx.lineWidth = 0.5;
+            for (let i = sx; i <= ex; i++) {
+                const x = W/2 + (i * gs + ox) * zoom;
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+            }
+            for (let j = sy; j <= ey; j++) {
+                const y = H/2 + (j * gs + oy) * zoom;
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+            }
+        }
+
+        // ========== Render - only when needed ==========
+        let hoveredNode = null;
+        let needsRender = true;
+        let bgGradCache = null;
+
+        function render() {
+            ctx.clearRect(0, 0, W, H);
+
+            // Cache background gradient (only recreate on resize)
+            if (!bgGradCache) {
+                bgGradCache = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.8);
+                bgGradCache.addColorStop(0, '#1a1a3e');
+                bgGradCache.addColorStop(1, '#0a0a1a');
+            }
+            ctx.fillStyle = bgGradCache;
+            ctx.fillRect(0, 0, W, H);
+
+            drawGrid();
+            drawParticles();
+
+            edges.forEach(e => {
+                const fn = nodeMap[e.from], tn = nodeMap[e.to];
+                if (fn && tn) drawEdge(fn, tn, e.strength);
+            });
+
+            sortedNodes.forEach(n => drawNode(n));
+            needsRender = false;
+        }
+
+        // ========== Hit testing ==========
+        function hitTest(mx, my) {
+            for (let i = nodes.length - 1; i >= 0; i--) {
+                const n = nodes[i];
+                const p = project(n.x, n.y);
+                if (Math.hypot(mx - p.x, my - p.y) < n.r * zoom + 8) return n;
+            }
+            return null;
+        }
+
+        // ========== Interaction ==========
+        let dragging = false, dragStartX = 0, dragStartY = 0, dragCamX = 0, dragCamY = 0;
+
+        canvas.addEventListener('mousedown', e => {
+            dragging = true;
+            dragStartX = e.clientX; dragStartY = e.clientY;
+            dragCamX = camX; dragCamY = camY;
+            body.classList.add('grabbing');
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (dragging) {
+                const dx = e.clientX - dragStartX, dy = e.clientY - dragStartY;
+                if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+                    camX = dragCamX + dx;
+                    camY = dragCamY + dy;
+                    targetCamX = camX; targetCamY = camY;
+                    needsRender = true;
+                }
+            }
+            const hit = hitTest(e.clientX, e.clientY);
+            if (hit !== hoveredNode) {
+                hoveredNode = hit;
+                needsRender = true;
+                if (hit && hit.link) {
+                    body.classList.add('pointing');
+                    tooltip.classList.add('show');
+                    tooltip.innerHTML = `<div class="tt-title">${hit.icon ? hit.icon+' ':''}${hit.label}</div><div class="tt-desc">${hit.desc||''}</div><div class="tt-hint">点击跳转 →</div>`;
+                } else {
+                    body.classList.remove('pointing');
+                    tooltip.classList.remove('show');
+                }
+            }
+            if (hit && hit.link) {
+                tooltip.style.left = (e.clientX + 16) + 'px';
+                tooltip.style.top = (e.clientY - 20) + 'px';
+            }
+        });
+
+        window.addEventListener('mouseup', () => { dragging = false; body.classList.remove('grabbing'); });
+
+        canvas.addEventListener('click', e => {
+            if (Math.abs(e.clientX - dragStartX) > 5 || Math.abs(e.clientY - dragStartY) > 5) return;
+            const hit = hitTest(e.clientX, e.clientY);
+            if (hit && hit.link) {
+                document.body.style.opacity = '0';
+                document.body.style.transition = 'opacity 0.3s';
+                setTimeout(() => { window.location.href = hit.link; }, 250);
+            }
+        });
+
+        // Touch
+        let tsDist = 0, tsZoom = 1, tsCamX = 0, tsCamY = 0;
+        canvas.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                dragging = true;
+                dragStartX = e.touches[0].clientX; dragStartY = e.touches[0].clientY;
+                dragCamX = camX; dragCamY = camY;
+            } else if (e.touches.length === 2) {
+                dragging = false;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                tsDist = Math.hypot(dx, dy);
+                tsZoom = zoom;
+                tsCamX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                tsCamY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            if (e.touches.length === 1 && dragging) {
+                camX = dragCamX + (e.touches[0].clientX - dragStartX);
+                camY = dragCamY + (e.touches[0].clientY - dragStartY);
+                targetCamX = camX; targetCamY = camY;
+                needsRender = true;
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                zoom = Math.max(0.3, Math.min(2.5, tsZoom * Math.hypot(dx, dy) / tsDist));
+                targetZoom = zoom;
+                needsRender = true;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            const zf = e.deltaY > 0 ? 0.92 : 1.08;
+            const clamped = Math.max(0.3, Math.min(2.5, zoom * zf));
+            const mx = e.clientX - W/2, my = e.clientY - H/2;
+            camX = mx - (mx - camX) * (clamped / zoom);
+            camY = my - (my - camY) * (clamped / zoom);
+            zoom = clamped;
+            targetZoom = zoom; targetCamX = camX; targetCamY = camY;
+            needsRender = true;
+        }, { passive: false });
+
+        document.getElementById('btn-zoom-in').addEventListener('click', () => { targetZoom = Math.min(2.5, zoom * 1.3); needsRender = true; });
+        document.getElementById('btn-zoom-out').addEventListener('click', () => { targetZoom = Math.max(0.3, zoom * 0.77); needsRender = true; });
+        document.getElementById('btn-reset').addEventListener('click', () => { targetCamX = 0; targetCamY = 0; targetZoom = 1; needsRender = true; });
+
+        // ========== Animation loop (only runs when needed) ==========
+        let animId = null;
+        const SMOOTH = 0.12;
+        const EPSILON = 0.05;
+
+        function animate() {
+            const wasMoving = Math.abs(targetCamX - camX) > EPSILON || Math.abs(targetCamY - camY) > EPSILON || Math.abs(targetZoom - zoom) > 0.001;
+
+            if (wasMoving) {
+                camX += (targetCamX - camX) * SMOOTH;
+                camY += (targetCamY - camY) * SMOOTH;
+                zoom += (targetZoom - zoom) * SMOOTH;
+                needsRender = true;
+            }
+
+            // Update particles
+            particles.forEach(p => {
+                p.y += p.speed * 0.3;
+                if (p.y > 1500) { p.y = -1500; p.x = Math.random() * 3000 - 1500; }
+            });
+
+            if (needsRender) {
+                render();
+                document.getElementById('zoom-level').textContent = Math.round(zoom * 100) + '%';
+            }
+
+            // Stop animation loop when nothing is happening
+            if (!wasMoving && !needsRender && !dragging) {
+                animId = null;
+                return;
+            }
+
+            animId = requestAnimationFrame(animate);
+        }
+
+        function ensureAnimating() {
+            needsRender = true;
+            if (!animId) {
+                animId = requestAnimationFrame(animate);
+                // Safety timeout: restart loop if particle updates needed
+                setTimeout(() => { if (!animId) { needsRender = true; animId = requestAnimationFrame(animate); } }, 2000);
+            }
+        }
+
+        // Use a simple polling approach: restart animation every 1.5s for particles
+        setInterval(() => {
+            if (!animId && !dragging) {
+                const moving = Math.abs(targetCamX - camX) > EPSILON || Math.abs(targetCamY - camY) > EPSILON || Math.abs(targetZoom - zoom) > 0.001;
+                if (moving) { needsRender = true; animId = requestAnimationFrame(animate); }
+            }
+        }, 1500);
+
+        // Resize clears cache
+        window.addEventListener('resize', () => { resize(); bgGradCache = null; needsRender = true; ensureAnimating(); });
+
+        // Initial
+        targetZoom = 0.85; targetCamX = 50; targetCamY = 80;
+        ensureAnimating();
+    })();
+    </script>
+</body>
+</html>

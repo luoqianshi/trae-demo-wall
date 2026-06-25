@@ -1,0 +1,20 @@
+package dao.impl;
+import bean.CriticalValueReport;
+import dao.CriticalValueReportDAO;
+import util.JDBCUtil;
+import java.sql.*;
+import java.util.*;
+
+public class CriticalValueReportDAOImpl implements CriticalValueReportDAO {
+    private <T> List<T> queryList(String sql, java.util.function.Function<ResultSet,T> mapper, Object... params) {
+        List<T> list = new ArrayList<>();
+        try (JDBCUtil.QueryResult qr = JDBCUtil.executeQuery(sql, params)) { ResultSet rs = qr.getResultSet(); while(rs.next()) list.add(mapper.apply(rs)); } catch(Exception e){ e.printStackTrace(); }
+        return list;
+    }
+    @Override public int insert(CriticalValueReport r){return JDBCUtil.executeInsert("INSERT INTO critical_value_report(report_no,patient_id,patient_name,medical_record_no,admission_no,value_type,item_name,item_value,unit,reference_range,critical_low,critical_high,reporter_id,reporter_name,report_time,notify_method,notified_doctor_id,notified_doctor_name,notify_time,status,is_urgent)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",r.getReportNo(),r.getPatientId(),r.getPatientName(),r.getMedicalRecordNo(),r.getAdmissionNo(),r.getValueType(),r.getItemName(),r.getItemValue(),r.getUnit(),r.getReferenceRange(),r.getCriticalLow(),r.getCriticalHigh(),r.getReporterId(),r.getReporterName(),r.getReportTime(),r.getNotifyMethod(),r.getNotifiedDoctorId(),r.getNotifiedDoctorName(),r.getNotifyTime(),r.getStatus(),r.getIsUrgent());}
+    @Override public int update(CriticalValueReport r){return JDBCUtil.executeUpdate("UPDATE critical_value_report SET doctor_confirm_time=?,doctor_response=?,handle_measure=?,resolve_time=?,outcome=?,status=?WHERE id=?",r.getDoctorConfirmTime(),r.getDoctorResponse(),r.getHandleMeasure(),r.getResolveTime(),r.getOutcome(),r.getStatus(),r.getId());}
+    @Override public CriticalValueReport findById(int id){List<CriticalValueReport>l=queryList("SELECT*FROM critical_value_report WHERE id=?",this::mapCVR,id);return l.isEmpty()?null:l.get(0);}
+    @Override public List<CriticalValueReport> findByPatientId(int patientId){return queryList("SELECT*FROM critical_value_report WHERE patient_id=?ORDER BY report_time DESC",this::mapCVR,patientId);}
+    @Override public List<CriticalValueReport> findReports(String status,int page,int size){String sql="SELECT*FROM critical_value_report WHERE 1=1";List<Object>params=new ArrayList<>();if(status!=null&&!status.isEmpty()){sql+=" AND status=?";params.add(status);}sql+=" ORDER BY report_time DESC LIMIT ?,?";params.add((page-1)*size);params.add(size);return queryList(sql,this::mapCVR,params.toArray(new Object[0]));}
+    private CriticalValueReport mapCVR(ResultSet rs){try{CriticalValueReport r=new CriticalValueReport();r.setId(rs.getInt("id"));r.setReportNo(rs.getString("report_no"));r.setPatientId(rs.getInt("patient_id"));r.setPatientName(rs.getString("patient_name"));r.setMedicalRecordNo(rs.getString("medical_record_no"));r.setAdmissionNo(rs.getString("admission_no"));r.setValueType(rs.getString("value_type"));r.setItemName(rs.getString("item_name"));r.setItemValue(rs.getString("item_value"));r.setUnit(rs.getString("unit"));r.setReferenceRange(rs.getString("reference_range"));r.setCriticalLow(rs.getBigDecimal("critical_low"));r.setCriticalHigh(rs.getBigDecimal("critical_high"));r.setReporterId(rs.getInt("reporter_id"));r.setReporterName(rs.getString("reporter_name"));r.setReportTime(rs.getTimestamp("report_time"));r.setNotifyMethod(rs.getString("notify_method"));if(rs.getObject("notified_doctor_id")!=null)r.setNotifiedDoctorId(rs.getInt("notified_doctor_id"));r.setNotifiedDoctorName(rs.getString("notified_doctor_name"));r.setNotifyTime(rs.getTimestamp("notify_time"));r.setDoctorConfirmTime(rs.getTimestamp("doctor_confirm_time"));r.setDoctorResponse(rs.getString("doctor_response"));r.setHandleMeasure(rs.getString("handle_measure"));r.setResolveTime(rs.getTimestamp("resolve_time"));r.setOutcome(rs.getString("outcome"));r.setStatus(rs.getString("status"));r.setIsUrgent(rs.getInt("is_urgent"));r.setCreateTime(rs.getTimestamp("create_time"));r.setUpdateTime(rs.getTimestamp("update_time"));return r;}catch(SQLException e){return null;}}
+}

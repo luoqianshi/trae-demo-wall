@@ -1,0 +1,552 @@
+package processor
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"YaraFlow/internal/bus"
+	"YaraFlow/internal/chat"
+	"YaraFlow/internal/config"
+	"YaraFlow/internal/emoji"
+	"YaraFlow/internal/hook"
+	"YaraFlow/internal/llm"
+	"YaraFlow/internal/logger"
+	"YaraFlow/internal/memory"
+	"YaraFlow/internal/personality"
+	"YaraFlow/internal/platform"
+	"YaraFlow/internal/plugin"
+	"YaraFlow/internal/storage"
+)
+
+type ChatBot struct {
+	config               *config.Config
+	llmProvider          llm.LLMProvider
+	toolLLMProvider      llm.LLMProvider
+	messageProcessor     *MessageProcessor
+	triggerController    *TriggerController
+	decisionMaker        *DecisionMaker
+	toolExecutor         *ToolExecutor
+	replyGenerator       *ReplyGenerator
+	commandProcessor     *CommandProcessor
+	memoryManager        *memory.MemoryManager
+	personFactWriter     *memory.PersonFactWriter
+	periodicMemoryWriter *memory.PeriodicMemoryWriter
+	emotionalState       *personality.EmotionalState
+}
+
+func NewChatBot(cfg *config.Config, llmProvider llm.LLMProvider, visionProvider llm.VisionProvider) *ChatBot {
+	plannerProvider := llm.NewRandomModelProvider("planner")
+	toolProvider := llm.NewRandomModelProvider("tool_use")
+	dm := NewDecisionMaker(cfg, plannerProvider)
+	te := NewToolExecutor(cfg, visionProvider)
+	te.SetToolLLMProvider(toolProvider)
+
+	if plugin.DefaultPluginManager != nil {
+		te.SetPluginExecutor(plugin.DefaultPluginManager)
+	}
+
+	return &ChatBot{
+		config:            cfg,
+		llmProvider:       llmProvider,
+		toolLLMProvider:   toolProvider,
+		messageProcessor:  NewMessageProcessor(cfg, visionProvider),
+		triggerController: NewTriggerController(cfg),
+		decisionMaker:     dm,
+		toolExecutor:      te,
+		replyGenerator:    NewReplyGenerator(cfg, llmProvider),
+		commandProcessor:  NewCommandProcessor(cfg),
+		emotionalState:    personality.NewEmotionalState(),
+	}
+}
+
+func (bot *ChatBot) getToolLLMProvider() llm.LLMProvider {
+	if bot.toolLLMProvider != nil {
+		return bot.toolLLMProvider
+	}
+	bot.toolLLMProvider = llm.NewRandomModelProvider("tool_use")
+	return bot.toolLLMProvider
+}
+
+func (bot *ChatBot) ProcessMessage(message platform.Message) (string, error) {
+	logger.Info("========== 消息处理开始 ==========")
+
+	sessionID := chat.CalculateSessionID(&message)
+	session := chat.DefaultChatManager.GetOrCreateSession(sessionID, message.SenderID, message.GroupID)
+	session.SetLLMProvider(bot.getToolLLMProvider())
+
+	bus.DefaultBus.Publish("message.received", &message)
+
+	storage.SaveMessage(storage.MessageRecord{
+		MessageID:    message.ID,
+		Platform:     message.Platform,
+		SenderID:     message.SenderID,
+		SenderName:   message.SenderName,
+		GroupID:      message.GroupID,
+		Content:      message.Content,
+		Direction:    "in",
+		IsAtMe:       message.IsAtMe,
+		HasImage:     message.HasImage,
+		ReplyToMsgID: message.ReplyMessageID,
+		Timestamp:    message.Timestamp,
+	})
+
+	var imageTags []string
+
+	if message.HasImage && len(message.Images) > 0 {
+		imageTags = make([]string, len(message.Images))
+
+		logger.Info(fmt.Sprintf("开始处理 %d 张图片/表情包", len(message.Images)))
+
+		for i, img := range message.Images {
+			isEmoji := img.IsSticker || img.Type == platform.ImageTypeSticker || img.Type == platform.ImageTypeEmoji
+
+			logger.Info(fmt.Sprintf("处理图片 %d/%d: IsSticker=%v, Type=%v, isEmoji=%v, URL=%s",
+				i+1, len(message.Images), img.IsSticker, img.Type, isEmoji, img.URL))
+
+			data, err := bot.downloadImage(img.URL)
+			if err != nil {
+				logger.Warn(fmt.Sprintf("下载图片失败: %v", err))
+				continue
+			}
+			logger.Debug(fmt.Sprintf("图片已下载: %d bytes", len(data)))
+
+			if !isEmoji {
+				continue
+			}
+
+			hash := emoji.CalculateHash(data)
+
+			if bot.config.Emoji.StealEmoji && emoji.DefaultEmojiManager != nil {
+				if err := emoji.DefaultEmojiManager.SaveReceivedEmoji(data); err != nil {
+					logger.Warn(fmt.Sprintf("收入表情包失败: %v", err))
+				}
+			}
+
+			if tag, ok := emoji.DefaultEmojiManager.QueryEmojiByHash(hash); ok {
+				imageTags[i] = tag
+				logger.Info(fmt.Sprintf("表情包已注册，标签: %s (hash=%s)", tag, hash[:8]))
+			} else if emoji.DefaultEmojiManager.EmojiExists(hash) {
+				logger.Info(fmt.Sprintf("表情包已收入收件箱等待偷取 (hash=%s)", hash[:8]))
+			}
+		}
+	}
+
+	if hookResult, err := hook.DefaultHookManager.Trigger(hook.HookChatReceiveBeforeProcess, &message, nil); err != nil {
+		logger.Error(fmt.Sprintf("Hook chat.receive.before_process 触发失败: %v", err))
+	} else if !hookResult.AllowContinue {
+		logger.Info(fmt.Sprintf("消息 %s 在预处理前被 Hook 中止", message.ID))
+		return "", nil
+	}
+
+	processedMsg, err := bot.messageProcessor.Process(message)
+	if err != nil {
+		logger.Error(fmt.Sprintf("消息预处理失败: %v", err))
+		return "", err
+	}
+
+	if len(imageTags) > 0 {
+		processedMsg.Content = bot.buildContentWithEmojiTags(processedMsg, imageTags)
+	}
+
+	session.SetContext(processedMsg)
+
+	logger.Info(fmt.Sprintf("消息预处理完成 - 内容: %s, @我: %v, 表情包: %v",
+		processedMsg.Content, processedMsg.IsAtMe, processedMsg.HasSticker))
+
+	bus.DefaultBus.Publish("message.processed", processedMsg)
+
+	if hookResult, err := hook.DefaultHookManager.Trigger(hook.HookChatReceiveAfterProcess, &message, nil); err != nil {
+		logger.Error(fmt.Sprintf("Hook chat.receive.after_process 触发失败: %v", err))
+	} else if !hookResult.AllowContinue {
+		logger.Info(fmt.Sprintf("消息 %s 在预处理后被 Hook 中止", message.ID))
+		return "", nil
+	}
+
+	filterResult := chat.DefaultMessageFilter.Filter(processedMsg.Content)
+	if !filterResult.Allowed {
+		logger.Info(fmt.Sprintf("消息被过滤 - 原因: %s", filterResult.Reason))
+		return "", nil
+	}
+
+	isCommand, cmdResult, continueProcess := bot.processCommands(processedMsg, &message)
+	if isCommand {
+		if cmdResult != "" {
+			session.ResetConsecutiveNoReply()
+			logger.Info("========== 消息处理结束 ==========")
+			return cmdResult, nil
+		}
+		if !continueProcess {
+			logger.Info("命令处理完成，跳过后续消息处理")
+			return "", nil
+		}
+	}
+
+	triggerResult := bot.triggerController.CheckTrigger(processedMsg)
+	logger.Info(fmt.Sprintf("触发检查结果: 应该回复=%v, 原因: %s, 强制回复: %v",
+		triggerResult.ShouldReply, triggerResult.Reason, triggerResult.ForceReply))
+
+	if !triggerResult.ShouldReply && !triggerResult.ForceReply {
+		session.IncrementConsecutiveNoReply()
+		logger.Info("触发检查未通过，不进行回复")
+		return "", nil
+	}
+
+	var memorySummary string
+
+	context := session.GetContextSummary(bot.config.Bot.QQ, bot.config.Bot.Nickname)
+
+	if bot.memoryManager != nil && bot.config.Memory.Enabled {
+		memResult, err := bot.memoryManager.Query(memory.MemoryQueryRequest{
+			CurrentMessage: processedMsg.Content,
+			SessionID:      sessionID,
+			Limit:          bot.config.Memory.TopK,
+		})
+		if err != nil {
+			logger.Warn(fmt.Sprintf("记忆检索失败: %v", err))
+		} else if memResult != nil && memResult.Summary != "" {
+			memorySummary = memResult.Summary
+			if context != "" {
+				context = memorySummary + "\n\n" + context
+			} else {
+				context = memorySummary
+			}
+			logger.Info(fmt.Sprintf("记忆检索成功，命中 %d 条记忆", len(memResult.Hits)))
+		}
+	}
+
+	if plugin.DefaultPluginManager != nil {
+		allTools := plugin.DefaultPluginManager.GetAllToolDefinitions()
+		allActions := plugin.DefaultPluginManager.GetAllActionDefinitions()
+		bot.decisionMaker.SetActionDefinitions(allActions)
+		bot.toolExecutor.SetToolDefinitions(allTools)
+	}
+
+	var decisionTools []config.ToolDefData
+	if plugin.DefaultPluginManager != nil {
+		decisionTools = plugin.DefaultPluginManager.GetVisibleToolDefinitions()
+	}
+	if bot.toolExecutor.builtinTools != nil {
+		decisionTools = append(decisionTools, bot.toolExecutor.builtinTools.GetToolDefinitions()...)
+	}
+	bot.decisionMaker.SetToolDefinitions(decisionTools)
+
+	bot.toolExecutor.SetBuiltinToolContext(&BuiltinToolContext{
+		SessionID: sessionID,
+		Platform:  message.Platform,
+		GroupID:   message.GroupID,
+		UserID:    message.SenderID,
+	})
+
+	decisionResult, _, err := bot.decisionMaker.DecideWithTools(processedMsg, context, bot.toolExecutor)
+	if err != nil {
+		logger.Error(fmt.Sprintf("决策失败: %v", err))
+		return "", err
+	}
+
+	logger.Info(fmt.Sprintf("决策结果: action=%s, thought=%s", decisionResult.Action, decisionResult.Thought))
+
+	bus.DefaultBus.Publish("decision.made", decisionResult)
+
+	chatHistory := session.GetContextSummary(bot.config.Bot.QQ, bot.config.Bot.Nickname)
+
+	if isPluginAction := bot.isPluginAction(decisionResult.Action); isPluginAction {
+		actionResults, err := bot.toolExecutor.ExecutePluginAction(decisionResult)
+		if err != nil {
+			logger.Error(fmt.Sprintf("插件 action %s 执行失败: %v", decisionResult.Action, err))
+		} else if len(actionResults) > 0 {
+			for _, ar := range actionResults {
+				if ar.Success && ar.Result != "" {
+					actionContext := fmt.Sprintf("\n[动作 %s 执行结果]\n%s\n", decisionResult.Action, ar.Result)
+					chatHistory += actionContext
+				}
+			}
+		}
+	}
+
+	if !decisionResult.ReplyNeeded {
+		session.IncrementConsecutiveNoReply()
+		logger.Info("决策结果不需要回复")
+		return "", nil
+	}
+
+	replyContextSummary := session.ContextSummary
+	if memorySummary != "" {
+		if replyContextSummary != "" {
+			replyContextSummary = memorySummary + "\n\n" + replyContextSummary
+		} else {
+			replyContextSummary = memorySummary
+		}
+	}
+
+	if decisionResult.SearchMemory && bot.memoryManager != nil && bot.config.Memory.GlobalMemory.Enabled {
+		globalResult, err := bot.memoryManager.QueryGlobal(memory.MemoryQueryRequest{
+			CurrentMessage: processedMsg.Content,
+			Limit:          bot.config.Memory.GlobalMemory.TopK,
+		})
+		if err != nil {
+			logger.Warn(fmt.Sprintf("全局记忆检索失败: %v", err))
+		} else if globalResult != nil && globalResult.Summary != "" {
+			globalMemorySummary := globalResult.Summary
+			if replyContextSummary != "" {
+				replyContextSummary = replyContextSummary + "\n\n" + globalMemorySummary
+			} else {
+				replyContextSummary = globalMemorySummary
+			}
+			logger.Info(fmt.Sprintf("全局记忆检索成功，命中 %d 条记忆", len(globalResult.Hits)))
+		}
+	}
+
+	replyResult := bot.replyGenerator.GenerateReply(processedMsg, chatHistory, decisionResult, replyContextSummary, bot.emotionalState)
+	if !replyResult.Success {
+		logger.Error(fmt.Sprintf("回复生成失败: %v", replyResult.Error))
+		return "", replyResult.Error
+	}
+
+	sentences := platform.SplitSentences(replyResult.Content)
+	splitContent := strings.Join(sentences, "\n")
+	if splitContent == "" {
+		splitContent = replyResult.Content
+	}
+
+	bus.DefaultBus.Publish("reply.generated", replyResult)
+
+	session.ResetConsecutiveNoReply()
+
+	replyMsgID := platform.GenerateMessageID()
+
+	replyProcessedMsg := &platform.ProcessedMessage{
+		OriginalMessage: platform.Message{
+			ID:         replyMsgID,
+			Platform:   message.Platform,
+			SenderID:   bot.config.Bot.QQ,
+			SenderName: bot.config.Bot.Nickname,
+			GroupID:    message.GroupID,
+			Content:    splitContent,
+			Timestamp:  platform.NowMilliseconds(),
+		},
+		Content:   splitContent,
+		Timestamp: platform.NowMilliseconds(),
+	}
+	session.SetContext(replyProcessedMsg)
+
+	logger.Info("========== 消息处理结束 ==========")
+
+	storage.SaveMessage(storage.MessageRecord{
+		MessageID:  replyMsgID,
+		Platform:   message.Platform,
+		SenderID:   bot.config.Bot.QQ,
+		SenderName: bot.config.Bot.Nickname,
+		GroupID:    message.GroupID,
+		Content:    splitContent,
+		Direction:  "out",
+		IsAtMe:     false,
+		HasImage:   false,
+		Timestamp:  platform.NowMilliseconds(),
+	})
+
+	bot.ingestMemory(sessionID, session, &message, processedMsg, &ReplyResult{
+		Success: true,
+		Content: splitContent,
+	})
+
+	return splitContent, nil
+}
+
+func (bot *ChatBot) ingestMemory(sessionID string, session *chat.ChatSession, message *platform.Message, processedMsg *platform.ProcessedMessage, replyResult *ReplyResult) {
+	if bot.memoryManager == nil || !bot.config.Memory.Enabled {
+		return
+	}
+
+	if bot.config.Memory.Writeback.Enabled && bot.periodicMemoryWriter != nil {
+		fullMessage := fmt.Sprintf("%s: %s", message.SenderName, processedMsg.Content)
+		bot.periodicMemoryWriter.OnMessage(sessionID, message.Platform, message.GroupID, fullMessage)
+
+		if replyResult != nil && replyResult.Content != "" {
+			botReply := fmt.Sprintf("%s: %s", bot.config.Bot.Nickname, replyResult.Content)
+			bot.periodicMemoryWriter.OnMessage(sessionID, message.Platform, message.GroupID, botReply)
+		}
+	}
+
+	config.DetectAndUpdateMood(bot.emotionalState, processedMsg.Content)
+
+	if bot.config.Memory.Writeback.PersonFactEnabled {
+		facts := memory.ExtractPersonFacts(processedMsg.Content, message.SenderName, message.SenderID)
+		for _, fact := range facts {
+			bot.memoryManager.Ingest(fact, sessionID, message.Platform, message.GroupID, message.SenderID, memory.SourcePersonFact)
+		}
+
+		if bot.personFactWriter != nil {
+			go bot.personFactWriter.ExtractAndStore(
+				processedMsg.Content, message.SenderName, message.SenderID,
+				sessionID, message.Platform, message.GroupID,
+			)
+		}
+	}
+}
+
+func (bot *ChatBot) processCommands(processedMsg *platform.ProcessedMessage, message *platform.Message) (bool, string, bool) {
+	cmdContent := extractCommandContent(processedMsg.Content)
+	logger.Info(fmt.Sprintf("提取命令: 原始内容=%q, 提取结果=%q", processedMsg.Content, cmdContent))
+	cmdMatch, found := bot.commandProcessor.FindCommand(cmdContent)
+	if !found {
+		return false, "", true
+	}
+
+	logger.Info(fmt.Sprintf("检测到命令: %s (原始内容: %s)", cmdMatch.CommandName, cmdContent))
+
+	if hookResult, err := hook.DefaultHookManager.Trigger(hook.HookChatCommandBeforeExecute, message, map[string]interface{}{
+		"command_name":   cmdMatch.CommandName,
+		"plugin_id":      cmdMatch.PluginID,
+		"matched_groups": cmdMatch.Groups,
+	}); err != nil {
+		logger.Error(fmt.Sprintf("Hook chat.command.before_execute 触发失败: %v", err))
+	} else if !hookResult.AllowContinue {
+		logger.Info(fmt.Sprintf("命令 %s 被 Hook 中止", cmdMatch.CommandName))
+		return true, "", false
+	}
+
+	cmdResult, err := bot.commandProcessor.ExecuteCommand(cmdMatch)
+	if err != nil {
+		logger.Error(fmt.Sprintf("命令执行失败: %v", err))
+	}
+
+	if _, err := hook.DefaultHookManager.Trigger(hook.HookChatCommandAfterExecute, message, map[string]interface{}{
+		"command_name":     cmdMatch.CommandName,
+		"plugin_id":        cmdMatch.PluginID,
+		"matched_groups":   cmdMatch.Groups,
+		"success":          err == nil,
+		"response":         cmdResult,
+		"continue_process": false,
+	}); err != nil {
+		logger.Error(fmt.Sprintf("Hook chat.command.after_execute 触发失败: %v", err))
+	}
+
+	return true, cmdResult, false
+}
+
+func (bot *ChatBot) downloadImage(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("http get failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http request failed with status: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body failed: %w", err)
+	}
+
+	return data, nil
+}
+
+func (bot *ChatBot) buildContentWithEmojiTags(processedMsg *platform.ProcessedMessage, imageTags []string) string {
+	content := processedMsg.Content
+
+	hasStickerTag := false
+	for i, tag := range imageTags {
+		if tag != "" {
+			hasStickerTag = true
+			content = replaceNthPlaceholder(content, i, fmt.Sprintf("[表情包：%s]", tag))
+		} else if processedMsg.OriginalMessage.Images[i].Type == platform.ImageTypeEmoji || processedMsg.OriginalMessage.Images[i].Type == platform.ImageTypeSticker || processedMsg.OriginalMessage.Images[i].IsSticker {
+			content = replaceNthPlaceholder(content, i, "[表情包]")
+		}
+	}
+
+	if !hasStickerTag && processedMsg.HasSticker {
+		content = replaceFirstPlaceholder(content, "[表情包]")
+	}
+
+	return content
+}
+
+func replaceNthPlaceholder(content string, index int, replacement string) string {
+	placeholders := []string{"[图片]", "[表情包]"}
+	for _, ph := range placeholders {
+		result := replaceNthSpecific(content, index, ph, replacement)
+		if result != content {
+			return result
+		}
+	}
+	return content
+}
+
+func replaceNthSpecific(content string, index int, placeholder string, replacement string) string {
+	count := 0
+	for i := 0; i < len(content); {
+		idx := strings.Index(content[i:], placeholder)
+		if idx == -1 {
+			break
+		}
+		actualIdx := i + idx
+		if count == index {
+			return content[:actualIdx] + replacement + content[actualIdx+len(placeholder):]
+		}
+		count++
+		i = actualIdx + len(placeholder)
+	}
+	return content
+}
+
+func replaceFirstPlaceholder(content string, replacement string) string {
+	placeholders := []string{"[图片]", "[表情包]"}
+	for _, ph := range placeholders {
+		if idx := strings.Index(content, ph); idx != -1 {
+			return content[:idx] + replacement + content[idx+len(ph):]
+		}
+	}
+	return content
+}
+
+func (bot *ChatBot) GetCommandProcessor() *CommandProcessor {
+	return bot.commandProcessor
+}
+
+func (bot *ChatBot) SetMemoryManager(mm *memory.MemoryManager) {
+	bot.memoryManager = mm
+	if bot.config.Memory.Enabled && bot.config.Memory.Writeback.PersonFactEnabled {
+		factProvider := llm.NewRandomModelProvider("tool_use")
+		bot.personFactWriter = memory.NewPersonFactWriter(factProvider, mm)
+	}
+	if bot.config.Memory.Enabled && bot.config.Memory.Writeback.Enabled {
+		summaryProvider := llm.NewRandomModelProvider("tool_use")
+		bot.periodicMemoryWriter = memory.NewPeriodicMemoryWriter(
+			summaryProvider, mm,
+			bot.config.Memory.Writeback.MessageThreshold,
+			0,
+		)
+	}
+	bot.toolExecutor.SetBuiltinTools(NewBuiltinToolRegistry(mm))
+}
+
+func (bot *ChatBot) isPluginAction(action string) bool {
+	switch action {
+	case "reply", "no_reply", "no_action", "emoji", "msg_react", "poke", "silence", "tool_use", "wait", "finish":
+		return false
+	}
+	return bot.decisionMaker.isPluginAction(action)
+}
+
+func extractCommandContent(fullContent string) string {
+	if fullContent == "" {
+		return ""
+	}
+	parts := strings.SplitN(fullContent, " : ", 2)
+	if len(parts) >= 2 {
+		cmdPart := strings.TrimSpace(parts[len(parts)-1])
+		if cmdPart != "" {
+			return cmdPart
+		}
+	}
+	return fullContent
+}
+
+func (bot *ChatBot) ReloadConfig() {
+	bot.config = &config.AppConfig
+	bot.triggerController.ReloadConfig()
+}

@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Knowledge Map - 知识地图</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none'><circle cx='32' cy='32' r='28' stroke='%2360a5fa' stroke-width='3'/><circle cx='32' cy='20' r='4' fill='%2360a5fa'/><circle cx='20' cy='38' r='4' fill='%23a78bfa'/><circle cx='44' cy='38' r='4' fill='%23f472b6'/><line x1='32' y1='24' x2='22' y2='35' stroke='%2360a5fa' stroke-width='2'/><line x1='32' y1='24' x2='42' y2='35' stroke='%2360a5fa' stroke-width='2'/><line x1='24' y1='38' x2='40' y2='38' stroke='%23a78bfa' stroke-width='2' stroke-dasharray='4 2'/></svg>">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="data.js"></script>
+  <style>
+    :root {
+      --primary-dark: #0f172a;
+      --primary: #1e293b;
+      --primary-light: #334155;
+      --accent: #3b82f6;
+      --accent-light: #60a5fa;
+      --highlight: #fbbf24;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --border: #475569;
+      --bg-card: #1e293b;
+      --bg-hover: #334155;
+      --shadow: rgba(0, 0, 0, 0.4);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, var(--primary-dark) 0%, #0c1222 50%, var(--primary-dark) 100%);
+      color: var(--text-primary);
+      line-height: 1.6;
+      overflow: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: 
+        radial-gradient(ellipse at 20% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page-container {
+      position: relative;
+      z-index: 1;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tree-header {
+      background: var(--primary);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .back-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    .search-container {
+      flex: 1;
+      max-width: 500px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .search-input-wrapper { flex: 1; position: relative; }
+
+    .search-input-wrapper input {
+      width: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 1rem 0.5rem 2.5rem;
+      color: var(--text-primary);
+      font-size: 0.875rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .search-input-wrapper input:focus { border-color: var(--accent); }
+
+    .search-input-wrapper svg {
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      width: 16px;
+      height: 16px;
+    }
+
+    .search-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 0.5rem;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+      z-index: 100;
+    }
+
+    .search-results.visible { display: block; }
+
+    .search-result-item {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover { background: var(--bg-hover); }
+
+    .search-result-name { font-weight: 500; color: var(--text-primary); }
+    .search-result-path { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+    .search-count {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      padding: 0.25rem 0.75rem;
+      background: var(--bg-card);
+      border-radius: 12px;
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      overflow-x: auto;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .breadcrumb-item { color: var(--text-muted); cursor: pointer; transition: color 0.2s; }
+    .breadcrumb-item:hover { color: var(--accent-light); }
+    .breadcrumb-item.current { color: var(--text-primary); cursor: default; }
+    .breadcrumb-sep { color: var(--text-muted); margin: 0 0.25rem; }
+
+    .tree-container { flex: 1; position: relative; overflow: hidden; }
+
+    #treeSvg { width: 100%; height: 100%; cursor: grab; }
+    #treeSvg:active { cursor: grabbing; }
+
+    .node-group { cursor: pointer; }
+
+    .node-bg {
+      fill: var(--bg-card);
+      stroke: var(--border);
+      stroke-width: 2;
+      transition: all 0.3s ease;
+    }
+
+    .node-group:hover .node-bg {
+      fill: rgba(59, 130, 246, 0.15);
+      stroke: var(--accent);
+    }
+
+    .node-group.selected .node-bg {
+      fill: rgba(59, 130, 246, 0.25);
+      stroke: var(--accent);
+      stroke-width: 3;
+    }
+
+    .node-group.highlighted .node-bg {
+      fill: rgba(251, 191, 36, 0.2);
+      stroke: var(--highlight);
+      stroke-width: 3;
+    }
+
+    .node-name {
+      fill: var(--text-primary);
+      font-size: 12px;
+      font-weight: 500;
+      text-anchor: middle;
+      cursor: pointer;
+    }
+
+    .node-name:hover { fill: var(--accent-light); text-decoration: underline; }
+    .node-count { fill: var(--accent-light); font-size: 10px; pointer-events: none; }
+
+    .link {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 2;
+      stroke-opacity: 0.6;
+    }
+
+    .link.highlighted { stroke: var(--accent); stroke-width: 3; stroke-opacity: 1; }
+
+    .tree-controls {
+      position: absolute;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: flex;
+      gap: 0.5rem;
+      z-index: 10;
+    }
+
+    .control-btn {
+      width: 40px;
+      height: 40px;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .control-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
+    .control-btn svg { width: 20px; height: 20px; }
+
+    .detail-popup {
+      position: fixed;
+      background: var(--primary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px var(--shadow);
+      z-index: 1000;
+      min-width: 380px;
+      max-width: 500px;
+      max-height: 70vh;
+      display: none;
+      overflow: hidden;
+    }
+
+    .detail-popup.visible {
+      display: block;
+      animation: popupFadeIn 0.2s ease;
+    }
+
+    @keyframes popupFadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .detail-popup-header {
+      background: var(--bg-card);
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      cursor: move;
+      user-select: none;
+    }
+
+    .detail-popup-title { font-size: 1.125rem; font-weight: 600; color: var(--accent-light); }
+
+    .detail-popup-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.25rem;
+      cursor: pointer;
+      padding: 0.25rem;
+      line-height: 1;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+
+    .detail-popup-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    .detail-popup-content {
+      padding: 1.25rem;
+      overflow-y: auto;
+      max-height: calc(70vh - 60px);
+    }
+
+    .detail-path {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      background: var(--bg-card);
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .detail-path svg { width: 14px; height: 14px; flex-shrink: 0; }
+    .detail-desc { color: var(--text-secondary); margin-bottom: 1.25rem; line-height: 1.8; font-size: 0.9375rem; }
+
+    .detail-section { margin-top: 1.25rem; }
+
+    .detail-section-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .detail-section-title svg { width: 14px; height: 14px; }
+
+    .resource-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .resource-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--text-primary);
+      transition: all 0.2s ease;
+    }
+
+    .resource-item:hover { border-color: var(--accent); background: var(--bg-hover); }
+
+    .resource-icon {
+      width: 32px;
+      height: 32px;
+      background: rgba(59, 130, 246, 0.15);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .resource-icon svg { width: 16px; height: 16px; color: var(--accent); }
+    .resource-icon.book svg { color: #f59e0b; }
+    .resource-icon.video svg { color: #ef4444; }
+    .resource-icon.link svg { color: #10b981; }
+
+    .resource-info { flex: 1; min-width: 0; }
+    .resource-title { font-size: 0.875rem; font-weight: 500; margin-bottom: 0.125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .resource-desc { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .children-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+
+    .child-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .child-item:hover { border-color: var(--accent); background: var(--bg-hover); }
+
+    .tooltip {
+      position: fixed;
+      background: var(--primary-dark);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      max-width: 300px;
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      box-shadow: 0 8px 24px var(--shadow);
+      z-index: 1001;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .tooltip.visible { opacity: 1; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    @media (max-width: 768px) {
+      .tree-header { flex-wrap: wrap; gap: 0.5rem; }
+      .search-container { order: 3; max-width: 100%; width: 100%; }
+      .breadcrumb { order: 2; flex: 1; }
+      .detail-popup { min-width: calc(100vw - 2rem); max-width: calc(100vw - 2rem); left: 1rem !important; right: 1rem; }
+      .children-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-container">
+    <div class="tree-header">
+      <button class="back-btn" onclick="goBack()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="19" y1="12" x2="5" y2="12"/>
+          <polyline points="12 19 5 12 12 5"/>
+        </svg>
+        返回首页
+      </button>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="搜索节点..." oninput="handleSearchInput()">
+        </div>
+        <div class="search-results" id="searchResults"></div>
+        <span class="search-count" id="searchCount" style="display: none;"></span>
+      </div>
+      <div class="breadcrumb" id="breadcrumb"></div>
+    </div>
+    
+    <div class="tree-container" id="treeContainer">
+      <svg id="treeSvg"></svg>
+    </div>
+
+    <div class="tree-controls">
+      <button class="control-btn" onclick="zoomIn()" title="放大">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          <line x1="11" y1="8" x2="11" y2="14"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+      </button>
+      <button class="control-btn" onclick="zoomOut()" title="缩小">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+      </button>
+      <button class="control-btn" onclick="resetZoom()" title="重置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+      </button>
+      <button class="control-btn" onclick="expandAll()" title="展开全部">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 3 21 3 21 9"/>
+          <polyline points="9 21 3 21 3 15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/>
+          <line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+      </button>
+      <button class="control-btn" onclick="collapseAll()" title="折叠全部">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4 14 10 14 10 20"/>
+          <polyline points="20 10 14 10 14 4"/>
+          <line x1="14" y1="10" x2="21" y2="3"/>
+          <line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="detail-popup" id="detailPopup">
+      <div class="detail-popup-header">
+        <span class="detail-popup-title" id="detailTitle"></span>
+        <button class="detail-popup-close" onclick="closeDetailPopup()">×</button>
+      </div>
+      <div class="detail-popup-content">
+        <div class="detail-path" id="detailPath">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span id="detailPathText"></span>
+        </div>
+        <p class="detail-desc" id="detailDesc"></p>
+        
+        <div class="detail-section" id="booksSection" style="display: none;">
+          <div class="detail-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            推荐书籍
+          </div>
+          <div class="resource-list" id="booksList"></div>
+        </div>
+
+        <div class="detail-section" id="videosSection" style="display: none;">
+          <div class="detail-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="23 7 16 12 23 17 23 7"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+            视频课程
+          </div>
+          <div class="resource-list" id="videosList"></div>
+        </div>
+
+        <div class="detail-section" id="linksSection" style="display: none;">
+          <div class="detail-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+            相关链接
+          </div>
+          <div class="resource-list" id="linksList"></div>
+        </div>
+
+        <div class="detail-section" id="childrenSection" style="display: none;">
+          <div class="detail-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"/>
+              <line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/>
+              <line x1="3" y1="12" x2="3.01" y2="12"/>
+              <line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+            子节点
+          </div>
+          <div class="children-grid" id="childrenList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    let currentTree = null;
+    let rootHierarchy = null;
+    let svg = null;
+    let g = null;
+    let zoom = null;
+    let selectedNode = null;
+    let highlightedNodeId = null;
+    let currentPopupNode = null;
+    let popupDragging = false;
+    let popupDragOffsetX = 0;
+    let popupDragOffsetY = 0;
+    let nodeWidth = 120;
+    let nodeHeight = 40;
+    let duration = 400;
+
+    const breadcrumb = document.getElementById('breadcrumb');
+    const detailPopup = document.getElementById('detailPopup');
+    const detailTitle = document.getElementById('detailTitle');
+    const detailPathText = document.getElementById('detailPathText');
+    const detailDesc = document.getElementById('detailDesc');
+    const tooltip = document.getElementById('tooltip');
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const searchCount = document.getElementById('searchCount');
+
+    function init() {
+      initPopupDrag();
+      
+      const params = new URLSearchParams(window.location.search);
+      const treeId = params.get('tree');
+      const nodeId = params.get('node');
+
+      if (treeId) {
+        currentTree = knowledgeTrees.find(t => t.id === treeId);
+        if (currentTree) {
+          highlightedNodeId = nodeId;
+          initTree(nodeId);
+        }
+      }
+    }
+
+    function initTree(targetNodeId) {
+      const container = document.getElementById('treeContainer');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      svg = d3.select('#treeSvg')
+        .attr('width', width)
+        .attr('height', height);
+
+      zoom = d3.zoom()
+        .scaleExtent([0.3, 3])
+        .on('zoom', (event) => {
+          g.attr('transform', event.transform);
+        });
+
+      svg.call(zoom);
+
+      // 创建初始的 g 元素
+      g = svg.append('g')
+        .attr('transform', `translate(${width / 4}, ${height / 2})`);
+
+      rootHierarchy = d3.hierarchy(currentTree.root);
+      rootHierarchy.x0 = height / 2;
+      rootHierarchy.y0 = 0;
+
+      // 如果有目标节点，先找到它并展开其路径
+      if (targetNodeId) {
+        const targetNode = findNodeInTree(rootHierarchy, targetNodeId);
+        if (targetNode) {
+          // 展开到目标节点的完整路径
+          expandPath(targetNode);
+        }
+      }
+
+      // 折叠所有节点
+      rootHierarchy.descendants().forEach(d => {
+        d.children ? (d._children = d.children) : null;
+        d.children = null;
+      });
+
+      // 如果有目标节点，展开其路径上的节点
+      if (targetNodeId) {
+        const targetNode = findNodeInTree(rootHierarchy, targetNodeId);
+        if (targetNode) {
+          // 展开到目标节点的完整路径
+          const path = [];
+          let current = targetNode;
+          while (current) {
+            path.unshift(current);
+            current = current.parent;
+          }
+          // 从根开始，逐层展开
+          for (let i = 0; i < path.length - 1; i++) {
+            const parent = path[i];
+            const child = path[i + 1];
+            if (parent._children) {
+              parent.children = parent._children;
+              parent._children = null;
+            }
+          }
+        }
+      }
+
+      update(rootHierarchy);
+      updateBreadcrumb(rootHierarchy.data);
+
+      // 如果有目标节点，直接设置初始 transform
+      if (targetNodeId) {
+        const targetNode = findNodeInTree(rootHierarchy, targetNodeId);
+        if (targetNode) {
+          selectedNode = targetNode;
+          // 等待布局计算完成后，设置初始偏移让目标节点居中
+          setTimeout(() => {
+            const transform = d3.zoomIdentity
+              .translate(width / 3 - targetNode.y, height / 2 - targetNode.x);
+            svg.call(zoom.transform, transform);
+          }, 50);
+        }
+      }
+    }
+
+    // 辅助函数：递归查找节点
+    function findNodeInTree(node, targetId) {
+      if (node.data.id === targetId) return node;
+      if (node.children) {
+        for (const child of node.children) {
+          const found = findNodeInTree(child, targetId);
+          if (found) return found;
+        }
+      }
+      if (node._children) {
+        for (const child of node._children) {
+          const found = findNodeInTree(child, targetId);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    function update(source) {
+      const container = document.getElementById('treeContainer');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      const treeLayout = d3.tree()
+        .size([height * 0.8, width * 0.6])
+        .nodeSize([60, 140])
+        .separation((a, b) => {
+          return (a.parent === b.parent ? 1 : 1.2);
+        });
+
+      treeLayout(rootHierarchy);
+
+      const nodes = rootHierarchy.descendants();
+      const links = rootHierarchy.links();
+
+      nodes.forEach(d => {
+        d.y = d.depth * 180;
+      });
+
+      const link = g.selectAll('.link')
+        .data(links, d => d.target.data.id);
+
+      link.enter()
+        .insert('path', 'g')
+        .attr('class', 'link')
+        .attr('d', d => {
+          const o = { x: source.x0, y: source.y0 };
+          return diagonal(o, o);
+        })
+        .merge(link)
+        .transition()
+        .duration(duration)
+        .attr('d', d => diagonal(d.source, d.target));
+
+      link.exit()
+        .transition()
+        .duration(duration)
+        .attr('d', d => {
+          const o = { x: source.x, y: source.y };
+          return diagonal(o, o);
+        })
+        .remove();
+
+      const node = g.selectAll('.node-group')
+        .data(nodes, d => d.data.id);
+
+      const nodeEnter = node.enter()
+        .append('g')
+        .attr('class', 'node-group')
+        .attr('transform', d => `translate(${source.y0}, ${source.x0})`)
+        .on('click', (event, d) => {
+          event.stopPropagation();
+          if (event.target.classList.contains('node-name')) {
+            toggleDetailPopup(d, event);
+          } else {
+            selectNode(d);
+          }
+        })
+        .on('mouseenter', (event, d) => showTooltip(event, d.data))
+        .on('mouseleave', hideTooltip);
+
+      nodeEnter.append('rect')
+        .attr('class', 'node-bg')
+        .attr('x', -nodeWidth / 2)
+        .attr('y', -nodeHeight / 2)
+        .attr('width', nodeWidth)
+        .attr('height', nodeHeight)
+        .attr('rx', 8)
+        .attr('ry', 8);
+
+      nodeEnter.append('text')
+        .attr('class', 'node-name')
+        .attr('dy', 4)
+        .text(d => d.data.name);
+
+      nodeEnter.append('text')
+        .attr('class', 'node-count')
+        .attr('dy', -8)
+        .text(d => {
+          if (d._children) return `+${d._children.length}`;
+          if (d.children) return d.children.length;
+          return '';
+        });
+
+      const nodeUpdate = node.merge(nodeEnter);
+
+      nodeUpdate
+        .transition()
+        .duration(duration)
+        .attr('transform', d => `translate(${d.y}, ${d.x})`);
+
+      nodeUpdate.classed('selected', d => selectedNode && d.data.id === selectedNode.data.id);
+      nodeUpdate.classed('highlighted', d => d.data.id === highlightedNodeId);
+
+      node.exit()
+        .transition()
+        .duration(duration)
+        .attr('transform', d => `translate(${source.y}, ${source.x})`)
+        .remove();
+
+      nodes.forEach(d => {
+        d.x0 = d.x;
+        d.y0 = d.y;
+      });
+    }
+
+    function diagonal(s, d) {
+      return `M ${s.y} ${s.x}
+              C ${(s.y + d.y) / 2} ${s.x},
+                ${(s.y + d.y) / 2} ${d.x},
+                ${d.y} ${d.x}`;
+    }
+
+    function selectNode(d) {
+      if (d._children) {
+        d.children = d._children;
+        d._children = null;
+      } else if (d.children) {
+        d._children = d.children;
+        d.children = null;
+      }
+
+      selectedNode = d;
+      update(d);
+      updateBreadcrumb(d.data);
+    }
+
+    function findAndSelectNode(nodeId) {
+      // 递归查找所有节点（包括 _children 中的节点）
+      function findNode(node) {
+        if (node.data.id === nodeId) return node;
+        if (node.children) {
+          for (const child of node.children) {
+            const found = findNode(child);
+            if (found) return found;
+          }
+        }
+        if (node._children) {
+          for (const child of node._children) {
+            const found = findNode(child);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const node = findNode(rootHierarchy);
+      if (node) {
+        expandPath(node);
+        selectedNode = node;
+        update(rootHierarchy);
+        updateBreadcrumb(node.data);
+        centerOnNode(node);
+      }
+    }
+
+    function expandPath(node) {
+      // 先展开到根节点的完整路径
+      const path = [];
+      let current = node;
+      while (current) {
+        path.unshift(current);
+        current = current.parent;
+      }
+      
+      // 从根开始，逐层展开
+      for (let i = 0; i < path.length - 1; i++) {
+        const parent = path[i];
+        const child = path[i + 1];
+        if (parent._children) {
+          parent.children = parent._children;
+          parent._children = null;
+        }
+      }
+    }
+
+    function centerOnNode(node) {
+      const container = document.getElementById('treeContainer');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      const transform = d3.zoomIdentity
+        .translate(width / 3 - node.y, height / 2 - node.x);
+
+      svg.transition()
+        .duration(duration)
+        .call(zoom.transform, transform);
+    }
+
+    function toggleDetailPopup(d, event) {
+      if (currentPopupNode && currentPopupNode.data.id === d.data.id) {
+        closeDetailPopup();
+      } else {
+        showDetailPopup(d, event);
+      }
+    }
+
+    function showDetailPopup(d, event) {
+      currentPopupNode = d;
+      const node = d.data;
+
+      detailTitle.textContent = node.name;
+      detailPathText.textContent = getNodePath(currentTree.root, node.id).join(' > ');
+      detailDesc.textContent = node.description || '暂无描述';
+
+      const booksSection = document.getElementById('booksSection');
+      const booksList = document.getElementById('booksList');
+      if (node.books && node.books.length > 0) {
+        booksSection.style.display = 'block';
+        booksList.innerHTML = node.books.map(book => `
+          <a class="resource-item" href="javascript:void(0)">
+            <div class="resource-icon book">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+            <div class="resource-info">
+              <div class="resource-title">${book.title}</div>
+              <div class="resource-desc">${book.author} · ${book.desc || ''}</div>
+            </div>
+          </a>
+        `).join('');
+      } else {
+        booksSection.style.display = 'none';
+      }
+
+      const videosSection = document.getElementById('videosSection');
+      const videosList = document.getElementById('videosList');
+      if (node.videos && node.videos.length > 0) {
+        videosSection.style.display = 'block';
+        videosList.innerHTML = node.videos.map(video => `
+          <a class="resource-item" href="${video.url}" target="_blank">
+            <div class="resource-icon video">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="23 7 16 12 23 17 23 7"/>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+              </svg>
+            </div>
+            <div class="resource-info">
+              <div class="resource-title">${video.title}</div>
+              <div class="resource-desc">${video.desc || ''}</div>
+            </div>
+          </a>
+        `).join('');
+      } else {
+        videosSection.style.display = 'none';
+      }
+
+      const linksSection = document.getElementById('linksSection');
+      const linksList = document.getElementById('linksList');
+      if (node.links && node.links.length > 0) {
+        linksSection.style.display = 'block';
+        linksList.innerHTML = node.links.map(link => `
+          <a class="resource-item" href="${link.url}" target="_blank">
+            <div class="resource-icon link">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+            </div>
+            <div class="resource-info">
+              <div class="resource-title">${link.title}</div>
+              <div class="resource-desc">${link.desc || ''}</div>
+            </div>
+          </a>
+        `).join('');
+      } else {
+        linksSection.style.display = 'none';
+      }
+
+      const childrenSection = document.getElementById('childrenSection');
+      const childrenList = document.getElementById('childrenList');
+      const children = node.children || [];
+      if (children.length > 0) {
+        childrenSection.style.display = 'block';
+        childrenList.innerHTML = children.map(child => `
+          <div class="child-item" onclick="navigateToChild('${child.id}')">${child.name}</div>
+        `).join('');
+      } else {
+        childrenSection.style.display = 'none';
+      }
+
+      positionPopup(event);
+      detailPopup.classList.add('visible');
+    }
+
+    function positionPopup(event) {
+      const popup = detailPopup;
+      const padding = 15;
+      let left = event.clientX + padding;
+      let top = event.clientY + padding;
+
+      if (left + 380 > window.innerWidth - padding) {
+        left = event.clientX - 380 - padding;
+      }
+      if (top + 300 > window.innerHeight - padding) {
+        top = event.clientY - 300 - padding;
+      }
+      if (left < padding) left = padding;
+      if (top < padding) top = padding;
+
+      popup.style.left = left + 'px';
+      popup.style.top = top + 'px';
+      popup.style.right = 'auto';
+    }
+
+    function closeDetailPopup() {
+      currentPopupNode = null;
+      detailPopup.classList.remove('visible');
+    }
+
+    function navigateToChild(nodeId) {
+      closeDetailPopup();
+      findAndSelectNode(nodeId);
+    }
+
+    function initPopupDrag() {
+      const header = document.querySelector('.detail-popup-header');
+      const popup = detailPopup;
+
+      header.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('detail-popup-close')) return;
+        
+        popupDragging = true;
+        const rect = popup.getBoundingClientRect();
+        popupDragOffsetX = e.clientX - rect.left;
+        popupDragOffsetY = e.clientY - rect.top;
+        popup.style.right = 'auto';
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!popupDragging) return;
+        
+        let left = e.clientX - popupDragOffsetX;
+        let top = e.clientY - popupDragOffsetY;
+        const rect = popup.getBoundingClientRect();
+        
+        if (left < 0) left = 0;
+        if (top < 0) top = 0;
+        if (left + rect.width > window.innerWidth) left = window.innerWidth - rect.width;
+        if (top + rect.height > window.innerHeight) top = window.innerHeight - rect.height;
+        
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+      });
+
+      document.addEventListener('mouseup', () => {
+        popupDragging = false;
+      });
+    }
+
+    function updateBreadcrumb(node) {
+      const path = getNodePath(currentTree.root, node.id);
+      breadcrumb.innerHTML = path.map((name, index) => {
+        const isLast = index === path.length - 1;
+        return `
+          <span class="breadcrumb-item ${isLast ? 'current' : ''}">${name}</span>
+          ${!isLast ? '<span class="breadcrumb-sep">›</span>' : ''}
+        `;
+      }).join('');
+    }
+
+    function getNodePath(root, targetId, path = []) {
+      if (root.id === targetId) {
+        return [...path, root.name];
+      }
+      for (const child of root.children || []) {
+        const result = getNodePath(child, targetId, [...path, root.name]);
+        if (result) return result;
+      }
+      return null;
+    }
+
+    let tooltipTimeout = null;
+
+    function showTooltip(event, node) {
+      clearTimeout(tooltipTimeout);
+
+      tooltip.textContent = node.description || node.name;
+
+      tooltipTimeout = setTimeout(() => {
+        const rect = event.target.getBoundingClientRect();
+        tooltip.style.left = `${rect.right + 10}px`;
+        tooltip.style.top = `${rect.top}px`;
+        tooltip.classList.add('visible');
+      }, 300);
+    }
+
+    function hideTooltip() {
+      clearTimeout(tooltipTimeout);
+      tooltip.classList.remove('visible');
+    }
+
+    function handleSearchInput() {
+      const keyword = searchInput.value.trim().toLowerCase();
+      
+      if (!keyword || !rootHierarchy) {
+        searchResults.classList.remove('visible');
+        searchCount.style.display = 'none';
+        return;
+      }
+
+      // 搜索所有节点，使用 Set 避免重复
+      const results = [];
+      const seenIds = new Set();
+      
+      function searchAllNodes(node) {
+        // 检查是否已添加过
+        if (seenIds.has(node.data.id)) return;
+        
+        if (node.data.name.toLowerCase().includes(keyword)) {
+          seenIds.add(node.data.id);
+          results.push({
+            id: node.data.id,
+            name: node.data.name,
+            path: getNodePath(currentTree.root, node.data.id)
+          });
+        }
+        // 搜索 children 和 _children
+        if (node.children) {
+          node.children.forEach(searchAllNodes);
+        }
+        if (node._children) {
+          node._children.forEach(searchAllNodes);
+        }
+      }
+      
+      searchAllNodes(rootHierarchy);
+
+      if (results.length > 0) {
+        searchResults.innerHTML = results.map(r => `
+          <div class="search-result-item" onclick="findAndSelectNode('${r.id}')">
+            <div class="search-result-name">${r.name}</div>
+            <div class="search-result-path">${r.path ? r.path.join(' > ') : ''}</div>
+          </div>
+        `).join('');
+        searchResults.classList.add('visible');
+        searchCount.textContent = `${results.length} 个结果`;
+        searchCount.style.display = 'inline';
+      } else {
+        searchResults.innerHTML = '<div class="search-result-item"><div class="search-result-name">无匹配结果</div></div>';
+        searchResults.classList.add('visible');
+        searchCount.style.display = 'none';
+      }
+    }
+
+    function zoomIn() {
+      svg.transition().duration(duration).call(zoom.scaleBy, 1.3);
+    }
+
+    function zoomOut() {
+      svg.transition().duration(duration).call(zoom.scaleBy, 0.7);
+    }
+
+    function resetZoom() {
+      const container = document.getElementById('treeContainer');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      svg.transition().duration(duration).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(width / 4, height / 2)
+      );
+    }
+
+    function expandAll() {
+      // 递归展开所有节点
+      function recurseExpand(d) {
+        if (d._children) {
+          d.children = d._children;
+          d._children = null;
+        }
+        if (d.children) {
+          d.children.forEach(recurseExpand);
+        }
+      }
+      recurseExpand(rootHierarchy);
+      update(rootHierarchy);
+    }
+
+    function collapseAll() {
+      // 保留根节点，折叠其它所有节点
+      function recurseCollapse(d) {
+        if (d.children) {
+          d._children = d.children;
+          d._children.forEach(child => recurseCollapse(child));
+          d.children = null;
+        } else if (d._children) {
+          d._children.forEach(child => recurseCollapse(child));
+        }
+      }
+      recurseCollapse(rootHierarchy);
+      // 强制重新计算布局
+      update(rootHierarchy);
+      // 重置视图到根节点
+      const container = document.getElementById('treeContainer');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      svg.transition()
+        .duration(duration)
+        .call(zoom.transform, d3.zoomIdentity.translate(width / 4, height / 2));
+    }
+
+    function goBack() {
+      window.location.href = 'index.html';
+    }
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('.detail-popup') && 
+          !event.target.closest('.node-group') &&
+          !event.target.closest('.search-container')) {
+        closeDetailPopup();
+        searchResults.classList.remove('visible');
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (svg && currentTree) {
+        const container = document.getElementById('treeContainer');
+        svg.attr('width', container.clientWidth)
+           .attr('height', container.clientHeight);
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
