@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>闪念时光机 - 个人记录应用 (复盘回顾版)</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+            transform: scale(0.95) translateY(10px);
+        }
+        .list-move, .list-enter-active, .list-leave-active {
+            transition: all 0.4s ease;
+        }
+        .list-enter-from, .list-leave-to {
+            opacity: 0;
+            transform: translateX(-30px) scale(0.9);
+        }
+        .list-leave-active {
+            position: absolute;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen pb-28">
+    <div id="app" class="max-w-md md:max-w-2xl mx-auto px-4 pt-6">
+        
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-slate-900">闪念时光机</h1>
+                <p class="text-xs text-slate-500 mt-1">捕捉碎片，沉淀经验，时段规划</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-xs w-full md:w-auto justify-end">
+                <input type="file" ref="fileInput" @change="handleImport" accept=".json,.md,.txt" class="hidden">
+                
+                <button @click="triggerImport" class="px-2.5 py-1.5 hover:bg-slate-50 rounded-lg transition-colors text-slate-700 flex items-center gap-1 text-xs font-semibold bg-slate-50">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-slate-900"></i> 导入记录
+                </button>
+                <div class="h-4 w-[1px] bg-slate-200 mx-0.5"></div>
+                
+                <div class="relative">
+                    <button @click="showExportMenu = !showExportMenu" class="px-2.5 py-1.5 hover:bg-slate-50 rounded-lg transition-colors text-slate-700 flex items-center gap-1 text-xs font-semibold bg-slate-50">
+                        <i data-lucide="download" class="w-3.5 h-3.5 text-slate-900"></i> 导出记录
+                    </button>
+                    <transition name="fade">
+                        <div v-if="showExportMenu" class="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[140px] z-50">
+                            <button @click="exportData(); showExportMenu = false" class="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors">
+                                <i data-lucide="braces" class="w-3.5 h-3.5 text-slate-500"></i> JSON 格式
+                            </button>
+                            <button @click="exportMarkdown(); showExportMenu = false" class="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors">
+                                <i data-lucide="file-text" class="w-3.5 h-3.5 text-emerald-600"></i> .MD 格式
+                            </button>
+                            <button @click="exportTxt(); showExportMenu = false" class="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 transition-colors">
+                                <i data-lucide="file-code" class="w-3.5 h-3.5 text-blue-600"></i> .TXT 格式
+                            </button>
+                        </div>
+                    </transition>
+                </div>
+            </div>
+        </header>
+
+        <div class="relative mb-4 group">
+            <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400 group-focus-within:text-slate-900 transition-colors">
+                <i data-lucide="search" class="w-4 h-4"></i>
+            </span>
+            <input v-model="searchQuery" type="text" placeholder="搜索已有记录的内容、计划任务或标签..." class="w-full bg-white border border-slate-200 rounded-2xl pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 shadow-xs transition-all placeholder:text-slate-400">
+            <button v-if="searchQuery" @click="searchQuery = ''" class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600">
+                <i data-lucide="x-circle" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <div class="flex gap-2 mb-4 overflow-x-auto pb-1 no-scrollbar">
+            <button @click="setViewMode('active_all')" :class="currentFilter === 'all' && !showCompletedOnly ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200'" class="px-4 py-2 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap">
+                待办/未完 ({{ activeRecordsCount }})
+            </button>
+            <button @click="setViewMode('active_idea')" :class="currentFilter === 'idea' && !showCompletedOnly ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-amber-600 border border-amber-100'" class="px-4 py-2 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap">
+                💡 想法 ({{ typeActiveCount('idea') }})
+            </button>
+            <button @click="setViewMode('active_summary')" :class="currentFilter === 'summary' && !showCompletedOnly ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white text-emerald-600 border border-emerald-100'" class="px-4 py-2 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap">
+                🌱 经验 ({{ typeActiveCount('summary') }})
+            </button>
+            <button @click="setViewMode('active_plan')" :class="currentFilter === 'plan' && !showCompletedOnly ? 'bg-blue-500 text-white shadow-sm' : 'bg-white text-blue-600 border border-blue-100'" class="px-4 py-2 rounded-full text-xs font-medium transition-all duration-200 whitespace-nowrap">
+                📅 计划 ({{ typeActiveCount('plan') }})
+            </button>
+            
+            <div class="h-8 w-[1px] bg-slate-300 self-center mx-1"></div>
+            <button @click="setViewMode('completed_only')" :class="showCompletedOnly ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100'" class="px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 whitespace-nowrap flex items-center gap-1">
+                <i data-lucide="check-square" class="w-3.5 h-3.5"></i> 已完成回顾 ({{ completedRecordsCount }})
+            </button>
+        </div>
+
+        <div v-if="allTags.length > 0" class="mb-6 bg-slate-100/60 p-3 rounded-xl flex flex-wrap gap-1.5 items-center">
+            <span class="text-xs text-slate-400 mr-1">标签过滤:</span>
+            <button v-for="tag in allTags" :key="tag" @click="toggleTagFilter(tag)" :class="selectedTags.includes(tag) ? 'bg-slate-700 text-white' : 'bg-white/80 text-slate-600 border border-slate-200'" class="px-2.5 py-1 rounded-md text-xs transition-all">
+                #{{ tag }}
+            </button>
+            <button v-if="selectedTags.length > 0" @click="selectedTags = []" class="text-xs text-rose-500 ml-auto pl-2">清空</button>
+        </div>
+
+        <div v-if="showCompletedOnly" class="mb-3 px-1 text-xs text-indigo-600 font-medium flex items-center gap-1 animate-pulse">
+            <i data-lucide="info" class="w-3.5 h-3.5"></i> 当前处于“已完成历史复盘舱”，再次点击左侧按钮可回到正常待办列表。
+        </div>
+
+        <div class="relative">
+            <div v-if="filteredRecords.length === 0" class="text-center py-20 text-slate-400">
+                <i data-lucide="inbox" class="w-12 h-12 mx-auto stroke-1 mb-3 text-slate-300"></i>
+                <p class="text-sm">{{ showCompletedOnly ? '这里空空如也，快去把主列表的任务打勾完成吧！' : '没有找到相关记录，换个词或导入/点击 + 开始吧' }}</p>
+            </div>
+
+            <transition-group name="list" tag="div" class="space-y-4">
+                <div v-for="item in filteredRecords" :key="item.id" @dblclick="startEdit(item)" :class="[getTypeClass(item.type), item.isCompleted ? 'opacity-70 bg-slate-50/70 border-dashed line-through decoration-slate-300' : 'bg-white shadow-sm']" class="p-4 rounded-2xl border hover:shadow-md transition-all duration-300 relative group cursor-pointer">
+                    
+                    <div class="flex justify-between items-center mb-2.5">
+                        <div class="flex items-center gap-2">
+                            <button @click.stop="toggleComplete(item)" class="p-0.5 rounded-full transition-colors duration-200" :title="item.isCompleted ? '设为未完成' : '标记为已完成'">
+                                <i v-if="item.isCompleted" data-lucide="check-circle-2" class="w-5 h-5 text-indigo-600 fill-indigo-50"></i>
+                                <i v-else data-lucide="circle" class="w-5 h-5 text-slate-300 hover:text-indigo-500 hover:scale-110 transition-transform"></i>
+                            </button>
+                            <span :class="getTypeBadgeClass(item.type)" class="text-[11px] font-bold px-2 py-0.5 rounded-md tracking-wider">
+                                {{ getTypeLabel(item.type) }}
+                            </span>
+                        </div>
+                        <span class="text-xs text-slate-400">
+                            {{ item.type === 'plan' ? '📅 计划日: ' + item.planDate : formatTime(item.timestamp) }}
+                        </span>
+                    </div>
+                    
+                    <p v-if="item.type !== 'plan'" :class="{'text-slate-400': item.isCompleted, 'text-slate-700': !item.isCompleted}" class="text-sm leading-relaxed whitespace-pre-wrap pr-4">{{ item.content }}</p>
+                    
+                    <div v-else class="space-y-2.5 my-2 pl-2 border-l-2 border-blue-100 ml-1.5 relative">
+                        <div v-for="(slot, idx) in item.timeSlots" :key="idx" class="relative pl-4 text-sm">
+                            <div class="absolute w-2 h-2 rounded-full -left-[21px] top-1.5 ring-4 ring-white" :class="item.isCompleted ? 'bg-slate-400':'bg-blue-500'"></div>
+                            <div class="flex flex-col sm:flex-row sm:items-baseline gap-1">
+                                <span :class="item.isCompleted ? 'bg-slate-100 text-slate-400':'bg-blue-500/10 text-blue-600'" class="text-xs font-semibold px-1.5 py-0.5 rounded-sm whitespace-nowrap">
+                                    {{ slot.start }} - {{ slot.end }}
+                                </span>
+                                <span :class="item.isCompleted ? 'text-slate-400':'text-slate-700'" class="font-medium">{{ slot.todo }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-between items-end mt-4">
+                        <div class="flex flex-wrap gap-1.5 max-w-[70%]">
+                            <span v-if="item.tags && item.tags.length > 0" v-for="tag in item.tags" :key="tag" class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded">
+                                #{{ tag }}
+                            </span>
+                        </div>
+                        <div class="flex gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <button @click.stop="startEdit(item)" class="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-lg transition-colors" title="编辑记录">
+                                <i data-lucide="edit-3" class="w-4 h-4"></i>
+                            </button>
+                            <button @click.stop="deleteRecord(item.id)" class="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition-colors" title="彻底删除">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </transition-group>
+        </div>
+
+        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-50">
+            <transition name="fade">
+                <div v-if="isPanelOpen" class="bg-white rounded-3xl shadow-xl border border-slate-100 p-4 mb-4 max-h-[80vh] overflow-y-auto backdrop-blur-lg">
+                    <div v-if="isEditing" class="text-[11px] bg-indigo-50 text-indigo-600 font-medium px-3 py-1 rounded-lg mb-3 flex items-center gap-1">
+                        <i data-lucide="info" class="w-3.5 h-3.5"></i> 正在编辑现有记录
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        <button @click="newRecord.type = 'idea'" :class="newRecord.type === 'idea' ? 'bg-amber-500 text-white shadow-md' : 'bg-amber-50 text-amber-700'" class="py-2 rounded-xl font-medium text-xs flex flex-col items-center gap-0.5">
+                            <span>💡</span> 想法
+                        </button>
+                        <button @click="newRecord.type = 'summary'" :class="newRecord.type === 'summary' ? 'bg-emerald-500 text-white shadow-md' : 'bg-emerald-50 text-emerald-700'" class="py-2 rounded-xl font-medium text-xs flex flex-col items-center gap-0.5">
+                            <span>🌱</span> 经验
+                        </button>
+                        <button @click="newRecord.type = 'plan'" :class="newRecord.type === 'plan' ? 'bg-blue-500 text-white shadow-md' : 'bg-blue-50 text-blue-700'" class="py-2 rounded-xl font-medium text-xs flex flex-col items-center gap-0.5">
+                            <span>📅</span> 计划
+                        </button>
+                    </div>
+
+                    <textarea v-if="newRecord.type !== 'plan'" v-model="newRecord.content" rows="3" :placeholder="getPlaceholder(newRecord.type)" class="w-full border border-slate-100 bg-slate-50/50 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none transition-all placeholder:text-slate-400"></textarea>
+                    
+                    <div v-else class="space-y-3 bg-slate-50/80 p-3 rounded-2xl border border-slate-100">
+                        <div>
+                            <label class="text-xs font-bold text-slate-500 block mb-1">📅 第一步：选择计划执行日期</label>
+                            <input v-model="newRecord.planDate" type="date" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center mb-1.5">
+                                <label class="text-xs font-bold text-slate-500">⏰ 第二步：划定时段与编辑任务</label>
+                                <button @click="addTimeSlot" class="text-xs text-blue-600 font-semibold flex items-center gap-0.5 hover:underline">
+                                    + 添加时段
+                                </button>
+                            </div>
+                            <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                <div v-for="(slot, index) in newRecord.timeSlots" :key="index" class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col gap-2 relative group/slot">
+                                    <div class="flex items-center gap-1.5">
+                                        <input v-model="slot.start" type="time" class="border border-slate-200 rounded-md text-xs px-1.5 py-0.5 focus:ring-1 focus:ring-blue-500">
+                                        <span class="text-slate-400 text-xs">至</span>
+                                        <input v-model="slot.end" type="time" class="border border-slate-200 rounded-md text-xs px-1.5 py-0.5 focus:ring-1 focus:ring-blue-500">
+                                        <button @click="removeTimeSlot(index)" class="ml-auto text-slate-300 hover:text-rose-500 p-0.5 transition-colors">
+                                            <i data-lucide="minus-circle" class="w-4 h-4"></i>
+                                        </button>
+                                    </div>
+                                    <input v-model="slot.todo" type="text" placeholder="这个时间段做什么？" class="w-full bg-slate-50 border border-transparent rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:bg-white focus:border-blue-400">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-2.5">
+                        <input v-model="tagInput" @keydown.enter.prevent="addTag" type="text" placeholder="输入新标签按回车添加..." class="w-full border border-slate-100 bg-slate-50/50 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all">
+                        <div v-if="allTags.length > 0" class="mt-2">
+                            <p class="text-[10px] text-slate-400 mb-1 font-medium">历史标签 (点击快速归类):</p>
+                            <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto pb-1">
+                                <button v-for="tag in allTags" :key="'hist-'+tag" @click="toggleTagInNewRecord(tag)" :class="newRecord.tags.includes(tag) ? 'bg-slate-800 text-white ring-1 ring-slate-800' : 'bg-slate-50 text-slate-500 border border-slate-200/60 hover:bg-slate-100'" class="px-2 py-0.5 rounded text-[11px] cursor-pointer">
+                                    #{{ tag }}
+                                </button>
+                            </div>
+                        </div>
+                        <div v-if="newRecord.tags.length > 0" class="flex flex-wrap gap-1 mt-2 pt-2 border-t border-dashed border-slate-100">
+                            <span v-for="tag in newRecord.tags" :key="'curr-'+tag" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                #{{ tag }}
+                                <i @click="removeTag(tag)" data-lucide="x" class="w-3 h-3 cursor-pointer text-slate-400 hover:text-slate-600"></i>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 mt-4">
+                        <button @click="closePanel" class="w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium py-2.5 rounded-xl">取消</button>
+                        <button @click="saveRecord" class="w-2/3 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium py-2.5 rounded-xl shadow-lg transition-transform active:scale-[0.98]">
+                            {{ isEditing ? '更新记录' : '保存记录' }}
+                        </button>
+                    </div>
+                </div>
+            </transition>
+
+            <div class="flex justify-center">
+                <button @click="togglePanel" :class="isPanelOpen ? 'rotate-45 bg-rose-500 shadow-rose-200' : 'bg-slate-900 shadow-slate-300'" class="w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 transform active:scale-90 hover:scale-105 z-50">
+                    <i data-lucide="plus" class="w-7 h-7"></i>
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const records = ref([]);
+                const isPanelOpen = ref(false);
+                const isEditing = ref(false);
+                const editingId = ref(null);
+                const fileInput = ref(null);
+                
+                const currentFilter = ref('all');
+                const showCompletedOnly = ref(false); // 新增状态：控制是否只显示已完成回顾
+                const selectedTags = ref([]);
+                const tagInput = ref('');
+                const searchQuery = ref('');
+                const showExportMenu = ref(false);
+
+                const getBlankRecord = () => ({
+                    type: 'idea',
+                    content: '',
+                    planDate: new Date().toISOString().slice(0, 10),
+                    timeSlots: [{ start: '09:00', end: '10:00', todo: '' }],
+                    tags: [],
+                    isCompleted: false // 确保每条新纪录有默认未完成状态
+                });
+
+                const newRecord = ref(getBlankRecord());
+
+                onMounted(() => {
+                    const localData = localStorage.getItem('local_memo_records');
+                    if (localData) { 
+                        // 向下兼容：如果旧数据没有 isCompleted 字段，自动补充 false
+                        const parsed = JSON.parse(localData);
+                        records.value = parsed.map(r => ({...r, isCompleted: !!r.isCompleted}));
+                    }
+                    updateIcons();
+                });
+
+                const updateIcons = () => {
+                    nextTick(() => { if (window.lucide) window.lucide.createIcons(); });
+                };
+
+                const saveToLocal = () => {
+                    localStorage.setItem('local_memo_records', JSON.stringify(records.value));
+                    updateIcons();
+                };
+
+                const togglePanel = () => {
+                    if (isPanelOpen.value) { closePanel(); } 
+                    else {
+                        isPanelOpen.value = true;
+                        isEditing.value = false;
+                        editingId.value = null;
+                        newRecord.value = getBlankRecord();
+                        tagInput.value = '';
+                        updateIcons();
+                    }
+                };
+
+                const closePanel = () => {
+                    isPanelOpen.value = false;
+                    isEditing.value = false;
+                    editingId.value = null;
+                };
+
+                const addTimeSlot = () => {
+                    newRecord.value.timeSlots.push({ start: '10:00', end: '11:00', todo: '' });
+                    updateIcons();
+                };
+                const removeTimeSlot = (index) => {
+                    if(newRecord.value.timeSlots.length > 1) {
+                        newRecord.value.timeSlots.splice(index, 1);
+                    } else {
+                        alert('计划至少需要保留一个时间段哦！');
+                    }
+                };
+
+                const startEdit = (item) => {
+                    isEditing.value = true;
+                    editingId.value = item.id;
+                    newRecord.value = {
+                        type: item.type,
+                        content: item.content || '',
+                        planDate: item.planDate || new Date().toISOString().slice(0, 10),
+                        timeSlots: item.timeSlots ? JSON.parse(JSON.stringify(item.timeSlots)) : [{ start: '09:00', end: '10:00', todo: '' }],
+                        tags: [...(item.tags || [])],
+                        isCompleted: item.isCompleted || false
+                    };
+                    tagInput.value = '';
+                    isPanelOpen.value = true;
+                    updateIcons();
+                };
+
+                // ---- 新增：打勾完成/撤销完成 核心函数 ----
+                const toggleComplete = (item) => {
+                    item.isCompleted = !item.isCompleted;
+                    saveToLocal();
+                };
+
+                // ---- 新增：切换查看模式（普通视图 vs 已完成回顾舱） ----
+                const setViewMode = (mode) => {
+                    if (mode === 'completed_only') {
+                        showCompletedOnly.value = true;
+                        currentFilter.value = 'all'; // 回顾舱内默认看全部
+                    } else {
+                        showCompletedOnly.value = false;
+                        currentFilter.value = mode.replace('active_', '');
+                    }
+                    updateIcons();
+                };
+
+                // ---- 智能计算各种视图下的总数统计 ----
+                const activeRecordsCount = computed(() => records.value.filter(r => !r.isCompleted).length);
+                const completedRecordsCount = computed(() => records.value.filter(r => r.isCompleted).length);
+                const typeActiveCount = (type) => records.value.filter(r => r.type === type && !r.isCompleted).length;
+
+                // ---- 智能导入核心引擎（已适配完成状态） ----
+                const triggerImport = () => { fileInput.value.click(); };
+
+                const handleImport = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const text = e.target.result;
+                        let importedCount = 0;
+                        let skipCount = 0;
+
+                        try {
+                            if (file.name.endsWith('.json') || text.trim().startsWith('[')) {
+                                const parsed = JSON.parse(text);
+                                if (Array.isArray(parsed)) {
+                                    parsed.forEach(item => {
+                                        if (item.id && !records.value.some(r => r.id === item.id)) {
+                                            item.isCompleted = !!item.isCompleted;
+                                            records.value.push(item);
+                                            importedCount++;
+                                        } else { skipCount++; }
+                                    });
+                                } else { throw new Error('JSON格式不符'); }
+                            } 
+                            else {
+                                // 提取所有结构化元数据块（支持 ⟦...⟧ 和 <!-- ⟦...⟧ --> 两种格式）
+                                const metaRegex = /(?:<!--\s*)?⟦type:(idea|summary|plan)\|time:([^\]|]+)\|tags:([^\]|]*)\|done:(true|false)⟧(?:\s*-->)?/g;
+                                const metaBlocks = [];
+                                let metaMatch;
+                                while ((metaMatch = metaRegex.exec(text)) !== null) {
+                                    metaBlocks.push({
+                                        index: metaMatch.index,
+                                        end: metaMatch.index + metaMatch[0].length,
+                                        type: metaMatch[1],
+                                        time: metaMatch[2].trim(),
+                                        tags: metaMatch[3].trim(),
+                                        done: metaMatch[4] === 'true'
+                                    });
+                                }
+
+                                if (metaBlocks.length > 0) {
+                                    // ===== 新格式：按元数据块精确解析 =====
+                                    metaBlocks.forEach((meta, idx) => {
+                                        const blockStart = meta.end;
+                                        const blockEnd = idx + 1 < metaBlocks.length ? metaBlocks[idx + 1].index : text.length;
+                                        const block = text.substring(blockStart, blockEnd);
+
+                                        let type = meta.type;
+                                        let timestamp = Date.now() - (importedCount * 1000);
+                                        let planDate = new Date().toISOString().slice(0, 10);
+                                        let content = '';
+                                        let timeSlots = [];
+                                        let tags = meta.tags ? meta.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
+                                        let isCompleted = meta.done;
+
+                                        // 解析时间
+                                        if (type === 'plan') {
+                                            planDate = /^\d{4}[-/]\d{2}[-/]\d{2}$/.test(meta.time) ? meta.time.replace(/\//g, '-') : meta.time;
+                                        } else {
+                                            const ts = parseInt(meta.time);
+                                            if (!isNaN(ts) && ts > 0) timestamp = ts;
+                                        }
+
+                                        // 提取正文（去除标题行、标签行、分隔线等）
+                                        const lines = block.split('\n');
+                                        const contentLines = [];
+                                        lines.forEach(line => {
+                                            const trimmed = line.trim();
+                                            if (!trimmed) return;
+                                            // 跳过标题行
+                                            if (trimmed.startsWith('###') || trimmed.startsWith('【记录')) return;
+                                            // 跳过分隔线
+                                            if (/^---+$/.test(trimmed) || /^-+$/.test(trimmed) || /^=+$/.test(trimmed)) return;
+                                            // 跳过标签行
+                                            if (trimmed.startsWith('**标签**') || trimmed.startsWith('标签:')) return;
+                                            // 跳过导出头部
+                                            if (trimmed.includes('闪念时光机') || trimmed.startsWith('> 导出时间')) return;
+
+                                            if (type === 'plan') {
+                                                // 解析时间段
+                                                const slotMatch = trimmed.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+                                                if (slotMatch) {
+                                                    let todo = trimmed.replace(/.*?\d{2}:\d{2}\s*-\s*\d{2}:\d{2}[\]\s|]*/, '').trim();
+                                                    todo = todo.replace(/^-\s*\[\s*[xX ]\s*\]/, '').trim();
+                                                    if (todo) timeSlots.push({ start: slotMatch[1], end: slotMatch[2], todo });
+                                                }
+                                            } else {
+                                                contentLines.push(line);
+                                            }
+                                        });
+
+                                        if (type === 'plan' && timeSlots.length === 0) {
+                                            timeSlots = [{ start: '09:00', end: '10:00', todo: '导入的任务' }];
+                                        }
+                                        content = contentLines.join('\n').trim();
+
+                                        if (content || timeSlots.length > 0) {
+                                            const isDuplicate = records.value.some(r =>
+                                                r.type === type && (type === 'plan' ? r.planDate === planDate : r.content === content)
+                                            );
+                                            if (!isDuplicate) {
+                                                records.value.push({ id: timestamp, type, content, planDate, timeSlots, tags, timestamp, isCompleted });
+                                                importedCount++;
+                                            } else { skipCount++; }
+                                        }
+                                    });
+                                } else {
+                                    // ===== 旧格式兼容：启发式解析 =====
+                                    const blocks = text.split(/###\s+\[|【记录\s+#/g);
+                                    blocks.forEach(block => {
+                                        if (!block.trim() || block.includes('闪念时光机')) return;
+
+                                        let type = 'idea';
+                                        let content = '';
+                                        let planDate = new Date().toISOString().slice(0, 10);
+                                        let timeSlots = [];
+                                        let tags = [];
+                                        let isCompleted = block.includes('【已完成】');
+                                        let timestamp = Date.now() - (importedCount * 1000);
+
+                                        const tagMatches = block.match(/#\s*([^\s#\-\[\]\【\】\（\）]+)/g);
+                                        if (tagMatches) { tags = tagMatches.map(t => t.replace('#', '').trim()); }
+
+                                        if (block.includes('计划') || block.includes('- [ ]')) {
+                                            type = 'plan';
+                                            const dateMatch = block.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+                                            if (dateMatch) planDate = dateMatch[1].replace(/\//g, '-');
+
+                                            const slotLines = block.split('\n');
+                                            slotLines.forEach(line => {
+                                                const slotMatch = line.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+                                                if (slotMatch) {
+                                                    let todo = line.replace(/.*?\d{2}:\d{2}\s*-\s*\d{2}:\d{2}[\]\s|]*/, '').trim();
+                                                    todo = todo.replace(/^-\s*\[\s*[xX ]\s*\]/, '').trim();
+                                                    if(todo) timeSlots.push({ start: slotMatch[1], end: slotMatch[2], todo });
+                                                }
+                                            });
+                                            if (timeSlots.length === 0) timeSlots = [{ start: '09:00', end: '10:00', todo: '导入的任务' }];
+                                        } else {
+                                            if (block.includes('经验') || block.includes('🌱')) type = 'summary';
+                                            const lines = block.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('---') && !l.startsWith('标签') && !l.startsWith('类型') && !block.startsWith('】'));
+                                            content = lines.join('\n');
+                                        }
+
+                                        if (content.trim() || timeSlots.length > 0) {
+                                            const isDuplicate = records.value.some(r => 
+                                                r.type === type && (type === 'plan' ? r.planDate === planDate : r.content === content)
+                                            );
+
+                                            if (!isDuplicate) {
+                                                records.value.push({ id: timestamp, type, content, planDate, timeSlots, tags, timestamp, isCompleted });
+                                                importedCount++;
+                                            } else { skipCount++; }
+                                        }
+                                    });
+                                }
+                            }
+
+                            alert(`导入完成！成功导入 ${importedCount} 条记录` + (skipCount > 0 ? `，跳过 ${skipCount} 条重复。` : '。'));
+                            saveToLocal();
+                        } catch (err) {
+                            alert('导入失败，解析出错！');
+                        }
+                        event.target.value = '';
+                    };
+                    reader.readAsText(file);
+                };
+
+                const addTag = () => {
+                    const tag = tagInput.value.trim();
+                    if (tag && !newRecord.value.tags.includes(tag)) { newRecord.value.tags.push(tag); }
+                    tagInput.value = '';
+                    updateIcons();
+                };
+                
+                const removeTag = (tag) => {
+                    newRecord.value.tags = newRecord.value.tags.filter(t => t !== tag);
+                    updateIcons();
+                };
+
+                const toggleTagInNewRecord = (tag) => {
+                    if (newRecord.value.tags.includes(tag)) {
+                        newRecord.value.tags = newRecord.value.tags.filter(t => t !== tag);
+                    } else {
+                        newRecord.value.tags.push(tag);
+                    }
+                    updateIcons();
+                };
+
+                const allTags = computed(() => {
+                    const tagsSet = new Set();
+                    records.value.forEach(r => { if(r.tags) r.tags.forEach(t => tagsSet.add(t)); });
+                    return Array.from(tagsSet);
+                });
+
+                const toggleTagFilter = (tag) => {
+                    if (selectedTags.value.includes(tag)) {
+                        selectedTags.value = selectedTags.value.filter(t => t !== tag);
+                    } else {
+                        selectedTags.value.push(tag);
+                    }
+                };
+
+                // ---- 列表智能检索拦截（将完成与未完成完全隔离隔离） ----
+                const filteredRecords = computed(() => {
+                    let result = records.value;
+                    
+                    // 核心拦截线：判断现在是处于普通视图还是已完成回顾视图
+                    if (showCompletedOnly.value) {
+                        result = result.filter(r => r.isCompleted); // 只提取已完成
+                    } else {
+                        result = result.filter(r => !r.isCompleted); // 只提取未完成/待办
+                    }
+
+                    // 检索输入过滤
+                    if (searchQuery.value.trim()) {
+                        const query = searchQuery.value.toLowerCase().trim();
+                        result = result.filter(r => {
+                            const contentMatch = r.content && r.content.toLowerCase().includes(query);
+                            const tagMatch = r.tags && r.tags.some(t => t.toLowerCase().includes(query));
+                            const slotMatch = r.timeSlots && r.timeSlots.some(s => s.todo.toLowerCase().includes(query));
+                            const dateMatch = r.planDate && r.planDate.includes(query);
+                            return contentMatch || tagMatch || slotMatch || dateMatch;
+                        });
+                    }
+
+                    // 分类过滤（想法/经验/计划）
+                    if (currentFilter.value !== 'all') {
+                        result = result.filter(r => r.type === currentFilter.value);
+                    }
+
+                    // 标签选中过滤
+                    if (selectedTags.value.length > 0) {
+                        result = result.filter(r => selectedTags.value.every(t => r.tags && r.tags.includes(t)));
+                    }
+
+                    return result.sort((a, b) => b.timestamp - a.timestamp);
+                });
+
+                const saveRecord = () => {
+                    if (newRecord.value.type !== 'plan' && !newRecord.value.content.trim()) {
+                        return alert('内容不能为空哦！');
+                    }
+                    if (newRecord.value.type === 'plan' && !newRecord.value.timeSlots.some(s => s.todo.trim())) {
+                        return alert('计划日程里至少写一个任务项吧！');
+                    }
+                    if(tagInput.value.trim()) addTag();
+
+                    if (isEditing.value && editingId.value !== null) {
+                        const index = records.value.findIndex(r => r.id === editingId.value);
+                        if (index !== -1) {
+                            records.value[index] = {
+                                ...records.value[index],
+                                type: newRecord.value.type,
+                                content: newRecord.value.content,
+                                planDate: newRecord.value.planDate,
+                                timeSlots: newRecord.value.type === 'plan' ? [...newRecord.value.timeSlots] : null,
+                                tags: [...newRecord.value.tags]
+                            };
+                        }
+                    } else {
+                        records.value.push({
+                            id: Date.now(),
+                            type: newRecord.value.type,
+                            content: newRecord.value.content,
+                            planDate: newRecord.value.type === 'plan' ? newRecord.value.planDate : null,
+                            timeSlots: newRecord.value.type === 'plan' ? [...newRecord.value.timeSlots] : null,
+                            tags: [...newRecord.value.tags],
+                            timestamp: Date.now(),
+                            isCompleted: false
+                        });
+                    }
+
+                    saveToLocal();
+                    closePanel();
+                };
+
+                const deleteRecord = (id) => {
+                    if(confirm('注意：这是彻底删除操作（不可恢复）！\n如果您只是完成了本事件，请使用卡片左上角的打勾按钮。确定彻底删除吗？')) {
+                        records.value = records.value.filter(r => r.id !== id);
+                        saveToLocal();
+                    }
+                };
+
+                const exportMarkdown = () => {
+                    if(records.value.length === 0) return alert('没有记录可供导出！');
+                    let md = `# 闪念时光机 - 个人全量数据备份\n\n> 导出时间：${formatTime(Date.now())}\n\n---\n\n`;
+                    
+                    [...records.value].sort((a,b)=>b.timestamp-a.timestamp).forEach(item => {
+                        // 结构化元数据行（HTML注释包裹，不影响阅读，导入时精确解析）
+                        const tagsPart = item.tags?.length ? item.tags.join(',') : '';
+                        const donePart = item.isCompleted ? 'done:true' : 'done:false';
+                        const timePart = item.type === 'plan' ? item.planDate : String(item.timestamp);
+                        md += `<!-- ⟦type:${item.type}|time:${timePart}|tags:${tagsPart}|${donePart}⟧ -->\n`;
+                        const compSign = item.isCompleted ? ' 【已完成】' : '';
+                        if(item.type === 'plan') {
+                            md += `### [📅 计划]${compSign} - 日期: ${item.planDate}\n\n`;
+                            item.timeSlots.forEach(s => { md += `- [ ] **${s.start} - ${s.end}** | ${s.todo}\n`; });
+                        } else {
+                            const label = item.type === 'idea' ? '💡 想法' : '🌱 经验';
+                            md += `### [${label}]${compSign} - ${formatTime(item.timestamp)}\n\n${item.content}\n`;
+                        }
+                        const tagsDisplay = item.tags?.length ? item.tags.map(t => `#${t}`).join(' ') : '无标签';
+                        md += `\n**标签**：${tagsDisplay}\n\n---\n\n`;
+                    });
+                    downloadBlob(md, `时光机备份_${new Date().toISOString().slice(0,10)}.md`, 'text/markdown');
+                };
+
+                const exportTxt = () => {
+                    if(records.value.length === 0) return alert('没有记录可供导出！');
+                    let txt = `========================================\n  闪念时光机历史备份\n========================================\n\n`;
+                    
+                    [...records.value].sort((a,b)=>b.timestamp-a.timestamp).forEach((item, i) => {
+                        const tagsPart = item.tags?.length ? item.tags.join(',') : '';
+                        const donePart = item.isCompleted ? 'done:true' : 'done:false';
+                        const timePart = item.type === 'plan' ? item.planDate : String(item.timestamp);
+                        // 结构化元数据行（特殊括号包裹，导入时精确解析）
+                        txt += `⟦type:${item.type}|time:${timePart}|tags:${tagsPart}|${donePart}⟧\n`;
+                        const typeLabel = {idea:'想法', summary:'经验', plan:'计划'}[item.type];
+                        const compSign = item.isCompleted ? '[已完成] ' : '';
+                        txt += `【记录 #${i+1}】 ${compSign}类型: ${typeLabel} | 时间: ${item.type==='plan'?item.planDate:formatTime(item.timestamp)}\n`;
+                        txt += `----------------------------------------\n`;
+                        if(item.type === 'plan') {
+                            item.timeSlots.forEach(s => { txt += `[${s.start} - ${s.end}] ${s.todo}\n`; });
+                        } else { txt += `${item.content}\n`; }
+                        const tagsDisplay = item.tags?.length ? item.tags.map(t => `#${t}`).join(' ') : '无';
+                        txt += `----------------------------------------\n标签: ${tagsDisplay}\n\n\n`;
+                    });
+                    downloadBlob(txt, `时光机文本_${new Date().toISOString().slice(0,10)}.txt`, 'text/plain');
+                };
+
+                const exportData = () => {
+                    if(records.value.length === 0) return alert('没有记录可供导出！');
+                    downloadBlob(JSON.stringify(records.value, null, 2), `时光机原始JSON_${new Date().toISOString().slice(0,10)}.json`, 'application/json');
+                };
+
+                const downloadBlob = (content, filename, contentType) => {
+                    const blob = new Blob([content], { type: contentType + ';charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = filename;
+                    document.body.appendChild(a); a.click();
+                    document.body.removeChild(a); URL.revokeObjectURL(url);
+                };
+
+                const getPlaceholder = (type) => ({
+                    idea: '捕捉到什么奇思妙想？快记下来...',
+                    summary: '今天有什么复盘和学到的经验吗？'
+                }[type]);
+
+                const getTypeLabel = (type) => ({ idea: '💡 想法', summary: '🌱 经验', plan: '📅 计划' }[type]);
+                const getTypeClass = (type) => ({ idea: 'border-amber-100', summary: 'border-emerald-100', plan: 'border-blue-100' }[type]);
+                const getTypeBadgeClass = (type) => ({ idea: 'bg-amber-50 text-amber-600', summary: 'bg-emerald-50 text-emerald-600', plan: 'bg-blue-50 text-blue-600' }[type]);
+                const formatTime = (ts) => {
+                    const d = new Date(ts);
+                    return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                };
+
+                return {
+                    records, isPanelOpen, isEditing, currentFilter, showCompletedOnly, selectedTags, tagInput, searchQuery, newRecord, fileInput, showExportMenu,
+                    activeRecordsCount, completedRecordsCount, typeActiveCount, setViewMode, toggleComplete,
+                    togglePanel, closePanel, startEdit, addTag, removeTag, toggleTagInNewRecord, allTags, toggleTagFilter,
+                    filteredRecords, saveRecord, deleteRecord, getPlaceholder, triggerImport, handleImport,
+                    getTypeLabel, getTypeClass, getTypeBadgeClass, formatTime, exportData, exportMarkdown, exportTxt,
+                    addTimeSlot, removeTimeSlot
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
