@@ -113,6 +113,22 @@ cd /workspace/trae-demo-wall && git status
 
 如果无需更新，跳过此步骤。
 
+### Step 5.5: 安全检查（必须执行，防止密钥泄露）
+
+爬取的 demo 文件中可能包含作者上传的 `.env` 文件，其中可能含有真实 API Key 等密钥。GitHub 的 Push Protection 会拦截包含密钥的推送。**必须在提交前执行以下清理操作**：
+
+```bash
+cd /workspace/trae-demo-wall
+# 查找所有 .env 文件（排除 .env.example 模板文件）
+find public/demos -name ".env" -not -name ".env.example" -type f
+```
+
+- 如果找到 `.env` 文件，检查内容是否包含真实密钥（如 `sk-xxx`、`api_key=xxx` 等）
+- 包含真实密钥的 `.env` 文件必须删除：`rm <path>/.env`
+- 包含占位符的 `.env` 文件（如 `YOUR_API_KEY`、`sk-your-api-key-here`）可以保留
+- 删除所有遗留的 `.zip` 文件：`rm -f public/demos/*.zip`（这些文件在解压后不再需要）
+- 确保 `.gitignore` 中包含 `.env` 规则
+
 ### Step 6: 提交并推送到 main 分支
 
 ```bash
