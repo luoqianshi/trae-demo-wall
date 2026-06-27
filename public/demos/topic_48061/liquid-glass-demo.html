@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Liquid Glass · Apple iOS 26 风格</title>
+  <link rel="stylesheet" href="./liquid-glass-demo.css" />
+</head>
+
+<body>
+
+  <!-- 背景流动光斑 -->
+  <div class="bg-decor" aria-hidden="true">
+    <span></span><span></span><span></span><span></span>
+  </div>
+
+  <!-- 顶部说明 + 总开关 -->
+  <header class="intro">
+    <h1>Liquid Glass · Apple iOS 26 风格</h1>
+    <p>支持物理折射、可调高光、可切换渲染引擎。<span id="env-info"></span></p>
+    <div class="topbar">
+      <label class="switch">
+        <input type="checkbox" id="lg-toggle" checked />
+        <span class="slider"></span>
+        <span class="switch-label">液态玻璃</span>
+      </label>
+
+      <label class="select-wrap">
+        <span>渲染引擎</span>
+        <select id="lg-engine">
+          <option value="auto">自动检测（推荐）</option>
+          <option value="svg">强制 SVG（Chromium）</option>
+          <option value="webgl">强制 WebGL（全兼容）</option>
+          <option value="off">关闭（仅磨砂）</option>
+        </select>
+      </label>
+
+      <button id="lg-panel-toggle" type="button" title="控制面板">⚙️</button>
+    </div>
+  </header>
+
+  <!-- 可调参数面板 -->
+  <aside id="lg-panel" class="panel">
+    <div class="panel-header">
+      <span>实时参数</span>
+      <button id="lg-panel-close" type="button">×</button>
+    </div>
+    <div class="panel-body">
+      <h3>折射</h3>
+      <label>折射强度 <input type="range" id="p-displace" min="0" max="40" step="1" value="18" /><span class="val"
+          data-for="p-displace">18</span></label>
+      <label>边缘宽度 <input type="range" id="p-bezel" min="2" max="80" step="1" value="40" /><span class="val"
+          data-for="p-bezel">40</span></label>
+      <label>玻璃厚度 <input type="range" id="p-thick" min="10" max="200" step="1" value="80" /><span class="val"
+          data-for="p-thick">80</span></label>
+      <label>折射率 IOR<input type="range" id="p-ior" min="1.0" max="3.0" step="0.05" value="1.8" /><span class="val"
+          data-for="p-ior">1.80</span></label>
+
+      <h3>外观</h3>
+      <label>磨砂模糊 <input type="range" id="p-blur" min="0" max="6" step="0.1" value="0.6" /><span class="val"
+          data-for="p-blur">0.6</span></label>
+      <label>饱和度 <input type="range" id="p-sat" min="100" max="240" step="5" value="160" /><span class="val"
+          data-for="p-sat">160</span></label>
+      <label>高光透明 <input type="range" id="p-spec" min="0" max="100" step="1" value="55" /><span class="val"
+          data-for="p-spec">55</span></label>
+
+      <h3>调试</h3>
+      <button id="lg-rebuild" type="button">重建所有滤镜</button>
+    </div>
+  </aside>
+
+  <!-- Demo 舞台 -->
+  <main class="stage">
+    <div class="lg lg__pill" data-radius="38">
+      <div class="lg__content">Liquid Glass</div>
+    </div>
+
+    <div class="lg lg__card" data-radius="28">
+      <div class="lg__content">
+        <div class="title">WWDC 25</div>
+        <div class="desc">边缘折射 + 物理光学高光，营造真实玻璃质感。</div>
+      </div>
+    </div>
+
+    <div class="lg lg__circle" data-radius="65">
+      <div class="lg__content">＋</div>
+    </div>
+
+    <div class="lg lg__card" data-radius="28">
+      <div class="lg__content">
+        <div class="title">Snell 定律</div>
+        <div class="desc">折射率 IOR 越大，边缘弯曲越夸张。试着拖动右上角面板里的 IOR 滑杆。</div>
+      </div>
+    </div>
+
+    <div class="lg lg__pill" data-radius="38">
+      <div class="lg__content">Try Me</div>
+    </div>
+
+    <div class="lg lg__circle" data-radius="65">
+      <div class="lg__content">★</div>
+    </div>
+  </main>
+
+  <!-- SVG 滤镜挂载点 -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" color-interpolation-filters="sRGB">
+    <defs id="lg-defs"></defs>
+  </svg>
+
+  <script src="./liquid-glass.js"></script>
+  <script src="./liquid-glass-webgl.js"></script>
+  <script>
+    /* ========== 全局控制器 ========== */
+    (function () {
+      const html = document.documentElement;
+      const envInfo = document.getElementById('env-info');
+      const toggle = document.getElementById('lg-toggle');
+      const engineSel = document.getElementById('lg-engine');
+      const panel = document.getElementById('lg-panel');
+      const panelBtn = document.getElementById('lg-panel-toggle');
+      const panelClose = document.getElementById('lg-panel-close');
+      const rebuildBtn = document.getElementById('lg-rebuild');
+
+      /* 1. 能力检测 */
+      const caps = LiquidGlass.detect();
+      envInfo.textContent =
+        '当前环境：' +
+        (caps.svgBackdrop ? 'SVG ✅ ' : 'SVG ❌ ') +
+        (caps.webgl ? 'WebGL ✅' : 'WebGL ❌');
+
+      /* 2. 决定渲染模式 */
+      function resolveMode(choice) {
+        if (choice === 'off') return 'off';
+        if (choice === 'svg') return caps.svgBackdrop ? 'svg' : 'fallback';
+        if (choice === 'webgl') return caps.webgl ? 'webgl' : 'fallback';
+        // auto
+        if (caps.svgBackdrop) return 'svg';
+        if (caps.webgl) return 'webgl';
+        return 'fallback';
+      }
+
+      /* 3. 应用渲染 */
+      let instances = [];
+      function destroyAll() {
+        instances.forEach(i => i.destroy && i.destroy());
+        instances = [];
+      }
+      function applyMode(mode) {
+        destroyAll();
+        html.dataset.lgMode = mode;
+        const els = document.querySelectorAll('.lg');
+        // 切换模式前彻底重置 inline 样式，避免 SVG/WebGL 残留互相干扰
+        els.forEach(el => {
+          el.style.backdropFilter = '';
+          el.style.webkitBackdropFilter = '';
+        });
+        if (mode === 'off' || mode === 'fallback') {
+          els.forEach(el => el.style.backdropFilter =
+            (mode === 'fallback'
+              ? 'blur(12px) saturate(160%)'
+              : 'blur(0)'));
+          return;
+        }
+        const opts = readParams();
+        els.forEach(el => {
+          if (mode === 'svg') instances.push(LiquidGlass.svg(el, opts));
+          else if (mode === 'webgl') instances.push(LiquidGlass.webgl(el, opts));
+        });
+      }
+
+      /* 4. 读取面板参数 */
+      function readParams() {
+        return {
+          displace: +document.getElementById('p-displace').value,
+          bezel: +document.getElementById('p-bezel').value,
+          thick: +document.getElementById('p-thick').value,
+          ior: +document.getElementById('p-ior').value,
+          blur: +document.getElementById('p-blur').value,
+          saturate: +document.getElementById('p-sat').value / 100,
+          specular: +document.getElementById('p-spec').value / 100,
+        };
+      }
+
+      /* 5. 事件绑定 */
+      toggle.addEventListener('change', () => {
+        const choice = toggle.checked ? engineSel.value : 'off';
+        applyMode(resolveMode(choice));
+      });
+      engineSel.addEventListener('change', () => {
+        if (!toggle.checked) return;
+        applyMode(resolveMode(engineSel.value));
+      });
+      panelBtn.addEventListener('click', () => panel.classList.toggle('open'));
+      panelClose.addEventListener('click', () => panel.classList.remove('open'));
+      rebuildBtn.addEventListener('click', () => {
+        if (toggle.checked) applyMode(resolveMode(engineSel.value));
+      });
+
+      // 滑杆实时反馈
+      document.querySelectorAll('#lg-panel input[type=range]').forEach(input => {
+        const val = document.querySelector(`.val[data-for="${input.id}"]`);
+        let raf = null;
+        input.addEventListener('input', () => {
+          val.textContent = input.id === 'p-ior'
+            ? (+input.value).toFixed(2)
+            : input.value;
+          if (raf) cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => {
+            if (toggle.checked) applyMode(resolveMode(engineSel.value));
+          });
+        });
+      });
+
+      // 窗口尺寸变化时重建（避免位置/尺寸错位）
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (toggle.checked) applyMode(resolveMode(engineSel.value));
+        }, 200);
+      });
+
+      /* 6. 启动 */
+      applyMode(resolveMode(engineSel.value));
+    })();
+  </script>
+</body>
+
+</html>
