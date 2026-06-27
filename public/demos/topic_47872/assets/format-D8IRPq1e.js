@@ -1,0 +1,1 @@
+function e(e){return{breakfast:`早餐`,lunch:`午餐`,dinner:`晚餐`,snack:`加餐`}[e]||e}function t(e){return{breakfast:`🌅`,lunch:`☀️`,dinner:`🌙`,snack:`🍪`}[e]||`🍽️`}function n(e){return e>100?`超标`:e<-100?`偏低`:`适宜`}function r(e){return e>100?`text-danger`:e<-100?`text-warning`:`text-success`}export{n as i,e as n,r,t};
