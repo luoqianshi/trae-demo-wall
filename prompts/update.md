@@ -115,7 +115,9 @@ cd /workspace/trae-demo-wall && git status
 
 ### Step 5.5: 安全检查（必须执行，防止密钥泄露）
 
-爬取的 demo 文件中可能包含作者上传的 `.env` 文件，其中可能含有真实 API Key 等密钥。GitHub 的 Push Protection 会拦截包含密钥的推送。**必须在提交前执行以下清理操作**：
+爬取的 demo 文件中可能包含作者硬编码的 API Key 等密钥。GitHub 的 Push Protection 会拦截包含密钥的推送。**必须在提交前执行以下清理操作**：
+
+#### 5.5.1 检查 .env 文件
 
 ```bash
 cd /workspace/trae-demo-wall
@@ -129,21 +131,93 @@ find public/demos -name ".env" -not -name ".env.example" -type f
 - 删除所有遗留的 `.zip` 文件：`rm -f public/demos/*.zip`（这些文件在解压后不再需要）
 - 确保 `.gitignore` 中包含 `.env` 规则
 
-### Step 6: 提交并推送到 main 分支
+#### 5.5.2 扫描硬编码密钥（必须执行）
+
+demo 的 HTML/JS 文件中可能直接硬编码了 API Key。使用以下命令扫描所有新增的 demo 文件：
 
 ```bash
 cd /workspace/trae-demo-wall
-git add -A
+# 扫描 DeepSeek API Key (sk- 开头的长字符串)
+grep -rn 'sk-[a-zA-Z0-9]\{32,\}' public/demos/topic_*/ 2>/dev/null
+
+# 扫描 OpenRouter API Key (sk-or-v1- 开头)
+grep -rn 'sk-or-v1-[a-zA-Z0-9]\{20,\}' public/demos/topic_*/ 2>/dev/null
+
+# 扫描 Google API Key (AIza 开头)
+grep -rn 'AIza[a-zA-Z0-9_-]\{35\}' public/demos/topic_*/ 2>/dev/null
+
+# 扫描通用 API Key 赋值
+grep -rn 'api[_-]*key.*=.*["\x27][a-zA-Z0-9_-]\{20,\}' public/demos/topic_*/ 2>/dev/null
+```
+
+如果发现密钥，使用 `sed` 替换为占位符：
+```bash
+# 示例：替换 DeepSeek API Key
+sed -i "s/sk-<实际密钥>/sk-YOUR_API_KEY_HERE/g" <文件路径>
+
+# 示例：替换 OpenRouter API Key
+sed -i "s/sk-or-v1-<实际密钥>/sk-or-v1-YOUR_API_KEY_HERE/g" <文件路径>
+```
+
+**常见密钥模式总结**：
+| 密钥类型 | 特征前缀 | 替换占位符 |
+|---|---|---|
+| DeepSeek | `sk-` + 32位以上字符 | `sk-YOUR_API_KEY_HERE` |
+| OpenRouter | `sk-or-v1-` + 20位以上字符 | `sk-or-v1-YOUR_API_KEY_HERE` |
+| Google | `AIza` + 35位字符 | `AIzaYOUR_API_KEY_HERE` |
+| 通用 | `api_key=...` | `api_key=YOUR_API_KEY_HERE` |
+
+### Step 6: 提交并推送到 main 分支
+
+#### 6.1 先提交数据文件（src/data 和 public/data）
+
+```bash
+cd /workspace/trae-demo-wall
+git add src/data/ public/data/
 git commit -m "data: incremental crawl update (+N new projects, total M)"
+git push origin main
 ```
 
 **将 `N` 替换为 Step 2 中新增作品数，`M` 替换为总作品数。** 例如：
 ```
-data: incremental crawl update (+170 new projects, total 1034)
+data: incremental crawl update (+97 new projects, total 1290)
 ```
 
-然后推送：
+#### 6.2 再提交 demo 文件（分批推送）
+
+demo 文件较多时，分批提交和推送可以避免 Push Protection 拦截时难以定位问题文件：
+
 ```bash
+# 按 topic 编号范围分批添加
+git add public/demos/topic_47[5-6]*/
+git commit -m "feat: add new demo files batch 1"
+git push origin main
+
+git add public/demos/topic_47[7-8]*/
+git commit -m "feat: add new demo files batch 2"
+git push origin main
+
+# 继续后续批次...
+git add public/demos/topic_47[9]*/ public/demos/topic_48[0-3]*/
+git commit -m "feat: add new demo files batch 3"
+git push origin main
+```
+
+#### 6.3 如果 Push Protection 拦截推送
+
+如果 `git push` 返回 `repository rule violations` 错误，说明某文件包含密钥。错误信息会指明具体文件路径和行号。处理方式：
+
+1. 查看错误信息中的 `path` 和密钥类型
+2. 使用 `sed` 替换密钥为占位符
+3. `git add` 修改后的文件
+4. `git commit --amend --no-edit` 更新提交
+5. 重新 `git push origin main`
+
+```bash
+# 示例：清除 topic_XXXXX 中的密钥
+sed -i "s/<实际密钥>/YOUR_API_KEY_HERE/g" public/demos/topic_XXXXX/*.html
+git add public/demos/topic_XXXXX/
+git commit --amend --no-edit
 git push origin main
 ```
 
@@ -204,6 +278,22 @@ data: sync views/likes, no new projects
 
 ### Q7: `public/data` 中存在 `data/data/` 嵌套目录
 **处理**: 这是历史遗留问题，构建前执行 `rm -rf public/data && cp -r src/data public/data` 即可修复，build 脚本中已包含此操作。
+
+### Q8: git push 被拒绝，提示 `repository rule violations` / `Push Protection`
+**处理**: demo 文件中包含硬编码的 API Key。错误信息会指明具体文件路径和密钥类型（如 OpenRouter API Key、DeepSeek API Key）。处理步骤：
+1. 根据错误信息中的 `path` 定位文件
+2. 使用 `sed -i "s/<密钥>/YOUR_API_KEY_HERE/g" <文件>` 替换密钥
+3. `git add <文件>` && `git commit --amend --no-edit` && `git push origin main`
+4. 如果一次推送的文件太多难以定位，改为分批推送（先推数据文件，再按 topic 编号范围分批推 demo 文件）
+
+### Q9: git 中存在已跟踪的 `.pyc` 文件
+**处理**: `.gitignore` 已包含 `*.pyc` 和 `__pycache__/`，但历史提交中可能仍有跟踪的 .pyc 文件。清理方法：
+```bash
+cd /workspace/trae-demo-wall
+git rm -r --cached "**/*.pyc" "**/__pycache__/" 2>/dev/null
+git commit -m "chore: remove tracked .pyc files"
+git push origin main
+```
 
 ---
 
