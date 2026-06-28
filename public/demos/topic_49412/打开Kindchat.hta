@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Kindchat - 启动中</title>
+  <hta:application
+    border="dialog"
+    innerborder="no"
+    contextmenu="no"
+    maximizebutton="no"
+    minimizebutton="no"
+    scroll="no"
+    singleinstance="yes"
+  />
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; text-align: center; padding: 30px 30px; background: #1a1a2e; color: #eee; margin: 0; }
+    h2 { font-size: 22px; margin-bottom: 5px; }
+    .status { margin-top: 16px; color: #aaa; font-size: 13px; line-height: 1.8; }
+    .success { color: #4ecdc4; }
+    .error { color: #e74c3c; }
+    .info-box { margin-top: 16px; padding: 12px; background: #2a2a3e; border-radius: 8px; text-align: left; font-size: 13px; line-height: 2; }
+    .info-box .label { color: #888; }
+    .info-box .url { color: #7b68ee; font-weight: bold; }
+    .btn { display: inline-block; margin-top: 16px; padding: 10px 30px; background: #7b68ee; color: #fff; border: none; border-radius: 6px; font-size: 15px; cursor: pointer; text-decoration: none; }
+    .btn:hover { background: #6a5acd; }
+    #actions { display: none; }
+    #info { display: none; }
+  </style>
+</head>
+<body>
+  <h2>Kindchat</h2>
+  <div class="status" id="status">正在启动服务...</div>
+  <div id="info" class="info-box">
+    <div id="lanSection" style="display:none"><span class="label">局域网：</span></div>
+    <div id="vpnSection" style="display:none"><span class="label">VPN/虚拟网：</span></div>
+    <div id="otherSection" style="display:none"><span class="label">其他地址：</span></div>
+    <div style="color:#888;font-size:12px;margin-top:6px;">把地址发给对方，对方在浏览器打开即可</div>
+  </div>
+  <div id="actions">
+    <a class="btn" href="#" onclick="openApp()">进入 Kindchat</a>
+  </div>
+
+  <script>
+    var shell = new ActiveXObject("WScript.Shell");
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+
+    // 获取本文件所在目录
+    var fullPath = unescape(document.location.href);
+    fullPath = fullPath.replace('file:///', '');
+    var dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+    dir = dir.replace(/\//g, '\\');
+    var srvDir = dir + '\\server';
+    var PORT = '12345';
+
+    var statusEl = document.getElementById('status');
+    var actionsEl = document.getElementById('actions');
+    var infoEl = document.getElementById('info');
+
+    // 先显示占位，服务器启动后写入 .local_ip 文件，HTA 读取该文件获取 IP
+    var localIP = '127.0.0.1';
+    var baseUrl = 'http://' + localIP + ':' + PORT;
+    var healthUrl = 'http://127.0.0.1:' + PORT + '/health';
+    var ipApiUrl = 'http://127.0.0.1:' + PORT + '/api/ip';
+    var ipFilePath = dir + '\\.local_ip';
+
+    var lanSection = document.getElementById('lanSection');
+    var vpnSection = document.getElementById('vpnSection');
+    var otherSection = document.getElementById('otherSection');
+
+    // 安装依赖
+    if (!fso.FolderExists(srvDir + '\\node_modules')) {
+      statusEl.innerText = '首次运行，正在安装依赖...';
+      shell.Run('cmd /c cd /d "' + srvDir + '" && npm install --omit=dev', 0, true);
+    }
+
+    // 杀掉旧进程（避免端口占用导致新服务无法启动）
+    shell.Run('cmd /c for /f "tokens=5" %a in (\'netstat -ano ^| findstr :12345 ^| findstr LISTENING\') do taskkill /F /PID %a >nul 2>&1', 0, true);
+
+    // 配置防火墙
+    statusEl.innerText = '正在配置防火墙...';
+    shell.Run('netsh advfirewall firewall add rule name="Kindchat" dir=in action=allow protocol=TCP localport=12345', 0, true);
+
+    // 启动服务器（后台）
+    statusEl.innerText = '正在启动服务...';
+    shell.Run('cmd /c cd /d "' + dir + '" && node server\\dist\\index.js', 0, false);
+
+    // 显示IP组的辅助函数
+    function showIPs(section, ips, label) {
+      if (!ips || !ips.length) { section.style.display = 'none'; return; }
+      section.style.display = 'block';
+      var html = '<span class="label">' + label + '：</span>';
+      for (var i = 0; i < ips.length; i++) {
+        html += '<span class="url">http://' + ips[i] + ':' + PORT + '</span>';
+        if (i < ips.length - 1) html += '<span style="color:#666"> | </span>';
+      }
+      section.innerHTML = html;
+    }
+
+    // 轮询：等待服务器就绪 → 读取 IP 文件 / API → 更新显示
+    var attempts = 0;
+    function checkReady() {
+      attempts++;
+      try {
+        var http = new ActiveXObject("MSXML2.XMLHTTP");
+        http.open("GET", healthUrl, false);
+        http.send();
+        if (http.status === 200) {
+          // 方法1：读取服务端写入的 IP 文件
+          if (fso.FileExists(ipFilePath)) {
+            try {
+              var ts = fso.OpenTextFile(ipFilePath, 1, false);
+              var json = ts.ReadAll();
+              ts.Close();
+              var ips = eval('(' + json + ')');
+              if (ips) {
+                showIPs(lanSection, ips.lan, '局域网');
+                showIPs(vpnSection, ips.vpn, 'VPN/虚拟网');
+                showIPs(otherSection, ips.other, '其他');
+                if (ips.best && ips.best !== '127.0.0.1') {
+                  localIP = ips.best;
+                  baseUrl = 'http://' + localIP + ':' + PORT;
+                }
+              }
+            } catch (e2) {}
+          }
+          // 方法2：通过 /api/ip 接口获取（兜底）
+          if (localIP === '127.0.0.1') {
+            try {
+              var http2 = new ActiveXObject("MSXML2.XMLHTTP");
+              http2.open("GET", ipApiUrl, false);
+              http2.send();
+              if (http2.status === 200) {
+                var txt = http2.responseText;
+                var resp = eval('(' + txt + ')');
+                if (resp) {
+                  showIPs(lanSection, resp.lan, '局域网');
+                  showIPs(vpnSection, resp.vpn, 'VPN/虚拟网');
+                  showIPs(otherSection, resp.other, '其他');
+                  if (resp.best && resp.best !== '127.0.0.1') {
+                    localIP = resp.best;
+                    baseUrl = 'http://' + localIP + ':' + PORT;
+                  }
+                }
+              }
+            } catch (e3) {}
+          }
+
+          statusEl.innerHTML = '<span class="success">服务已就绪</span>';
+          infoEl.style.display = 'block';
+          actionsEl.style.display = 'block';
+          openApp();
+          return;
+        }
+      } catch (e) {}
+
+      if (attempts < 30) {
+        statusEl.innerText = '正在启动服务... (' + attempts + 's)';
+        setTimeout(checkReady, 1000);
+      } else {
+        statusEl.innerHTML = '<span class="error">启动超时，请手动运行 start.bat</span>';
+      }
+    }
+    setTimeout(checkReady, 2000);
+
+    function openApp() {
+      shell.Run('rundll32 url.dll,FileProtocolHandler ' + baseUrl);
+    }
+  </script>
+</body>
+</html>
