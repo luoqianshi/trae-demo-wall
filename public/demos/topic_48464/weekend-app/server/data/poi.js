@@ -1,0 +1,133 @@
+/**
+ * POI 数据集 - 16 城兴趣点
+ * 字段: name 名称 / category 分类 / district 区域 / cost 人均费用(元) / indoor 是否室内
+ *        tags 标签 / duration 建议时长(小时) / transport 交通提示
+ * 分类: 漫步 美术馆 餐饮 公园 购物 娱乐 运动 室内 展览
+ * 标签: 文艺 拍照 放松 探索 社交 运动 亲子 约会 低预算
+ */
+const { POI_DATA_EXTENDED } = require('./poiExtended');
+
+const POI_DATA = {
+  上海: [
+    { name: '武康路 City Walk', category: '漫步', district: '徐汇', cost: 0, indoor: false, tags: ['文艺', '拍照', '放松'], duration: 2, transport: '地铁10号线交通大学站' },
+    { name: '西岸美术馆', category: '美术馆', district: '徐汇', cost: 80, indoor: true, tags: ['文艺', '探索', '拍照'], duration: 2.5, transport: '地铁11号线云锦路站' },
+    { name: '上海博物馆东馆', category: '展览', district: '浦东', cost: 0, indoor: true, tags: ['文艺', '探索', '亲子'], duration: 3, transport: '地铁2号线上海科技馆站' },
+    { name: '外滩夜景漫步', category: '漫步', district: '黄浦', cost: 0, indoor: false, tags: ['拍照', '社交', '约会'], duration: 1.5, transport: '地铁2/10号线南京东路站' },
+    { name: '田子坊', category: '购物', district: '黄浦', cost: 50, indoor: false, tags: ['文艺', '拍照', '社交'], duration: 2, transport: '地铁9号线打浦桥站' },
+    { name: 'M50 创意园', category: '展览', district: '普陀', cost: 30, indoor: true, tags: ['文艺', '探索', '拍照'], duration: 2, transport: '地铁13号线江宁路站' },
+    { name: '豫园与城隍庙', category: '漫步', district: '黄浦', cost: 40, indoor: false, tags: ['探索', '亲子', '拍照'], duration: 2.5, transport: '地铁10号线豫园站' },
+    { name: '思南公馆', category: '漫步', district: '黄浦', cost: 0, indoor: false, tags: ['文艺', '约会', '放松'], duration: 1.5, transport: '地铁13号线新天地站' },
+    { name: '上海当代艺术博物馆', category: '美术馆', district: '黄浦', cost: 0, indoor: true, tags: ['文艺', '探索'], duration: 2, transport: '地铁4号线西藏南路站' },
+    { name: '徐汇滨江绿地', category: '公园', district: '徐汇', cost: 0, indoor: false, tags: ['放松', '运动', '约会'], duration: 1.5, transport: '地铁7号线龙华中路站' },
+    { name: '本帮菜馆·老吉士', category: '餐饮', district: '徐汇', cost: 120, indoor: true, tags: ['社交', '约会'], duration: 1.5, transport: '地铁1号线衡山路站' },
+    { name: '小笼包·佳家汤包', category: '餐饮', district: '黄浦', cost: 50, indoor: true, tags: ['低预算', '亲子'], duration: 1, transport: '地铁10号线豫园站' },
+    { name: 'K11 购物艺术中心', category: '购物', district: '黄浦', cost: 100, indoor: true, tags: ['文艺', '购物', '社交'], duration: 2.5, transport: '地铁1号线黄陂南路站' },
+    { name: '上海自然博物馆', category: '展览', district: '静安', cost: 30, indoor: true, tags: ['亲子', '探索'], duration: 3, transport: '地铁13号线自然博物馆站' },
+    { name: '新天地', category: '购物', district: '黄浦', cost: 150, indoor: false, tags: ['社交', '约会', '拍照'], duration: 2, transport: '地铁10/13号线新天地站' },
+    { name: '复兴公园', category: '公园', district: '黄浦', cost: 0, indoor: false, tags: ['放松', '亲子'], duration: 1.5, transport: '地铁13号线新天地站' },
+    { name: '浦东美术馆', category: '美术馆', district: '浦东', cost: 100, indoor: true, tags: ['文艺', '约会', '拍照'], duration: 2, transport: '地铁2号线陆家嘴站' },
+    { name: '陆家嘴中心绿地', category: '公园', district: '浦东', cost: 0, indoor: false, tags: ['放松', '运动'], duration: 1, transport: '地铁2号线陆家嘴站' },
+    { name: '江景餐厅·浦东', category: '餐饮', district: '浦东', cost: 200, indoor: true, tags: ['约会', '社交'], duration: 1.5, transport: '地铁2号线陆家嘴站' },
+    { name: '大悦城摩天轮', category: '娱乐', district: '静安', cost: 80, indoor: false, tags: ['约会', '拍照'], duration: 1, transport: '地铁8号线曲阜路站' },
+    { name: '上海影城', category: '娱乐', district: '徐汇', cost: 60, indoor: true, tags: ['放松', '约会', '社交'], duration: 2.5, transport: '地铁1号线衡山路站' },
+    { name: '苏州河畔漫步', category: '漫步', district: '静安', cost: 0, indoor: false, tags: ['放松', '拍照'], duration: 1.5, transport: '地铁1号线上海火车站站' },
+    { name: '静安雕塑公园', category: '公园', district: '静安', cost: 0, indoor: false, tags: ['放松', '亲子'], duration: 1, transport: '地铁13号线自然博物馆站' },
+    { name: '淮海中路购物街', category: '购物', district: '徐汇', cost: 200, indoor: false, tags: ['购物', '社交'], duration: 2.5, transport: '地铁1/10/13号线陕西南路站' },
+    { name: '上海动物园', category: '公园', district: '长宁', cost: 40, indoor: false, tags: ['亲子', '探索'], duration: 3, transport: '地铁10号线上海动物园站' },
+    { name: '兰州拉面馆', category: '餐饮', district: '徐汇', cost: 30, indoor: true, tags: ['低预算', '社交'], duration: 1, transport: '地铁1号线徐家汇站' },
+    { name: '上海图书馆东馆', category: '展览', district: '浦东', cost: 0, indoor: true, tags: ['文艺', '放松', '低预算'], duration: 2, transport: '地铁2号线上海科技馆站' },
+    { name: '人民公园', category: '公园', district: '黄浦', cost: 0, indoor: false, tags: ['放松', '低预算', '社交'], duration: 1, transport: '地铁1/2/8号线人民广场站' }
+  ],
+  北京: [
+    { name: '南锣鼓巷', category: '漫步', district: '东城', cost: 50, indoor: false, tags: ['文艺', '拍照', '社交'], duration: 2, transport: '地铁6/8号线南锣鼓巷站' },
+    { name: '故宫博物院', category: '展览', district: '东城', cost: 60, indoor: false, tags: ['文艺', '探索', '亲子'], duration: 4, transport: '地铁1号线天安门东站' },
+    { name: '798 艺术区', category: '展览', district: '朝阳', cost: 0, indoor: true, tags: ['文艺', '拍照', '探索'], duration: 3, transport: '地铁14号线将台站' },
+    { name: '什刹海', category: '漫步', district: '西城', cost: 0, indoor: false, tags: ['放松', '约会', '拍照'], duration: 2, transport: '地铁8号线什刹海站' },
+    { name: '中国国家博物馆', category: '展览', district: '东城', cost: 0, indoor: true, tags: ['文艺', '探索', '亲子'], duration: 3, transport: '地铁1号线天安门东站' },
+    { name: '三里屯', category: '购物', district: '朝阳', cost: 200, indoor: false, tags: ['社交', '约会', '购物'], duration: 2.5, transport: '地铁10号线团结湖站' },
+    { name: '景山公园', category: '公园', district: '东城', cost: 2, indoor: false, tags: ['拍照', '放松', '低预算'], duration: 1.5, transport: '地铁6号线南锣鼓巷站' },
+    { name: '中国美术馆', category: '美术馆', district: '东城', cost: 0, indoor: true, tags: ['文艺', '探索'], duration: 2, transport: '地铁5/6号线东四站' },
+    { name: '北京烤鸭·四季民福', category: '餐饮', district: '东城', cost: 150, indoor: true, tags: ['社交', '约会', '亲子'], duration: 1.5, transport: '地铁1号线天安门东站' },
+    { name: '护国寺小吃', category: '餐饮', district: '西城', cost: 40, indoor: true, tags: ['低预算', '探索', '亲子'], duration: 1, transport: '地铁4号线平安里站' },
+    { name: '奥林匹克森林公园', category: '公园', district: '朝阳', cost: 0, indoor: false, tags: ['运动', '放松', '亲子'], duration: 2.5, transport: '地铁8号线森林公园南门站' },
+    { name: '五道营胡同', category: '漫步', district: '东城', cost: 60, indoor: false, tags: ['文艺', '拍照', '约会'], duration: 1.5, transport: '地铁2/5号线雍和宫站' },
+    { name: '国家大剧院', category: '娱乐', district: '西城', cost: 180, indoor: true, tags: ['文艺', '约会', '社交'], duration: 2.5, transport: '地铁1号线天安门西站' },
+    { name: '蓝色港湾', category: '购物', district: '朝阳', cost: 150, indoor: false, tags: ['购物', '约会', '亲子'], duration: 2.5, transport: '地铁14号线枣营站' },
+    { name: '南馆公园', category: '公园', district: '东城', cost: 0, indoor: false, tags: ['放松', '亲子'], duration: 1, transport: '地铁2号线安定门站' },
+    { name: '隆福寺', category: '购物', district: '东城', cost: 80, indoor: false, tags: ['文艺', '社交', '拍照'], duration: 2, transport: '地铁5/6号线东四站' },
+    { name: '亮马河畔漫步', category: '漫步', district: '朝阳', cost: 0, indoor: false, tags: ['放松', '约会', '拍照'], duration: 1.5, transport: '地铁10号线亮马桥站' },
+    { name: '朝阳大悦城', category: '购物', district: '朝阳', cost: 150, indoor: true, tags: ['购物', '社交', '亲子'], duration: 2.5, transport: '地铁6号线青年路站' },
+    { name: '北京坊', category: '购物', district: '西城', cost: 100, indoor: false, tags: ['文艺', '约会', '拍照'], duration: 2, transport: '地铁2号线前门站' },
+    { name: '老舍茶馆', category: '娱乐', district: '西城', cost: 100, indoor: true, tags: ['文艺', '探索', '社交'], duration: 2, transport: '地铁2号线前门站' },
+    { name: '恭王府', category: '漫步', district: '西城', cost: 40, indoor: false, tags: ['文艺', '探索', '拍照'], duration: 2, transport: '地铁6号线北海北站' },
+    { name: '簋街美食', category: '餐饮', district: '东城', cost: 90, indoor: true, tags: ['社交', '探索'], duration: 1.5, transport: '地铁5号线北新桥站' },
+    { name: '中国科技馆', category: '展览', district: '朝阳', cost: 30, indoor: true, tags: ['亲子', '探索'], duration: 3, transport: '地铁8号线奥林匹克公园站' },
+    { name: '地坛公园', category: '公园', district: '东城', cost: 0, indoor: false, tags: ['放松', '低预算'], duration: 1, transport: '地铁2/5号线雍和宫站' },
+    { name: '庆丰包子铺', category: '餐饮', district: '西城', cost: 25, indoor: true, tags: ['低预算', '亲子'], duration: 1, transport: '地铁4号线西四站' },
+    { name: '国家图书馆', category: '展览', district: '海淀', cost: 0, indoor: true, tags: ['文艺', '放松', '低预算'], duration: 2, transport: '地铁4/9号线国家图书馆站' },
+    { name: '日坛公园', category: '公园', district: '朝阳', cost: 0, indoor: false, tags: ['放松', '低预算', '运动'], duration: 1, transport: '地铁1号线永安里站' }
+  ],
+  广州: [
+    { name: '沙面岛', category: '漫步', district: '荔湾', cost: 0, indoor: false, tags: ['文艺', '拍照', '放松'], duration: 2, transport: '地铁1/6号线黄沙站' },
+    { name: '广东省博物馆', category: '展览', district: '天河', cost: 0, indoor: true, tags: ['文艺', '探索', '亲子'], duration: 3, transport: '地铁3号线珠江新城站' },
+    { name: '永庆坊', category: '漫步', district: '荔湾', cost: 50, indoor: false, tags: ['文艺', '拍照', '社交'], duration: 2, transport: '地铁6号线黄沙站' },
+    { name: '广州塔', category: '娱乐', district: '海珠', cost: 150, indoor: false, tags: ['拍照', '约会', '社交'], duration: 2, transport: '地铁3号线广州塔站' },
+    { name: '花城广场', category: '公园', district: '天河', cost: 0, indoor: false, tags: ['放松', '拍照', '亲子'], duration: 1.5, transport: '地铁3/5号线珠江新城站' },
+    { name: '红专厂创意园', category: '展览', district: '天河', cost: 0, indoor: true, tags: ['文艺', '探索', '拍照'], duration: 2.5, transport: '地铁5号线员村站' },
+    { name: '陈家祠', category: '展览', district: '荔湾', cost: 10, indoor: true, tags: ['文艺', '探索', '低预算'], duration: 1.5, transport: '地铁1号线陈家祠站' },
+    { name: '早茶·广州酒家', category: '餐饮', district: '荔湾', cost: 80, indoor: true, tags: ['社交', '亲子', '探索'], duration: 1.5, transport: '地铁1号线长寿路站' },
+    { name: '上下九步行街', category: '购物', district: '荔湾', cost: 80, indoor: false, tags: ['购物', '低预算', '社交'], duration: 2, transport: '地铁1号线长寿路站' },
+    { name: '太古汇', category: '购物', district: '天河', cost: 200, indoor: true, tags: ['购物', '约会', '社交'], duration: 2.5, transport: '地铁1号线石牌桥站' },
+    { name: '珠江夜游', category: '娱乐', district: '越秀', cost: 100, indoor: false, tags: ['约会', '拍照', '社交'], duration: 1.5, transport: '地铁6号线北京路站' },
+    { name: '北京路步行街', category: '购物', district: '越秀', cost: 60, indoor: false, tags: ['购物', '社交', '亲子'], duration: 2, transport: '地铁6号线北京路站' },
+    { name: '越秀公园', category: '公园', district: '越秀', cost: 0, indoor: false, tags: ['放松', '亲子', '运动'], duration: 2, transport: '地铁2号线越秀公园站' },
+    { name: 'K11 购物艺术中心', category: '购物', district: '天河', cost: 120, indoor: true, tags: ['文艺', '购物', '约会'], duration: 2.5, transport: '地铁3号线珠江新城站' },
+    { name: '广州大剧院', category: '娱乐', district: '天河', cost: 180, indoor: true, tags: ['文艺', '约会', '社交'], duration: 2.5, transport: '地铁3号线珠江新城站' },
+    { name: '海珠湿地', category: '公园', district: '海珠', cost: 20, indoor: false, tags: ['运动', '放松', '亲子'], duration: 3, transport: '地铁3号线大塘站' },
+    { name: '荔湾湖公园', category: '公园', district: '荔湾', cost: 0, indoor: false, tags: ['放松', '低预算', '亲子'], duration: 1.5, transport: '地铁5号线中山八站' },
+    { name: '陶陶居酒家', category: '餐饮', district: '天河', cost: 100, indoor: true, tags: ['社交', '约会', '亲子'], duration: 1.5, transport: '地铁1号线体育西路站' },
+    { name: '正佳广场', category: '购物', district: '天河', cost: 150, indoor: true, tags: ['购物', '亲子', '社交'], duration: 3, transport: '地铁1号线体育中心站' },
+    { name: '天河公园', category: '公园', district: '天河', cost: 0, indoor: false, tags: ['放松', '运动', '亲子'], duration: 2, transport: '地铁21号线天河公园站' },
+    { name: '东山口', category: '漫步', district: '越秀', cost: 0, indoor: false, tags: ['文艺', '拍照', '约会'], duration: 2, transport: '地铁1/6号线东山口站' },
+    { name: '广州艺术博物院', category: '美术馆', district: '越秀', cost: 0, indoor: true, tags: ['文艺', '探索'], duration: 2, transport: '地铁5号线小北站' },
+    { name: '二沙岛', category: '漫步', district: '越秀', cost: 0, indoor: false, tags: ['放松', '运动', '约会'], duration: 2, transport: '地铁3号线客村站' },
+    { name: '长隆野生动物世界', category: '公园', district: '番禺', cost: 300, indoor: false, tags: ['亲子', '探索'], duration: 5, transport: '地铁3号线汉溪长隆站' },
+    { name: '银记肠粉店', category: '餐饮', district: '越秀', cost: 25, indoor: true, tags: ['低预算', '探索'], duration: 1, transport: '地铁1号线东山口站' },
+    { name: '广州图书馆', category: '展览', district: '天河', cost: 0, indoor: true, tags: ['文艺', '放松', '低预算'], duration: 2, transport: '地铁3号线珠江新城站' },
+    { name: '麓湖公园', category: '公园', district: '越秀', cost: 0, indoor: false, tags: ['放松', '低预算', '运动'], duration: 1.5, transport: '地铁5号线小北站' }
+  ],
+  深圳: [
+    { name: '华侨城创意文化园', category: '展览', district: '南山', cost: 0, indoor: true, tags: ['文艺', '拍照', '探索'], duration: 2.5, transport: '地铁1号线侨城东站' },
+    { name: '深圳湾公园', category: '公园', district: '南山', cost: 0, indoor: false, tags: ['放松', '运动', '约会'], duration: 2, transport: '地铁2号线红树湾站' },
+    { name: '南头古城', category: '漫步', district: '南山', cost: 0, indoor: false, tags: ['文艺', '拍照', '探索'], duration: 2, transport: '地铁12号线南头古城站' },
+    { name: '深圳博物馆', category: '展览', district: '福田', cost: 0, indoor: true, tags: ['文艺', '探索', '亲子'], duration: 2, transport: '地铁2号线市民中心站' },
+    { name: '莲花山公园', category: '公园', district: '福田', cost: 0, indoor: false, tags: ['放松', '亲子', '运动'], duration: 2, transport: '地铁3/4号线少年宫站' },
+    { name: '世界之窗', category: '娱乐', district: '南山', cost: 220, indoor: false, tags: ['亲子', '拍照', '社交'], duration: 4, transport: '地铁1/2号线世界之窗站' },
+    { name: '欢乐海岸', category: '购物', district: '南山', cost: 150, indoor: false, tags: ['约会', '社交', '亲子'], duration: 3, transport: '地铁9号线深圳湾公园站' },
+    { name: '海上世界', category: '购物', district: '南山', cost: 120, indoor: false, tags: ['约会', '社交', '拍照'], duration: 2.5, transport: '地铁2号线海上世界站' },
+    { name: '蛇口美食街', category: '餐饮', district: '南山', cost: 100, indoor: true, tags: ['社交', '探索', '约会'], duration: 1.5, transport: '地铁2号线海上世界站' },
+    { name: '华强北步行街', category: '购物', district: '福田', cost: 80, indoor: false, tags: ['购物', '低预算', '社交'], duration: 2, transport: '地铁2/7号线华强北站' },
+    { name: '京基100观光层', category: '娱乐', district: '罗湖', cost: 80, indoor: true, tags: ['拍照', '约会'], duration: 1, transport: '地铁1号线大剧院站' },
+    { name: '仙湖植物园', category: '公园', district: '罗湖', cost: 15, indoor: false, tags: ['放松', '亲子', '运动'], duration: 3, transport: '地铁2号线仙湖路站' },
+    { name: '深圳美术馆', category: '美术馆', district: '罗湖', cost: 0, indoor: true, tags: ['文艺', '探索'], duration: 1.5, transport: '地铁3号线红岭站' },
+    { name: '万象城', category: '购物', district: '罗湖', cost: 250, indoor: true, tags: ['购物', '约会', '社交'], duration: 2.5, transport: '地铁1号线大剧院站' },
+    { name: '深圳湾滨海栈道', category: '漫步', district: '南山', cost: 0, indoor: false, tags: ['运动', '放松', '拍照'], duration: 2, transport: '地铁2号线湾厦站' },
+    { name: '人才公园', category: '公园', district: '南山', cost: 0, indoor: false, tags: ['放松', '拍照', '运动'], duration: 1.5, transport: '地铁2号线后海站' },
+    { name: '海岸城', category: '购物', district: '南山', cost: 150, indoor: true, tags: ['购物', '亲子', '社交'], duration: 2.5, transport: '地铁2/11号线后海站' },
+    { name: '粤菜·润园四季', category: '餐饮', district: '福田', cost: 120, indoor: true, tags: ['社交', '约会', '亲子'], duration: 1.5, transport: '地铁2号线岗厦北站' },
+    { name: '东门老街', category: '购物', district: '罗湖', cost: 60, indoor: false, tags: ['购物', '低预算', '社交'], duration: 2, transport: '地铁1/3号线老街站' },
+    { name: '深圳书城中心城', category: '购物', district: '福田', cost: 50, indoor: true, tags: ['文艺', '放松', '亲子'], duration: 2, transport: '地铁3/4号线少年宫站' },
+    { name: '梧桐山', category: '运动', district: '罗湖', cost: 0, indoor: false, tags: ['运动', '探索'], duration: 4, transport: '地铁8号线梧桐山南站' },
+    { name: '荷兰花卉小镇', category: '购物', district: '南山', cost: 30, indoor: false, tags: ['拍照', '亲子', '约会'], duration: 1.5, transport: '地铁1号线大新站' },
+    { name: '关山月美术馆', category: '美术馆', district: '福田', cost: 0, indoor: true, tags: ['文艺', '探索', '拍照'], duration: 1.5, transport: '地铁3号线莲花村站' },
+    { name: '笔架山公园', category: '公园', district: '福田', cost: 0, indoor: false, tags: ['运动', '放松', '亲子'], duration: 2, transport: '地铁6号线银湖站' },
+    { name: '隆江猪脚饭', category: '餐饮', district: '南山', cost: 25, indoor: true, tags: ['低预算', '社交'], duration: 1, transport: '地铁1号线大新站' },
+    { name: '深圳图书馆', category: '展览', district: '福田', cost: 0, indoor: true, tags: ['文艺', '放松', '低预算'], duration: 2, transport: '地铁3号线少年宫站' },
+    { name: '中山公园', category: '公园', district: '南山', cost: 0, indoor: false, tags: ['放松', '低预算', '亲子'], duration: 1.5, transport: '地铁12号线中山公园站' }
+  ]
+};
+
+// 合并扩展城市数据
+Object.assign(POI_DATA, POI_DATA_EXTENDED);
+
+module.exports = { POI_DATA };

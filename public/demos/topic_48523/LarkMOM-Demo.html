@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云雀 LarkMOM — AI 驱动的多工序制造运行仿真与智能排产系统</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config={theme:{extend:{colors:{'lark':'#0ea5e9','lark-dark':'#0284c7','violet-lark':'#8b5cf6'}}}}
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
+.nav-tab{position:relative;cursor:pointer;padding:6px 16px;border-radius:6px;font-size:14px;color:#94a3b8;transition:all .2s}
+.nav-tab:hover{color:#e2e8f0;background:rgba(255,255,255,.06)}
+.nav-tab.active{color:#fff;background:rgba(14,165,233,.25);font-weight:600}
+.sub-menu-item{padding:8px 16px 8px 28px;font-size:13px;color:#64748b;cursor:pointer;border-radius:6px;transition:all .15s}
+.sub-menu-item:hover{background:#f1f5f9;color:#334155}
+.sub-menu-item.active{background:#e0f2fe;color:#0284c7;font-weight:600}
+.card{border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow:hidden}
+.gantt-bar{height:26px;border-radius:4px;position:absolute;cursor:pointer;display:flex;align-items:center;padding:0 8px;font-size:11px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:filter .15s,transform .15s}
+.gantt-bar:hover{filter:brightness(1.12);transform:scaleY(1.15);z-index:10}
+.gantt-bar.maintenance{background:repeating-linear-gradient(45deg,#94a3b8,#94a3b8 4px,#b0bec5 4px,#b0bec5 8px)!important;color:#fff}
+.tooltip{position:fixed;background:#1e293b;color:#f1f5f9;padding:10px 14px;border-radius:8px;font-size:12px;line-height:1.6;z-index:9999;pointer-events:none;max-width:300px;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.step-pill{padding:6px 20px;border-radius:999px;font-size:13px;font-weight:500;border:2px solid #e2e8f0;color:#94a3b8;transition:all .25s}
+.step-pill.active{border-color:#8b5cf6;background:#8b5cf6;color:#fff;box-shadow:0 2px 8px rgba(139,92,246,.35)}
+.step-pill.done{border-color:#a78bfa;background:#ede9fe;color:#7c3aed}
+.fade-in{animation:fadeIn .35s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.hatch-pattern{background:repeating-linear-gradient(45deg,#94a3b8,#94a3b8 3px,#b0bec5 3px,#b0bec5 6px)}
+</style>
+</head>
+<body class="bg-slate-50">
+
+<!-- 顶部导航栏 -->
+<header class="fixed top-0 left-0 right-0 h-14 bg-slate-800 flex items-center px-4 z-50 shadow-lg">
+  <div class="flex items-center gap-2 mr-8">
+    <svg class="w-7 h-7 text-sky-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4 7v2l8-5 8 5V7l-8-5zM4 11v2l8 5 8-5v-2l-8 5-8-5zm0 4v2l8 5 8-5v-2l-8 5-8-5z"/></svg>
+    <span class="text-white font-bold text-lg tracking-wide">云雀管理系统</span>
+  </div>
+  <nav class="flex items-center gap-1 flex-1 justify-center" id="mainNav"></nav>
+  <div class="text-slate-400 text-sm flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2m7-12a4 4 0 100-8 4 4 0 000 8z"/></svg>
+    兴业钢铁集团
+  </div>
+</header>
+
+<!-- 左侧菜单 -->
+<aside class="fixed top-14 left-0 w-52 bg-white border-r border-slate-200 z-40 transition-transform" id="sidebar" style="height:calc(100vh - 56px)">
+  <div class="p-3" id="sideMenu"></div>
+</aside>
+
+<!-- 主内容区 -->
+<main class="ml-52 mt-14 p-6" style="min-height:calc(100vh - 56px)" id="mainContent"></main>
+
+<!-- Tooltip容器 -->
+<div id="tooltip" class="tooltip hidden"></div>
+
+<script>
+// ==================== 数据定义 ====================
+const NAV_TABS = [
+  {id:'dashboard',label:'Dashboard',icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4'},
+  {id:'gantt',label:'工单排产',icon:'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'},
+  {id:'resource',label:'资源平衡',icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6m6 0V9a2 2 0 012-2h2a2 2 0 012 2v10m6 0v-4a2 2 0 00-2-2h-2a2 2 0 00-2 2v4'},
+  {id:'order',label:'订单推算',icon:'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'},
+  {id:'ai',label:'AI助手',icon:'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'},
+  {id:'basedata',label:'基础数据',icon:'M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7zm5-3v2m6-2v2M4 9h16'}
+];
+
+const SIDE_MENUS = {
+  dashboard:[{label:'概览总览',id:'overview'},{label:'设计理念',id:'philosophy'},{label:'参赛说明',id:'contest'}],
+  gantt:[{label:'工单甘特图',id:'gantt-view'},{label:'工单详情',id:'gantt-detail'}],
+  resource:[{label:'资源甘特图',id:'res-gantt'},{label:'资源直方图',id:'res-histogram'},{label:'平衡分析',id:'res-balance'}],
+  order:[{label:'订单推算',id:'order-calc'},{label:'物料推算',id:'order-material'}],
+  ai:[{label:'AI对话',id:'ai-chat'},{label:'调整预览',id:'ai-preview'}],
+  basedata:[{label:'产品分类',id:'bd-product'},{label:'工序分类',id:'bd-process'},{label:'工艺路线',id:'bd-route'}]
+};
+
+const PROCESSES = ['炼铁','转炉','精炼','连铸','轧钢','精整'];
+const STEEL_COLORS = {'HRB400':'#3b82f6','Q235B':'#8b5cf6','45#':'#06b6d4'};
+const PERIOD_LABELS = {'上旬':'early','中旬':'mid','下旬':'late'};
+
+const WORK_ORDERS = [
+  {id:'W101',process:'炼铁',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1200,start:'2026-07-01',end:'2026-07-03'},
+  {id:'W201',process:'转炉',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1150,start:'2026-07-03',end:'2026-07-04'},
+  {id:'W202',process:'转炉',steel:'Q235B',spec:'Φ20',period:'上旬',resource:980,start:'2026-07-04',end:'2026-07-05'},
+  {id:'W301',process:'精炼',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1120,start:'2026-07-04',end:'2026-07-05'},
+  {id:'W401',process:'连铸',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1080,start:'2026-07-05',end:'2026-07-07'},
+  {id:'W501',process:'轧钢',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1050,start:'2026-07-07',end:'2026-07-09'},
+  {id:'W102',process:'炼铁',steel:'Q235B',spec:'Φ20',period:'中旬',resource:1300,start:'2026-07-10',end:'2026-07-12'},
+  {id:'W203',process:'转炉',steel:'Q235B',spec:'Φ20',period:'中旬',resource:1260,start:'2026-07-12',end:'2026-07-13'},
+  {id:'W302',process:'精炼',steel:'Q235B',spec:'Φ20',period:'中旬',resource:1220,start:'2026-07-13',end:'2026-07-14'},
+  {id:'W402',process:'连铸',steel:'Q235B',spec:'Φ20',period:'中旬',resource:1180,start:'2026-07-14',end:'2026-07-16'},
+  {id:'W502',process:'轧钢',steel:'Q235B',spec:'Φ20',period:'中旬',resource:1150,start:'2026-07-16',end:'2026-07-18'},
+  {id:'W601',process:'精整',steel:'HRB400',spec:'Φ12',period:'上旬',resource:1030,start:'2026-07-09',end:'2026-07-10'},
+  {id:'M101',process:'转炉',steel:'检修',spec:'',period:'',resource:0,start:'2026-07-05',end:'2026-07-05',isMaintenance:true,mStart:8,mEnd:18},
+  {id:'W103',process:'炼铁',steel:'45#',spec:'Φ30',period:'下旬',resource:1100,start:'2026-07-20',end:'2026-07-22'},
+  {id:'W204',process:'转炉',steel:'45#',spec:'Φ30',period:'下旬',resource:1060,start:'2026-07-22',end:'2026-07-23'}
+];
+
+const ORDERS = [
+  {id:'OPM001',steel:'HRB400',spec:'Φ12',qty:1030},
+  {id:'OPM002',steel:'Q235B',spec:'Φ20',qty:850},
+  {id:'OPM003',steel:'45#',spec:'Φ30',qty:620}
+];
+
+const ORDER_STEPS = [
+  {seq:6,code:'JZ01',name:'精整',yield:0.985,time:90,input:1045.68,output:1030.00,earliest:'07-09 08:00',latest:'07-10 02:00'},
+  {seq:5,code:'ZG01',name:'轧钢',yield:0.970,time:180,input:1077.97,output:1045.68,earliest:'07-07 06:00',latest:'07-09 08:00'},
+  {seq:4,code:'LZ01',name:'连铸',yield:0.975,time:240,input:1105.61,output:1077.97,earliest:'07-05 04:00',latest:'07-07 06:00'},
+  {seq:3,code:'JL01',name:'精炼',yield:0.980,time:120,input:1128.18,output:1105.61,earliest:'07-04 02:00',latest:'07-05 04:00'},
+  {seq:2,code:'ZL01',name:'转炉',yield:0.985,time:60,input:1145.26,output:1128.18,earliest:'07-03 00:00',latest:'07-04 02:00'},
+  {seq:1,code:'LT01',name:'炼铁',yield:0.990,time:2880,input:1156.83,output:1145.26,earliest:'07-01 00:00',latest:'07-03 00:00'}
+];
+
+const BASE_DATA = {
+  product:{
+    L:[{id:'PL01',name:'普钢'},{id:'PL02',name:'优钢'},{id:'PL03',name:'特钢'},{id:'PL04',name:'中间品'}],
+    M:{PL01:[{id:'PM01',name:'螺纹钢'},{id:'PM02',name:'线材'},{id:'PM03',name:'型钢'}],PL02:[{id:'PM04',name:'碳结钢'},{id:'PM05',name:'合结钢'}],PL03:[{id:'PM06',name:'轴承钢'},{id:'PM07',name:'弹簧钢'}],PL04:[{id:'PM08',name:'钢坯'},{id:'PM09',name:'铁水'}]},
+    S:{PM01:[{id:'PS01',name:'HRB400'},{id:'PS02',name:'HRB500'},{id:'PS03',name:'HRB400E'}],PM02:[{id:'PS04',name:'Q235B'},{id:'PS05',name:'Q195'}],PM03:[{id:'PS06',name:'H型钢'},{id:'PS07',name:'工字钢'}]},
+    D:{PS01:[{id:'PH001',name:'HRB400 Φ12',spec:'Φ12×12m'},{id:'PH002',name:'HRB400 Φ14',spec:'Φ14×12m'},{id:'PH003',name:'HRB400 Φ16',spec:'Φ16×12m'}],PS02:[{id:'PH004',name:'HRB500 Φ12',spec:'Φ12×12m'}],PS03:[{id:'PH005',name:'HRB400E Φ12',spec:'Φ12×12m'}]}
+  },
+  process:{
+    L:[{id:'KL01',name:'炼铁总厂'},{id:'KL02',name:'炼钢总厂'},{id:'KL03',name:'轧钢总厂'},{id:'KL04',name:'联合生产'},{id:'KL05',name:'产品准发'}],
+    M:{KL01:[{id:'KM01',name:'高炉'}],KL02:[{id:'KM02',name:'转炉'},{id:'KM03',name:'精炼'},{id:'KM04',name:'连铸'}],KL03:[{id:'KM05',name:'轧钢'}],KL04:[{id:'KM06',name:'精整'}],KL05:[{id:'KM07',name:'准发'}]},
+    S:{KM02:[{id:'KS01',name:'120t转炉'},{id:'KS02',name:'150t转炉'}],KM03:[{id:'KS03',name:'RH精炼'},{id:'KS04',name:'LF精炼'}],KM04:[{id:'KS05',name:'1#连铸'},{id:'KS06',name:'2#连铸'}]}
+  },
+  route:{
+    L:[{id:'RL01',name:'炼铁→炼钢→轧钢→准发'},{id:'RL02',name:'炼铁→炼钢→轧钢→准发(优钢)'},{id:'RL03',name:'炼钢→轧钢→准发'}],
+    M:{RL01:[{id:'RM01',name:'螺纹钢线'},{id:'RM02',name:'线材线'}],RL02:[{id:'RM03',name:'优钢线'},{id:'RM04',name:'碳结钢线'}],RL03:[{id:'RM05',name:'短流程螺纹钢线'}]}
+  }
+};
+
+// ==================== 路由与状态 ====================
+let currentPage = 'dashboard';
+let selectedOrderId = 'OPM001';
+let aiStep = 1;
+let selectedWorkOrder = null;
+let colorMode = 'steel';
+let baseDataTab = 'product';
+let bdL = null, bdM = null, bdS = null;
+
+function navigate(page) {
+  currentPage = page;
+  window.location.hash = page;
+  renderAll();
+}
+
+function renderAll() {
+  renderNav();
+  renderSideMenu();
+  renderContent();
+}
+
+function renderNav() {
+  const nav = document.getElementById('mainNav');
+  nav.innerHTML = NAV_TABS.map(t => `
+    <div class="nav-tab ${currentPage===t.id?'active':''}" onclick="navigate('${t.id}')">
+      <svg class="w-4 h-4 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="${t.icon}"/></svg>
+      ${t.label}
+    </div>
+  `).join('');
+}
+
+function renderSideMenu() {
+  const menu = document.getElementById('sideMenu');
+  const items = SIDE_MENUS[currentPage] || [];
+  menu.innerHTML = `
+    <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider px-3 mb-2">${NAV_TABS.find(t=>t.id===currentPage)?.label||''}</div>
+    ${items.map((it,i) => `<div class="sub-menu-item ${i===0?'active':''}" onclick="this.parentElement.querySelectorAll('.sub-menu-item').forEach(e=>e.classList.remove('active'));this.classList.add('active')">${it.label}</div>`).join('')}
+  `;
+}
+
+function renderContent() {
+  const main = document.getElementById('mainContent');
+  switch(currentPage) {
+    case 'dashboard': main.innerHTML = renderDashboard(); break;
+    case 'gantt': main.innerHTML = renderGantt(); initGanttChart(); break;
+    case 'resource': main.innerHTML = renderResource(); initResourceChart(); break;
+    case 'order': main.innerHTML = renderOrder(); break;
+    case 'ai': main.innerHTML = renderAI(); break;
+    case 'basedata': main.innerHTML = renderBaseData(); initBaseData(); break;
+    default: main.innerHTML = renderDashboard();
+  }
+}
+
+// ==================== 页面1: Dashboard ====================
+function renderDashboard() {
+  return `<div class="fade-in space-y-6">
+    <!-- 在线体验地址 -->
+    <div class="card bg-gradient-to-r from-sky-500 via-blue-500 to-indigo-600 p-5 text-white flex items-center justify-between shadow-lg">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div>
+          <div class="text-lg font-bold tracking-wide">在线体验演示地址</div>
+          <div class="text-white/80 text-sm mt-0.5">点击访问完整系统，体验全部交互功能</div>
+        </div>
+      </div>
+      <a href="http://124.223.215.226" target="_blank" class="px-8 py-3 bg-white text-blue-600 font-bold rounded-xl text-lg hover:bg-blue-50 transition-colors shadow-md flex items-center gap-2">
+        <span>124.223.215.226</span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      </a>
+    </div>
+
+    <!-- 设计理念卡片 -->
+    <div class="grid grid-cols-3 gap-5">
+      <div class="card bg-gradient-to-br from-violet-600 to-indigo-600 p-6 text-white">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          </div>
+          <h3 class="font-bold text-lg">AI 赋能范式升级</h3>
+        </div>
+        <p class="text-white/85 text-sm leading-relaxed">依托 AI 赋能实现企业经营范式升级，推动管理逻辑从"管控过去业务"转向"运营未来业务"</p>
+      </div>
+      <div class="card bg-gradient-to-br from-amber-500 to-orange-500 p-6 text-white">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3 class="font-bold text-lg">经营重心前置</h3>
+        </div>
+        <p class="text-white/85 text-sm leading-relaxed">经营重心由复盘过往经营结果，前置至预判、谋划、运营未来经营成效</p>
+      </div>
+      <div class="card bg-gradient-to-br from-emerald-500 to-teal-500 p-6 text-white">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zm4-8a1 1 0 100-2 1 1 0 000 2zm4 0a1 1 0 100-2 1 1 0 000 2z"/></svg>
+          </div>
+          <h3 class="font-bold text-lg">仿真与智能双引擎</h3>
+        </div>
+        <p class="text-white/85 text-sm leading-relaxed">依托业务仿真引擎达成业务推演所见即所得，依托 AI 智能引擎驱动全链路常态化、前瞻性精益运营</p>
+      </div>
+    </div>
+
+    <!-- APS 悖论图解 -->
+    <div class="card bg-white p-6">
+      <h3 class="font-bold text-slate-700 text-base mb-5">APS 决策悖论：决策周期与执行周期错位</h3>
+      <svg viewBox="0 0 800 260" class="w-full" style="max-width:800px;margin:0 auto;display:block">
+        <defs>
+          <linearGradient id="redG" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#dc2626"/></linearGradient>
+          <linearGradient id="blueG" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#2563eb"/></linearGradient>
+          <linearGradient id="greenG" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/></linearGradient>
+        </defs>
+        <!-- 左路径 -->
+        <rect x="40" y="40" width="200" height="48" rx="10" fill="url(#redG)"/>
+        <text x="140" y="69" text-anchor="middle" fill="#fff" font-size="14" font-weight="600">参与下一轮决策</text>
+        <line x1="140" y1="88" x2="140" y2="140" stroke="#ef4444" stroke-width="2" marker-end="url(#arrowR)"/>
+        <rect x="40" y="140" width="200" height="48" rx="10" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+        <text x="140" y="169" text-anchor="middle" fill="#dc2626" font-size="13">破坏上一轮决策效果</text>
+        <!-- 右路径 -->
+        <rect x="560" y="40" width="200" height="48" rx="10" fill="url(#blueG)"/>
+        <text x="660" y="69" text-anchor="middle" fill="#fff" font-size="14" font-weight="600">不参与下一轮决策</text>
+        <line x1="660" y1="88" x2="660" y2="140" stroke="#3b82f6" stroke-width="2"/>
+        <rect x="560" y="140" width="200" height="48" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+        <text x="660" y="169" text-anchor="middle" fill="#2563eb" font-size="13">影响下一轮决策基础</text>
+        <!-- VS 圆 -->
+        <circle cx="400" cy="110" r="32" fill="#1e293b"/>
+        <text x="400" y="116" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">VS</text>
+        <!-- 矛盾标记 -->
+        <text x="400" y="168" text-anchor="middle" fill="#ef4444" font-size="12" font-weight="600">⚡ 逻辑矛盾</text>
+        <!-- 连线 -->
+        <path d="M240 64 Q400 30 560 64" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <path d="M240 164 Q400 130 560 164" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <!-- 底部方案 -->
+        <rect x="260" y="210" width="280" height="40" rx="10" fill="url(#greenG)"/>
+        <text x="400" y="235" text-anchor="middle" fill="#fff" font-size="13" font-weight="600">全域业务仿真</text>
+        <line x1="400" y1="210" x2="400" y2="190" stroke="#10b981" stroke-width="2"/>
+        <text x="400" y="256" text-anchor="middle" fill="#059669" font-size="12">仿真决策：以治既往之法，管控未发之事</text>
+      </svg>
+    </div>
+
+    <!-- 管理过去 vs 运营未来 -->
+    <div class="grid grid-cols-2 gap-5">
+      <div class="card bg-slate-100 p-6">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-8 h-8 rounded-lg bg-slate-300 flex items-center justify-center">
+            <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <h4 class="font-bold text-slate-600">管理过去</h4>
+        </div>
+        <p class="text-slate-500 text-sm leading-relaxed">只能复盘已经发生的问题，被动承受既定产生的物料、交期、产能损耗</p>
+      </div>
+      <div class="card bg-gradient-to-br from-violet-600 to-blue-600 p-6 text-white">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          </div>
+          <h4 class="font-bold">运营未来</h4>
+        </div>
+        <p class="text-white/90 text-sm leading-relaxed">依托全局推演重构经营管控思路，从业务源头实现可预判、可统筹的降本增效</p>
+      </div>
+    </div>
+
+    <!-- 统计看板 -->
+    <div class="grid grid-cols-3 gap-5">
+      <div class="card bg-white p-5 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+          <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </div>
+        <div><div class="text-2xl font-bold text-slate-800">68</div><div class="text-xs text-slate-400">基础管理</div></div>
+      </div>
+      <div class="card bg-white p-5 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0">
+          <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+        </div>
+        <div><div class="text-2xl font-bold text-slate-800">25</div><div class="text-xs text-slate-400">业务管理</div></div>
+      </div>
+      <div class="card bg-white p-5 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center flex-shrink-0">
+          <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        </div>
+        <div><div class="text-2xl font-bold text-slate-800">12</div><div class="text-xs text-slate-400">合约管理</div></div>
+      </div>
+    </div>
+
+    <!-- 参赛说明 -->
+    <div class="card bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 p-6 text-white">
+      <h3 class="font-bold text-lg mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        TRAE AI 创造力大赛 · 参赛说明
+      </h3>
+      <div class="grid grid-cols-4 gap-4">
+        <div class="bg-white/15 rounded-xl p-4 backdrop-blur">
+          <div class="font-semibold mb-1">初心溯源</div>
+          <div class="text-white/80 text-xs leading-relaxed">跨界从业者借 AI 重启代码实践</div>
+        </div>
+        <div class="bg-white/15 rounded-xl p-4 backdrop-blur">
+          <div class="font-semibold mb-1">全链路 AI 驱动</div>
+          <div class="text-white/80 text-xs leading-relaxed">纯语言文字完成完整交付</div>
+        </div>
+        <div class="bg-white/15 rounded-xl p-4 backdrop-blur">
+          <div class="font-semibold mb-1">碎片化创作</div>
+          <div class="text-white/80 text-xs leading-relaxed">业余时段高效完成、稳定低缺陷</div>
+        </div>
+        <div class="bg-white/15 rounded-xl p-4 backdrop-blur">
+          <div class="font-semibold mb-1">全域数据脱敏</div>
+          <div class="text-white/80 text-xs leading-relaxed">严守赛事合规与行业隐私规范</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ==================== 页面2: 工单排产甘特图 ====================
+function renderGantt() {
+  return `<div class="fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-slate-700">30301 工单管理</h2>
+      <div class="flex items-center gap-3 text-xs text-slate-500">
+        ${Object.entries(STEEL_COLORS).map(([k,v])=>`<span class="flex items-center gap-1"><span class="w-3 h-3 rounded" style="background:${v}"></span>${k}</span>`).join('')}
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded hatch-pattern"></span>检修</span>
+      </div>
+    </div>
+    <div class="card bg-white p-4 overflow-auto">
+      <div id="ganttChart" style="position:relative;min-height:340px"></div>
+    </div>
+    <div id="ganttDetail" class="card bg-white p-4 mt-4" style="display:none">
+      <h4 class="font-semibold text-slate-700 mb-3">工单详情</h4>
+      <div id="ganttDetailContent"></div>
+    </div>
+  </div>`;
+}
+
+function initGanttChart() {
+  const container = document.getElementById('ganttChart');
+  if(!container) return;
+  const rowH = 50, headerH = 40, dayW = 36;
+  const startDay = new Date('2026-07-01');
+  const totalDays = 31;
+  const width = totalDays * dayW + 120;
+
+  let html = `<div style="position:relative;width:${width}px;min-height:${PROCESSES.length*rowH+headerH+20}px">`;
+
+  // 时间轴头部
+  html += `<div style="position:sticky;top:0;z-index:5;background:#f8fafc;height:${headerH}px;display:flex;align-items:center">`;
+  html += `<div style="width:120px;flex-shrink:0;padding:0 8px;font-size:12px;font-weight:600;color:#64748b">工序</div>`;
+  for(let d=0;d<totalDays;d++){
+    const dt = new Date(startDay); dt.setDate(dt.getDate()+d);
+    const day = dt.getDate();
+    const isWeekend = dt.getDay()===0||dt.getDay()===6;
+    const bg = isWeekend ? '#fef3c7' : '#f8fafc';
+    html += `<div style="width:${dayW}px;flex-shrink:0;text-align:center;font-size:10px;color:${isWeekend?'#b45309':'#94a3b8'};background:${bg};line-height:${headerH}px">${day}</div>`;
+  }
+  html += `</div>`;
+
+  // 工序行
+  PROCESSES.forEach((proc, pi) => {
+    const y = pi * rowH + headerH;
+    html += `<div style="display:flex;position:relative;height:${rowH}px;border-top:1px solid #f1f5f9">`;
+    html += `<div style="width:120px;flex-shrink:0;padding:0 12px;font-size:13px;font-weight:500;color:#334155;display:flex;align-items:center;background:#fafbfc">${proc}</div>`;
+    html += `<div style="position:relative;flex:1;height:${rowH}px">`;
+    // 网格线
+    for(let d=0;d<totalDays;d++){
+      const dt = new Date(startDay); dt.setDate(dt.getDate()+d);
+      const isWeekend = dt.getDay()===0||dt.getDay()===6;
+      html += `<div style="position:absolute;left:${d*dayW}px;top:0;width:${dayW}px;height:${rowH}px;border-left:1px solid ${isWeekend?'#fde68a':'#f1f5f9'};background:${isWeekend?'#fffbeb':'transparent'}"></div>`;
+    }
+    // 工单条
+    WORK_ORDERS.filter(w => w.process === proc).forEach(w => {
+      const dStart = Math.floor((new Date(w.start) - startDay) / 86400000);
+      let dEnd = Math.floor((new Date(w.end) - startDay) / 86400000);
+      if(w.isMaintenance) {
+        const hours = w.mEnd - w.mStart;
+        const frac = hours / 24;
+        const x = dStart * dayW + (w.mStart/24)*dayW;
+        const w_ = frac * dayW;
+        html += `<div class="gantt-bar maintenance" style="left:${x}px;top:12px;width:${w_}px;font-size:10px" data-wid="${w.id}" onmouseenter="showGanttTip(event,'${w.id}')" onmouseleave="hideTip()" onclick="selectWO('${w.id}')">检修</div>`;
+      } else {
+        const x = dStart * dayW;
+        const w_ = (dEnd - dStart + 1) * dayW;
+        const color = STEEL_COLORS[w.steel] || '#64748b';
+        html += `<div class="gantt-bar" style="left:${x}px;top:12px;width:${w_}px;background:${color}" data-wid="${w.id}" onmouseenter="showGanttTip(event,'${w.id}')" onmouseleave="hideTip()" onclick="selectWO('${w.id}')">${w.steel} ${w.spec} ${w.period}</div>`;
+      }
+    });
+    html += `</div></div>`;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function showGanttTip(e, wid) {
+  const w = WORK_ORDERS.find(x=>x.id===wid);
+  if(!w) return;
+  const tip = document.getElementById('tooltip');
+  if(w.isMaintenance) {
+    tip.innerHTML = `<b>${w.id}</b> 检修工单<br>工序：${w.process}<br>时间：${w.start.slice(5)} ${String(w.mStart).padStart(2,'0')}:00 ~ ${String(w.mEnd).padStart(2,'0')}:00`;
+  } else {
+    tip.innerHTML = `<b>${w.id}</b><br>钢种：${w.steel} | 规格：${w.spec}<br>旬：${w.period} | 资源量：${w.resource}t<br>计划：${w.start.slice(5)} ~ ${w.end.slice(5)}`;
+  }
+  tip.style.left = (e.clientX+12)+'px';
+  tip.style.top = (e.clientY-10)+'px';
+  tip.classList.remove('hidden');
+}
+
+function hideTip() {
+  document.getElementById('tooltip').classList.add('hidden');
+}
+
+function selectWO(wid) {
+  const w = WORK_ORDERS.find(x=>x.id===wid);
+  if(!w) return;
+  selectedWorkOrder = w;
+  const detail = document.getElementById('ganttDetail');
+  const content = document.getElementById('ganttDetailContent');
+  detail.style.display = 'block';
+  if(w.isMaintenance) {
+    content.innerHTML = `<div class="grid grid-cols-2 gap-3 text-sm">
+      <div><span class="text-slate-400">工单编号：</span>${w.id}</div>
+      <div><span class="text-slate-400">类型：</span>检修工单</div>
+      <div><span class="text-slate-400">工序：</span>${w.process}</div>
+      <div><span class="text-slate-400">时间：</span>${w.start.slice(5)} ${String(w.mStart).padStart(2,'0')}:00 ~ ${String(w.mEnd).padStart(2,'0')}:00</div>
+    </div>`;
+  } else {
+    content.innerHTML = `<div class="grid grid-cols-4 gap-3 text-sm">
+      <div><span class="text-slate-400">工单编号：</span><b class="text-sky-600">${w.id}</b></div>
+      <div><span class="text-slate-400">钢种：</span>${w.steel}</div>
+      <div><span class="text-slate-400">规格：</span>${w.spec}</div>
+      <div><span class="text-slate-400">旬：</span>${w.period}</div>
+      <div><span class="text-slate-400">工序：</span>${w.process}</div>
+      <div><span class="text-slate-400">资源量：</span>${w.resource}t</div>
+      <div><span class="text-slate-400">开始：</span>${w.start}</div>
+      <div><span class="text-slate-400">结束：</span>${w.end}</div>
+    </div>`;
+  }
+}
+
+// ==================== 页面3: 资源平衡甘特图 ====================
+function renderResource() {
+  return `<div class="fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-slate-700">60901 资源平衡</h2>
+      <div class="flex items-center gap-3">
+        <select class="text-sm border rounded-lg px-3 py-1.5" id="resMonth">
+          <option value="2026-07">2026年7月</option>
+          <option value="2026-08">2026年8月</option>
+        </select>
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-slate-500">着色：</span>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="colorMode" value="steel" ${colorMode==='steel'?'checked':''} onchange="colorMode='steel';initResourceChart()" class="accent-sky-500"> <span>按钢种</span></label>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="colorMode" value="group" ${colorMode==='group'?'checked':''} onchange="colorMode='group';initResourceChart()" class="accent-violet-500"> <span>按关联工单</span></label>
+        </div>
+        <label class="flex items-center gap-1 text-sm cursor-pointer"><input type="checkbox" checked class="accent-sky-500" id="showHistogram" onchange="initResourceChart()"> 显示直方图</label>
+      </div>
+    </div>
+    <div class="card bg-white p-4 overflow-auto">
+      <div id="resourceChart" style="position:relative;min-height:400px"></div>
+    </div>
+    <div id="resDetail" class="card bg-white p-4 mt-4" style="display:none">
+      <h4 class="font-semibold text-slate-700 mb-3">高亮工单系列</h4>
+      <div id="resDetailContent"></div>
+    </div>
+  </div>`;
+}
+
+const GROUP_COLORS = {'G1':'#f43f5e','G2':'#8b5cf6','G3':'#0ea5e9'};
+const WO_GROUPS = {W101:'G1',W201:'G1',W301:'G1',W401:'G1',W501:'G1',W601:'G1',W102:'G2',W202:'G2',W203:'G2',W302:'G2',W402:'G2',W502:'G2',W103:'G3',W204:'G3'};
+
+function initResourceChart() {
+  const container = document.getElementById('resourceChart');
+  if(!container) return;
+  const rowH = 70, headerH = 40, dayW = 36;
+  const startDay = new Date('2026-07-01');
+  const totalDays = 31;
+  const width = totalDays * dayW + 120;
+  const showHist = document.getElementById('showHistogram')?.checked;
+
+  let html = `<div style="position:relative;width:${width}px;min-height:${PROCESSES.length*rowH+headerH+20}px">`;
+
+  // 时间轴
+  html += `<div style="position:sticky;top:0;z-index:5;background:#f8fafc;height:${headerH}px;display:flex;align-items:center">`;
+  html += `<div style="width:120px;flex-shrink:0;padding:0 8px;font-size:12px;font-weight:600;color:#64748b">工序</div>`;
+  for(let d=0;d<totalDays;d++){
+    const dt=new Date(startDay);dt.setDate(dt.getDate()+d);
+    const isWeekend=dt.getDay()===0||dt.getDay()===6;
+    html+=`<div style="width:${dayW}px;flex-shrink:0;text-align:center;font-size:10px;color:${isWeekend?'#b45309':'#94a3b8'};background:${isWeekend?'#fef3c7':'#f8fafc'};line-height:${headerH}px">${dt.getDate()}</div>`;
+  }
+  html += `</div>`;
+
+  PROCESSES.forEach((proc, pi) => {
+    html += `<div style="display:flex;position:relative;height:${rowH}px;border-top:1px solid #f1f5f9">`;
+    html += `<div style="width:120px;flex-shrink:0;padding:0 12px;font-size:13px;font-weight:500;color:#334155;display:flex;align-items:center;background:#fafbfc">${proc}</div>`;
+    html += `<div style="position:relative;flex:1;height:${rowH}px">`;
+    for(let d=0;d<totalDays;d++){
+      const dt=new Date(startDay);dt.setDate(dt.getDate()+d);
+      const isWeekend=dt.getDay()===0||dt.getDay()===6;
+      html+=`<div style="position:absolute;left:${d*dayW}px;top:0;width:${dayW}px;height:${rowH}px;border-left:1px solid ${isWeekend?'#fde68a':'#f1f5f9'};background:${isWeekend?'#fffbeb':'transparent'}"></div>`;
+    }
+    // 工单条
+    WORK_ORDERS.filter(w=>w.process===proc).forEach(w=>{
+      const dStart=Math.floor((new Date(w.start)-startDay)/86400000);
+      let dEnd=Math.floor((new Date(w.end)-startDay)/86400000);
+      if(w.isMaintenance){
+        const x=dStart*dayW+(w.mStart/24)*dayW;
+        const w_=(w.mEnd-w.mStart)/24*dayW;
+        html+=`<div class="gantt-bar maintenance" style="left:${x}px;top:6px;width:${w_}px;font-size:10px" onclick="highlightGroup(null)">检修</div>`;
+      } else {
+        const x=dStart*dayW;
+        const w_=(dEnd-dStart+1)*dayW;
+        const color = colorMode==='steel'?(STEEL_COLORS[w.steel]||'#64748b'):(GROUP_COLORS[WO_GROUPS[w.id]]||'#64748b');
+        html+=`<div class="gantt-bar" style="left:${x}px;top:6px;width:${w_}px;background:${color}" onclick="highlightGroup('${WO_GROUPS[w.id]||''}')">${w.steel} ${w.spec}</div>`;
+      }
+    });
+    // 资源直方图
+    if(showHist){
+      const dailyRes = new Array(totalDays).fill(0);
+      WORK_ORDERS.filter(w=>w.process===proc&&!w.isMaintenance).forEach(w=>{
+        const dStart=Math.floor((new Date(w.start)-startDay)/86400000);
+        const dEnd=Math.floor((new Date(w.end)-startDay)/86400000);
+        for(let d=dStart;d<=dEnd&&d<totalDays;d++) dailyRes[d]+=w.resource/(dEnd-dStart+1);
+      });
+      const maxR=Math.max(...dailyRes,1);
+      const histH=18, histTop=38;
+      for(let d=0;d<totalDays;d++){
+        if(dailyRes[d]>0){
+          const h=Math.max(2,(dailyRes[d]/maxR)*histH);
+          html+=`<div style="position:absolute;left:${d*dayW+2}px;top:${histTop+histH-h}px;width:${dayW-4}px;height:${h}px;background:rgba(59,130,246,0.35);border-radius:2px 2px 0 0" title="${dailyRes[d].toFixed(0)}t"></div>`;
+        }
+      }
+    }
+    html += `</div></div>`;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function highlightGroup(gid) {
+  const detail = document.getElementById('resDetail');
+  const content = document.getElementById('resDetailContent');
+  if(!gid) { detail.style.display='none'; return; }
+  detail.style.display = 'block';
+  const groupWOs = WORK_ORDERS.filter(w=>WO_GROUPS[w.id]===gid);
+  content.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-slate-50"><th class="p-2 text-left">工单</th><th class="p-2">钢种</th><th class="p-2">规格</th><th class="p-2">工序</th><th class="p-2">资源量</th><th class="p-2">开始</th><th class="p-2">结束</th></tr></thead><tbody>${groupWOs.map((w,i)=>`<tr class="${i%2?'bg-slate-50':''}"><td class="p-2 text-center font-medium text-sky-600">${w.id}</td><td class="p-2 text-center">${w.steel}</td><td class="p-2 text-center">${w.spec}</td><td class="p-2 text-center">${w.process}</td><td class="p-2 text-center">${w.resource}t</td><td class="p-2 text-center">${w.start.slice(5)}</td><td class="p-2 text-center">${w.end.slice(5)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+// ==================== 页面4: 订单逆序推算 ====================
+function renderOrder() {
+  const order = ORDERS.find(o=>o.id===selectedOrderId) || ORDERS[0];
+  return `<div class="fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-slate-700">40301 合约工序物料</h2>
+      <select class="text-sm border rounded-lg px-3 py-1.5" onchange="selectedOrderId=this.value;document.getElementById('orderContent').innerHTML=renderOrderTable()">
+        ${ORDERS.map(o=>`<option value="${o.id}" ${o.id===selectedOrderId?'selected':''}>${o.id} — ${o.steel} ${o.spec} (${o.qty}t)</option>`).join('')}
+      </select>
+    </div>
+    <div class="card bg-white p-6" id="orderContent">
+      ${renderOrderTable()}
+    </div>
+  </div>`;
+}
+
+function renderOrderTable() {
+  const order = ORDERS.find(o=>o.id===selectedOrderId) || ORDERS[0];
+  const steps = ORDER_STEPS;
+  const maxSeq = steps.length;
+  return `
+    <div class="flex items-center gap-3 mb-4">
+      <span class="px-3 py-1 bg-violet-100 text-violet-700 rounded-lg text-sm font-medium">${order.id}</span>
+      <span class="text-sm text-slate-500">${order.steel} ${order.spec} · 合同量 <b class="text-slate-800">${order.qty}t</b></span>
+      <span class="ml-auto flex items-center gap-1 text-xs text-violet-500">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+        逆序推算方向：从末工序到首工序
+      </span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-slate-50">
+            <th class="p-2.5 text-center text-slate-500 font-medium w-16">序号</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">工序编码</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">工序名称</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">成材率</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">耗时(分钟)</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">投料量</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">产出量</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">最早通过时间</th>
+            <th class="p-2.5 text-center text-slate-500 font-medium">最晚通过时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${steps.map((s,i) => {
+            const opacity = 1 - (i / (maxSeq)) * 0.55;
+            const bg = `rgba(139,92,246,${0.08 + (maxSeq-1-i)*0.04})`;
+            return `<tr style="background:${bg}" class="hover:brightness-95 transition">
+              <td class="p-2.5 text-center font-bold" style="color:rgba(109,40,217,${opacity})">${s.seq}</td>
+              <td class="p-2.5 text-center font-mono text-xs">${s.code}</td>
+              <td class="p-2.5 text-center font-medium">${s.name}</td>
+              <td class="p-2.5 text-center text-emerald-600">${(s.yield*100).toFixed(1)}%</td>
+              <td class="p-2.5 text-center">${s.time}</td>
+              <td class="p-2.5 text-center font-medium">${s.input.toFixed(2)}t</td>
+              <td class="p-2.5 text-center font-medium">${s.output.toFixed(2)}t</td>
+              <td class="p-2.5 text-center text-xs">${s.earliest}</td>
+              <td class="p-2.5 text-center text-xs">${s.latest}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-center mt-4 gap-1 text-xs text-slate-400">
+      <span>首工序(投料起点)</span>
+      ${Array(maxSeq).fill(0).map((_,i)=>`<svg class="w-4 h-4 text-violet-300" style="transform:rotate(180deg)" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>`).join('')}
+      <span>末工序(合同交付)</span>
+    </div>
+  `;
+}
+
+// ==================== 页面5: AI 助手 ====================
+function renderAI() {
+  return `<div class="fade-in">
+    <h2 class="text-lg font-bold text-slate-700 mb-4">AI 数据助手</h2>
+    <!-- 步骤指示器 -->
+    <div class="flex items-center justify-center gap-3 mb-6">
+      <div class="step-pill ${aiStep>=1?(aiStep>1?'done':'active'):''}" onclick="aiStep=1;renderContent()">① 输入需求</div>
+      <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+      <div class="step-pill ${aiStep>=2?(aiStep>2?'done':'active'):''}">② AI反馈</div>
+      <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+      <div class="step-pill ${aiStep>=3?'active':''}">③ 确认调整</div>
+    </div>
+
+    ${aiStep===1?renderAIStep1():''}
+    ${aiStep===2?renderAIStep2():''}
+    ${aiStep===3?renderAIStep3():''}
+  </div>`;
+}
+
+function renderAIStep1() {
+  return `<div class="card bg-white p-6 space-y-4 fade-in">
+    <div>
+      <label class="block text-sm font-medium text-slate-600 mb-2">固定要求</label>
+      <textarea class="w-full border rounded-lg p-3 text-sm h-24 resize-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 outline-none">1. 同钢种订单优先排在一起；2. 转场时间最小化；3. 确保交期不延误</textarea>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-slate-600 mb-2">输出要求</label>
+      <textarea class="w-full border rounded-lg p-3 text-sm h-20 resize-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 outline-none">返回所有工单重新排列后的工单编号和计划开始时间以及调整的建议描述</textarea>
+    </div>
+    <div class="flex justify-end">
+      <button onclick="aiStep=2;renderContent()" class="px-6 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg font-medium text-sm hover:shadow-lg hover:shadow-violet-200 transition-all">提交AI分析</button>
+    </div>
+  </div>`;
+}
+
+function renderAIStep2() {
+  return `<div class="space-y-4 fade-in">
+    <div class="card bg-violet-50 border border-violet-200 p-6">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-7 h-7 rounded-full bg-violet-500 flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        </div>
+        <span class="font-semibold text-violet-700">AI 分析结果</span>
+      </div>
+      <p class="text-sm text-slate-700 leading-relaxed">根据分析，当前排产方案存在以下优化空间：</p>
+      <ol class="text-sm text-slate-700 leading-relaxed mt-2 ml-4 list-decimal space-y-1">
+        <li>转炉工序 W201(HRB400) 和 W202(Q235B) 之间存在钢种切换，转场时间约30分钟</li>
+        <li>建议将同钢种工单集中排列：W101→W201→W301 连续排产</li>
+        <li>精炼工序 W301 可提前至 07-03 22:00 开始，缩短等待时间 4 小时</li>
+      </ol>
+      <p class="text-sm font-medium text-violet-700 mt-3">综合优化后，预计可节省转场时间 2.5 小时，提高产能利用率约 3.2%</p>
+    </div>
+    <div class="card bg-white p-6">
+      <h4 class="font-semibold text-slate-700 mb-3">调整方案</h4>
+      <table class="w-full text-sm">
+        <thead><tr class="bg-slate-50"><th class="p-2 text-center">#</th><th class="p-2 text-center">工单编号</th><th class="p-2 text-center">新计划开始时间</th><th class="p-2 text-left">调整原因</th></tr></thead>
+        <tbody>
+          <tr class="border-t"><td class="p-2 text-center">1</td><td class="p-2 text-center font-medium text-sky-600">W301</td><td class="p-2 text-center">07-03 22:00</td><td class="p-2">同钢种连续排产，减少等待</td></tr>
+          <tr class="border-t bg-slate-50"><td class="p-2 text-center">2</td><td class="p-2 text-center font-medium text-sky-600">W401</td><td class="p-2 text-center">07-04 18:00</td><td class="p-2">前序提前，顺延调整</td></tr>
+          <tr class="border-t"><td class="p-2 text-center">3</td><td class="p-2 text-center font-medium text-sky-600">W501</td><td class="p-2 text-center">07-06 12:00</td><td class="p-2">连铸提前完成，轧钢提前</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex justify-end gap-3">
+      <button onclick="aiStep=1;renderContent()" class="px-5 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition">返回修改</button>
+      <button onclick="aiStep=3;renderContent()" class="px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-violet-200 transition-all">预览调整</button>
+    </div>
+  </div>`;
+}
+
+function renderAIStep3() {
+  return `<div class="space-y-4 fade-in">
+    <div class="grid grid-cols-2 gap-4">
+      <div class="card bg-white p-4">
+        <h4 class="font-semibold text-slate-700 mb-3 text-center">调整前</h4>
+        ${renderMiniGantt(false)}
+      </div>
+      <div class="card bg-white p-4 border-2 border-violet-200">
+        <h4 class="font-semibold text-violet-700 mb-3 text-center">调整后</h4>
+        ${renderMiniGantt(true)}
+      </div>
+    </div>
+    <div class="card bg-green-50 border border-green-200 p-4 text-center">
+      <span class="text-green-700 font-medium text-sm">✓ 预计节省转场时间 2.5h · 产能利用率提升 3.2%</span>
+    </div>
+    <div class="flex justify-end gap-3">
+      <button onclick="aiStep=2;renderContent()" class="px-5 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition">取消</button>
+      <button onclick="alert('已确认执行调整方案！');aiStep=1;renderContent()" class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-green-200 transition-all">确认执行</button>
+    </div>
+  </div>`;
+}
+
+function renderMiniGantt(adjusted) {
+  const procs = ['精炼','连铸','轧钢'];
+  const dayW = 28, rowH = 32;
+  const bars = adjusted ? [
+    {proc:'精炼',start:2.9,end:3.9,steel:'HRB400',label:'W301'},
+    {proc:'连铸',start:3.75,end:5.75,steel:'HRB400',label:'W401'},
+    {proc:'轧钢',start:5.5,end:7.5,steel:'HRB400',label:'W501'}
+  ] : [
+    {proc:'精炼',start:3,end:4,steel:'HRB400',label:'W301'},
+    {proc:'连铸',start:4,end:6,steel:'HRB400',label:'W401'},
+    {proc:'轧钢',start:6,end:8,steel:'HRB400',label:'W501'}
+  ];
+  let html = `<div style="position:relative">`;
+  procs.forEach((p,pi)=>{
+    html += `<div style="display:flex;align-items:center;height:${rowH}px;border-bottom:1px solid #f1f5f9">
+      <div style="width:36px;flex-shrink:0;font-size:11px;color:#64748b;text-align:center">${p}</div>
+      <div style="position:relative;flex:1;height:${rowH}px">`;
+    for(let d=0;d<10;d++){
+      html+=`<div style="position:absolute;left:${d*dayW}px;top:8px;width:${dayW}px;height:16px;border-left:1px solid #f1f5f9"></div>`;
+    }
+    bars.filter(b=>b.proc===p).forEach(b=>{
+      const x=b.start*dayW;
+      const w_=(b.end-b.start)*dayW;
+      html+=`<div class="gantt-bar" style="left:${x}px;top:8px;width:${w_}px;background:${STEEL_COLORS[b.steel]};font-size:10px">${b.label}</div>`;
+    });
+    html += `</div></div>`;
+  });
+  // 时间标签
+  html += `<div style="display:flex;margin-left:36px">`;
+  for(let d=1;d<=10;d++){
+    html+=`<div style="width:${dayW}px;text-align:center;font-size:9px;color:#94a3b8">7/${d}</div>`;
+  }
+  html += `</div></div>`;
+  return html;
+}
+
+// ==================== 页面6: 基础数据 ====================
+function renderBaseData() {
+  const tabs = [{id:'product',label:'产品分类'},{id:'process',label:'工序分类'},{id:'route',label:'工艺路线'}];
+  return `<div class="fade-in">
+    <h2 class="text-lg font-bold text-slate-700 mb-4">基础数据浏览</h2>
+    <div class="flex gap-2 mb-4">
+      ${tabs.map(t=>`<button onclick="baseDataTab='${t.id}';bdL=bdM=bdS=null;renderContent()" class="px-4 py-2 rounded-lg text-sm font-medium transition ${baseDataTab===t.id?'bg-sky-500 text-white shadow-sm':'bg-white text-slate-600 border hover:bg-slate-50'}">${t.label}</button>`).join('')}
+    </div>
+    <div class="card bg-white p-0 overflow-hidden" id="bdContainer">
+      <div id="bdContent"></div>
+    </div>
+  </div>`;
+}
+
+function initBaseData() {
+  renderBDPanel();
+}
+
+function renderBDPanel() {
+  const container = document.getElementById('bdContent');
+  if(!container) return;
+  const data = BASE_DATA[baseDataTab];
+  if(!data) return;
+
+  const lList = data.L;
+  const selectedL = bdL || lList[0]?.id;
+  const mList = data.M?.[selectedL] || [];
+  const selectedM = bdM || mList[0]?.id;
+  const sList = data.S?.[selectedM] || [];
+  const selectedS = bdS || sList[0]?.id;
+  const dList = data.D?.[selectedS] || [];
+
+  container.innerHTML = `
+    <div class="flex" style="min-height:360px">
+      <!-- L 级 -->
+      <div class="w-56 border-r border-slate-100">
+        <div class="p-3 bg-slate-50 text-xs font-semibold text-slate-400 uppercase tracking-wider">L 级分类</div>
+        ${lList.map(l=>`<div class="px-4 py-2.5 cursor-pointer text-sm transition hover:bg-sky-50 ${l.id===selectedL?'bg-sky-50 text-sky-600 font-medium border-r-2 border-sky-500':'text-slate-600'}" onclick="bdL='${l.id}';bdM=null;bdS=null;renderBDPanel()">${l.id} ${l.name}</div>`).join('')}
+      </div>
+      <!-- M 级 -->
+      <div class="w-56 border-r border-slate-100">
+        <div class="p-3 bg-slate-50 text-xs font-semibold text-slate-400 uppercase tracking-wider">M 级分类</div>
+        ${mList.length?mList.map(m=>`<div class="px-4 py-2.5 cursor-pointer text-sm transition hover:bg-sky-50 ${m.id===selectedM?'bg-sky-50 text-sky-600 font-medium border-r-2 border-sky-500':'text-slate-600'}" onclick="bdM='${m.id}';bdS=null;renderBDPanel()">${m.id} ${m.name}</div>`).join(''):'<div class="p-4 text-sm text-slate-300">暂无数据</div>'}
+      </div>
+      <!-- S 级 -->
+      <div class="w-56 border-r border-slate-100">
+        <div class="p-3 bg-slate-50 text-xs font-semibold text-slate-400 uppercase tracking-wider">S 级分类</div>
+        ${sList.length?sList.map(s=>`<div class="px-4 py-2.5 cursor-pointer text-sm transition hover:bg-sky-50 ${s.id===selectedS?'bg-sky-50 text-sky-600 font-medium border-r-2 border-sky-500':'text-slate-600'}" onclick="bdS='${s.id}';renderBDPanel()">${s.id} ${s.name}</div>`).join(''):'<div class="p-4 text-sm text-slate-300">暂无数据</div>'}
+      </div>
+      <!-- 主档 -->
+      <div class="flex-1">
+        <div class="p-3 bg-slate-50 text-xs font-semibold text-slate-400 uppercase tracking-wider">主档列表</div>
+        ${dList.length?`<table class="w-full text-sm"><thead><tr class="bg-slate-50"><th class="p-2 text-left text-slate-500">编码</th><th class="p-2 text-left text-slate-500">名称</th>${baseDataTab==='product'?'<th class="p-2 text-left text-slate-500">规格</th>':''}</tr></thead><tbody>${dList.map((d,i)=>`<tr class="${i%2?'bg-slate-50':''}"><td class="p-2 font-mono text-xs">${d.id}</td><td class="p-2">${d.name}</td>${baseDataTab==='product'?`<td class="p-2 text-slate-500">${d.spec||''}</td>`:''}</tr>`).join('')}</tbody></table>`:'<div class="p-4 text-sm text-slate-300">暂无数据</div>'}
+      </div>
+    </div>
+  `;
+}
+
+// ==================== 初始化 ====================
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash.slice(1);
+  if(hash && NAV_TABS.find(t=>t.id===hash)) {
+    currentPage = hash;
+    renderAll();
+  }
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.slice(1);
+  if(hash && NAV_TABS.find(t=>t.id===hash)) currentPage = hash;
+  renderAll();
+});
+
+// 鼠标移动更新tooltip位置
+document.addEventListener('mousemove', (e) => {
+  const tip = document.getElementById('tooltip');
+  if(!tip.classList.contains('hidden')) {
+    tip.style.left = (e.clientX+12)+'px';
+    tip.style.top = (e.clientY-10)+'px';
+  }
+});
+</script>
+</body>
+</html>
