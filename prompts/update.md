@@ -87,6 +87,163 @@ cat /workspace/trae-demo-wall/dist/data/index.json | python3 -c "import json,sys
 cd /workspace/trae-demo-wall && rm -rf public/data && cp -r src/data public/data && rm -rf dist && npm run build
 ```
 
+### Step 3.5: 数据质量检查与 404 修复（必须执行）
+
+爬虫下载的 demo 文件可能存在 3 类 404 问题，必须在构建后、提交前执行检查和修复。
+
+#### 3.5.1 检查 404 问题
+
+运行以下 Python 脚本检查所有 `localPath` 指向的文件是否在磁盘上真实存在：
+
+```python
+#!/usr/bin/env python3
+"""检查所有分页数据中 localPath 指向的文件是否存在"""
+import json, os, glob
+
+DEMO_DIR = "/workspace/trae-demo-wall/public/demos"
+PAGES_DIR = "/workspace/trae-demo-wall/src/data/pages"
+
+all_projects = []
+for page_file in sorted(glob.glob(os.path.join(PAGES_DIR, "page-*.json"))):
+    with open(page_file) as f:
+        all_projects.extend(json.load(f)['projects'])
+
+issues = []
+for p in all_projects:
+    pid, ptype, lp = p['id'], p.get('type', 'none'), p.get('localPath')
+    if ptype != 'local' or not lp or not lp.startswith('./demos/'):
+        continue
+    disk_path = os.path.join(DEMO_DIR, lp[8:])
+    is_bad = ('._' in lp or '__MACOSX' in lp or 'node_modules' in lp)
+    has_backslash = '\\' in lp
+    if is_bad or has_backslash or not os.path.exists(disk_path):
+        issues.append((pid, lp, 'bad_entry' if is_bad else 'backslash' if has_backslash else 'missing'))
+
+print(f"总项目: {len(all_projects)}, 404 问题: {len(issues)}")
+for pid, lp, reason in issues:
+    print(f"  [{reason}] {pid}: {lp}")
+```
+
+#### 3.5.2 修复 404 问题
+
+如果检查发现问题，运行修复脚本（保存为 `/data/user/work/fix_404.py` 并执行）：
+
+```python
+#!/usr/bin/env python3
+"""修复 404 问题：错误入口、反斜杠路径、无 HTML 项目"""
+import json, os, glob, shutil
+
+DEMO_DIR = "/workspace/trae-demo-wall/public/demos"
+PAGES_DIR = "/workspace/trae-demo-wall/src/data/pages"
+
+def find_best_html(topic_dir):
+    """查找最佳 HTML 入口，跳过 __MACOSX, ._, node_modules"""
+    candidates = []
+    for root, dirs, files in os.walk(topic_dir):
+        dirs[:] = [d for d in dirs if d not in ('__MACOSX', 'node_modules', '.git', 'dist')]
+        for f in files:
+            if f.endswith('.html') and not f.startswith('._'):
+                rel = os.path.relpath(os.path.join(root, f), topic_dir)
+                score = 100 if f == 'index.html' else 90 if f == 'demo.html' else 80 if 'index' in f.lower() else 70 if 'demo' in f.lower() else 50
+                score -= rel.count(os.sep) * 5
+                candidates.append((score, rel))
+    if candidates:
+        candidates.sort(key=lambda x: -x[0])
+        return candidates[0][1]
+    return None
+
+def fix_backslash_files(topic_dir):
+    """递归重命名反斜杠文件名为正斜杠目录结构"""
+    fixed = 0
+    for root, dirs, files in os.walk(topic_dir, topdown=False):
+        for f in files:
+            if '\\' in f:
+                old_path = os.path.join(root, f)
+                new_path = os.path.join(root, f.replace('\\', '/'))
+                os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                shutil.move(old_path, new_path)
+                fixed += 1
+        for d in list(dirs):
+            if '\\' in d:
+                old_dir = os.path.join(root, d)
+                new_dir = os.path.join(root, d.replace('\\', '/'))
+                os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+                if os.path.exists(old_dir):
+                    for item in os.listdir(old_dir):
+                        shutil.move(os.path.join(old_dir, item), os.path.join(new_dir, item))
+                    os.rmdir(old_dir)
+                dirs.remove(d)
+    return fixed
+
+# 主流程
+page_files = sorted(glob.glob(os.path.join(PAGES_DIR, "page-*.json")))
+pages_data = {}
+for pf in page_files:
+    with open(pf) as f:
+        pages_data[pf] = json.load(f)
+
+all_projects = [p for page in pages_data.values() for p in page['projects']]
+stats = {'bad_entry_fixed': 0, 'backslash_fixed': 0, 'none_marked': 0}
+
+for p in all_projects:
+    pid, ptype, lp = p['id'], p.get('type', 'none'), p.get('localPath')
+    if ptype != 'local' or not lp or not lp.startswith('./demos/'):
+        continue
+    topic_name = lp[8:].split('/')[0]
+    topic_dir = os.path.join(DEMO_DIR, topic_name)
+    if not os.path.isdir(topic_dir):
+        continue
+
+    is_bad = ('._' in lp or '__MACOSX' in lp or 'node_modules' in lp)
+    has_backslash = '\\' in lp
+    disk_path = os.path.join(DEMO_DIR, lp[8:])
+
+    if has_backslash:
+        fixed = fix_backslash_files(topic_dir)
+        if fixed: stats['backslash_fixed'] += 1
+
+    if is_bad or not os.path.exists(disk_path):
+        best = find_best_html(topic_dir)
+        if best:
+            p['localPath'] = f"./demos/{topic_name}/{best}"
+            stats['bad_entry_fixed'] += 1
+            print(f"  [FIXED] {pid}: {lp} -> {p['localPath']}")
+        else:
+            p['type'] = 'none'
+            p['localPath'] = None
+            stats['none_marked'] += 1
+            print(f"  [NONE] {pid}: 无 HTML 文件")
+
+for pf, page in pages_data.items():
+    with open(pf, 'w', encoding='utf-8') as f:
+        json.dump(page, f, ensure_ascii=False, indent=2)
+
+# 同步到 public/data/pages
+import shutil
+public_pages = "/workspace/trae-demo-wall/public/data/pages"
+if os.path.isdir(public_pages):
+    for pf in page_files:
+        shutil.copy2(pf, os.path.join(public_pages, os.path.basename(pf)))
+
+print(f"\n修复统计: 入口修复={stats['bad_entry_fixed']}, 反斜杠={stats['backslash_fixed']}, 标记none={stats['none_marked']}")
+```
+
+#### 3.5.3 修复后重新构建
+
+修复数据后需要重新执行构建：
+```bash
+cd /workspace/trae-demo-wall && npm run build
+```
+
+#### 3.5.4 三类 404 根因说明
+
+| 问题类型 | 根因 | 影响 |
+|---|---|---|
+| macOS `.__MACOSX/._*.html` 被误选为入口 | 爬虫 `find_first_html_file()` 未排除 `._` 前缀文件和 `__MACOSX` 目录 | demo 打开后显示空白或乱码 |
+| Windows ZIP 反斜杠路径 | `extractor.py` 的 `extractall()` 未规范化 `\` 分隔符，磁盘上文件名含 `\`，浏览器请求 `/` 版本时 404 | demo 打开后 404 |
+| `node_modules` 深层 HTML 被选为入口 | `find_first_html_file()` 未排除 `node_modules` 目录 | demo 打开后显示框架内部页面而非实际 demo |
+| 无有效 HTML 文件 | 项目只包含 `.bat`、`package.json` 等非 HTML 文件 | demo 打开后 404 |
+
 ### Step 4: 检查 Git 状态
 
 ```bash
@@ -294,6 +451,18 @@ git rm -r --cached "**/*.pyc" "**/__pycache__/" 2>/dev/null
 git commit -m "chore: remove tracked .pyc files"
 git push origin main
 ```
+
+### Q10: demo 打开后 404 — `localPath` 含反斜杠 `\`
+**处理**: Windows 创建的 ZIP 使用 `\` 作为路径分隔符，Python 的 `extractall()` 在 Linux 上解压后文件名中保留 `\`，浏览器将 URL 中的 `\` 规范化为 `/` 后找不到文件。修复方法见 Step 3.5.2，核心逻辑是递归遍历 topic 目录，将所有含 `\` 的文件和目录重命名为 `/` 结构。
+
+### Q11: demo 打开后显示空白或乱码 — `localPath` 指向 `__MACOSX/._*.html`
+**处理**: macOS 打包 ZIP 时会生成 `__MACOSX/` 目录和 `._` 前缀的 AppleDouble 元数据文件，爬虫的 `find_first_html_file()` 误将这些文件选为 demo 入口。修复方法见 Step 3.5.2，重新查找正确 HTML 入口（跳过 `__MACOSX`、`._` 前缀、`node_modules`），优先选择 `index.html` / `demo.html`。
+
+### Q12: demo 打开后显示框架内部页面 — `localPath` 深入 `node_modules/`
+**处理**: 部分项目的 ZIP 包含 `node_modules` 目录，其中可能有框架自带的 HTML 文件（如 Playwright 的 `snapshot.html`），被误选为入口。修复方法同 Q11，`find_best_html()` 函数已排除 `node_modules` 目录。
+
+### Q13: demo 打开后 404 — 项目无有效 HTML 文件
+**处理**: 部分作品只包含 `.bat` 启动脚本、`package.json` 等非 HTML 文件，没有可在线预览的 demo。修复方法：将这类项目标记为 `type=none`，前端会自动隐藏"在线体验"按钮。Step 3.5.2 中的修复脚本会自动处理。
 
 ---
 
