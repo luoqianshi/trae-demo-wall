@@ -1,0 +1,1804 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>丢方 - 关中地方棋</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #f5f0e8; font-family: "Noto Serif SC", "STSong", "SimSun", "KaiTi", serif; }
+canvas { display: block; position: absolute; top: 0; left: 0; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// ============================================================
+//  丢方 (Diufang) - HTML5 Demo
+//  西安关中地方棋 | 张磊 2026
+// ============================================================
+
+// ==================== CONSTANTS ====================
+const BOARD_SIZE = 7;
+const EMPTY = 0;
+const BLACK = 1;
+const WHITE = 2;
+const PHASE_PLACEMENT = 'placement';
+const PRE_EAT = 'preMoveEat';
+const MOVE_SEL = 'moveSelect';
+const MOVE_TARGET = 'moveTarget';
+const MOVE_EAT = 'moveEat';
+const GAME_OVER = 'gameOver';
+
+// ==================== CANVAS SETUP ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let CW, CH, scale, offsetX, offsetY;
+let CELL_SIZE, MARGIN, STONE_RADIUS;
+
+function resizeCanvas() {
+  // 响应式：桌面端最大900px，移动端自适应屏幕宽度
+  CW = Math.min(window.innerWidth, 900);
+  CH = window.innerHeight;
+  canvas.width = CW;
+  canvas.height = CH;
+  canvas.style.width = CW + 'px';
+  canvas.style.height = CH + 'px';
+  canvas.style.left = ((window.innerWidth - CW) / 2) + 'px';
+  // 棋盘比例：格子尺寸 ≈ 画布宽度的9.5%，边距 ≈ 格子尺寸的75%
+  CELL_SIZE = Math.floor(CW * 0.095);
+  MARGIN = Math.floor(CELL_SIZE * 0.75);
+  // 棋子半径 ≈ 格子尺寸的23%（与原版小程序 18/79≈0.228 保持一致）
+  STONE_RADIUS = Math.floor(CELL_SIZE * 0.23);
+  const boardVisual = CELL_SIZE * 6 + MARGIN * 2;
+  scale = Math.min(CW / boardVisual, 1);
+  offsetX = (CW - boardVisual * scale) / 2;
+  offsetY = 160;
+}
+resizeCanvas();
+window.addEventListener('resize', () => { resizeCanvas(); if (currentScene === 'game') initBoardLayout(); });
+
+// ==================== AUDIO (Web Audio API) ====================
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playTone(freq, duration, type = 'sine', vol = 0.17) {
+  try {
+    const ac = getAudioCtx();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ac.currentTime);
+    gain.gain.setValueAtTime(vol, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(ac.currentTime);
+    osc.stop(ac.currentTime + duration);
+  } catch(e) {}
+}
+
+function playNote(freq, dur, type, vol, delay) {
+  if (delay) setTimeout(() => playTone(freq, dur, type, vol), delay);
+  else playTone(freq, dur, type, vol);
+}
+
+// ==================== VOICE PROMPTS (Web Speech API) ====================
+let pendingSpeech = null;
+
+function speakChinese(text) {
+  if (!window.speechSynthesis) return;
+  if (pendingSpeech) {
+    speechSynthesis.cancel();
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'zh-CN';
+  utterance.rate = 0.75;    // 语速降低 17%，更清晰
+  utterance.volume = 1.0;   // 音量提升 25%，增强可听性
+  pendingSpeech = utterance;
+  utterance.onend = () => { pendingSpeech = null; };
+  speechSynthesis.speak(utterance);
+}
+
+// 走子音效 - 落子
+function playPlace() { playTone(660, 0.1, 'triangle', 0.14); }
+// 吃子音效 - 吃/提子
+function playEat() { playTone(330, 0.08, 'square', 0.13); playNote(440, 0.08, 'square', 0.13, 60); }
+// 成方音效 - 方上
+function playFang() { playTone(523, 0.12, 'sine', 0.17); playNote(659, 0.12, 'sine', 0.17, 100); }
+// 成轴音效 - 轴上
+function playZhou() { playTone(523, 0.10, 'sine', 0.17); playNote(659, 0.10, 'sine', 0.17, 80); playNote(784, 0.14, 'sine', 0.17, 160); }
+// 登方音效 - 上升提示
+function playDengFang() { playTone(440, 0.08, 'sine', 0.11); playNote(554, 0.08, 'sine', 0.11, 80); }
+// 大方音效 - 三连升
+function playDaFang() { playTone(523, 0.10, 'sine', 0.15); playNote(659, 0.10, 'sine', 0.15, 90); playNote(784, 0.10, 'sine', 0.15, 180); }
+// 小方轴音效
+function playXiaoFangZhou() { playTone(523, 0.10, 'sine', 0.15); playNote(659, 0.10, 'sine', 0.15, 80); playNote(784, 0.12, 'sine', 0.15, 140); }
+// 大方轴音效
+function playDaFangZhou() { playTone(523, 0.10, 'sine', 0.17); playNote(659, 0.10, 'sine', 0.17, 70); playNote(784, 0.10, 'sine', 0.17, 140); playNote(880, 0.12, 'sine', 0.17, 210); }
+// 拉方音效 - 下降提示
+function playLaFang() { playTone(659, 0.10, 'sine', 0.14); playNote(523, 0.10, 'sine', 0.14, 100); }
+// 拉大方音效
+function playLaDaFang() { playTone(784, 0.10, 'sine', 0.14); playNote(659, 0.10, 'sine', 0.14, 90); playNote(523, 0.10, 'sine', 0.14, 180); }
+// 拉轴音效
+function playLaZhou() { playTone(784, 0.10, 'sine', 0.14); playNote(659, 0.10, 'sine', 0.14, 80); playNote(523, 0.12, 'sine', 0.14, 150); }
+// 连拉带塞音效
+function playLianLaDaiSe() { playTone(440, 0.06, 'triangle', 0.11); playNote(554, 0.06, 'triangle', 0.11, 60); playNote(440, 0.08, 'sine', 0.14, 130); }
+// 塞住音效
+function playSaiZhu() { playTone(350, 0.12, 'triangle', 0.13); }
+// 成方宣告（落子阶段）
+function playChengFang() { playTone(523, 0.12, 'sine', 0.18); playNote(659, 0.14, 'sine', 0.18, 100); }
+// 禁止操作音效
+function playForbidden() { playTone(180, 0.18, 'sawtooth', 0.10); setTimeout(() => speakChinese('禁塞'), 150); }
+
+let bgmInterval = null;
+function startBGM() {
+  stopBGM();
+  const notes = [262, 294, 330, 349, 392, 349, 330, 294, 262, 330, 392, 440, 392, 330, 294, 262];
+  let idx = 0;
+  function playNote() {
+    playTone(notes[idx % notes.length], 0.45, 'sine', 0.07);
+    idx++;
+  }
+  playNote();
+  bgmInterval = setInterval(playNote, 800);
+}
+function stopBGM() { if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; } }
+
+// ==================== GAME STATE (DataBus) ====================
+const Game = {
+  board: null, phase: null, turn: null,
+  placeCount: 0, bPlace: 0, wPlace: 0,
+  bFang: 0, wFang: 0, fangSeq: [], firstFang: null,
+  moveFirst: null, moveRound: 0, noFangRound: 0,
+  selected: null, validMoves: [],
+  eatBatches: [], eatBatchIdx: 0, eatenCount: 0,
+  firstEatCreatedEye: false, isPaused: false,
+  newFangs: 0, newZhous: 0, result: null,
+  history: [], gameMode: 'dev', record: [],
+  currentRound: 0, roundFirstPlayer: BLACK, roundFirstPlayerMoved: false,
+  blackGameTime: 900, whiteGameTime: 900,
+  blackMoveTime: 90, whiteMoveTime: 90,
+  timerInterval: null, lastTickTime: 0,
+  lastActionTime: 0, totalInactiveTime: 0,
+  alertVisible: false, alertTitle: '', alertMsg: '', alertBtnText: '确定',
+  alertCallback: null, alertCancelCallback: null,
+  alertSecondBtnText: '', alertSecondCallback: null,
+  showAlertCancel: false, isGameOverAlert: false,
+  alertOkRect: null, alertCancelRect: null, alertOverlayRect: null,
+
+  init() {
+    this.board = Array.from({length: 7}, () => Array(7).fill(EMPTY));
+    this.phase = PHASE_PLACEMENT; this.turn = BLACK;
+    this.placeCount = 0; this.bPlace = 0; this.wPlace = 0;
+    this.bFang = 0; this.wFang = 0; this.fangSeq = []; this.firstFang = null;
+    this.moveFirst = null; this.moveRound = 0; this.noFangRound = 0;
+    this.selected = null; this.validMoves = [];
+    this.eatBatches = []; this.eatBatchIdx = 0; this.eatenCount = 0;
+    this.firstEatCreatedEye = false; this.isPaused = false;
+    this.newFangs = 0; this.newZhous = 0; this.result = null;
+    this.history = []; this.record = [];
+    this.currentRound = 0; this.roundFirstPlayer = BLACK; this.roundFirstPlayerMoved = false;
+    this.blackGameTime = 900; this.whiteGameTime = 900;
+    this.blackMoveTime = 90; this.whiteMoveTime = 90;
+    this.lastActionTime = Date.now(); this.totalInactiveTime = 0;
+    this.alertVisible = false; this.isGameOverAlert = false;
+    this.isPaused = false;
+    stopTimer();
+  },
+
+  capState() {
+    return {
+      board: this.board.map(r => r.slice()), phase: this.phase, turn: this.turn,
+      placeCount: this.placeCount, bPlace: this.bPlace, wPlace: this.wPlace,
+      bFang: this.bFang, wFang: this.wFang, fangSeq: this.fangSeq.slice(), firstFang: this.firstFang,
+      moveFirst: this.moveFirst, moveRound: this.moveRound, noFangRound: this.noFangRound,
+      selected: this.selected ? {row: this.selected.row, col: this.selected.col} : null,
+      validMoves: this.validMoves.map(m => ({row: m.row, col: m.col})),
+      eatBatches: this.eatBatches.map(b => ({player: b.player, count: b.count})),
+      eatBatchIdx: this.eatBatchIdx, eatenCount: this.eatenCount,
+      firstEatCreatedEye: this.firstEatCreatedEye, isPaused: this.isPaused,
+      newFangs: this.newFangs, newZhous: this.newZhous, result: this.result,
+      currentRound: this.currentRound, roundFirstPlayer: this.roundFirstPlayer,
+      roundFirstPlayerMoved: this.roundFirstPlayerMoved,
+      blackMoveTime: this.blackMoveTime, whiteMoveTime: this.whiteMoveTime
+    };
+  },
+
+  restoreState(s) {
+    this.board = s.board.map(r => r.slice()); this.phase = s.phase; this.turn = s.turn;
+    this.placeCount = s.placeCount; this.bPlace = s.bPlace; this.wPlace = s.wPlace;
+    this.bFang = s.bFang; this.wFang = s.wFang; this.fangSeq = s.fangSeq.slice(); this.firstFang = s.firstFang;
+    this.moveFirst = s.moveFirst; this.moveRound = s.moveRound; this.noFangRound = s.noFangRound;
+    this.selected = s.selected ? {row: s.selected.row, col: s.selected.col} : null;
+    this.validMoves = s.validMoves.map(m => ({row: m.row, col: m.col}));
+    this.eatBatches = s.eatBatches.map(b => ({player: b.player, count: b.count}));
+    this.eatBatchIdx = s.eatBatchIdx; this.eatenCount = s.eatenCount;
+    this.firstEatCreatedEye = s.firstEatCreatedEye || false; this.isPaused = s.isPaused || false;
+    this.newFangs = s.newFangs; this.newZhous = s.newZhous; this.result = s.result;
+    this.currentRound = s.currentRound; this.roundFirstPlayer = s.roundFirstPlayer;
+    this.roundFirstPlayerMoved = s.roundFirstPlayerMoved;
+    this.blackMoveTime = s.blackMoveTime != null ? s.blackMoveTime : 90;
+    this.whiteMoveTime = s.whiteMoveTime != null ? s.whiteMoveTime : 90;
+  },
+
+  pushHistory() { this.history.push(this.capState()); if (this.history.length > 200) this.history.shift(); }
+};
+
+// ==================== TIMER ====================
+function startTimer() { stopTimer(); Game.lastTickTime = Date.now(); Game.timerInterval = setInterval(tick, 1000); }
+function stopTimer() { if (Game.timerInterval) { clearInterval(Game.timerInterval); Game.timerInterval = null; } }
+function tick() {
+  if (Game.phase === GAME_OVER || Game.isPaused) return;
+  const now = Date.now();
+  const elapsed = (now - Game.lastTickTime) / 1000;
+  Game.lastTickTime = now;
+  const isBlack = Game.turn === BLACK;
+  if (isBlack) { Game.blackGameTime -= elapsed; if (Game.blackGameTime <= 0) { Game.blackGameTime = 0; endGame('white_win', '黑方局时耗尽'); return; } }
+  else { Game.whiteGameTime -= elapsed; if (Game.whiteGameTime <= 0) { Game.whiteGameTime = 0; endGame('black_win', '白方局时耗尽'); return; } }
+  if (isBlack) { Game.blackMoveTime -= elapsed; if (Game.blackMoveTime <= 0) { Game.blackMoveTime = 0; endGame('white_win', '黑方步时耗尽'); return; } }
+  else { Game.whiteMoveTime -= elapsed; if (Game.whiteMoveTime <= 0) { Game.whiteMoveTime = 0; endGame('black_win', '白方步时耗尽'); return; } }
+  const curMoveTime = isBlack ? Game.blackMoveTime : Game.whiteMoveTime;
+  const maxMoveTime = Game.phase === PHASE_PLACEMENT ? 90 : 90;
+  if (Game.lastActionTime > 0 && curMoveTime > maxMoveTime * 0.8) {
+    const inactive = (now - Game.lastActionTime) / 1000;
+    if (inactive > 120) Game.totalInactiveTime += elapsed;
+  }
+}
+function resetMoveTime() {
+  const isBlack = Game.turn === BLACK;
+  let newTime = Game.phase === PHASE_PLACEMENT ? ((isBlack ? Game.bPlace : Game.wPlace) < 3 ? 30 : 90) : 90;
+  if (isBlack) Game.blackMoveTime = newTime; else Game.whiteMoveTime = newTime;
+}
+function recordAction() { Game.lastActionTime = Date.now(); }
+
+// ==================== RULES ====================
+function cloneB(b) { return b.map(r => r.slice()); }
+function fId(r, c) { return 'F_' + r + '_' + c; }
+function posStr(r, c) { return String.fromCharCode(97 + c) + (r + 1); }
+
+function fangs(bs, p) {
+  const s = new Set();
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++)
+    if (bs[r][c] === p && bs[r][c+1] === p && bs[r+1][c] === p && bs[r+1][c+1] === p) s.add(fId(r, c));
+  return s;
+}
+
+function zhous(bs, p) {
+  const s = new Set();
+  for (let r = 0; r < 7; r++) if (bs[r].every(v => v === p)) s.add('R' + r);
+  for (let c = 0; c < 7; c++) if (bs.every(row => row[c] === p)) s.add('C' + c);
+  return s;
+}
+
+function protectedSet(bs, p) {
+  const s = new Set();
+  fangs(bs, p).forEach(f => {
+    const parts = f.split('_'), r = parseInt(parts[1]), c = parseInt(parts[2]);
+    s.add(r+','+c); s.add(r+','+(c+1)); s.add((r+1)+','+c); s.add((r+1)+','+(c+1));
+  });
+  zhous(bs, p).forEach(z => {
+    if (z[0] === 'R') { const r = parseInt(z.slice(1)); for (let c = 0; c < 7; c++) s.add(r+','+c); }
+    else { const c = parseInt(z.slice(1)); for (let r = 0; r < 7; r++) s.add(r+','+c); }
+  });
+  return s;
+}
+
+function eatable(bs, t) {
+  const p = protectedSet(bs, t), result = [];
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++)
+    if (bs[i][j] === t && !p.has(i+','+j)) result.push({row: i, col: j});
+  return result;
+}
+
+function validMovesOf(bs, row, col) {
+  if (bs[row][col] === EMPTY) return [];
+  const moves = [], dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  for (const [dr, dc] of dirs) {
+    let r = row + dr, c = col + dc;
+    while (r >= 0 && r < 7 && c >= 0 && c < 7 && bs[r][c] === EMPTY) {
+      moves.push({row: r, col: c}); r += dr; c += dc;
+    }
+  }
+  return moves;
+}
+
+function countS(bs, p) { let n = 0; for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) if (bs[r][c] === p) n++; return n; }
+
+function hasAnyValid(bs, p) {
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++)
+    if (bs[r][c] === p && validMovesOf(bs, r, c).length) return true;
+  return false;
+}
+
+function hasImmediate(bs, p) {
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+    if (bs[r][c] !== p) continue;
+    const moves = validMovesOf(bs, r, c);
+    for (const m of moves) {
+      const cp = cloneB(bs); cp[r][c] = EMPTY; cp[m.row][m.col] = p;
+      const fb = fangs(bs, p), fa = fangs(cp, p);
+      for (const x of fa) if (!fb.has(x)) return true;
+      const zb = zhous(bs, p), za = zhous(cp, p);
+      for (const x of za) if (!zb.has(x)) return true;
+    }
+  }
+  return false;
+}
+
+function opponentEyes(bs, opp) {
+  const eyes = new Set();
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+    if (bs[r][c] !== opp) continue;
+    const moves = validMovesOf(bs, r, c);
+    for (const m of moves) {
+      const cp = cloneB(bs); cp[r][c] = EMPTY; cp[m.row][m.col] = opp;
+      const fb = fangs(bs, opp), fa = fangs(cp, opp);
+      let hasNew = false;
+      for (const x of fa) if (!fb.has(x)) { hasNew = true; break; }
+      if (!hasNew) { const zb = zhous(bs, opp), za = zhous(cp, opp); for (const x of za) if (!zb.has(x)) { hasNew = true; break; } }
+      if (hasNew) eyes.add(m.row+','+m.col);
+    }
+  }
+  return eyes;
+}
+
+function filterMoves(board, row, col, moves, phase) {
+  if (phase !== MOVE_SEL) return moves;
+  const p = board[row][col];
+  if (!hasImmediate(board, p)) return moves;
+  const opp = p === BLACK ? WHITE : BLACK;
+  const eyes = opponentEyes(board, opp);
+  return moves.filter(m => !eyes.has(m.row+','+m.col));
+}
+
+function hasAnyEye(bs, p) { return opponentEyes(bs, p).size > 0; }
+
+function canStillForm(bs, p) { return fangs(bs, p).size || zhous(bs, p).size || hasAnyEye(bs, p); }
+
+function isTimeWindowForCrippledZhou() {
+  if (Game.phase !== PRE_EAT) return false;
+  if (Game.eatBatchIdx !== 0) return false;
+  if (Game.turn !== Game.moveFirst) return false;
+  if (Game.eatBatches.length > 0 && Game.eatBatches[0].count > 1)
+    if (Game.eatenCount > 0 && Game.firstEatCreatedEye) return false;
+  return true;
+}
+
+function crippledZhou(bs, r, c, eater) {
+  let isRowAxis = true, isColAxis = true;
+  for (let ci = 0; ci < 7; ci++) if (ci !== c && bs[r][ci] !== eater) { isRowAxis = false; break; }
+  for (let ri = 0; ri < 7; ri++) if (ri !== r && bs[ri][c] !== eater) { isColAxis = false; break; }
+  if (!isRowAxis && !isColAxis) return false;
+  const axis = isRowAxis ? 'row' : 'col';
+  const allDirs = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+  const neighbors = [];
+  for (const [dr, dc] of allDirs) {
+    const nr = r + dr, nc = c + dc;
+    if (nr < 0 || nr >= 7 || nc < 0 || nc >= 7) continue;
+    if (axis === 'row' && dr === 0) continue;
+    if (axis === 'col' && dc === 0) continue;
+    neighbors.push({r: nr, c: nc, color: bs[nr][nc], isOrthogonal: dr === 0 || dc === 0});
+  }
+  const eaterCount = neighbors.filter(n => n.color === eater).length;
+  const isCorner = (r === 0 || r === 6) && (c === 0 || c === 6);
+  const isEdge = ((r === 0 || r === 6) && c > 0 && c < 6) || ((c === 0 || c === 6) && r > 0 && r < 6);
+  if (isCorner) {
+    if (eaterCount === 2) return false;
+    if (eaterCount === 0) return false;
+    for (const n of neighbors) if (n.color === eater) return n.isOrthogonal;
+  }
+  if (isEdge) {
+    const innerDr = r === 0 ? 1 : (r === 6 ? -1 : 0);
+    const innerDc = c === 0 ? 1 : (c === 6 ? -1 : 0);
+    let innerNb = null;
+    const sideNbs = [];
+    for (const nb of neighbors) {
+      if (innerDr !== 0 && nb.r === r + innerDr && nb.c === c) innerNb = nb;
+      else if (innerDc !== 0 && nb.c === c + innerDc && nb.r === r) innerNb = nb;
+      else sideNbs.push(nb);
+    }
+    if (innerNb) {
+      if (innerNb.color !== eater) return false;
+      for (const sn of sideNbs) if (sn.color === eater) return false;
+      return true;
+    }
+  }
+  if (eaterCount >= 4) return false;
+  if (eaterCount <= 2) return true;
+  const perp = axis === 'row' ? [1, 0] : [0, 1];
+  const eaterNbs = neighbors.filter(n => n.color === eater);
+  const sideVals = eaterNbs.map(n => { const s = (n.r - r) * perp[0] + (n.c - c) * perp[1]; return s > 0 ? 1 : (s < 0 ? -1 : 0); });
+  if (new Set(sideVals).size === 1) return false;
+  const oppNbs = neighbors.filter(n => n.color !== eater);
+  const sym = n => axis === 'row' ? {r: 2*r - n.r, c: n.c} : {r: n.r, c: 2*c - n.c};
+  let allOppSymMatch = true;
+  for (const on of oppNbs) { const s = sym(on); if (!eaterNbs.some(en => en.r === s.r && en.c === s.c)) { allOppSymMatch = false; break; } }
+  let allEaterSymMatch = true;
+  for (const en of eaterNbs) { const s = sym(en); if (!oppNbs.some(on => on.r === s.r && on.c === s.c)) { allEaterSymMatch = false; break; } }
+  if (allOppSymMatch && allEaterSymMatch) return false;
+  return true;
+}
+
+function protType(bs, pl, r, c) {
+  for (const f of fangs(bs, pl)) {
+    const parts = f.split('_'), fr = parseInt(parts[1]), fc = parseInt(parts[2]);
+    if ((r === fr && c === fc) || (r === fr && c === fc+1) || (r === fr+1 && c === fc) || (r === fr+1 && c === fc+1)) return 'fang';
+  }
+  for (const z of zhous(bs, pl)) {
+    if (z[0] === 'R' && r === parseInt(z.slice(1))) return 'zhou';
+    if (z[0] === 'C' && c === parseInt(z.slice(1))) return 'zhou';
+  }
+  return null;
+}
+
+function getEmptyCells(bs) {
+  const ec = [];
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) if (bs[r][c] === EMPTY) ec.push({row: r, col: c});
+  return ec;
+}
+
+function getActuallyEatablePositions(bs, eater) {
+  const target = eater === BLACK ? WHITE : BLACK;
+  const all = eatable(bs, target);
+  return all.filter(item => {
+    const {row, col} = item;
+    if (isTimeWindowForCrippledZhou()) {
+      const cp = cloneB(bs); cp[row][col] = EMPTY;
+      if (crippledZhou(cp, row, col, eater)) return false;
+    }
+    if ((Game.phase === PRE_EAT && Game.eatBatchIdx === 1) ||
+        (Game.phase === MOVE_EAT && Game.moveRound === 1 && eater === Game.moveFirst)) {
+      if (!hasAnyEye(bs, target)) return true;
+      const cp2 = cloneB(bs); cp2[row][col] = EMPTY;
+      if (!canStillForm(cp2, target)) {
+        const others = all.filter(s => s.row !== row || s.col !== col);
+        if (others.length > 0) return false;
+      }
+    }
+    return true;
+  });
+}
+
+function countDengFang(board, player) {
+  let count = 0;
+  for (let r = 0; r < 6; r++) for (let c = 0; c < 6; c++) {
+    let p = 0, e = 0;
+    if (board[r][c] === player) p++; else if (board[r][c] === EMPTY) e++;
+    if (board[r][c+1] === player) p++; else if (board[r][c+1] === EMPTY) e++;
+    if (board[r+1][c] === player) p++; else if (board[r+1][c] === EMPTY) e++;
+    if (board[r+1][c+1] === player) p++; else if (board[r+1][c+1] === EMPTY) e++;
+    if (p === 3 && e === 1) count++;
+  }
+  return count;
+}
+
+function xy2rc(cx, cy) {
+  const bx = (cx - offsetX) / scale, by = (cy - offsetY) / scale;
+  const c = Math.round((bx - MARGIN) / CELL_SIZE), r = Math.round((by - MARGIN) / CELL_SIZE);
+  if (r < 0 || r >= 7 || c < 0 || c >= 7) return null;
+  const point = {x: MARGIN + c * CELL_SIZE, y: MARGIN + r * CELL_SIZE};
+  const dist = Math.hypot(bx - point.x, by - point.y);
+  return dist <= STONE_RADIUS + 8 ? {row: r, col: c} : null;
+}
+
+// ==================== GAME LOGIC ====================
+function initBoardLayout() {
+  const boardVisual = CELL_SIZE * 6 + MARGIN * 2;
+  // 各区域高度和间距（使用相对值，适配不同屏幕）
+  const titleH = 70, statusH = 64, playerH = 80, btnH = 46, backBtnH = 46;
+  const gapTitle = 20, gapBoard = 28, gapPlayer = 28, gapBtn = 24, gapBack = 24;
+  const reserved = titleH + gapTitle + statusH + gapBoard + gapPlayer + playerH + gapBtn + btnH + gapBack + backBtnH + 30;
+  const availH = CH - reserved;
+  scale = Math.min(CW / boardVisual, availH / boardVisual, 1);
+  offsetX = (CW - boardVisual * scale) / 2;
+  offsetY = titleH + gapTitle + statusH + gapBoard;
+}
+
+function initBoard(mode) {
+  Game.init();
+  Game.gameMode = mode || 'dev';
+  Game.isPaused = false;
+  initBoardLayout();
+  resetMoveTime();
+  startTimer();
+  currentScene = 'game';
+}
+
+function handlePlace(row, col) {
+  if (Game.phase !== PHASE_PLACEMENT || Game.board[row][col] !== EMPTY) return;
+  Game.pushHistory();
+  const beforeFangs = fangs(Game.board, Game.turn);
+  const beforeDengFang = countDengFang(Game.board, Game.turn);
+  Game.board[row][col] = Game.turn;
+  Game.placeCount++;
+  if (Game.turn === BLACK) Game.bPlace++; else Game.wPlace++;
+  const afterFangs = fangs(Game.board, Game.turn);
+  let newFangCount = 0;
+  afterFangs.forEach(f => { if (!beforeFangs.has(f)) { newFangCount++; Game.fangSeq.push(Game.turn); if (Game.turn === BLACK) Game.bFang++; else Game.wFang++; if (!Game.firstFang) Game.firstFang = Game.turn; } });
+  playPlace();
+  if (newFangCount > 0) { playChengFang(); setTimeout(() => speakChinese('方上'), 150); }
+  else { const afterDengFang = countDengFang(Game.board, Game.turn); if (afterDengFang > beforeDengFang) { playDengFang(); setTimeout(() => speakChinese('登方'), 150); } }
+  recordMove('落子', row, col);
+  if (Game.placeCount >= 49) enterPreEat();
+  else { Game.turn = Game.turn === BLACK ? WHITE : BLACK; resetMoveTime(); }
+}
+
+function enterPreEat() {
+  if (Game.bFang && !Game.wFang) Game.moveFirst = BLACK;
+  else if (Game.wFang && !Game.bFang) Game.moveFirst = WHITE;
+  else if (Game.bFang && Game.wFang) Game.moveFirst = Game.firstFang;
+  else Game.moveFirst = WHITE;
+  Game.roundFirstPlayer = Game.moveFirst;
+  Game.roundFirstPlayerMoved = false;
+  const sec = Game.moveFirst === BLACK ? WHITE : BLACK;
+  Game.eatBatches = [
+    {player: Game.moveFirst, count: 1 + Game.fangSeq.filter(p => p === Game.moveFirst).length},
+    {player: sec, count: 1 + Game.fangSeq.filter(p => p === sec).length}
+  ];
+  Game.eatBatchIdx = 0; Game.eatenCount = 0; Game.firstEatCreatedEye = false;
+  Game.phase = PRE_EAT;
+  const firstTarget = Game.moveFirst === BLACK ? WHITE : BLACK;
+  if (!eatable(Game.board, firstTarget).length) { endGame('draw', '无子可吃'); return; }
+  Game.turn = Game.eatBatches[0].player;
+  resetMoveTime();
+}
+
+function startMove() {
+  Game.phase = MOVE_SEL; Game.turn = Game.moveFirst; resetMoveTime();
+  Game.moveRound = 0; Game.noFangRound = 0;
+  Game.selected = null; Game.validMoves = [];
+  Game.eatBatches = []; Game.eatBatchIdx = 0; Game.eatenCount = 0;
+  Game.roundFirstPlayerMoved = false;
+  checkMove();
+}
+
+function checkMove() {
+  if (!hasAnyValid(Game.board, Game.turn)) endGame(Game.turn === BLACK ? 'white_win' : 'black_win', '无法移动');
+  else if (countS(Game.board, Game.turn) < 4) endGame(Game.turn === BLACK ? 'white_win' : 'black_win', '不足四子');
+}
+
+function handleEat(row, col) {
+  if ((Game.phase !== PRE_EAT && Game.phase !== MOVE_EAT) || Game.eatBatchIdx >= Game.eatBatches.length) return;
+  const batch = Game.eatBatches[Game.eatBatchIdx];
+  const target = batch.player === BLACK ? WHITE : BLACK;
+  if (Game.board[row][col] !== target) return;
+  const allEat = getActuallyEatablePositions(Game.board, batch.player);
+  if (!allEat.length) { endGame('draw', '无子可吃'); return; }
+  if (!allEat.some(s => s.row === row && s.col === col)) {
+    let reason = null;
+    const t2 = protType(Game.board, target, row, col);
+    if (t2 === 'fang') reason = '成方棋子不可吃';
+    else if (t2 === 'zhou') reason = '成轴棋子不可吃';
+    else if (isTimeWindowForCrippledZhou()) {
+      const cp = cloneB(Game.board); cp[row][col] = EMPTY;
+      if (crippledZhou(cp, row, col, Game.turn)) reason = '撵撑轴轴眼不可吃';
+    }
+    if (!reason) {
+      const isFirstStepBreakFang = (Game.phase === PRE_EAT && Game.eatBatchIdx === 1) ||
+        (Game.phase === MOVE_EAT && Game.moveRound === 1 && Game.turn === Game.moveFirst);
+      if (isFirstStepBreakFang && hasAnyEye(Game.board, target)) {
+        const cp2 = cloneB(Game.board); cp2[row][col] = EMPTY;
+        if (!canStillForm(cp2, target)) reason = '第一步断方不可吃';
+      }
+    }
+    if (!reason) reason = '不可被吃';
+    playForbidden();
+    return;
+  }
+  if (handleSpecialRuleCrippledZhou(row, col, Game.turn, allEat)) return;
+  if (handleSpecialRuleFirstStepBreakFang(row, col, target, allEat)) return;
+  Game.pushHistory();
+  playEat();
+  if (Game.phase === PRE_EAT) {
+    const eater = Game.turn;
+    setTimeout(() => speakChinese(eater === BLACK ? '黑棋提子' : '白棋提子'), 150);
+  } else {
+    if (Game.eatenCount === 0) {
+      setTimeout(() => speakChinese('吃'), 150);
+    } else {
+      setTimeout(() => speakChinese('再吃'), 150);
+    }
+  }
+  Game.board[row][col] = EMPTY;
+  Game.eatenCount++;
+  recordMove('吃子', row, col);
+  if (Game.phase === PRE_EAT && Game.eatBatchIdx === 0 && Game.eatenCount === 1)
+    Game.firstEatCreatedEye = hasAnyEye(Game.board, Game.turn);
+  if (Game.eatenCount >= Game.eatBatches[Game.eatBatchIdx].count) { Game.eatBatchIdx++; Game.eatenCount = 0; }
+  proceedEat();
+}
+
+function handleSpecialRuleCrippledZhou(row, col, eater, allEat) {
+  if (!isTimeWindowForCrippledZhou()) return false;
+  const cp = cloneB(Game.board); cp[row][col] = EMPTY;
+  if (!crippledZhou(cp, row, col, eater)) return false;
+  const others = allEat.filter(s => s.row !== row || s.col !== col);
+  if (others.length > 0) { playForbidden(); return true; }
+  Game.board[row][col] = EMPTY;
+  endGame('draw', '撵撑轴（无其他可吃子）');
+  return true;
+}
+
+function handleSpecialRuleFirstStepBreakFang(row, col, targetPlayer, allEat) {
+  const check = (phase, batchIdx, moveRound, turn) => {
+    if (phase === PRE_EAT && batchIdx === 1) {
+      if (!hasAnyEye(Game.board, targetPlayer)) return false;
+      const cp = cloneB(Game.board); cp[row][col] = EMPTY;
+      if (canStillForm(cp, targetPlayer)) return false;
+      const others = allEat.filter(s => s.row !== row || s.col !== col);
+      if (others.length > 0) { playForbidden(); return true; }
+      Game.board[row][col] = EMPTY;
+      endGame('draw', '第一步断方（无其他可吃子）');
+      return true;
+    }
+    if (phase === MOVE_EAT && moveRound === 1 && turn === Game.moveFirst) {
+      if (!hasAnyEye(Game.board, targetPlayer)) return false;
+      const cp = cloneB(Game.board); cp[row][col] = EMPTY;
+      if (canStillForm(cp, targetPlayer)) return false;
+      const others = allEat.filter(s => s.row !== row || s.col !== col);
+      if (others.length > 0) { playForbidden(); return true; }
+      Game.board[row][col] = EMPTY;
+      endGame('draw', '第一步断方（无其他可吃子）');
+      return true;
+    }
+    return false;
+  };
+  return check(Game.phase, Game.eatBatchIdx, Game.moveRound, Game.turn);
+}
+
+function proceedEat() {
+  if (Game.eatBatchIdx >= Game.eatBatches.length) {
+    if (Game.phase === PRE_EAT) startMove();
+    else if (Game.phase === MOVE_EAT) {
+      const mover = Game.eatBatches[0].player;
+      Game.turn = mover === BLACK ? WHITE : BLACK;
+      resetMoveTime(); Game.phase = MOVE_SEL;
+      Game.newFangs = 0; Game.newZhous = 0; checkMove();
+    }
+  } else {
+    Game.turn = Game.eatBatches[Game.eatBatchIdx].player;
+    resetMoveTime();
+    const t = Game.turn === BLACK ? WHITE : BLACK;
+    if (!eatable(Game.board, t).length) { endGame('draw', '无子可吃'); return; }
+  }
+}
+
+function handleSelect(row, col) {
+  if (Game.phase !== MOVE_SEL || Game.board[row][col] !== Game.turn) return;
+  const moves = validMovesOf(Game.board, row, col);
+  const filtered = filterMoves(Game.board, row, col, moves, Game.phase);
+  Game.selected = {row, col}; Game.validMoves = filtered; Game.phase = MOVE_TARGET;
+}
+
+function handleTarget(row, col) {
+  if (Game.phase !== MOVE_TARGET || !Game.selected) return;
+  if (!Game.validMoves.some(m => m.row === row && m.col === col)) {
+    if (Game.board[row][col] === Game.turn) {
+      const m = validMovesOf(Game.board, row, col);
+      const f = filterMoves(Game.board, row, col, m, Game.phase);
+      if (f.length) { Game.selected = {row, col}; Game.validMoves = f; return; }
+    }
+    const opp = Game.turn === BLACK ? WHITE : BLACK;
+    if (Game.board[row][col] === EMPTY && hasImmediate(Game.board, Game.turn) && opponentEyes(Game.board, opp).has(row+','+col)) {
+      playForbidden(); return;
+    }
+    Game.selected = null; Game.validMoves = []; Game.phase = MOVE_SEL; return;
+  }
+  const opp2 = Game.turn === BLACK ? WHITE : BLACK;
+  if (hasImmediate(Game.board, Game.turn) && opponentEyes(Game.board, opp2).has(row+','+col)) {
+    playForbidden(); return;
+  }
+  const mover = Game.turn;
+  const fb = fangs(Game.board, mover), zb = zhous(Game.board, mover);
+  const oppBeforeEyes = opponentEyes(Game.board, opp2);
+  Game.pushHistory();
+  const fr = Game.selected.row, fc = Game.selected.col;
+  Game.board[row][col] = mover; Game.board[fr][fc] = EMPTY;
+  playPlace();
+  const fa = fangs(Game.board, mover), za = zhous(Game.board, mover);
+  let newF = 0, newZ = 0;
+  fa.forEach(x => { if (!fb.has(x)) newF++; });
+  za.forEach(x => { if (!zb.has(x)) newZ++; });
+  Game.newFangs = newF; Game.newZhous = newZ;
+  const total = newF + newZ * 2;
+  const fangsLost = fb.size - fa.size + newF;
+  const targetInOppEye = oppBeforeEyes.has(row+','+col);
+  let moveSound = null;
+  if (total > 0) {
+    if (newF === 1 && newZ === 0) { moveSound = 'fang'; playFang(); setTimeout(() => speakChinese('方上'), 150); }
+    else if (newF >= 2 && newZ === 0) { moveSound = 'dafang'; playDaFang(); setTimeout(() => speakChinese('方上'), 150); }
+    else if (newF === 0 && newZ === 1) { moveSound = 'zhou'; playZhou(); setTimeout(() => speakChinese('轴上'), 150); }
+    else if (newF === 1 && newZ === 1) { moveSound = 'xiaofangzhou'; playXiaoFangZhou(); setTimeout(() => speakChinese('方上'), 150); }
+    else if (newF >= 2 && newZ >= 1) { moveSound = 'dafangzhou'; playDaFangZhou(); setTimeout(() => speakChinese('方上'), 150); setTimeout(() => speakChinese('大方轴'), 300); }
+  } else {
+    if ((fangsLost > 0 || zb.size > za.size) && targetInOppEye) { moveSound = 'lianladai'; playLianLaDaiSe(); setTimeout(() => speakChinese('连拉带塞'), 150); }
+    else if (fangsLost === 1) { moveSound = 'lafang'; playLaFang(); setTimeout(() => speakChinese('拉方'), 150); }
+    else if (fangsLost >= 2) { moveSound = 'ladafang'; playLaDaFang(); setTimeout(() => speakChinese('拉大方'), 150); }
+    else if (zb.size > za.size) { moveSound = 'lazhou'; playLaZhou(); setTimeout(() => speakChinese('拉轴'), 150); }
+    else if (targetInOppEye) { moveSound = 'saizhu'; playSaiZhu(); setTimeout(() => speakChinese('塞住'), 150); }
+  }
+  Game.selected = null; Game.validMoves = []; Game.moveRound++; Game.noFangRound++;
+  recordMove('移动', fr, fc, row, col);
+  if (total > 0) {
+    Game.eatBatches = [{player: mover, count: total}];
+    Game.eatBatchIdx = 0; Game.eatenCount = 0; Game.phase = MOVE_EAT; Game.noFangRound = 0;
+    if (!eatable(Game.board, mover === BLACK ? WHITE : BLACK).length) { endGame('draw', '无子可吃'); return; }
+    Game.turn = mover; resetMoveTime();
+  } else {
+    Game.turn = Game.turn === BLACK ? WHITE : BLACK; resetMoveTime(); Game.phase = MOVE_SEL;
+    if (Game.noFangRound >= 20) { endGame('draw', '二十回合无成方'); return; }
+  }
+  if (Game.phase === MOVE_SEL) checkMove();
+}
+
+function recordMove(action, fromR, fromC, toR, toC) {
+  const pn = Game.turn === BLACK ? '黑' : '白';
+  const from = posStr(fromR, fromC);
+  const to = toR !== undefined ? posStr(toR, toC) : '';
+  let newRound = false;
+  if (Game.phase === PHASE_PLACEMENT) { if (Game.turn === BLACK && !Game.roundFirstPlayerMoved) newRound = true; }
+  else if (Game.phase === PRE_EAT) { if (Game.turn === Game.roundFirstPlayer && !Game.roundFirstPlayerMoved) newRound = true; }
+  else if (Game.phase === MOVE_SEL || Game.phase === MOVE_TARGET) { if (Game.turn === Game.roundFirstPlayer && !Game.roundFirstPlayerMoved) newRound = true; }
+  if (newRound) { Game.currentRound++; Game.roundFirstPlayerMoved = false; }
+  Game.record.push({step: Game.record.length + 1, round: Game.currentRound, player: pn, action, from, to, board: cloneB(Game.board), phase: Game.phase, turn: Game.turn});
+  if (Game.turn === Game.roundFirstPlayer) Game.roundFirstPlayerMoved = true; else Game.roundFirstPlayerMoved = false;
+}
+
+function endGame(res, reason) {
+  stopTimer();
+  Game.result = res; Game.phase = GAME_OVER;
+  const displayText = res === 'black_win' ? '⚫ 黑方胜' : res === 'white_win' ? '⚪ 白方胜' : '🤝 和棋';
+  showGameOverAlert(displayText, reason, () => initBoard('dev'), () => { currentScene = 'menu'; stopBGM(); });
+}
+
+function undo() {
+  if (!Game.history.length || Game.phase === GAME_OVER) return;
+  Game.restoreState(Game.history.pop());
+}
+
+function resign() {
+  if (Game.phase === GAME_OVER) return;
+  endGame(Game.turn === BLACK ? 'white_win' : 'black_win', '认输');
+}
+
+function drawOffer() {
+  if (Game.phase === GAME_OVER) return;
+  showAlert('和棋', '对方提议和棋，同意？', '同意', () => endGame('draw', '同意和棋'), '取消', null);
+}
+
+// ==================== ALERT SYSTEM ====================
+function showAlert(title, msg, btnText, cb, cancelText, cancelCb) {
+  Game.alertVisible = true; Game.isGameOverAlert = false;
+  Game.alertTitle = title; Game.alertMsg = msg;
+  Game.alertBtnText = btnText || '确定'; Game.alertCallback = cb;
+  Game.alertSecondBtnText = cancelText || ''; Game.alertCancelCallback = cancelCb || null;
+  Game.showAlertCancel = !!cancelText;
+}
+
+function showGameOverAlert(title, msg, okCb, closeCb) {
+  Game.alertVisible = true; Game.isGameOverAlert = true;
+  Game.alertTitle = title; Game.alertMsg = msg;
+  Game.alertBtnText = '新局'; Game.alertCallback = okCb;
+  Game.alertSecondBtnText = '返回'; Game.alertSecondCallback = closeCb;
+  Game.showAlertCancel = true; Game.alertCancelCallback = null;
+}
+
+function hideAlert() {
+  Game.alertVisible = false; Game.isGameOverAlert = false;
+  Game.alertCallback = null; Game.alertCancelCallback = null;
+  Game.alertSecondBtnText = ''; Game.alertSecondCallback = null;
+}
+
+// ==================== RENDERING ====================
+function drawRoundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r); ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r); ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r); ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+}
+
+function formatTime(seconds) {
+  if (seconds < 0) seconds = 0;
+  const m = Math.floor(seconds / 60), s = Math.floor(seconds % 60);
+  return (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+}
+
+function drawBoard() {
+  const boardVisual = CELL_SIZE * 6 + MARGIN * 2;
+  ctx.clearRect(0, 0, CW, CH);
+  // White background
+  ctx.fillStyle = '#fdf8f0';
+  ctx.fillRect(0, 0, CW, CH);
+
+  drawTitle();
+  drawStatusBar();
+
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+
+  // Board background (gradient centered on board)
+  const boardCenter = boardVisual / 2;
+  const bgGrad = ctx.createRadialGradient(boardCenter, boardCenter, 20, boardCenter, boardCenter, boardVisual * 0.7);
+  bgGrad.addColorStop(0, '#e8d5b8'); bgGrad.addColorStop(0.7, '#c8a87c'); bgGrad.addColorStop(1, '#a07848');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, boardVisual, boardVisual);
+
+  // Grid lines
+  ctx.strokeStyle = '#3a2010'; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 7; i++) {
+    const p = MARGIN + i * CELL_SIZE;
+    ctx.beginPath(); ctx.moveTo(MARGIN, p); ctx.lineTo(MARGIN + 6 * CELL_SIZE, p); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p, MARGIN); ctx.lineTo(p, MARGIN + 6 * CELL_SIZE); ctx.stroke();
+  }
+
+  // Center dot
+  const cx = MARGIN + 3 * CELL_SIZE, cy = MARGIN + 3 * CELL_SIZE;
+  ctx.fillStyle = '#3a2010'; ctx.beginPath(); ctx.arc(cx, cy, STONE_RADIUS * 0.4, 0, Math.PI * 2); ctx.fill();
+
+  // Column labels (A-G) and row labels (1-7)
+  const labelFontSize = Math.max(13, Math.floor(CELL_SIZE * 0.3));
+  ctx.font = 'bold ' + labelFontSize + 'px "Noto Serif SC", serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cols = 'ABCDEFG';
+  const labelOffset = Math.floor(MARGIN * 0.6);
+  for (let c = 0; c < 7; c++) { ctx.fillStyle = '#2c1810'; ctx.fillText(cols[c], MARGIN + c * CELL_SIZE, labelOffset); }
+  for (let r = 0; r < 7; r++) { ctx.fillStyle = '#2c1810'; ctx.fillText((r + 1).toString(), labelOffset, MARGIN + r * CELL_SIZE); }
+
+  // Proverbs (棋谚) - placed inside the board margin area
+  const proverbRight = '落子兼长也兼短';
+  const proverbSpacing = CELL_SIZE * 0.9;
+  const proverbRightStartY = MARGIN + 3 * CELL_SIZE - 3 * proverbSpacing;
+  const proverbFontSize = Math.max(12, Math.floor(CELL_SIZE * 0.31));
+  ctx.font = 'bold ' + proverbFontSize + 'px sans-serif'; ctx.fillStyle = '#2c1810'; ctx.textAlign = 'center';
+  const rightProverbX = MARGIN + 6 * CELL_SIZE + MARGIN * 0.55;
+  for (let pr = 0; pr < 7; pr++) ctx.fillText(proverbRight[pr], rightProverbX, proverbRightStartY + pr * proverbSpacing);
+
+  const proverbBottom = '吃子忌短亦忌长';
+  const proverbBottomStartX = MARGIN + 3 * CELL_SIZE - 3 * proverbSpacing;
+  const bottomProverbY = MARGIN + 6 * CELL_SIZE + MARGIN * 0.55;
+  for (let pc = 0; pc < 7; pc++) ctx.fillText(proverbBottom[pc], proverbBottomStartX + pc * proverbSpacing, bottomProverbY);
+
+  drawPieces();
+  ctx.restore();
+
+  drawPlayerInfo();
+  drawButtons();
+
+  if (Game.alertVisible) {
+    if (Game.isGameOverAlert) drawGameOverAlert(); else drawAlert();
+  }
+}
+
+function drawTitle() {
+  const titleCY = 10 + 35;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '10px "Noto Serif SC", serif'; ctx.fillStyle = '#888888';
+  ctx.fillText('TRAE AI 创造力大赛DEMO版本', CW / 2, titleCY - 32);
+  ctx.font = 'bold 36px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+  ctx.fillText('丢 方', CW / 2, titleCY - 8);
+  ctx.font = '13px "Noto Serif SC", serif'; ctx.fillStyle = '#8b6914';
+  ctx.fillText('西安地方棋 · 本地测试', CW / 2, titleCY + 22);
+}
+
+function buildActionHint() {
+  switch (Game.phase) {
+    case PHASE_PLACEMENT: return Game.turn === BLACK ? '⚫ 黑方落子' : '⚪ 白方落子';
+    case PRE_EAT: {
+      const batch = Game.eatBatches[Game.eatBatchIdx] || {player: BLACK, count: 0};
+      const actor = batch.player === BLACK ? '黑棋' : '白棋';
+      const total = batch.count, remaining = total - Game.eatenCount;
+      return actor + ' | 吃' + total + '子，剩' + remaining + '子';
+    }
+    case MOVE_SEL: return Game.turn === BLACK ? '⚫ 黑方选子移动' : '⚪ 白方选子移动';
+    case MOVE_TARGET: return Game.turn === BLACK ? '⚫ 黑方选择目标' : '⚪ 白方选择目标';
+    case MOVE_EAT: {
+      const batch = Game.eatBatches[Game.eatBatchIdx] || {player: BLACK, count: 0};
+      const actor = batch.player === BLACK ? '黑棋' : '白棋';
+      const total = batch.count, remaining = total - Game.eatenCount;
+      const reason = Game.newFangs >= 2 ? '大方' : Game.newFangs === 1 ? '小方' : Game.newZhous > 0 ? '轴' : '';
+      return actor + ' | ' + reason + ' | 吃' + total + '子，剩' + remaining + '子';
+    }
+    case GAME_OVER: return Game.result === 'black_win' ? '⚫ 黑方胜' : Game.result === 'white_win' ? '⚪ 白方胜' : '🤝 和棋';
+    default: return '';
+  }
+}
+
+function buildPhaseText() {
+  switch (Game.phase) {
+    case PHASE_PLACEMENT: return '落子阶段';
+    case PRE_EAT: return '提子阶段';
+    case MOVE_SEL: case MOVE_TARGET: case MOVE_EAT: return '走子阶段';
+    case GAME_OVER: return '对局结束';
+    default: return '';
+  }
+}
+
+function drawStatusBar() {
+  const barY = 70 + 20, barW = CW - 20, barX = 10, barH = 64;
+  ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#d0c8b8'; ctx.lineWidth = 1.5;
+  drawRoundedRect(ctx, barX, barY, barW, barH, 8); ctx.fill(); ctx.stroke();
+  const ph = buildPhaseText();
+  ctx.textAlign = 'center'; ctx.font = 'bold 15px "Noto Serif SC", serif'; ctx.fillStyle = '#8b6914';
+  ctx.fillText(ph + '  ·  测试对战', barX + barW / 2, barY + barH * 0.3);
+  const hint = buildActionHint();
+  ctx.font = '14px "Noto Serif SC", serif'; ctx.fillStyle = '#3a2010';
+  ctx.fillText(hint, barX + barW / 2, barY + barH * 0.7);
+}
+
+function drawPieces() {
+  const eatHL = new Set();
+  if ((Game.phase === PRE_EAT || Game.phase === MOVE_EAT) && Game.eatBatchIdx < Game.eatBatches.length) {
+    const raw = getActuallyEatablePositions(Game.board, Game.eatBatches[Game.eatBatchIdx].player);
+    for (const ei of raw) eatHL.add(ei.row + ',' + ei.col);
+  }
+  const moveHL = new Set();
+  if (Game.phase === MOVE_TARGET && Game.selected && Game.validMoves.length) {
+    for (const m of Game.validMoves) moveHL.add(m.row + ',' + m.col);
+  }
+
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+    const x = MARGIN + c * CELL_SIZE, y = MARGIN + r * CELL_SIZE;
+    const stone = Game.board[r][c], key = r + ',' + c;
+
+    if (stone === EMPTY) {
+      if (moveHL.has(key)) {
+        ctx.fillStyle = 'rgba(76,175,80,0.6)'; ctx.beginPath(); ctx.arc(x, y, STONE_RADIUS * 0.9, 0, 2 * Math.PI); ctx.fill();
+      } else {
+        ctx.fillStyle = 'rgba(58,32,16,0.25)'; ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 2 * Math.PI); ctx.fill();
+      }
+      continue;
+    }
+
+    if (eatHL.has(key)) {
+      const g = ctx.createRadialGradient(x, y, STONE_RADIUS * 0.4, x, y, STONE_RADIUS + 12);
+      g.addColorStop(0, 'rgba(200,40,40,0.85)'); g.addColorStop(1, 'rgba(220,20,60,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, STONE_RADIUS + 12, 0, 2 * Math.PI); ctx.fill();
+    }
+
+    if (Game.selected && Game.selected.row === r && Game.selected.col === c) {
+      const pulse = Math.sin(Date.now() / 400) * 0.35 + 0.65;
+      ctx.strokeStyle = 'rgba(255,215,0,' + pulse + ')'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, STONE_RADIUS + 5, 0, 2 * Math.PI); ctx.stroke();
+    }
+
+    const grad = ctx.createRadialGradient(x - STONE_RADIUS * 0.3, y - STONE_RADIUS * 0.3, STONE_RADIUS * 0.15, x, y, STONE_RADIUS);
+    if (stone === BLACK) { grad.addColorStop(0, '#6a6a6a'); grad.addColorStop(0.5, '#2a2a2a'); grad.addColorStop(1, '#000'); }
+    else { grad.addColorStop(0, '#fff'); grad.addColorStop(0.5, '#e8e8e8'); grad.addColorStop(1, '#b0b0b0'); }
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, STONE_RADIUS, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = stone === BLACK ? '#1a1a1a' : '#999'; ctx.lineWidth = 1.2; ctx.stroke();
+
+    const shine = ctx.createRadialGradient(x - STONE_RADIUS * 0.35, y - STONE_RADIUS * 0.4, STONE_RADIUS * 0.05, x, y, STONE_RADIUS * 0.95);
+    shine.addColorStop(0, stone === BLACK ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.7)'); shine.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = shine; ctx.beginPath(); ctx.arc(x, y, STONE_RADIUS, 0, 2 * Math.PI); ctx.fill();
+  }
+}
+
+function drawPlayerInfo() {
+  const boardBottom = offsetY + (CELL_SIZE * 6 + MARGIN * 2) * scale;
+  const y = boardBottom + 28;
+  const panelW = Math.min(220, (CW - 60) / 2), gap = 12, pad = 12;
+  const totalW = panelW * 2 + gap;
+  const startX = (CW - totalW) / 2;
+  const INFO_H = 80;
+
+  for (let i = 0; i < 2; i++) {
+    const x = startX + i * (panelW + gap);
+    const isBlack = i === 0;
+    const isActive = Game.phase !== GAME_OVER && Game.turn === (isBlack ? BLACK : WHITE);
+    const bgColor = isBlack ? '#1a1a1a' : '#ffffff';
+    const textColor = isBlack ? '#e0e0e0' : '#1a1a1a';
+    const borderColor = isBlack ? '#444' : '#ccc';
+
+    ctx.fillStyle = bgColor; drawRoundedRect(ctx, x, y, panelW, INFO_H, 8); ctx.fill();
+    if (isActive) { ctx.strokeStyle = 'rgba(255,215,0,0.6)'; ctx.lineWidth = 3; ctx.stroke(); }
+    else { ctx.strokeStyle = borderColor; ctx.lineWidth = 2; ctx.stroke(); }
+
+    const label = isBlack ? '⚫ 黑方' : '⚪ 白方';
+    ctx.textAlign = 'center'; ctx.font = 'bold 13px "Noto Serif SC", serif'; ctx.fillStyle = textColor;
+    ctx.fillText(label, x + panelW / 2, y + 14);
+
+    const placeText = '落子: ' + (isBlack ? Game.bPlace : Game.wPlace) + '/' + (isBlack ? 25 : 24);
+    const gameTime = isBlack ? Game.blackGameTime : Game.whiteGameTime;
+    ctx.font = '11px "Noto Serif SC", serif'; ctx.textAlign = 'left';
+    ctx.fillText(placeText, x + 8, y + 30);
+    ctx.textAlign = 'right'; ctx.fillText('局时: ' + formatTime(gameTime), x + panelW - 8, y + 30);
+
+    const remainText = '剩余: ' + countS(Game.board, isBlack ? BLACK : WHITE);
+    const moveTime = isBlack ? Game.blackMoveTime : Game.whiteMoveTime;
+    ctx.textAlign = 'left'; ctx.fillText(remainText, x + 8, y + 48);
+    ctx.textAlign = 'right';
+    if (moveTime <= 10 && moveTime > 0) ctx.fillStyle = '#e74c3c';
+    ctx.fillText('步时: ' + formatTime(moveTime), x + panelW - 8, y + 48);
+    ctx.fillStyle = textColor;
+  }
+
+  ctx.strokeStyle = '#999'; ctx.lineWidth = 1.5;
+  drawRoundedRect(ctx, startX - pad, y - pad, totalW + pad * 2, INFO_H + pad * 2, 10); ctx.stroke();
+}
+
+function drawButtons() {
+  const boardBottom = offsetY + (CELL_SIZE * 6 + MARGIN * 2) * scale;
+  const btnY = boardBottom + 28 + 80 + 24;
+  const btnH = 46;
+  const gameLabels = ['🔄 新局', '↩ 悔棋', '🏳 认输', '🤝 提和'];
+  const gameTypes = ['newgame', 'undo', 'resign', 'draw'];
+  const gameColors = ['#5d3a1a', '#8b6914', '#c0392b', '#2c5f2d'];
+  const gap = 8, padX = 10;
+  const totalBtnW = CW - padX * 2;
+  const btnW = Math.floor((totalBtnW - gap * (gameLabels.length - 1)) / gameLabels.length);
+  Game.actionButtons = [];
+
+  for (let i = 0; i < gameLabels.length; i++) {
+    const x = padX + i * (btnW + gap);
+    let disabled = false;
+    if (gameTypes[i] === 'draw' && Game.phase === GAME_OVER) disabled = true;
+    if (gameTypes[i] === 'undo' && (!Game.history.length || Game.phase === GAME_OVER)) disabled = true;
+    if (gameTypes[i] === 'resign' && Game.phase === GAME_OVER) disabled = true;
+    ctx.fillStyle = disabled ? '#e8e0d0' : '#ffffff';
+    drawRoundedRect(ctx, x, btnY, btnW, btnH, 6); ctx.fill();
+    ctx.strokeStyle = disabled ? '#c0b8a8' : gameColors[i]; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.font = 'bold 12px "Noto Serif SC", serif';
+    ctx.fillStyle = disabled ? '#b0a898' : gameColors[i];
+    ctx.fillText(gameLabels[i], x + btnW / 2, btnY + btnH / 2 + 1);
+    Game.actionButtons.push({x, y: btnY, w: btnW, h: btnH, type: gameTypes[i], disabled});
+  }
+
+  // Back button
+  const backBtnW = 72, backBtnX = CW - backBtnW - padX, backBtnY = btnY + btnH + 24;
+  ctx.fillStyle = '#ffffff'; drawRoundedRect(ctx, backBtnX, backBtnY, backBtnW, btnH, 6); ctx.fill();
+  ctx.strokeStyle = '#8b6914'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.font = 'bold 13px "Noto Serif SC", serif'; ctx.fillStyle = '#8b6914';
+  ctx.fillText('🏠 返回', backBtnX + backBtnW / 2, backBtnY + btnH / 2 + 1);
+  Game.actionButtons.push({x: backBtnX, y: backBtnY, w: backBtnW, h: btnH, type: 'back', disabled: false});
+
+  // Pause button
+  const pauseBtnW = 72, pauseBtnX = padX;
+  const isPaused = Game.isPaused;
+  ctx.fillStyle = isPaused ? '#5d3a1a' : '#ffffff';
+  drawRoundedRect(ctx, pauseBtnX, backBtnY, pauseBtnW, btnH, 6); ctx.fill();
+  ctx.strokeStyle = isPaused ? '#3a2010' : '#8b6914'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.font = 'bold 13px "Noto Serif SC", serif';
+  ctx.fillStyle = isPaused ? '#ffffff' : '#8b6914';
+  ctx.fillText(isPaused ? '▶ 继续' : '⏸ 暂停', pauseBtnX + pauseBtnW / 2, backBtnY + btnH / 2 + 1);
+  Game.actionButtons.push({x: pauseBtnX, y: backBtnY, w: pauseBtnW, h: btnH, type: 'pause', disabled: false});
+}
+
+function drawAlert() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, CW, CH);
+  const aw = Math.min(320, CW - 40), ah = Game.showAlertCancel ? 180 : 150;
+  const ax = (CW - aw) / 2, ay = (CH - ah) / 2;
+  ctx.fillStyle = '#fdf5e6'; drawRoundedRect(ctx, ax, ay, aw, ah, 12); ctx.fill();
+  ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.textAlign = 'center';
+  if (Game.alertTitle) {
+    ctx.font = 'bold 20px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+    ctx.fillText(Game.alertTitle, ax + aw / 2, ay + 34);
+  }
+  const msgLines = (Game.alertMsg || '').split('\n');
+  const msgY = Game.alertTitle ? ay + 72 : ay + 48;
+  ctx.font = '16px "Noto Serif SC", serif'; ctx.fillStyle = '#5d3a1a'; ctx.textAlign = 'center';
+  for (let li = 0; li < msgLines.length; li++) ctx.fillText(msgLines[li], ax + aw / 2, msgY + li * 22);
+
+  if (Game.showAlertCancel) {
+    const centerX = ax + aw / 2, btnW = 80, btnH = 34, btnY2 = ay + ah - 50;
+    const okX = centerX - 45, cancelX = centerX + 45;
+    ctx.fillStyle = '#2c5f2d'; drawRoundedRect(ctx, okX - btnW / 2, btnY2, btnW, btnH, 6); ctx.fill();
+    ctx.font = 'bold 16px "Noto Serif SC", serif'; ctx.fillStyle = '#fff';
+    ctx.fillText(Game.alertBtnText, okX, btnY2 + btnH / 2 + 1);
+    const cancelLabel = Game.alertSecondBtnText || '取消';
+    ctx.fillStyle = Game.alertSecondBtnText ? '#6b6b6b' : '#c0392b';
+    drawRoundedRect(ctx, cancelX - btnW / 2, btnY2, btnW, btnH, 6); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText(cancelLabel, cancelX, btnY2 + btnH / 2 + 1);
+    Game.alertOkRect = {x: okX - btnW / 2, y: btnY2, w: btnW, h: btnH};
+    Game.alertCancelRect = {x: cancelX - btnW / 2, y: btnY2, w: btnW, h: btnH};
+  } else if (Game.alertBtnText) {
+    const btnW2 = 80, btnH2 = 34, btnY3 = ay + ah - 50;
+    ctx.fillStyle = '#5d3a1a'; drawRoundedRect(ctx, ax + aw / 2 - btnW2 / 2, btnY3, btnW2, btnH2, 6); ctx.fill();
+    ctx.font = 'bold 16px "Noto Serif SC", serif'; ctx.fillStyle = '#fdf5e6';
+    ctx.fillText(Game.alertBtnText, ax + aw / 2, btnY3 + btnH2 / 2 + 1);
+    Game.alertOkRect = {x: ax + aw / 2 - btnW2 / 2, y: btnY3, w: btnW2, h: btnH2};
+    Game.alertCancelRect = null;
+  } else {
+    Game.alertOkRect = null; Game.alertCancelRect = null;
+  }
+  Game.alertOverlayRect = {x: 0, y: 0, w: CW, h: CH};
+}
+
+function drawGameOverAlert() {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, CW, CH);
+  const isBlackWin = Game.alertTitle.includes('黑');
+  const isDraw = Game.result === 'draw';
+  const accentColor = isDraw ? '#6b8e6d' : (isBlackWin ? '#b8860b' : '#a0a0a0');
+  const bannerColor = isDraw ? '#2d4a3e' : (isBlackWin ? '#3d2b1a' : '#2a2a2a');
+  const bannerColor2 = isDraw ? '#3d5e4e' : (isBlackWin ? '#5a3e1b' : '#4a4a4a');
+  const cardW = Math.min(320, CW - 32), cardH = 220;
+  const cx = (CW - cardW) / 2, cy = (CH - cardH) / 2;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; drawRoundedRect(ctx, cx + 3, cy + 3, cardW, cardH, 14); ctx.fill();
+  const cardGrad = ctx.createLinearGradient(cx, cy, cx, cy + cardH);
+  cardGrad.addColorStop(0, '#fef9f0'); cardGrad.addColorStop(1, '#f0e6d0');
+  ctx.fillStyle = cardGrad; drawRoundedRect(ctx, cx, cy, cardW, cardH, 14); ctx.fill();
+  ctx.strokeStyle = 'rgba(180,150,110,0.5)'; ctx.lineWidth = 2; ctx.stroke();
+
+  const bannerH = 62;
+  const bannerGrad = ctx.createLinearGradient(cx, cy, cx + cardW, cy);
+  bannerGrad.addColorStop(0, bannerColor); bannerGrad.addColorStop(1, bannerColor2);
+  ctx.fillStyle = bannerGrad;
+  ctx.beginPath(); ctx.moveTo(cx + 14, cy); ctx.lineTo(cx + cardW - 14, cy);
+  ctx.arcTo(cx + cardW, cy, cx + cardW, cy + 14, 14); ctx.lineTo(cx + cardW, cy + bannerH);
+  ctx.lineTo(cx, cy + bannerH); ctx.lineTo(cx, cy + 14); ctx.arcTo(cx, cy, cx + 14, cy, 14); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = accentColor; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx + 20, cy + bannerH); ctx.lineTo(cx + cardW - 20, cy + bannerH); ctx.stroke();
+
+  ctx.font = '30px "Noto Serif SC", serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const icon = isDraw ? '🤝' : (isBlackWin ? '⚫' : '⚪');
+  ctx.fillText(icon, cx + 44, cy + bannerH / 2);
+  ctx.font = 'bold 18px "Noto Serif SC", serif'; ctx.fillStyle = '#ffffff';
+  const resultLabel = Game.alertTitle.replace(/[⚫⚪🤝]/g, '').trim();
+  ctx.fillText(resultLabel, cx + cardW / 2 + 10, cy + bannerH / 2);
+
+  const infoY = cy + bannerH + 14;
+  const reasonLines = (Game.alertMsg || '').split('\n');
+  ctx.font = 'bold 18px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810'; ctx.textAlign = 'center';
+  for (let rli = 0; rli < reasonLines.length; rli++) ctx.fillText(reasonLines[rli], cx + cardW / 2, infoY + 10 + rli * 22);
+
+  const modeLabelY = infoY + 10 + reasonLines.length * 22 + 6;
+  ctx.font = '13px "Noto Serif SC", serif'; ctx.fillStyle = '#8b7355';
+  ctx.fillText('测试对战 · ' + (Game.currentRound || 0) + '回合', cx + cardW / 2, modeLabelY);
+
+  const btnY = cy + cardH - 48, btnW = 100, btnH = 34;
+  const okX = cx + cardW / 2 - 60;
+  const btnGradOk = ctx.createLinearGradient(okX - btnW / 2, btnY, okX - btnW / 2, btnY + btnH);
+  btnGradOk.addColorStop(0, accentColor); btnGradOk.addColorStop(1, isDraw ? '#2d4a3e' : (isBlackWin ? '#5a3e1b' : '#3a3a3a'));
+  ctx.fillStyle = btnGradOk; drawRoundedRect(ctx, okX - btnW / 2, btnY, btnW, btnH, 17); ctx.fill();
+  ctx.font = 'bold 14px "Noto Serif SC", serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('新 局', okX, btnY + btnH / 2);
+  Game.alertOkRect = {x: okX - btnW / 2, y: btnY, w: btnW, h: btnH};
+
+  const closeX = cx + cardW / 2 + 60;
+  ctx.fillStyle = 'rgba(150,130,110,0.25)'; drawRoundedRect(ctx, closeX - btnW / 2, btnY, btnW, btnH, 17); ctx.fill();
+  ctx.strokeStyle = 'rgba(150,130,110,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#8b7355'; ctx.fillText('返 回', closeX, btnY + btnH / 2);
+  Game.alertCancelRect = {x: closeX - btnW / 2, y: btnY, w: btnW, h: btnH};
+  Game.alertOverlayRect = {x: 0, y: 0, w: CW, h: CH};
+}
+
+// ==================== INTRO SCENE ====================
+function drawIntro() {
+  ctx.clearRect(0, 0, CW, CH);
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, CH);
+  bgGrad.addColorStop(0, '#fdf8f0'); bgGrad.addColorStop(0.5, '#f5ede0'); bgGrad.addColorStop(1, '#ede0d0');
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, CW, CH);
+
+  const titleY = CH * 0.15;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '16px "Noto Serif SC", serif'; ctx.fillStyle = '#888888';
+  ctx.fillText('TRAE AI 创造力大赛DEMO版本', CW / 2, titleY - 46);
+  ctx.font = 'bold 55px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+  ctx.fillText('丢 方', CW / 2, titleY);
+  ctx.font = '19px "Noto Serif SC", serif'; ctx.fillStyle = '#8b6914';
+  ctx.fillText('西安地方棋', CW / 2, titleY + 48);
+
+  const introTexts = [
+    '从有趣到兴趣，', '从兴趣到热爱，', '从热爱到有了这个游戏。',
+    '我的家乡西安的一种地方棋——丢方。', '',
+    '百科上说，', '丢方在关中地区有一千多年历史，', '这点我不清楚；',
+    '但是丢方真的很好玩，这个我很确定。', '',
+    '如果你是一个喜欢下棋的人，', '那么你很可能也会喜欢丢方；',
+    '如果你不是一个喜欢下棋的人，', '那么丢方很可能会让你喜欢下棋。', '',
+    '让我们一起开始关于方和轴的智力博弈吧。', '来，方上！吃子。'
+  ];
+  const startY = titleY + 76;
+  const lineGap = 28;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let i = 0; i < introTexts.length; i++) {
+    const y = startY + i * lineGap;
+    if (!introTexts[i]) continue;
+    if (introTexts[i] === '来，方上！吃子。') {
+      ctx.font = 'bold 31px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+    } else {
+      ctx.font = '21px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+    }
+    ctx.fillText(introTexts[i], CW / 2, y);
+  }
+
+  ctx.textAlign = 'right'; ctx.font = 'italic 17px "Noto Serif SC", serif'; ctx.fillStyle = '#5d3a1a';
+  ctx.fillText('张磊，2026.6', CW - 30, startY + introTexts.length * lineGap + 30);
+
+  // Pulse dot
+  const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 600);
+  ctx.fillStyle = 'rgba(93,58,26,' + (0.3 + 0.3 * pulse) + ')';
+  ctx.font = '18px "Noto Serif SC", serif'; ctx.textAlign = 'center';
+  ctx.fillText('— 点击屏幕进入游戏 —', CW / 2, CH - 50);
+}
+
+// ==================== MENU SCENE ====================
+function drawMenu() {
+  ctx.clearRect(0, 0, CW, CH);
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, CH);
+  bgGrad.addColorStop(0, '#fdf8f0'); bgGrad.addColorStop(0.5, '#f0e6d5'); bgGrad.addColorStop(1, '#e8d8c0');
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, CW, CH);
+
+  const titleY = CH * 0.12;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '10px "Noto Serif SC", serif'; ctx.fillStyle = '#888888';
+  ctx.fillText('TRAE AI 创造力大赛DEMO版本', CW / 2, titleY - 40);
+  ctx.font = 'bold 48px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+  ctx.fillText('丢 方', CW / 2, titleY);
+  ctx.font = '15px "Noto Serif SC", serif'; ctx.fillStyle = '#8b6914';
+  ctx.fillText('西安地方棋', CW / 2, titleY + 54);
+
+  const modeY = titleY + 90;
+  const modeCardW = Math.min(280, CW - 80), modeCardH = 48, modeGap = 14;
+  const modes = [
+    {id: 'dev', icon: '⚔️', label: '测试对战'},
+    {id: 'wiki', icon: '📖', label: '丢方百科'}
+  ];
+  Game.menuButtons = [];
+
+  for (let i = 0; i < modes.length; i++) {
+    const mx = CW / 2 - modeCardW / 2, my = modeY + i * (modeCardH + modeGap);
+    const cardGrad = ctx.createLinearGradient(mx, my, mx, my + modeCardH);
+    cardGrad.addColorStop(0, '#fdf5e6'); cardGrad.addColorStop(1, '#e8d5b8');
+    ctx.fillStyle = cardGrad; drawRoundedRect(ctx, mx, my, modeCardW, modeCardH, 10); ctx.fill();
+    ctx.strokeStyle = '#c8a87c'; ctx.lineWidth = 2; ctx.stroke();
+
+    const iconW = 26, gap = 8, labelW = modes[i].label.length * 18;
+    const combinedW = iconW + gap + labelW;
+    const contentX = mx + (modeCardW - combinedW) / 2;
+
+    ctx.font = '22px "Noto Serif SC", serif'; ctx.textAlign = 'left';
+    ctx.fillText(modes[i].icon, contentX, my + modeCardH / 2 + 1);
+    ctx.font = 'bold 18px "Noto Serif SC", serif'; ctx.fillStyle = '#2c1810';
+    ctx.fillText(modes[i].label, contentX + iconW + gap, my + modeCardH / 2 + 1);
+
+    Game.menuButtons.push({x: mx, y: my, w: modeCardW, h: modeCardH, type: 'mode', mode: modes[i].id});
+  }
+
+  ctx.font = '12px "Noto Serif SC", serif'; ctx.fillStyle = 'rgba(139,105,20,0.5)';
+  ctx.textAlign = 'center'; ctx.fillText('v1.0.0 Demo', CW / 2, CH - 30);
+}
+
+// ==================== WIKI SCENE (from mini-program) ====================
+let scrollOffset = 0, maxScroll = 0;
+let velocity = 0, inertiaTimer = null;
+let touchStartY = 0, dragStartScrollOffset = 0;
+let touchStartTime = 0, lastTouchY = 0, lastTouchTime = 0;
+let isScrolling = false;
+let bottomBtns = [];
+let expandedWikiItems = {};
+let collapsedCategories = {};
+let wikiItems = [];
+let categoryItems = [];
+const SCROLL_TOP = 0.15;
+const SCROLL_BOTTOM_OFFSET = 60;
+let WIKI_DATA;
+
+function initWikiData() {
+  WIKI_DATA = [
+    { id: 'intro', title: '什么是丢方', category: '基础概念',
+      desc: '丢方是流行于关中地区的一种地方棋，应当是围棋的一种简化或变种，对局分为落子阶段、提子阶段、走子阶段三部分，下棋双方围绕"方"（四子成正方形）和"轴"（七子成一线）进行博弈。' },
+    { id: 'board', title: '棋盘与棋子', category: '基础概念',
+      desc: '丢方棋盘为七横七纵的直线相交形成49个交点，坐标列以a-g表示，行以1-7表示。棋子为黑白二色，先手黑方25子，后手白方24子，落子与走子均在交点上进行。' },
+    { id: 'flow', title: '对局流程', category: '对局规则',
+      desc: '对局分为三个阶段：1.落子阶段（丢）：黑白交替落子，填满49个点位。2.提子阶段：落子结束后双方轮流吃子，腾出移动空位。3.走子阶段（走）：双方轮流移动棋子，通过成方/成轴吃子。' },
+    { id: 'win', title: '胜负判定', category: '对局规则',
+      desc: '走子阶段无法移动棋子或棋子不足四颗的一方判负；主动认输判负。双方均无法成方且连续交换回合达到20次，判和棋。' },
+    { id: 'eatrule', title: '吃子规则', category: '对局规则',
+      desc: '可吃棋子：不构成方或轴的棋子。不可吃棋子：1.一般不可吃（成方/成轴棋子）；2.特殊不可吃（第一步断方、撵撑轴），受规则保护，强行吃子若无其他可吃子则判和棋。' },
+    { id: 'breakfang', title: '第一步断方', category: '对局规则',
+      desc: '提子阶段和走子阶段，后成方者走棋之前，双方所有的吃子，都不能吃掉对手唯一能一步走子成方的相关棋子；若无其他可吃子，则判和棋。' },
+    { id: 'crippled', title: '撵撑轴', category: '对局规则',
+      desc: '一种特殊的轴，对手可通过吃一子同时断方和断轴，且无法后续形成封闭方眼/轴眼。落子无人成方时，提子阶段先吃子者不能吃开撵撑轴轴眼。' },
+    { id: 'rule1', title: '有方不塞人', category: '对局规则',
+      desc: '走子阶段，如果一方存在任何一步能成方或成轴的走法，则该方本回合不能将任何棋子移动到对手任何能一步成形的方眼或轴眼上（不能塞）。可以走子阻挡对手成方棋子的移动路径（可以挡）。' },
+    { id: 'fang', title: '小方', category: '组合与术语',
+      desc: '相邻2×2四个交点同色，即构成小方。落子成方获先手权并多吃子；走子成方吃一子。' },
+    { id: 'dafang', title: '大方', category: '组合与术语',
+      desc: '相邻2×3或3×2六个交点同色，构成大方。大方只是战术概念，吃子时仍按小方数量计算。' },
+    { id: 'zhou', title: '轴', category: '组合与术语',
+      desc: '某一行或列的七个交点同色，构成轴。成轴棋子不可被吃；走子成轴吃两子。' },
+    { id: 'fangyan', title: '小方眼', category: '组合与术语',
+      desc: '2×2方格中三子同色，剩余一位为空（活眼）或敌子（死眼），构成小方眼。' },
+    { id: 'dafangyan', title: '大方眼', category: '组合与术语',
+      desc: '2×3或3×2方格中五子同色，缺子位于梁上（中间两点之一），构成大方眼。' },
+    { id: 'zhouyan', title: '轴眼', category: '组合与术语',
+      desc: '某一行或列上六子同色，缺一子构成轴眼。' },
+    { id: 'fangkou', title: '方口/轴口', category: '组合与术语',
+      desc: '成方或成轴相邻的点位即是该方/轴的口。口被棋子占据则封闭，所有口封闭则为死方/死轴。' },
+    { id: 'dengfang', title: '登方', category: '战术术语',
+      desc: '落子阶段在2×2方格中落下第三子，形成三己一空的状态，直接威胁下一手成方。对手须补方回应。' },
+    { id: 'lafang', title: '拉方/拉轴', category: '战术术语',
+      desc: '走子阶段移动已成方的棋子拆开形成方眼，下一手可再走回去成方吃子。拉大方/拉轴同理。' }
+  ];
+}
+
+function resetWikiState() {
+  expandedWikiItems = {};
+  collapsedCategories = {};
+  scrollOffset = 0;
+  maxScroll = 0;
+  touchStartY = 0;
+  dragStartScrollOffset = 0;
+  touchStartTime = 0;
+  lastTouchY = 0;
+  lastTouchTime = 0;
+  isScrolling = false;
+  velocity = 0;
+  stopInertia();
+}
+
+function drawWiki() {
+  const w = CW, h = CH;
+  bottomBtns = [];
+  wikiItems = [];
+  categoryItems = [];
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.font = '14px "Noto Serif SC"';
+  ctx.fillStyle = '#888888';
+  ctx.fillText('TRAE AI 创造力大赛DEMO版本', w / 2, h * 0.065 - 26);
+  ctx.font = 'bold 24px "Noto Serif SC"';
+  ctx.fillStyle = '#000000';
+  ctx.fillText('丢方百科', w / 2, h * 0.065);
+
+  const contentX = 15;
+  const contentW = w - 30;
+  const contentY = h * SCROLL_TOP;
+  const clipBottom = h - SCROLL_BOTTOM_OFFSET;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, contentY, w, clipBottom - contentY);
+  ctx.clip();
+
+  const cats = ['基础概念', '对局规则', '组合与术语', '战术术语'];
+  let itemY = contentY - scrollOffset;
+
+  function isItemVisible(y, h2) {
+    return y + h2 > contentY && y < clipBottom;
+  }
+
+  for (let ci = 0; ci < cats.length; ci++) {
+    const catName = cats[ci];
+    const catItems = WIKI_DATA.filter(wd => wd.category === catName);
+    if (!catItems.length) continue;
+
+    const isCollapsed = !!collapsedCategories[catName];
+
+    if (isItemVisible(itemY, 34)) {
+      ctx.fillStyle = 'rgba(212,160,23,0.15)';
+      ctx.fillRect(contentX, itemY - 2, contentW, 34);
+
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 17px "Noto Serif SC"';
+      ctx.fillStyle = '#000000';
+      const arrow = isCollapsed ? '\u25b8' : '\u25be';
+      ctx.fillText(arrow + ' ' + catName, contentX + 8, itemY + 14);
+
+      const catRect = { x: contentX, y: itemY - 2, w: contentW, h: 34, type: 'category', name: catName };
+      categoryItems.push(catRect);
+    }
+    itemY += 34;
+
+    if (!isCollapsed) {
+      for (let ii = 0; ii < catItems.length; ii++) {
+        const item = catItems[ii];
+        const isExpanded = !!expandedWikiItems[item.id];
+        const itemRect = { x: contentX, y: itemY - 2, w: contentW, h: isExpanded ? 0 : 32, item: item };
+
+        if (itemY > clipBottom + 100) break;
+        if (isItemVisible(itemY, isExpanded ? 200 : 32)) {
+          if (isExpanded) {
+            const descLines = wrapWikiText(item.desc, contentW - 30, ctx, '16px "Noto Serif SC"');
+            const descH = descLines.length * 24 + 48;
+            itemRect.h = 32 + descH;
+
+            ctx.fillStyle = 'rgba(212,160,23,0.15)';
+            ctx.fillRect(itemRect.x, itemRect.y, contentW, 32 + descH);
+            ctx.strokeStyle = 'rgba(212,160,23,0.4)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(itemRect.x, itemRect.y, contentW, 32 + descH);
+
+            ctx.font = 'bold 16px "Noto Serif SC"';
+            ctx.fillStyle = '#000000';
+            ctx.textAlign = 'left';
+            ctx.fillText('  ' + item.title, contentX + 8, itemY + 16);
+
+            ctx.fillStyle = 'rgba(253,245,230,0.08)';
+            ctx.fillRect(itemRect.x + 4, itemY + 34, contentW - 8, descH - 4);
+
+            ctx.font = '16px "Noto Serif SC"';
+            ctx.fillStyle = '#000000';
+            for (let dl = 0; dl < descLines.length; dl++) {
+              ctx.fillText(descLines[dl], contentX + 14, itemY + 52 + dl * 24);
+            }
+
+            itemY += 32 + descH + 4;
+          } else {
+            ctx.fillStyle = 'rgba(253,245,230,0.1)';
+            ctx.fillRect(itemRect.x, itemRect.y, contentW, 32);
+
+            ctx.font = '16px "Noto Serif SC"';
+            ctx.fillStyle = '#000000';
+            ctx.textAlign = 'left';
+            ctx.fillText('  ' + item.title, contentX + 8, itemY + 15);
+
+            itemY += 32;
+          }
+        } else {
+          itemY += isExpanded ? 32 + calcDescHeight(item.desc, contentW - 30) + 4 : 32;
+          itemRect.h = isExpanded ? 32 + calcDescHeight(item.desc, contentW - 30) + 4 : 32;
+        }
+
+        wikiItems.push(itemRect);
+      }
+    }
+    itemY += 6;
+  }
+
+  ctx.restore();
+
+  maxScroll = Math.max(0, itemY + scrollOffset - clipBottom);
+
+  if (maxScroll > 0) {
+    const barW = 6;
+    const barX = w - barW - 6;
+    const barTop = contentY + 2;
+    const barBottom = clipBottom - 2;
+    const barAreaH = barBottom - barTop;
+    const barThumbH = Math.max(32, barAreaH * barAreaH / (barAreaH + maxScroll));
+    let barThumbY = barTop + scrollOffset / maxScroll * (barAreaH - barThumbH);
+    if (barThumbY < barTop) barThumbY = barTop;
+    if (barThumbY + barThumbH > barBottom) barThumbY = barBottom - barThumbH;
+
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#2c1810';
+    drawRoundedRect(ctx, barX, barTop, barW, barAreaH, 3); ctx.fill();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = '#5d3a1a';
+    drawRoundedRect(ctx, barX, barThumbY, barW, barThumbH, 3); ctx.fill();
+    ctx.restore();
+  }
+
+  drawWikiBottomBar(w, h);
+}
+
+function calcDescHeight(text, maxWidth) {
+  if (!text) return 0;
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.font = '16px "Noto Serif SC"';
+  const words = text.split('');
+  let currentLine = '';
+  let lineCount = 1;
+  for (let i = 0; i < words.length; i++) {
+    const testLine = currentLine + words[i];
+    const metrics = tempCtx.measureText(testLine);
+    if (metrics.width > maxWidth && currentLine.length > 0) {
+      lineCount++;
+      currentLine = words[i];
+    } else {
+      currentLine = testLine;
+    }
+  }
+  return lineCount * 24 + 48;
+}
+
+function wrapWikiText(text, maxWidth, context, font) {
+  context.font = font;
+  const words = text.split('');
+  const lines = [];
+  let currentLine = '';
+  for (let i = 0; i < words.length; i++) {
+    const testLine = currentLine + words[i];
+    const metrics = context.measureText(testLine);
+    if (metrics.width > maxWidth && currentLine.length > 0) {
+      lines.push(currentLine);
+      currentLine = words[i];
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine.length > 0) lines.push(currentLine);
+  return lines;
+}
+
+function drawWikiBottomBar(w, h) {
+  const btnW = 72, btnH = 42;
+  const btnX = w - btnW - 12, btnY = h - btnH - 12;
+
+  drawRoundedRect(ctx, btnX, btnY, btnW, btnH, 6);
+  ctx.fillStyle = '#ffffff'; ctx.fill();
+  ctx.strokeStyle = '#8b6914'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  ctx.font = 'bold 15px "Noto Serif SC"';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#8b6914';
+  ctx.fillText('\u{1f3e0} \u8fd4\u56de', btnX + btnW / 2, btnY + btnH / 2 + 1);
+
+  bottomBtns.push({ x: btnX, y: btnY, w: btnW, h: btnH, type: 'back' });
+}
+
+// ========== 触摸滚动 ==========
+function handleWikiTouchStart(cx, cy) {
+  stopInertia();
+  touchStartY = cy;
+  dragStartScrollOffset = scrollOffset;
+  touchStartTime = Date.now();
+  lastTouchY = cy;
+  lastTouchTime = Date.now();
+  velocity = 0;
+  isScrolling = false;
+}
+
+function handleWikiTouchMove(cx, cy) {
+  const dy = cy - touchStartY;
+  const now = Date.now();
+  const totalTime = now - touchStartTime;
+
+  if (Math.abs(dy) > 6 && !isScrolling && totalTime < 500) {
+    isScrolling = true;
+  }
+  if (!isScrolling) return;
+
+  const deltaY = lastTouchY - cy;
+  const deltaTime = now - lastTouchTime;
+
+  if (deltaTime > 0) {
+    const instantV = deltaY / deltaTime;
+    velocity = velocity * 0.4 + instantV * 0.6;
+  }
+
+  const rawScroll = dragStartScrollOffset + (touchStartY - cy);
+
+  if (rawScroll < 0) {
+    scrollOffset = -Math.sqrt(-rawScroll) * 2.0;
+  } else if (rawScroll > maxScroll) {
+    const over = rawScroll - maxScroll;
+    scrollOffset = maxScroll + Math.sqrt(over) * 2.0;
+  } else {
+    scrollOffset = rawScroll;
+  }
+
+  lastTouchY = cy;
+  lastTouchTime = now;
+}
+
+function handleWikiTouchEnd(cx, cy) {
+  const now = Date.now();
+  const totalTime = now - touchStartTime;
+  const dy = cy - touchStartY;
+
+  if (!isScrolling && Math.abs(dy) < 12 && totalTime < 500) {
+    return handleWikiTouch(cx, cy);
+  }
+
+  if (scrollOffset < 0 || scrollOffset > maxScroll) {
+    startSnapBack();
+  } else if (Math.abs(velocity) > 0.02) {
+    startWikiInertia();
+  }
+  isScrolling = false;
+  return { action: 'scroll' };
+}
+
+function startWikiInertia() {
+  stopInertia();
+  function tick() {
+    velocity *= 0.93;
+    if (Math.abs(velocity) < 0.008) { stopInertia(); clampScroll(); return; }
+    scrollOffset += velocity * 16;
+    if (scrollOffset < 0) { scrollOffset *= 0.7; velocity *= 0.6; if (scrollOffset > -1) { scrollOffset = 0; stopInertia(); return; } }
+    if (scrollOffset > maxScroll) { const over = scrollOffset - maxScroll; scrollOffset = maxScroll + over * 0.6; velocity *= 0.6; if (over < 1) { scrollOffset = maxScroll; stopInertia(); return; } }
+    inertiaTimer = setTimeout(tick, 16);
+  }
+  inertiaTimer = setTimeout(tick, 16);
+}
+
+function startSnapBack() {
+  stopInertia();
+  const target = scrollOffset < 0 ? 0 : maxScroll;
+  let step = 0;
+  function tick() {
+    step++;
+    const t = Math.min(step / 15, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    scrollOffset = scrollOffset + (target - scrollOffset) * ease;
+    if (t >= 1 || Math.abs(target - scrollOffset) < 0.5) { scrollOffset = target; stopInertia(); return; }
+    inertiaTimer = setTimeout(tick, 16);
+  }
+  inertiaTimer = setTimeout(tick, 16);
+}
+
+function stopInertia() {
+  if (inertiaTimer) { clearTimeout(inertiaTimer); inertiaTimer = null; }
+}
+
+function clampScroll() {
+  if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+  if (scrollOffset < 0) scrollOffset = 0;
+}
+
+function handleWikiTouch(cx, cy) {
+  for (let i = 0; i < bottomBtns.length; i++) {
+    const b = bottomBtns[i];
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      if (b.type === 'back') { currentScene = 'menu'; return { action: 'back' }; }
+    }
+  }
+  for (let k = 0; k < categoryItems.length; k++) {
+    const cb = categoryItems[k];
+    if (cx >= cb.x && cx <= cb.x + cb.w && cy >= cb.y && cy <= cb.y + cb.h) {
+      if (collapsedCategories[cb.name]) { delete collapsedCategories[cb.name]; }
+      else { collapsedCategories[cb.name] = true; }
+      return { action: 'toggleCategory' };
+    }
+  }
+  for (let j = 0; j < wikiItems.length; j++) {
+    const wb = wikiItems[j];
+    if (cx >= wb.x && cx <= wb.x + wb.w && cy >= wb.y && cy <= wb.y + wb.h) {
+      const itemId = wb.item.id;
+      if (expandedWikiItems[itemId]) { delete expandedWikiItems[itemId]; }
+      else { expandedWikiItems[itemId] = true; }
+      return { action: 'selectItem' };
+    }
+  }
+  return null;
+}
+
+// ==================== SCENE MANAGEMENT ====================
+let currentScene = 'intro';
+let animFrameId = null;
+
+function handleClick(cx, cy) {
+  if (currentScene === 'intro') {
+    currentScene = 'menu';
+    return;
+  }
+
+  if (currentScene === 'wiki') {
+    const result = handleWikiTouch(cx, cy);
+    if (result && result.action === 'back') { return; }
+    return;
+  }
+
+  if (currentScene === 'menu') {
+    for (const b of (Game.menuButtons || [])) {
+      if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+        if (b.type === 'mode') {
+          if (b.mode === 'dev') { initBoard('dev'); startBGM(); }
+          else if (b.mode === 'wiki') { initWikiData(); resetWikiState(); currentScene = 'wiki'; }
+        }
+        return;
+      }
+    }
+    return;
+  }
+
+  if (currentScene === 'game') {
+    // Alert handling
+    if (Game.alertVisible) {
+      if (Game.alertOkRect && cx >= Game.alertOkRect.x && cx <= Game.alertOkRect.x + Game.alertOkRect.w && cy >= Game.alertOkRect.y && cy <= Game.alertOkRect.y + Game.alertOkRect.h) {
+        const cb = Game.alertCallback; hideAlert(); if (cb) cb(); return;
+      }
+      if (Game.alertCancelRect && cx >= Game.alertCancelRect.x && cx <= Game.alertCancelRect.x + Game.alertCancelRect.w && cy >= Game.alertCancelRect.y && cy <= Game.alertCancelRect.y + Game.alertCancelRect.h) {
+        const cancelCb = Game.alertSecondCallback || Game.alertCancelCallback; hideAlert(); if (cancelCb) cancelCb(); return;
+      }
+      if (Game.alertOverlayRect && cx >= Game.alertOverlayRect.x && cx <= Game.alertOverlayRect.x + Game.alertOverlayRect.w && cy >= Game.alertOverlayRect.y && cy <= Game.alertOverlayRect.y + Game.alertOverlayRect.h) return;
+    }
+
+    // Action buttons
+    if (Game.actionButtons) {
+      for (const b of Game.actionButtons) {
+        if (!b.disabled && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+          if (b.type === 'newgame') { initBoard('dev'); }
+          else if (b.type === 'undo') { undo(); }
+          else if (b.type === 'resign') {
+            showAlert('认输', '确定要认输吗？', '确定', () => resign(), '取消', null);
+          }
+          else if (b.type === 'draw') { drawOffer(); }
+          else if (b.type === 'back') { stopTimer(); stopBGM(); currentScene = 'menu'; }
+          else if (b.type === 'pause') {
+            if (Game.isPaused) { Game.isPaused = false; Game.lastTickTime = Date.now(); }
+            else { Game.isPaused = true; }
+          }
+          return;
+        }
+      }
+    }
+
+    if (Game.isPaused) return;
+    if (Game.phase === GAME_OVER) return;
+
+    // Board click
+    if (cx >= offsetX && cx <= offsetX + (CELL_SIZE * 6 + MARGIN * 2) * scale &&
+        cy >= offsetY && cy <= offsetY + (CELL_SIZE * 6 + MARGIN * 2) * scale) {
+      const pos = xy2rc(cx, cy);
+      if (!pos) return;
+      const {row, col} = pos;
+      recordAction();
+      if (Game.phase === PHASE_PLACEMENT) handlePlace(row, col);
+      else if (Game.phase === PRE_EAT || Game.phase === MOVE_EAT) handleEat(row, col);
+      else if (Game.phase === MOVE_SEL) handleSelect(row, col);
+      else if (Game.phase === MOVE_TARGET) handleTarget(row, col);
+    }
+  }
+}
+
+// ==================== EVENT LISTENERS ====================
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  handleClick(e.clientX - rect.left, e.clientY - rect.top);
+});
+
+canvas.addEventListener('touchstart', e => {
+  if (currentScene === 'wiki') {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    handleWikiTouchStart(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+  }
+});
+
+canvas.addEventListener('touchmove', e => {
+  if (currentScene === 'wiki') {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    handleWikiTouchMove(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+  }
+});
+
+canvas.addEventListener('touchend', e => {
+  if (currentScene === 'wiki') {
+    const rect = canvas.getBoundingClientRect();
+    handleWikiTouchEnd(e.changedTouches[0].clientX - rect.left, e.changedTouches[0].clientY - rect.top);
+  }
+});
+
+canvas.addEventListener('wheel', e => {
+  if (currentScene === 'wiki') {
+    e.preventDefault();
+    stopInertia();
+    scrollOffset += e.deltaY;
+    if (scrollOffset < 0) {
+      scrollOffset = -Math.sqrt(-scrollOffset) * 2.0;
+    } else if (scrollOffset > maxScroll) {
+      const over = scrollOffset - maxScroll;
+      scrollOffset = maxScroll + Math.sqrt(over) * 2.0;
+    }
+    if (scrollOffset < 0 || scrollOffset > maxScroll) {
+      startSnapBack();
+    }
+  }
+}, { passive: false });
+
+// ==================== MAIN LOOP ====================
+function loop() {
+  if (currentScene === 'intro') drawIntro();
+  else if (currentScene === 'menu') drawMenu();
+  else if (currentScene === 'wiki') drawWiki();
+  else if (currentScene === 'game') drawBoard();
+  animFrameId = requestAnimationFrame(loop);
+}
+
+// ==================== INIT ====================
+Game.init();
+loop();
+</script>
+</body>
+</html>

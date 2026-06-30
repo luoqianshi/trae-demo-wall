@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI社恐翻译器 - Social Decoder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd',
+              300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9',
+              600: '#0284c7', 700: '#0369a1', 800: '#075985', 900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    body { background: #0f172a; }
+    
+    /* 自定义滚动条 */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    
+    /* 案例卡片悬浮效果 */
+    .case-card {
+      transition: all 0.3s ease;
+    }
+    .case-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+    
+    /* 选中状态 */
+    .case-card.selected {
+      border-color: #0ea5e9;
+      background: linear-gradient(135deg, rgba(14,165,233,0.1) 0%, rgba(139,92,246,0.1) 100%);
+    }
+    
+    /* Timeline 节点 */
+    .timeline-node {
+      transition: all 0.3s ease;
+    }
+    .timeline-node.idle {
+      opacity: 0.4;
+    }
+    .timeline-node.active {
+      opacity: 1;
+    }
+    .timeline-node.completed {
+      opacity: 1;
+    }
+    
+    /* 分析卡片 */
+    .result-card {
+      animation: cardFadeIn 0.3s ease-out forwards;
+    }
+    @keyframes cardFadeIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* 风险环形图 */
+    .risk-ring {
+      transition: stroke-dashoffset 1s ease-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen text-white">
+  <div id="app" class="max-w-6xl mx-auto px-4 py-8">
+    
+    <!-- Header -->
+    <header class="text-center mb-12">
+      <div class="inline-flex items-center gap-3 mb-4">
+        <div class="p-3 bg-gradient-to-br from-purple-500/20 to-primary-500/20 rounded-xl">
+          <span class="text-4xl">🧠</span>
+        </div>
+        <div class="text-left">
+          <h1 class="text-3xl font-bold bg-gradient-to-r from-primary-400 to-purple-400 bg-clip-text text-transparent">
+            AI社恐翻译器
+          </h1>
+          <p class="text-slate-400 text-sm">Social Decoder - 帮你读懂社交潜台词</p>
+        </div>
+      </div>
+    </header>
+    
+    <!-- 案例选择区 -->
+    <section id="caseSelection" class="mb-12">
+      <h2 class="text-center text-slate-400 mb-6">👇 点击选择一个场景，开始体验 AI 分析</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
+        
+        <!-- 职场案例 -->
+        <button class="case-card p-6 bg-slate-800/50 border border-slate-700/50 rounded-xl text-center cursor-pointer"
+                onclick="selectCase('work', this)">
+          <div class="text-4xl mb-3">👔</div>
+          <div class="font-semibold text-white mb-1">职场</div>
+          <div class="text-xs text-slate-500">上下级沟通分析</div>
+        </button>
+        
+        <!-- 面试案例 -->
+        <button class="case-card p-6 bg-slate-800/50 border border-slate-700/50 rounded-xl text-center cursor-pointer"
+                onclick="selectCase('interview', this)">
+          <div class="text-4xl mb-3">🎯</div>
+          <div class="font-semibold text-white mb-1">面试</div>
+          <div class="text-xs text-slate-500">面试官潜台词识别</div>
+        </button>
+        
+        <!-- 客户案例 -->
+        <button class="case-card p-6 bg-slate-800/50 border border-slate-700/50 rounded-xl text-center cursor-pointer"
+                onclick="selectCase('client', this)">
+          <div class="text-4xl mb-3">🤝</div>
+          <div class="font-semibold text-white mb-1">客户</div>
+          <div class="text-xs text-slate-500">商务沟通分析</div>
+        </button>
+        
+        <!-- 多轮聊天 -->
+        <button class="case-card p-6 bg-slate-800/50 border border-slate-700/50 rounded-xl text-center cursor-pointer"
+                onclick="selectCase('conversation', this)">
+          <div class="text-4xl mb-3">💬</div>
+          <div class="font-semibold text-white mb-1">多轮聊天</div>
+          <div class="text-xs text-slate-500">完整对话分析</div>
+        </button>
+        
+      </div>
+    </section>
+    
+    <!-- 主分析区（初始隐藏） -->
+    <section id="mainAnalysis" class="hidden">
+      
+      <!-- 已选案例提示 -->
+      <div id="selectedCaseHint" class="text-center mb-6 p-4 bg-slate-800/30 rounded-lg border border-slate-700/30">
+        <span class="text-slate-400">当前案例：</span>
+        <span id="currentCaseName" class="text-primary-400 font-semibold"></span>
+        <span class="text-slate-500 mx-2">|</span>
+        <span id="currentCaseText" class="text-slate-400 text-sm"></span>
+      </div>
+      
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- 左侧：Timeline -->
+        <div class="lg:col-span-1">
+          <div class="bg-slate-800/40 backdrop-blur-sm rounded-xl border border-slate-700/40 p-6">
+            <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Agent Workflow</h3>
+            
+            <!-- Timeline 节点 -->
+            <div id="timeline" class="space-y-4">
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="scene">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">1</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">场景识别</div>
+                  <div class="text-xs text-slate-500 step-desc">识别当前沟通场景</div>
+                </div>
+              </div>
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="emotion">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">2</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">情绪分析</div>
+                  <div class="text-xs text-slate-500 step-desc">分析说话者真实情绪</div>
+                </div>
+              </div>
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="intent">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">3</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">潜台词推理</div>
+                  <div class="text-xs text-slate-500 step-desc">推理隐藏的真实意图</div>
+                </div>
+              </div>
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="risk">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">4</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">风险评估</div>
+                  <div class="text-xs text-slate-500 step-desc">评估沟通风险等级</div>
+                </div>
+              </div>
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="reply">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">5</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">回复生成</div>
+                  <div class="text-xs text-slate-500 step-desc">生成多种回复策略</div>
+                </div>
+              </div>
+              
+              <div class="timeline-node idle flex items-start gap-3" data-step="report">
+                <div class="step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400">6</div>
+                <div class="flex-1">
+                  <div class="font-medium text-slate-400 step-title">最终报告</div>
+                  <div class="text-xs text-slate-500 step-desc">汇总完整分析结果</div>
+                </div>
+              </div>
+              
+            </div>
+            
+            <!-- 总耗时 -->
+            <div id="totalTime" class="mt-6 pt-4 border-t border-slate-700/50 flex justify-between items-center">
+              <span class="text-sm text-slate-500">总耗时</span>
+              <span id="totalTimeValue" class="text-lg font-bold text-primary-400">—</span>
+            </div>
+            
+            <!-- 开始分析按钮 -->
+            <button id="startBtn" onclick="startAnalysis()"
+                    class="mt-6 w-full py-3 px-6 bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 rounded-lg font-semibold transition-all shadow-lg shadow-primary-500/25">
+              🚀 开始分析
+            </button>
+            
+          </div>
+        </div>
+        
+        <!-- 右侧：分析结果 -->
+        <div class="lg:col-span-2">
+          <div id="resultsArea" class="space-y-4">
+            
+            <!-- 初始提示 -->
+            <div id="emptyHint" class="bg-slate-800/30 rounded-xl border border-slate-700/30 p-12 text-center">
+              <div class="text-5xl mb-4 opacity-50">✨</div>
+              <h3 class="text-xl font-semibold text-slate-400 mb-2">准备就绪</h3>
+              <p class="text-slate-500">点击左侧「开始分析」开始体验</p>
+            </div>
+            
+            <!-- 分析过程容器 -->
+            <div id="processContainer" class="space-y-4"></div>
+            
+          </div>
+        </div>
+        
+      </div>
+    </section>
+    
+  </div>
+  
+  <!-- 引入数据 -->
+  <script src="demo-data.js"></script>
+  
+  <!-- 主逻辑 -->
+  <script>
+    // ========== 状态管理 ==========
+    let selectedCase = null;
+    let isRunning = false;
+    let startTime = null;
+    let animationFrameId = null;
+    
+    // ========== 案例选择 ==========
+    function selectCase(caseId, btnElement) {
+      if (isRunning) return;
+      
+      // 高亮选中
+      document.querySelectorAll('.case-card').forEach(card => {
+        card.classList.remove('selected');
+      });
+      btnElement.classList.add('selected');
+      
+      // 查找案例
+      selectedCase = cases.find(c => c.id === caseId);
+      if (!selectedCase) return;
+      
+      // 显示主分析区
+      document.getElementById('caseSelection').classList.add('hidden');
+      document.getElementById('mainAnalysis').classList.remove('hidden');
+      
+      // 显示案例信息
+      document.getElementById('currentCaseName').textContent = selectedCase.name;
+      document.getElementById('currentCaseText').textContent = selectedCase.input.substring(0, 30) + '...';
+      
+      // 重置 Timeline
+      resetTimeline();
+      
+      // 隐藏结果
+      document.getElementById('emptyHint').classList.remove('hidden');
+      document.getElementById('processContainer').innerHTML = '';
+      
+      // 重置按钮
+      const btn = document.getElementById('startBtn');
+      btn.disabled = false;
+      btn.className = 'mt-6 w-full py-3 px-6 bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 rounded-lg font-semibold transition-all shadow-lg shadow-primary-500/25';
+      btn.textContent = '🚀 开始分析';
+    }
+    
+    // ========== Timeline 控制 ==========
+    function resetTimeline() {
+      document.querySelectorAll('.timeline-node').forEach(node => {
+        node.classList.remove('active', 'completed');
+        node.classList.add('idle');
+        const indicator = node.querySelector('.step-indicator');
+        indicator.className = 'step-indicator w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-600 flex items-center justify-center flex-shrink-0 text-sm font-bold text-slate-400';
+        indicator.innerHTML = node.dataset.step === 'scene' ? '1' :
+                            node.dataset.step === 'emotion' ? '2' :
+                            node.dataset.step === 'intent' ? '3' :
+                            node.dataset.step === 'risk' ? '4' :
+                            node.dataset.step === 'reply' ? '5' : '6';
+        const title = node.querySelector('.step-title');
+        title.className = 'font-medium text-slate-400 step-title';
+        const desc = node.querySelector('.step-desc');
+        desc.className = 'text-xs text-slate-500 step-desc';
+      });
+      document.getElementById('totalTimeValue').textContent = '—';
+    }
+    
+    function setTimelineActive(step) {
+      const node = document.querySelector(`[data-step="${step}"]`);
+      if (!node) return;
+      node.classList.remove('idle', 'completed');
+      node.classList.add('active');
+      const indicator = node.querySelector('.step-indicator');
+      indicator.className = 'step-indicator w-8 h-8 rounded-full bg-blue-600 border-2 border-blue-400 flex items-center justify-center flex-shrink-0 text-sm font-bold text-white animate-pulse';
+      const title = node.querySelector('.step-title');
+      title.className = 'font-medium text-blue-400 step-title';
+      const desc = node.querySelector('.step-desc');
+      desc.className = 'text-xs text-blue-300 step-desc';
+    }
+    
+    function setTimelineCompleted(step) {
+      const node = document.querySelector(`[data-step="${step}"]`);
+      if (!node) return;
+      node.classList.remove('idle', 'active');
+      node.classList.add('completed');
+      const indicator = node.querySelector('.step-indicator');
+      indicator.className = 'step-indicator w-8 h-8 rounded-full bg-emerald-600 border-2 border-emerald-500 flex items-center justify-center flex-shrink-0 text-sm font-bold text-white';
+      indicator.innerHTML = '✓';
+      const title = node.querySelector('.step-title');
+      title.className = 'font-medium text-emerald-400 step-title';
+      const desc = node.querySelector('.step-desc');
+      desc.className = 'text-xs text-slate-500 step-desc';
+    }
+    
+    // ========== 计时器 ==========
+    function startTimer() {
+      startTime = performance.now();
+      updateTimer();
+    }
+    
+    function updateTimer() {
+      if (!startTime) return;
+      const elapsed = performance.now() - startTime;
+      const seconds = (elapsed / 1000).toFixed(2);
+      document.getElementById('totalTimeValue').textContent = seconds + 's';
+      animationFrameId = requestAnimationFrame(updateTimer);
+    }
+    
+    function stopTimer() {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    }
+    
+    // ========== 开始分析 ==========
+    async function startAnalysis() {
+      if (isRunning || !selectedCase) return;
+      isRunning = true;
+      
+      // 禁用按钮
+      const btn = document.getElementById('startBtn');
+      btn.disabled = true;
+      btn.className = 'mt-6 w-full py-3 px-6 bg-slate-600 rounded-lg font-semibold cursor-not-allowed';
+      btn.textContent = '⏳ Analyzing...';
+      
+      // 隐藏初始提示
+      document.getElementById('emptyHint').classList.add('hidden');
+      
+      // 重置 Timeline
+      resetTimeline();
+      
+      // 清空结果容器
+      document.getElementById('processContainer').innerHTML = '';
+      
+      // 开始计时
+      startTimer();
+      
+      // 执行分析流程
+      await runAnalysisFlow();
+      
+      // 完成
+      stopTimer();
+      isRunning = false;
+      
+      // 显示完成卡片（追加到末尾，不清空之前的卡片）
+      removeProcessingHint();
+      showCompleteCard();
+      
+      // 滚动到底部
+      scrollToBottom();
+      
+      // 重置按钮
+      btn.disabled = false;
+      btn.className = 'mt-6 w-full py-3 px-6 bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 rounded-lg font-semibold transition-all shadow-lg shadow-primary-500/25';
+      btn.textContent = '🔄 重新体验';
+    }
+    
+    // ========== 显示完成卡片 ==========
+    function showCompleteCard() {
+      const totalTime = document.getElementById('totalTimeValue').textContent;
+      const html = `
+        <div class="result-card">
+          <div class="bg-gradient-to-br from-emerald-900/40 to-slate-900/80 backdrop-blur-sm rounded-xl border border-emerald-500/50 p-6 shadow-lg shadow-emerald-500/10">
+            <div class="flex items-center gap-4 mb-5">
+              <div class="w-12 h-12 bg-emerald-500/30 rounded-full flex items-center justify-center">
+                <span class="text-2xl">✅</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-bold text-emerald-400">分析完成</h3>
+                <p class="text-slate-400 text-sm">Status: Completed</p>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+              <div class="bg-slate-800/60 rounded-lg p-3">
+                <div class="text-xs text-slate-500 mb-1">Model</div>
+                <div class="text-sm font-semibold text-primary-400">DeepSeek-V3</div>
+              </div>
+              <div class="bg-slate-800/60 rounded-lg p-3">
+                <div class="text-xs text-slate-500 mb-1">Total Time</div>
+                <div class="text-sm font-semibold text-primary-400">${totalTime}</div>
+              </div>
+              <div class="bg-slate-800/60 rounded-lg p-3">
+                <div class="text-xs text-slate-500 mb-1">Agents</div>
+                <div class="text-sm font-semibold text-purple-400">6</div>
+              </div>
+              <div class="bg-slate-800/60 rounded-lg p-3">
+                <div class="text-xs text-slate-500 mb-1">Steps</div>
+                <div class="text-sm font-semibold text-emerald-400">6 / 6</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('processContainer').insertAdjacentHTML('beforeend', html);
+    }
+    
+    // ========== 自动滚动到最新卡片 ==========
+    function scrollToBottom() {
+      const container = document.getElementById('processContainer');
+      if (container.lastElementChild) {
+        container.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+    
+    // ========== 分析流程（优化版：实时提示 + Evidence 过渡） ==========
+    async function runAnalysisFlow() {
+      const steps = ['scene', 'emotion', 'intent', 'risk', 'reply', 'report'];
+      const data = selectedCase.result;
+      
+      // 每次分析前清空结果容器
+      document.getElementById('processContainer').innerHTML = '';
+      
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        
+        // 1. Timeline 节点变为 active
+        setTimelineActive(step);
+        
+        // 2. 右侧显示实时状态
+        showProcessingHint(step);
+        
+        // 3. 模拟执行时间
+        await delay(350 + Math.random() * 150);
+        
+        // 4. Timeline 节点变为 completed
+        setTimelineCompleted(step);
+        
+        // 5. 显示对应分析卡片
+        await showResultCard(step, data);
+        
+        // 6. Evidence Chain 逐条展开（如果有）
+        if (step !== 'reply' && step !== 'report') {
+          await streamEvidenceChain(step, data);
+        }
+        
+        // 7. 最后一个 Agent 完成后增加收尾感
+        if (step === 'report') {
+          await delay(300);
+        }
+        
+        // 8. 等待后进入下一步
+        await delay(200);
+      }
+    }
+    
+    // ========== 显示处理中提示（追加到末尾，不替换已有内容） ==========
+    function showProcessingHint(step) {
+      const hints = {
+        'scene': { icon: '🎯', text: '正在识别场景...' },
+        'emotion': { icon: '😊', text: '正在分析情绪...' },
+        'intent': { icon: '🧠', text: '正在推理真实意图...' },
+        'risk': { icon: '🛡️', text: '正在评估风险...' },
+        'reply': { icon: '✍️', text: '正在生成回复...' },
+        'report': { icon: '📄', text: '正在生成最终报告...' }
+      };
+      
+      const hint = hints[step];
+      const container = document.getElementById('processContainer');
+      
+      // 先移除已有的 processing 提示
+      const existing = document.getElementById('processingHint');
+      if (existing) existing.remove();
+      
+      // 追加到末尾
+      container.insertAdjacentHTML('beforeend', `
+        <div id="processingHint" class="result-card">
+          <div class="bg-slate-800/40 backdrop-blur-sm rounded-xl border border-slate-700/40 py-8 flex items-center justify-center">
+            <div class="flex items-center gap-3 text-blue-400">
+              <span class="text-2xl animate-pulse">${hint.icon}</span>
+              <span class="text-lg font-medium">${hint.text}</span>
+            </div>
+          </div>
+        </div>
+      `);
+      
+      // 滚动到最新
+      scrollToBottom();
+    }
+    
+    // ========== 移除处理中提示 ==========
+    function removeProcessingHint() {
+      const hint = document.getElementById('processingHint');
+      if (hint) hint.remove();
+    }
+    
+    // ========== 显示结果卡片（带 fade in 动画） ==========
+    async function showResultCard(step, data) {
+      const container = document.getElementById('processContainer');
+      let cardHtml = '';
+      
+      switch(step) {
+        case 'scene':
+          cardHtml = createSceneCard(data.scene_analysis);
+          break;
+        case 'emotion':
+          cardHtml = createEmotionCard(data.emotion_analysis);
+          break;
+        case 'intent':
+          cardHtml = createIntentCard(data.intent_analysis);
+          break;
+        case 'risk':
+          cardHtml = createRiskCard(data.risk_analysis);
+          break;
+        case 'reply':
+          cardHtml = createReplyCard(data.reply_suggestions);
+          break;
+        case 'report':
+          cardHtml = createReportCard(data);
+          break;
+      }
+      
+      // 先移除 processing 提示
+      removeProcessingHint();
+      
+      // 插入卡片（带动画）
+      container.insertAdjacentHTML('beforeend', cardHtml);
+      
+      // 自动滚动到最新卡片
+      scrollToBottom();
+      
+      // 等待动画完成（约 300ms）
+      await delay(300);
+    }
+    
+    // ========== Evidence Chain 逐条展开 ==========
+    async function streamEvidenceChain(step, data) {
+      const evidenceMap = {
+        'scene': data.scene_analysis,
+        'emotion': data.emotion_analysis,
+        'intent': data.intent_analysis,
+        'risk': data.risk_analysis
+      };
+      
+      const evidenceData = evidenceMap[step];
+      if (!evidenceData || !evidenceData.evidence_chain || evidenceData.evidence_chain.length === 0) return;
+      
+      const container = document.getElementById(`evidence-${step}`);
+      if (!container) return;
+      
+      // 先显示"正在推理"提示
+      container.innerHTML = `
+        <div class="flex items-center gap-2 text-slate-500 text-sm animate-pulse">
+          <span>🔍</span>
+          <span>AI 正在推理...</span>
+        </div>
+      `;
+      
+      // 等待后再逐条显示证据
+      await delay(150);
+      
+      // 清空提示，开始显示证据
+      container.innerHTML = '';
+      
+      for (let i = 0; i < evidenceData.evidence_chain.length; i++) {
+        const item = evidenceData.evidence_chain[i];
+        
+        container.insertAdjacentHTML('beforeend', `
+          <div class="text-sm">
+            <span class="text-slate-500">「</span>
+            <span class="text-slate-200 font-medium">${item.detection}</span>
+            <span class="text-slate-500">」</span>
+            <div class="text-xs text-slate-400 mt-1 ml-3">→ ${item.inference}</div>
+          </div>
+        `);
+        
+        // 等待下一条
+        await delay(180);
+      }
+    }
+    
+    // ========== 创建卡片 HTML ==========
+    function createSceneCard(data) {
+      const icon = data.scene === '职场' ? '💼' : data.scene === '面试' ? '🎯' : data.scene === '客户' ? '🤝' : '💕';
+      return `
+        <div class="result-card">
+          <div class="bg-gradient-to-br from-slate-800/60 to-slate-900/60 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-3xl">${icon}</span>
+              <div class="flex-1">
+                <div class="text-lg font-bold text-white">${data.scene}</div>
+                <div class="text-sm text-primary-400">置信度 ${data.confidence}%</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 mb-2">🔍 推理依据</div>
+            <div id="evidence-scene" class="space-y-2"></div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function createEmotionCard(data) {
+      const icon = data.emotion === '积极' ? '😊' : data.emotion === '焦虑' ? '😰' : data.emotion === '愤怒' ? '😠' : '😐';
+      return `
+        <div class="result-card">
+          <div class="bg-gradient-to-br from-slate-800/60 to-slate-900/60 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="text-3xl">${icon}</span>
+              <div class="flex-1">
+                <div class="inline-flex items-center px-3 py-1 rounded-full bg-pink-500/20 text-pink-400 font-semibold">
+                  ${data.emotion}
+                </div>
+                <div class="text-sm text-primary-400 mt-1">置信度 ${data.score}%</div>
+              </div>
+            </div>
+            <p class="text-sm text-slate-400 mb-3">${data.reason || ''}</p>
+            <div class="text-xs text-slate-500 mb-2">🔍 推理依据</div>
+            <div id="evidence-emotion" class="space-y-2"></div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function createIntentCard(data) {
+      return `
+        <div class="result-card">
+          <div class="bg-gradient-to-br from-slate-800/60 to-slate-900/60 backdrop-blur-sm rounded-xl border border-slate-700/50 p-5">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3">🧠 潜台词分析</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <div class="bg-slate-900/50 rounded-lg p-3">
+                <div class="text-xs text-slate-500 mb-1">表面含义</div>
+                <p class="text-sm text-slate-400">${data.surface_meaning || '—'}</p>
+              </div>
+              <div class="bg-gradient-to-br from-purple-900/30 to-slate-900/50 rounded-lg p-3 border border-purple-500/30">
+                <div class="text-xs text-purple-400 mb-1">真实含义</div>
+                <p class="text-sm text-white font-medium">${data.true_meaning || '—'}</p>
+              </div>
+            </div>
+            <div class="text-sm text-primary-400 mb-3">置信度 ${data.confidence}%</div>
+            <div class="text-xs text-slate-500 mb-2">🔍 推理依据</div>
+            <div id="evidence-intent" class="space-y-2"></div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function createRiskCard(data) {
+      const colorHex = data.level === '低风险' ? '#10b981' : data.level === '中风险' ? '#f59e0b' : '#ef4444';
+      const circumference = 2 * Math.PI * 54;
+      const offset = circumference - (data.score / 100) * circumference;
+      
+      return `
+        <div class="result-card">
+          <div class="bg-gradient-to-br from-slate-800/60 to-slate-900/60 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+            <div class="flex items-center gap-6 p-5">
+              <div class="relative w-32 h-32 flex-shrink-0">
+                <svg class="w-full h-full transform -rotate-90" viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="54" fill="none" stroke="#1e293b" stroke-width="8"/>
+                  <circle cx="60" cy="60" r="54" fill="none" stroke="${colorHex}" stroke-width="8" stroke-linecap="round"
+                    stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" class="risk-ring"/>
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                  <span class="text-3xl font-bold" style="color: ${colorHex}">${data.score}</span>
+                  <span class="text-[10px] text-slate-500 uppercase">风险值</span>
+                </div>
+              </div>
+              <div class="flex-1">
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style="background: ${colorHex}20; color: ${colorHex};">
+                  🛡️ ${data.level}
+                </div>
+                <p class="text-sm text-slate-300 mt-2">${data.reason || ''}</p>
+              </div>
+            </div>
+            <div class="px-5 pb-4">
+              <div class="text-xs text-slate-500 mb-2">🔍 推理依据</div>
+              <div id="evidence-risk" class="space-y-2"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function createReplyCard(data) {
+      return `
+        <div class="result-card">
+          <div class="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700 p-5">
+            <h4 class="text-sm font-semibold text-slate-300 mb-3">💬 回复建议</h4>
+            <div class="space-y-3">
+              <div class="p-3 rounded-lg bg-primary-900/30 border border-primary-500/30">
+                <div class="text-xs text-primary-400 font-medium mb-1">💼 专业版</div>
+                <p class="text-sm text-white">${data.professional || '—'}</p>
+              </div>
+              <div class="p-3 rounded-lg bg-pink-900/30 border border-pink-500/30">
+                <div class="text-xs text-pink-400 font-medium mb-1">❤️ 高情商版</div>
+                <p class="text-sm text-white">${data.high_eq || '—'}</p>
+              </div>
+              <div class="p-3 rounded-lg bg-green-900/30 border border-green-500/30">
+                <div class="text-xs text-green-400 font-medium mb-1">⚡ 简洁版</div>
+                <p class="text-sm text-white">${data.simple || '—'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    function createReportCard(data) {
+      return `
+        <div class="result-card">
+          <div class="bg-gradient-to-r from-primary-600/20 to-purple-600/20 backdrop-blur-sm rounded-xl border border-primary-500/30 p-5">
+            <div class="flex items-start gap-3 mb-4">
+              <div class="p-2 bg-primary-500/20 rounded-lg">
+                <span class="text-2xl">✨</span>
+              </div>
+              <div class="flex-1">
+                <h3 class="text-sm font-medium text-primary-400 mb-1">📋 分析总结</h3>
+                <p class="text-base text-white leading-relaxed">${data.summary || '—'}</p>
+              </div>
+            </div>
+            ${data.advice ? `
+            <div class="mt-4 pt-4 border-t border-slate-700/50">
+              <div class="flex items-start gap-2">
+                <span class="text-lg">💡</span>
+                <p class="text-sm text-slate-300">${data.advice}</p>
+              </div>
+            </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }
+    
+    // ========== 重置 ==========
+    function resetDemo() {
+      if (isRunning) return;
+      
+      // 隐藏主分析区
+      document.getElementById('mainAnalysis').classList.add('hidden');
+      document.getElementById('caseSelection').classList.remove('hidden');
+      
+      // 清除选中状态
+      document.querySelectorAll('.case-card').forEach(card => {
+        card.classList.remove('selected');
+      });
+      
+      selectedCase = null;
+    }
+    
+    // ========== 工具函数 ==========
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+  </script>
+  
+</body>
+</html>
