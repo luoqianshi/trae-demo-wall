@@ -11,6 +11,11 @@ const routes = [
     name: 'detail',
     component: () => import('@/views/DetailView.vue'),
   },
+  {
+    path: '/immersive',
+    name: 'immersive',
+    component: () => import('@/views/ImmersiveView.vue'),
+  },
 ]
 
 const router = createRouter({
