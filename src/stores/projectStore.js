@@ -14,8 +14,6 @@ export const useProjectStore = defineStore('project', {
     batchSize: 12,
     isLoading: false,
     isAllLoaded: false,
-    immersiveProjects: [],
-    immersiveLoaded: false,
   }),
 
   getters: {
@@ -150,42 +148,6 @@ export const useProjectStore = defineStore('project', {
     resetVisible() {
       this.visibleCount = this.batchSize
       this.isAllLoaded = false
-    },
-
-    async loadAllPagesForImmersive() {
-      if (this.immersiveLoaded) return
-      if (!this.indexData) await this.loadIndex()
-      if (!this.indexData) return
-
-      const totalPages = this.indexData.totalPages
-      const allProjects = []
-
-      // Batch load: 6 pages at a time
-      const batchSize = 6
-      for (let start = 1; start <= totalPages; start += batchSize) {
-        const batch = []
-        for (let p = start; p < start + batchSize && p <= totalPages; p++) {
-          const v = Date.now()
-          batch.push(
-            fetch(`./data/pages/page-${p}.json?v=${v}`)
-              .then(r => r.json())
-              .then(data => data.projects || [])
-              .catch(() => [])
-          )
-        }
-        const results = await Promise.all(batch)
-        for (const projects of results) {
-          allProjects.push(...projects)
-        }
-      }
-
-      // Filter: only projects with a previewable URL
-      this.immersiveProjects = allProjects.filter(p => {
-        if (p.type === 'external' && p.demoUrl) return true
-        if (p.type === 'local' && p.localPath) return true
-        return false
-      })
-      this.immersiveLoaded = true
     },
   },
 })
