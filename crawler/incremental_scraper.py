@@ -208,8 +208,19 @@ def main():
     existing_projects = load_existing_projects()
     print(f"\n  已有 {len(existing_ids)} 个已收录项目")
 
-    # Step 1: 遍历论坛帖子列表，筛选新帖子
-    print("\n[Step 1] 遍历论坛帖子列表，查找新作品...")
+    # 构建已有项目索引，用于 views/likes 即时更新和变更追踪
+    # existing_index[id] = {project, old_views, old_likes}
+    existing_index = {}
+    for p in existing_projects:
+        existing_index[p['id']] = {
+            'project': p,
+            'old_views': p.get('views', 0),
+            'old_likes': p.get('likes', 0),
+        }
+    changed_project_ids = set()  # views/likes 发生变化的项目 ID
+
+    # Step 1: 遍历论坛帖子列表，筛选新帖子，同时更新已有项目 views/likes
+    print("\n[Step 1] 遍历论坛帖子列表，查找新作品 + 同步浏览量/点赞数...")
     all_topics = []
     page = 0
     while True:
@@ -223,13 +234,28 @@ def main():
         if not topics:
             break
         all_topics.extend(topics)
+
+        # 即时更新已有项目的 views/likes，跟踪变更页码
+        for topic in topics:
+            topic_id = f"topic_{topic['id']}"
+            if topic_id in existing_index:
+                idx = existing_index[topic_id]
+                new_views = topic.get('views', 0)
+                new_likes = topic.get('like_count', 0)
+                if new_views != idx['old_views'] or new_likes != idx['old_likes']:
+                    idx['project']['views'] = new_views
+                    idx['project']['likes'] = new_likes
+                    idx['old_views'] = new_views
+                    idx['old_likes'] = new_likes
+                    changed_project_ids.add(topic_id)
+
         page += 1
         more_url = data.get('topic_list', {}).get('more_topics_url', None)
         if not more_url:
             break
         time.sleep(DELAY)
 
-    print(f"  共获取 {len(all_topics)} 个帖子")
+    print(f"  共获取 {len(all_topics)} 个帖子，{len(changed_project_ids)} 个项目浏览量/点赞数变化")
 
     # Step 2: 筛选出是 web 类型且不在已有集合中的帖子
     print("\n[Step 2] 筛选新的网页/前端作品...")
@@ -245,8 +271,8 @@ def main():
 
     print(f"  发现 {len(new_web_topics)} 个新的候选帖子")
 
-    if not new_web_topics:
-        print("\n  没有新作品，无需更新。")
+    if not new_web_topics and not changed_project_ids:
+        print("\n  没有新作品，浏览量/点赞数无变化，无需更新。")
         return
 
     # Step 3: 获取详情并处理新作品
@@ -279,7 +305,6 @@ def main():
     # Step 4: 合并数据并重新生成
     print("\n[Step 4] 合并数据并重新生成文件...")
 
-    # 同时更新已有项目的 views/likes 数据
     # 重建所有 projects 列表
     all_projects_map = {}  # id -> project
     for p in existing_projects:
@@ -287,16 +312,23 @@ def main():
     for p in new_projects:
         all_projects_map[p['id']] = p
 
-    # 用论坛最新数据更新已有项目的 views 和 likes
-    print("  更新已有项目的浏览量/点赞数...")
-    for topic in all_topics:
-        topic_id = f"topic_{topic['id']}"
-        if topic_id in all_projects_map:
-            all_projects_map[topic_id]['views'] = topic.get('views', 0)
-            all_projects_map[topic_id]['likes'] = topic.get('like_count', 0)
+    # views/likes 已在 Step 1 中即时更新，此处无需再次遍历
 
     all_projects = list(all_projects_map.values())
     all_projects.sort(key=lambda p: p.get('createdAt', ''), reverse=True)
+
+    # 计算排序后的页码，标记变更页
+    changed_page_nums = set()
+    project_page_map = {}  # id -> page_num (排序后)
+    for i, p in enumerate(all_projects):
+        pn = i // PAGE_SIZE + 1
+        project_page_map[p['id']] = pn
+        # views/likes 变化的项目
+        if p['id'] in changed_project_ids:
+            changed_page_nums.add(pn)
+        # 新作品
+        if p['id'] not in existing_ids:
+            changed_page_nums.add(pn)
 
     # 统计
     tag_counts = {}
@@ -308,7 +340,7 @@ def main():
         for tag in p.get('tags', []):
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
-    # 生成 index.json
+    # 生成 index.json（始终重写）
     index = {
         'updatedAt': datetime.utcnow().isoformat() + 'Z',
         'totalProjects': len(all_projects),
@@ -338,27 +370,41 @@ def main():
         json.dump(index, f, ensure_ascii=False, indent=2)
     print(f"  index.json ({len(index['projects'])} 条摘要)")
 
-    # 生成分页文件
-    # 先清除旧分页文件
-    for fname in os.listdir(PAGES_DIR):
-        if fname.startswith('page-') and fname.endswith('.json'):
-            os.remove(os.path.join(PAGES_DIR, fname))
-
-    for page_num in range(index['totalPages']):
-        start = page_num * PAGE_SIZE
+    # 生成或更新分页文件（仅写入变更页）
+    for page_num in changed_page_nums:
+        start = (page_num - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
         page_projects = all_projects[start:end]
         page_data = {
-            'page': page_num + 1,
+            'page': page_num,
             'pageSize': PAGE_SIZE,
-            'hasNext': page_num + 1 < index['totalPages'],
+            'hasNext': page_num < index['totalPages'],
             'projects': page_projects,
         }
-        page_path = os.path.join(PAGES_DIR, f"page-{page_num + 1}.json")
+        page_path = os.path.join(PAGES_DIR, f"page-{page_num}.json")
         with open(page_path, 'w', encoding='utf-8') as f:
             json.dump(page_data, f, ensure_ascii=False, indent=2)
 
-    print(f"  分页文件 page-1.json ~ page-{index['totalPages']}.json")
+    print(f"  已更新 {len(changed_page_nums)} 个分页文件 (page {[str(n) for n in sorted(changed_page_nums)][:5]}{'...' if len(changed_page_nums) > 5 else ''})")
+
+    # 如果有新作品导致总页数增加，生成新页
+    for page_num in range(1, index['totalPages'] + 1):
+        page_path = os.path.join(PAGES_DIR, f"page-{page_num}.json")
+        if not os.path.exists(page_path):
+            start = (page_num - 1) * PAGE_SIZE
+            end = start + PAGE_SIZE
+            page_projects = all_projects[start:end]
+            page_data = {
+                'page': page_num,
+                'pageSize': PAGE_SIZE,
+                'hasNext': page_num < index['totalPages'],
+                'projects': page_projects,
+            }
+            with open(page_path, 'w', encoding='utf-8') as f:
+                json.dump(page_data, f, ensure_ascii=False, indent=2)
+            changed_page_nums.add(page_num)
+
+    print(f"  分页文件共 {index['totalPages']} 页")
 
     print(f"\n{'=' * 60}")
     print(f"增量爬取完成！")
