@@ -14,34 +14,71 @@
       </div>
     </div>
 
-    <!-- Fallback overlay -->
+    <!-- Beautiful fallback preview card -->
     <div
       v-if="showFallback"
-      class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-trae-card rounded-trae-card z-10"
+      class="absolute inset-0 flex flex-col items-center justify-center rounded-trae-card z-10 overflow-hidden"
     >
-      <svg class="w-12 h-12 text-trae-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-      </svg>
-      <p class="text-trae-text-secondary text-sm">该作品不支持内嵌预览</p>
-      <div class="flex gap-3">
+      <!-- Blurred thumbnail background -->
+      <div class="absolute inset-0">
+        <img
+          v-if="project?.thumbnail"
+          :src="project.thumbnail"
+          class="w-full h-full object-cover blur-2xl scale-110 opacity-30"
+          alt=""
+        />
+        <div
+          v-else
+          class="w-full h-full bg-gradient-to-br from-trae-card via-trae-bg to-trae-card"
+        />
+      </div>
+      <!-- Dark overlay -->
+      <div class="absolute inset-0 bg-trae-bg/60" />
+
+      <!-- Card content -->
+      <div class="relative z-10 flex flex-col items-center gap-4 px-8 text-center max-w-md">
+        <!-- Thumbnail -->
+        <img
+          v-if="project?.thumbnail"
+          :src="project.thumbnail"
+          :alt="project?.title"
+          class="w-16 h-16 rounded-2xl object-cover border border-white/10 shadow-lg"
+        />
+        <div
+          v-else
+          class="w-16 h-16 rounded-2xl bg-trae-card border border-trae-accent grid place-items-center text-trae-accent text-2xl shadow-[0_0_24px_rgba(34,197,94,0.35)]"
+        >
+          {{ project?.title?.charAt(0) || '?' }}
+        </div>
+
+        <!-- Title -->
+        <h3 class="text-trae-text font-bold text-lg leading-tight">{{ project?.title }}</h3>
+        <!-- Author -->
+        <p class="text-trae-text-muted text-sm">{{ project?.author }}</p>
+        <!-- Description -->
+        <p class="text-trae-text-secondary text-xs leading-relaxed line-clamp-2">
+          {{ project?.description || '暂无描述' }}
+        </p>
+
+        <!-- Open button -->
         <a
           :href="project?.demoUrl || project?.localPath"
           target="_blank"
           rel="noopener"
-          class="btn-secondary !py-2 !px-4 !text-xs"
+          class="btn-primary !py-2.5 !px-6 !text-sm mt-2"
         >
+          <svg class="w-4 h-4 inline mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
           在新标签页打开
         </a>
-        <button @click="$emit('next')" class="btn-primary !py-2 !px-4 !text-xs">
-          下一个
-        </button>
       </div>
     </div>
 
     <!-- iframe -->
     <transition name="fade">
       <iframe
-        v-if="previewUrl && !isLoading"
+        v-if="previewUrl && !isLoading && !showFallback"
         :key="previewUrl"
         :src="previewUrl"
         class="w-full h-full bg-trae-bg"
@@ -92,6 +129,10 @@ function onLoad() {
 watch(() => props.project, () => {
   if (previewUrl.value) {
     startLoading()
+  } else {
+    // No preview URL, show fallback immediately
+    isLoading.value = false
+    showFallback.value = true
   }
 }, { immediate: true })
 
