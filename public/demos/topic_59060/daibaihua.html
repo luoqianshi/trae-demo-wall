@@ -1,0 +1,1076 @@
+<!doctype html>
+<!-- 大白话 · 语言陷阱解码器 · 形态 C 单文件版（doc/05-ops.md §5.6）
+     纯手写 HTML+CSS+JS，零框架依赖，file:// 双击即跑。
+     两个占位符由注入脚本替换：DATA（8 seed × 3 tone）、SEEDS（chip 列表）。 -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大白话 · 语言陷阱解码器</title>
+<style>
+/* ─── 主题 token（匹配 src/app/globals.css）─── */
+:root, [data-theme="dark"] {
+  --stage:#15110d; --stage-2:#1d1813; --stage-3:#2c241c;
+  --paper:#f4ecd9; --paper-2:#ebe1ca;
+  --ink:#1a1612; --ink-2:#4a4239; --ink-3:#8a7f70;
+  --fg:#f4ecd9;
+  --stamp:#d6452c; --stamp-deep:#b8362a;
+  --gold:#c8a96a; --ink-blue:#3a5a8a;
+  --bg-glow:#221a13;
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  --stage:#ece3cc; --stage-2:#e0d5b8; --stage-3:#cdbf9c;
+  --paper:#ffffff; --paper-2:#f4ecd9;
+  --ink:#1a1612; --ink-2:#524a40; --ink-3:#756a5a;
+  --fg:#1a1612;
+  --stamp:#c4362a; --stamp-deep:#a22a20;
+  --gold:#9a8038; --ink-blue:#2a4a7a;
+  --bg-glow:#f5eed8;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { background: var(--stage); }
+body {
+  margin: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%, var(--bg-glow) 0%, transparent 60%),
+    var(--stage);
+  color: var(--fg);
+  font-family: "PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",sans-serif;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--stamp); color: var(--paper); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--stage); }
+::-webkit-scrollbar-thumb { background: var(--stage-3); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-2); }
+
+.mono { font-family: ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+.serif { font-family: "Songti SC","STSong","Source Han Serif SC","Noto Serif SC",serif; }
+.hand { font-family: "Kaiti SC","STKaiti","Marker Felt","Bradley Hand","Comic Sans MS",cursive; }
+
+/* ─── 布局 ─── */
+.wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+header.site { border-bottom: 1px solid var(--stage-3); padding: 32px 0; }
+header.site .kicker {
+  font-family: ui-monospace,"SF Mono",Menlo,monospace;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4em; color: var(--ink-3);
+}
+header.site h1 {
+  font-family: "Songti SC","STSong",serif;
+  font-size: 48px; font-weight: 900; letter-spacing: 0.12em;
+  margin: 8px 0 0; color: var(--fg); display: inline;
+}
+header.site .badge {
+  display: inline-block; vertical-align: middle; margin-left: 10px;
+  background: var(--stamp); color: var(--paper);
+  font-family: ui-monospace,monospace; font-size: 10px; font-weight: 500;
+  letter-spacing: 0.25em; padding: 4px 6px; border-radius: 2px;
+}
+header.site p { margin: 12px 0 0; font-size: 14px; line-height: 1.6; color: var(--ink-3); }
+header.site p .gold-c { color: var(--gold); }
+
+#theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 50;
+  background: var(--stage-2); color: var(--fg);
+  border: 1px solid var(--stage-3);
+  font-family: ui-monospace,monospace; font-size: 11px; letter-spacing: 0.15em;
+  padding: 6px 10px; cursor: pointer; border-radius: 2px;
+}
+#theme-toggle:hover { border-color: var(--stamp); color: var(--stamp); }
+
+/* ─── 输入区 ─── */
+section.input { padding: 24px 0; }
+textarea#text {
+  width: 100%; resize: none;
+  background: var(--stage-2); color: var(--fg);
+  border: 1px solid var(--stage-3);
+  padding: 12px; font-size: 14px; line-height: 1.6;
+  font-family: inherit; border-radius: 2px; min-height: 110px;
+}
+textarea#text:focus { outline: none; border-color: var(--stamp); }
+textarea#text::placeholder { color: var(--ink-3); }
+.meta {
+  margin-top: 6px; display: flex; align-items: center; justify-content: space-between;
+  font-family: ui-monospace,monospace; font-size: 10px; color: var(--ink-3);
+}
+.meta .right { display: flex; align-items: center; gap: 12px; }
+.tones { display: flex; gap: 4px; }
+.tones button, .btn-decode, .seeds button {
+  font-family: ui-monospace,monospace; cursor: pointer; border-radius: 2px;
+  border: 1px solid transparent; transition: all 0.15s;
+}
+.tones button {
+  background: var(--stage-3); color: var(--ink-3);
+  padding: 4px 8px; font-size: 11px; letter-spacing: 0.15em; border: 0;
+}
+.tones button:hover { color: var(--fg); }
+.tones button.active { background: var(--stamp); color: var(--paper); }
+.tones button:disabled, .btn-decode:disabled, .seeds button:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-decode {
+  background: var(--stamp); color: var(--paper);
+  padding: 6px 16px; font-size: 11px; letter-spacing: 0.2em; border: 0;
+}
+.btn-decode:hover:not(:disabled) { background: var(--stamp-deep); }
+.seeds { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.seeds button {
+  background: var(--stage-2); color: var(--ink-3);
+  border: 1px solid var(--stage-3);
+  padding: 4px 8px; font-size: 11px;
+}
+.seeds button:hover:not(:disabled) { border-color: var(--stamp); color: var(--fg); }
+
+/* ─── 结果区 ─── */
+section.result { padding: 0 0 80px; }
+.accusation { border-left: 2px solid var(--stamp); padding-left: 12px; margin-bottom: 16px; }
+.accusation .meta-line {
+  font-family: ui-monospace,monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.3em; color: var(--ink-3);
+}
+.accusation .text { font-size: 14px; color: var(--fg); margin-top: 4px; }
+
+.loading { padding: 64px 0; text-align: center; }
+.loading .kicker {
+  font-family: ui-monospace,monospace; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.4em; color: var(--ink-3);
+}
+.loading .pulse { margin-top: 12px; font-size: 18px; color: var(--gold); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:0.55} 50%{opacity:1} }
+.loading .hint { margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+
+.disclaimer { text-align: center; font-size: 11px; color: var(--ink-3); margin-top: 16px; }
+
+.idle-card {
+  border: 1px dashed var(--stage-3); padding: 32px; text-align: center; color: var(--ink-3);
+}
+.idle-card .big { font-size: 14px; margin-bottom: 8px; }
+.idle-card .small { font-size: 11px; }
+.idle-card.warn { border-color: var(--gold); color: var(--gold); }
+
+/* ─── 伪造件通用 ─── */
+.paper {
+  position: relative; background: var(--paper); color: var(--ink);
+  margin: 0 auto; max-width: 480px;
+  box-shadow: 0 30px 80px -25px rgba(0,0,0,0.75);
+  outline: 1px solid rgba(0,0,0,0.1);
+}
+.paper.w-narrow { max-width: 400px; }
+.paper.w-mid { max-width: 560px; }
+.paper.w-wide { max-width: 640px; }
+.paper.p-5 { padding: 20px; }
+.paper.p-6 { padding: 24px; }
+.paper.p-7 { padding: 28px; }
+.dash { margin: 12px 0; border-top: 1px dashed rgba(26,22,18,0.3); }
+
+.ink { color: var(--ink); } .ink-2 { color: var(--ink-2); } .ink-3 { color: var(--ink-3); }
+.stamp-c { color: var(--stamp); } .stamp-deep-c { color: var(--stamp-deep); }
+.gold-c { color: var(--gold); } .blue-c { color: var(--ink-blue); }
+
+.k { font-family: ui-monospace,monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--ink-3); }
+
+@keyframes stamp-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stamp-in { animation: stamp-in 0.28s ease-out backwards; }
+
+.watermark {
+  pointer-events: none; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; z-index: 0;
+}
+.watermark span {
+  font-size: 42px; font-weight: 700; letter-spacing: 0.3em;
+  color: rgba(214,69,44,0.07); transform: rotate(-28deg);
+  white-space: nowrap; user-select: none;
+}
+.paper > .body { position: relative; z-index: 1; }
+
+.round-stamp {
+  position: absolute; right: -12px; top: 24px; z-index: 2;
+  width: 78px; height: 78px; border-radius: 50%;
+  border: 3px solid var(--stamp); color: var(--stamp);
+  display: flex; align-items: center; justify-content: center;
+  transform: rotate(-12deg); pointer-events: none;
+  animation: round-in 0.45s cubic-bezier(0.34,1.56,0.64,1) 0.95s backwards;
+}
+@keyframes round-in {
+  from { opacity: 0; transform: rotate(-22deg) scale(1.6); }
+  to { opacity: 1; transform: rotate(-12deg) scale(1); }
+}
+.round-stamp span { font-size: 11px; font-weight: 700; text-align: center; line-height: 1.3; }
+
+/* 发疯贴纸：金色手写、旋转 -7deg、弹簧入场 */
+.unhinged-sticker {
+  position: absolute; top: -16px; left: 50%; margin-left: -70px;
+  background: var(--gold); color: var(--ink);
+  font-family: "Kaiti SC","STKaiti","Marker Felt","Bradley Hand",cursive;
+  font-weight: 900; font-size: 20px; letter-spacing: 4px;
+  padding: 6px 16px; box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+  z-index: 10; transform-origin: top center;
+  animation: sticker-bounce 0.6s cubic-bezier(0.34,1.8,0.64,1);
+}
+@keyframes sticker-bounce {
+  0%   { opacity: 0; transform: rotate(-30deg) scale(2.2) translateY(-20px); }
+  55%  { opacity: 1; transform: rotate(-2deg) scale(1.12) translateY(0); }
+  100% { opacity: 1; transform: rotate(-7deg) scale(1) translateY(0); }
+}
+
+/* Receipt */
+.receipt-row { display: flex; justify-content: space-between; gap: 8px; }
+.receipt-row .k-v { color: var(--ink-3); }
+.receipt-row .v { text-align: right; }
+.receipt-row .v.hl { font-weight: 700; color: var(--stamp); }
+.barcode { display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 32px; }
+.barcode i { display: inline-block; background: var(--ink); width: 2px; }
+
+/* LabReport 表格 */
+.lab-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lab-table th { text-align: left; font-weight: 400; font-size: 11px; color: var(--ink-3); padding: 4px 8px 4px 0; border-bottom: 1px solid rgba(26,22,18,0.4); }
+.lab-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid rgba(26,22,18,0.15); vertical-align: top; }
+.lab-table td.t { font-weight: 600; color: var(--ink-blue); }
+
+/* 风险等级 */
+.risk-tag { font-size: 11px; font-weight: 600; }
+.risk-high { color: var(--stamp); } .risk-medium { color: var(--gold); } .risk-low { color: var(--ink-blue); }
+
+/* finance trick 标签 */
+.trick-tag { background: var(--stamp); color: var(--paper); padding: 1px 4px; font-size: 10px; border-radius: 2px; }
+
+/* clarity 标签 */
+.clarity-tag { display: inline-block; padding: 2px 6px; font-size: 10px; border-radius: 2px; }
+.clarity-jargon { background: var(--stamp); color: var(--paper); }
+.clarity-vague { background: var(--gold); color: var(--ink); }
+.clarity-clear { background: var(--ink-blue); color: var(--paper); }
+
+/* Gist 卡片头 */
+.gist-head { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid rgba(26,22,18,0.15); background: var(--paper-2); font-size: 11px; color: var(--ink-3); }
+.gist-dots { display: flex; gap: 6px; }
+.gist-dots i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+pre.corecode { background: var(--stage); color: var(--paper-2); padding: 12px; font-size: 12px; overflow-x: auto; margin: 0; font-family: ui-monospace,monospace; }
+
+/* BattleBrief 武器行 */
+.weapon-row { display: flex; align-items: flex-start; gap: 8px; border: 1px solid rgba(26,22,18,0.2); padding: 8px; }
+.weapon-label { flex-shrink: 0; background: var(--ink-blue); color: var(--paper); padding: 2px 6px; font-size: 10px; border-radius: 2px; }
+.weapon-text { flex: 1; font-size: 13px; color: var(--ink); }
+.weapon-copy { flex-shrink: 0; padding: 2px 6px; font-family: ui-monospace,monospace; font-size: 9px; letter-spacing: 1px; cursor: pointer; border: 0; border-radius: 2px; }
+.weapon-copy.idle { background: rgba(26,22,18,0.1); color: var(--ink-3); }
+.weapon-copy.idle:hover { background: rgba(26,22,18,0.2); color: var(--ink); }
+.weapon-copy.copied { background: var(--ink-blue); color: var(--paper); }
+.weapon-copy.failed { background: var(--stamp); color: var(--paper); }
+
+/* RedHeader 红头 */
+.red-header .title { font-size: 24px; font-weight: 700; letter-spacing: 0.3em; color: var(--stamp); text-align: center; }
+.red-header .line-thick { height: 3px; background: var(--stamp); margin: 8px 0 2px; }
+.red-header .line-thin { height: 1px; background: var(--stamp); }
+
+/* 通用工具 */
+.flex-between { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.flex-items { display: flex; align-items: baseline; gap: 8px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.col-span-2 { grid-column: span 2; }
+.border-l-stamp { border-left: 2px solid rgba(214,69,44,0.5); padding-left: 12px; }
+.border-l-ink { border-left: 2px solid rgba(26,22,18,0.3); padding-left: 12px; }
+.border-l-blue { border-left: 2px solid rgba(58,90,138,0.5); padding-left: 12px; }
+.border-l-stamp-deep { border-left: 2px solid rgba(214,69,44,0.6); padding-left: 12px; }
+.box-stamp { border: 1px solid rgba(214,69,44,0.5); padding: 12px; background: rgba(214,69,44,0.06); }
+.box-stamp-2 { border: 1px solid rgba(214,69,44,0.6); padding: 12px; }
+.box-stamp-deep { border: 2px solid var(--stamp); background: rgba(214,69,44,0.08); padding: 12px; }
+.box-blue { border: 1px solid rgba(58,90,138,0.5); padding: 12px; background: rgba(58,90,138,0.06); }
+.italic { font-style: italic; }
+.semibold { font-weight: 600; }
+.bold { font-weight: 700; }
+.strike { text-decoration: line-through; text-decoration-color: rgba(214,69,44,0.6); }
+.text-center { text-align: center; }
+.pre-line { white-space: pre-line; }
+.hype-big { font-size: 48px; font-weight: 700; }
+.hype-suf { font-size: 18px; }
+.lg { font-size: 14px; } .md { font-size: 13px; } .sm { font-size: 12px; }
+.xs { font-size: 11px; } .xxs { font-size: 10px; }
+.mt-1 { margin-top: 4px; } .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; }
+.mb-2 { margin-bottom: 8px; }
+.col-gap-1 > * + * { margin-top: 4px; }
+.col-gap-2 > * + * { margin-top: 8px; }
+.col-gap-3 > * + * { margin-top: 12px; }
+</style>
+</head>
+<body>
+<button id="theme-toggle" title="切换主题">暖米</button>
+
+<header class="site">
+  <div class="wrap">
+    <div class="kicker">Case File · 语言陷阱档案馆</div>
+    <div class="flex-items" style="margin-top:8px">
+      <h1>大白话</h1><span class="badge">解码器</span>
+    </div>
+    <p>把营销话术 / 医疗天书 / 职场黑话，<span class="gold-c">翻译成人话「诚实文件」</span>。</p>
+  </div>
+</header>
+
+<section class="input">
+  <div class="wrap">
+    <textarea id="text" placeholder="点下方 chip 选一段样本，或粘贴营销话术 / 体检报告 / 职场通知 / 用户协议 / 政策条文…" maxlength="3000"></textarea>
+    <div class="meta">
+      <span><span id="count">0</span> / 3000</span>
+      <div class="right">
+        <div class="tones" id="tones">
+          <button data-tone="gentle">温柔</button>
+          <button data-tone="sharp" class="active">犀利</button>
+          <button data-tone="unhinged">发疯</button>
+        </div>
+        <button class="btn-decode" id="decode">解 码</button>
+      </div>
+    </div>
+    <div class="seeds" id="seeds"></div>
+  </div>
+</section>
+
+<section class="result">
+  <div class="wrap" id="result">
+    <div class="idle-card">
+      <div class="big">点上方 chip 选一段样本开始解码</div>
+      <div class="small">演示版预烘焙 8 条 seed × 3 种腔调，离线秒回</div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* 占位符（注入脚本会正则替换为 JSON 字面量） */
+const DATA = [{"id":"marketing","label":"智商税广告","text":"「焕颜秘境」精萃精华液，蕴含珍稀极地酵母精粹与多重神经酰胺复合因子，深层重塑肌底屏障，唤醒年轻光源。专属定制体验价 ¥380/30ml，让时光在你脸上停步。","classify":{"decoder":"marketing","codename":"概念包装厂","accusation":"堆术语吹贵价，成分无浓度证明","confidence":0.85},"decodes":{"gentle":{"decoder":"marketing","codename":"妈妈放心价","tone":"gentle","verdict":"你不必花 380，整瓶原料成本只有¥150-210（估算），别浪费。","headlineMetric":{"label":"智商税溢价指数","value":14,"raw":"2 倍","band":"低"},"breakdown":{"decoder":"marketing","rows":[{"claim":"珍稀极地酵母精粹","reality":"酿酒酵母或植物菌液提取物","cost":"{\n \"min\": 0.03,\n \"max\": 0.07\n} / 克（估算）"},{"claim":"多重神经酰胺复合因子","reality":"普通神经酰胺脂质体配方","cost":"{\n \"min\": 0.25,\n \"max\": 0.45\n} / 克（估算）"}]},"marketingRaw":{"product":"「焕颜秘境」精萃精华液","priceYuan":380,"costRangeYuan":{"min":150,"max":210,"unit":"30ml/瓶"},"cheaperAlternative":"搜“国货酵母精华 30ml”，比如“自然堂”同款（¥59）或淘宝“酵母精粹 + 神经酰胺混合液”（¥29）。"},"steps":[{"text":"1. 去淘宝搜索“酵母精粹+神经酰胺”，注意成分表，选标注活性物≥3%（坑：别把香精当神经酰胺）。","pitfall":"把香精误作活性物"},{"text":"2. 按营销文案买“定制体验价”会多付至少¥50 包装费，直接搜“精华液 30ml 国货”可降到¥30-40（坑：别被“升级包”诱导）。","pitfall":"多付包装费"}],"shield":"去“1688 酵母提取物”按¥0.03/g买，自己混合神经酰胺（化妆品级），再买个塑料瓶装，更省钱。","confidence":{"disclaimer":"对成本估算有把握，原料市场波动不能保证精确值。"}},"sharp":{"decoder":"marketing","codename":"酵母不如米粒香","tone":"sharp","verdict":"别被酵母唬住了，那是发酵缸里的米粒，C1-2-ER工业级才0.85元每克","headlineMetric":{"label":"智商税溢价指数","value":45,"raw":"11 倍","band":"中"},"breakdown":{"decoder":"marketing","rows":[{"claim":"珍稀酵母精粹","reality":"普通发酵谷物酵母粉","cost":"≈¥5-15/瓶(含填充)"},{"claim":"多重神经酰胺复合因子","reality":"多为C1-2-ER工业级原料","cost":"约¥0.85/g"},{"claim":"深层重塑肌底屏障","reality":"保湿剂堆砌，油酸/甘油占比高","cost":"填充剂≈¥0.03/g"}]},"marketingRaw":{"product":"焕颜秘境精萃精华液","priceYuan":380,"costRangeYuan":{"min":5.8,"max":65,"unit":"30ml/瓶"},"cheaperAlternative":"薇诺娜舒敏保湿特护霜"},"steps":[{"text":"放弃进口神话买同价国货，别被品牌溢价忽悠（Pitfall：专柜导购话术太猛）","pitfall":"专柜导购话术太猛"},{"text":"买酵母类精华别信宣传词，看配料表发酵源和含量（Pitfall：过期包装仍可闻新鲜）","pitfall":"过期包装仍可闻新鲜"},{"text":"买C1-2-ER神经酰胺前确认是否含烟酰胺（通常比纯神经酰胺便宜，Pitfall：单用烟酰胺刺激大）","pitfall":"单用烟酰胺刺激大"}],"shield":"买国货只要¥49，还送烟酰胺","confidence":{"disclaimer":"成本区间估算","sourceNote":"原料行情/配方推算"}},"unhinged":{"decoder":"marketing","codename":"酵母只是装饰","tone":"unhinged","verdict":"极地酵母是营销包装词，原料成本也就1.8-2.4元，你给380？","headlineMetric":{"label":"智商税溢价指数","value":98,"raw":"181 倍","band":"离谱"},"breakdown":{"decoder":"marketing","rows":[{"claim":"极地酵母精粹、神经酰胺复合因子","reality":"极地酵母不属普通化妆品原料，营销话术；复合神经酰胺即混合常用C12-13/C14/C16/C30，成本极低","cost":"0.08"},{"claim":"深层重塑肌底屏障、唤醒年轻光源","reality":"修护屏障属常规功效表述；年轻光源即视觉修辞，无科学依据","cost":"0.15"},{"claim":"专属定制体验价380元","reality":"包装与品牌营销成本占绝大部分，原料只占尾端","cost":"2.4"}]},"marketingRaw":{"product":"焕颜秘境 精萃精华液","priceYuan":380,"costRangeYuan":{"min":1.8,"max":2.4,"unit":"30ml/瓶"},"cheaperAlternative":"优色林 神经酰胺修护精华"},"steps":[{"text":"1. 查询官方或第三方原料渠道（如CIS、IPLS、原料商）获取C12-13/C14/C16/C30每克单价","pitfall":"注意CIS/IPLS官网价格表可能不实时更新，实际市价波动大，建议查近期报价或对比同类原料行情"},{"text":"2. 将官方单价与营销宣称对比，确认是否存在夸张","pitfall":"避免直接引用官网旧价，建议加一句'实际采购价往往比官网价低'作为补充说明"},{"text":"3. 选择国货配方相似的平替产品（如优色林 神经酰胺修护精华）","pitfall":"确保平替在成分表上明确列出C12-13/C14/C16/C30，避免买到含神经酰胺替代品的伪仿平替"},{"text":"4. 用成本区间说明原产品溢价程度（如'售价380元，原料仅1.6-2.4元'）","pitfall":"确保说明与最终结论一致；避免成本区间与verdict/shield的表述矛盾"}],"shield":"买优色林同款神经酰胺修护精华30元/支，功效对比价","confidence":{"disclaimer":"估算基于工业级大宗原料价格；特殊发酵提取物因无公开价表，暂按常规基质处理","sourceNote":"原料市价取自大宗渠道询价与同类配方成本对比"}}}},{"id":"medical","label":"体检报告天书","text":"体检结论：颈动脉内膜中层厚度（IMT）1.2mm；右侧甲状腺低回声结节，大小约 4×3mm，边界清，TI-RADS 3 类；左室舒张功能减低；空腹血糖 6.4 mmol/L。建议相关专科随访。","classify":{"decoder":"medical","codename":"健康迷雾","accusation":"体检名词让你焦虑，实则多数正常","confidence":0.75},"decodes":{"gentle":{"decoder":"medical","codename":"温柔版解码器-医疗","tone":"gentle","verdict":"这些指标多数属于早期、可逆的变化，颈动脉增厚和血糖临界都是身体在提醒：该管住血压血脂了；甲状腺结节多半良性但要定期复查，左室舒张功能减退要警惕心血管负荷过重的情况。现在最合理的是去正规医院的内分泌科或老年健康科做系统评估，顺便把血糖、血压等指标记录下来，便于后续对比监测变化。别因为体检结果就吓自己，也别觉得‘没事’就不管——真正的健康来自稳定的代谢环境和心脏功能。","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"medical","rows":[{"term":"颈动脉IMT 1.2mm","plain":"颈动脉IMT 1.2mm是早期动脉硬化迹象，管壁增厚到可接受范围，若年龄≥50岁属常见现象","means":"年度复查即可，无需紧张"},{"term":"甲状腺TI-RADS 3类","plain":"甲状腺TI-RADS 3类结节边界清晰属低度可疑，4×3mm体积微小，良性可能性大但需遵医嘱随访，警惕癌变风险","means":"一年后复查超声，不必过度担心"},{"term":"左室舒张功能减低","plain":"左室舒张功能减低反映心室充盈受影响，常见于老年人和长期高血压者，与心血管健康密切相关，需关注潜在因素如年龄、血压、糖尿病","means":"属可逆的生理老化或高血压表现"},{"term":"空腹血糖6.4mmol/L","plain":"空腹血糖6.4mmol/L介于正常5.6-7.0之间，提示可能存在胰岛素抵抗或糖耐量异常，存在进展为糖尿病的风险","means":"处于前糖尿病范围，建议定期血糖监测"}]},"steps":[{"text":"尽快看专科医生复诊（内分泌/甲状腺专科为佳，心血管和老年健康也可咨询）\nPitfall：网上查不到可靠标准，别依赖网络信息自我诊断或吓自己","pitfall":"盲目网诊"},{"text":"检查空腹血糖和糖化血红蛋白(HbA1c)\nPitfall：血糖6.4mmol/L处于临界波动带，单次测量不能排除糖尿病前期；HbA1c反映近三个月平均血糖更可靠，建议至少每3个月复查一次空腹血糖","pitfall":"忽视HbA1c"},{"text":"改善心血管危险因素：清淡饮食、控制体重、戒烟酒、适度运动——这比吃药更关键\nPitfall：运动需循序渐进避免加重心脏负担，尤其是已存在舒张功能减退者","pitfall":"急功近利运动"},{"text":"若复查发现甲状腺结节增大、边界不清或出现症状（如颈部压痛、声音嘶哑、憋闷气促）需及时就诊，别等\nPitfall：TI-RADS 3类属低度可疑不代表绝对良性，任何形态学改变都需重视","pitfall":"拖延观察"}],"shield":"若出现任何1条即就医：\n1. 结节增大压迫气管——颈部肿块变快（超过5mm）、压迫感、吞咽困难或声音嘶哑\n2. 空腹血糖持续≥7.0 mmol/L 或 餐后血糖升高——需专科评估是否需要干预，控制体重、增加运动、调整饮食，避免高升糖食物（如甜饮料、精制糖、油炸食品），戒烟限酒\n3. 活动后胸闷气促或心绞痛症状——可能反映心脏供氧不足，需立即就医评估心脏状况","confidence":{"disclaimer":"以上解读供参考，非诊断建议，具体以主治医生判断为准","sourceNote":"不确定信息已标注：因缺乏年龄、家族史和既往病史数据，无法评估各异常指标的预后风险和紧急程度，需结合临床综合判断，请用户补充相关背景以便调整建议"}},"sharp":{"decoder":"medical","codename":"医疗温柔解码器","tone":"sharp","verdict":"体检表上的红字？别慌，全是小毛病。心脏弹性小松点，血管内壁小粗糙，甲状腺小芝麻粒疙瘩，空腹血糖有点口渴——都是体检常跑出来的‘小插曲’。年度复查+清淡饮食，把风险关进瓶子里。放心啦，健康不靠焦虑，靠的是持续跟进哦~","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"medical","rows":[{"term":"颈动脉IMT 1.2mm","plain":"颈动脉壁稍显粗糙（接近斑块临界值但未形成）","means":"年度复查即可"},{"term":"甲状腺TI-RADS 3类结节4×3mm","plain":"甲状腺上落了颗芝麻粒大小的小疙瘩（良性概率75%-85%）","means":"年度复查即可"},{"term":"左室舒张功能减低","plain":"心脏弹性稍微松点（年龄相关或血压影响常见表现）","means":"年度体检正常即可，无需特殊处理"},{"term":"空腹血糖6.4 mmol/L","plain":"空腹血糖像有点口渴（属于血糖受损但非糖尿病）","means":"年度复查即可"}]},"steps":[{"text":"其一：保持日常运动（避免突然剧烈运动；如有胸闷先就医评估后再恢复）。","pitfall":"突然高强度运动可能诱发心肌缺血症状，尤其已有舒张功能减低的人群需循序渐进"},{"text":"其二：饮食调整——多吃蔬菜、鱼类和全谷物；减少精制碳水（白米饭/白面条）；控制盐摄入(<5g/日)，避免含糖饮料和油炸食品。","pitfall":"盲目节食反而可能导致血糖波动，应循序渐进减糖、维持蛋白质摄入"},{"text":"其三：记录血压/心率——建议居家测量血压，如有高血压风险需规律监测。部分降压药（如β受体阻滞剂）会影响甲状腺结节复查判断，需与医生沟通调整方案。","pitfall":"仅凭自我感觉忽视血压波动，可能导致心血管负担"},{"text":"其四：下次体检时主动带上甲状腺超声报告——便于医生对比结节大小变化，同时评估颈动脉斑块情况。","pitfall":"漏掉甲状腺结节的定期复查窗口期（如超过一年），不利于发现新发病变"}],"shield":"若甲状腺结节体积增大(如1年内直径增加≥50%)或出现声音嘶哑吞咽不畅—需尽快内分泌科就诊。空腹血糖两次≥7.0 mmol/L需内分泌科复查，并启动饮食干预计划。左室舒张功能减低若活动后胸闷气促加重、夜间阵发性呼吸困难需心内科急查心脏超声。","confidence":{"disclaimer":"注：以上解读仅供参考，若症状明显或疑虑加重，请及时联系医生。本输出为信息解码非诊断建议，具体以主治医生判断为准。","sourceNote":"数据来源：体检报告（2025-04）；解读依据：2023 AHA/ACC/VACEPI 心血管风险分层指南、甲状腺TI-RADS共识"}},"unhinged":{"decoder":"medical","codename":"医疗温柔解码器 - 发疯版 (v1.2)","tone":"unhinged","verdict":"报告看着像\"老年套餐\"，没到急诊通道，但别把脖子当摆设——甲状腺结节半年摸一次，血糖往7.0靠。建议内分泌科门诊建档，把这几个箭头标进病历，以后复查对比才有参考价值。","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"medical","rows":[{"term":"颈动脉内膜中层厚度( IMT )","plain":"\"颈动脉里还塞了粒芝麻\"","means":"目前不急，一年后查"},{"term":"甲状腺低回声结节(TI-RADS 3)","plain":"\"小土疙瘩，边界干净\"","means":"半年复查超声，别吃海鲜过敏"},{"term":"左室舒张功能减低","plain":"\"心脏弹性和点不动\"","means":"控制血压+心内科"},{"term":"空腹血糖 6.4","plain":"\"糖瓶刚开半盖\"","means":"管住嘴迈不开腿，别乱吃药"}]},"steps":[{"text":"1、每日盐≤5克（一啤酒盖）——别把盐当补品","pitfall":"钠超标会让心脏更累"},{"text":"2、把精米白面减量，配点深色菜和粗粮","pitfall":"糖瓶不是糖果罐儿，别往嘴里塞甜"}],"shield":"≥7.0毫摩尔/升且复测仍高（糖尿病红线）\n随呼吸急促或夜间憋醒（心衰警报声）\n甲状腺结节在3个月内增大超过2毫米（恶性征象）","confidence":{"disclaimer":"非诊断建议，具体以主治医生判断为准","sourceNote":"参考《TI-RADS 2023共识》+《颈动脉 IMT 分层管理指南》"}}}},{"id":"workplace","label":"毕业/裁员通知","text":"亲爱的同学：经公司盘点与战略复盘，为降本增效、聚焦核心赛道，部分岗位将进行优化调整。受影响的同学将进入毕业流程，我们会提供 N+1 的毕业礼包与灵活过渡支持。感谢你的付出，祝你未来一切顺利。","classify":{"decoder":"workplace","codename":"岗位优化辞","accusation":"把裁员说成“毕业”的套路太阴险，用“过渡支持”粉饰职场清洗，这种偷换概念的职场话术就是典型的工作场陷阱：workplace","confidence":0.95},"decodes":{"gentle":{"decoder":"workplace","codename":"脱水解码·温柔版","tone":"gentle","verdict":"这封信就是裁员通知单，'优化'=辞退，'毕业流程'=解除劳动关係，别被‘礼包’的话术安抚。","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"workplace","rows":[{"jargon":"降本增效、聚焦核心赛道","truth":"就是砍预算裁员，边缘部门优先"},{"jargon":"岗位优化调整","truth":"正式辞退，不是调岗"},{"jargon":"毕业流程","truth":"解除劳动关系手续"},{"jargon":"N+1 的毕业礼包","truth":"法定赔偿底线，非公司额外善意"},{"jargon":"灵活过渡支持","truth":"没有实际安置承诺，只是话术"},{"jargon":"感谢付出、未来顺利","truth":"标准告别语，法律上无特殊含义"}]},"steps":[{"text":"立刻备份全部纸质原件与电子记录到不同位置，防止被强制下班后设备丢失或HR回收账号，这是后续一切主张的基础材料。"},{"text":"核对合同里关于调岗、降薪的条款是否与通知一致，若公司说‘优化岗位’而合同未约定变更权，任何单方面调整都属无效指令，别签任何变更确认书。"}],"shield":"证据留存：1)公司红头文件/辞退通知—原件或高清扫描证明解雇事实与理由；2)近12个月工资银行流水—核对平均月薪、加班费及奖金是否已发放；3)劳动合同文本—确认岗位、薪资、试用期条款是否被单方面变更；4)考勤记录（打卡/签到日志）—防止公司事后否认上班时长；5)邮件/微信群沟通截图与录音—保留HR口头通知内容；6)绩效评分表/年终奖制度—若‘降本’导致降薪或取消奖金需留存。法条索引：《劳动合同法》第47条规定经济补偿按工龄每年1个月工资计算，半年以上不满一年按一年计；第87条明确违法解除应付2倍赔偿；第41条要求经济性裁员须提前三十日告知工会或全体职工并说明情况；第50条强调用人单位应在解除时出具书面证明并办理档案社保转移手续。","confidence":{"disclaimer":"法条仅依据现行《劳动合同法》，个案差异需结合司法实践；建议同时咨询专业律师审核条款，切勿直接签署放弃权利文件。"}},"sharp":{"decoder":"workplace","codename":"毕业大礼包 = N+1 逼签套路，别被‘优化’冲昏头脑","tone":"sharp","verdict":"裁员：用‘优化’和‘毕业流程’包装裁员，避掉赔偿金；别信‘毕业大礼包’那是套路","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"workplace","rows":[{"jargon":"毕业流程","truth":"离职，包装得跟校招似的"},{"jargon":"盘点","truth":"裁员名单，把名额当KPI考核"}]},"steps":[{"text":"立刻抄解聘通知全文，拍照存云端。Pitfall：HR可能先发微信模糊口信。","pitfall":"口信不留痕"},{"text":"保存最近12个月工资流水和银行APP截图，用‘工资结算证明’备查。Pitfall：银行流水显示到上月，需补发。","pitfall":"流水不完整"},{"text":"打印劳动合同原件，核对离职条款里是否写明‘提前30日解除需N+1'。Pitfall：HR口头要求别签和解。","pitfall":"口头威胁"}],"shield":"证据留存：裁员通知/解除协议原件、近12个月工资流水、劳动合同原件、考勤记录、HR沟通截图录音；法条索引：《劳动合同法》§47 经济补偿按工龄每年1个月；§87 违法解除2倍赔偿；第41条 经济性裁员需提前通知工会。","confidence":{"disclaimer":"法条为现行劳动合同法；建议咨询专业律师。","sourceNote":"本文档仅供参考，不构成法律意见。"}},"unhinged":{"decoder":"workplace","codename":"裁员","tone":"unhinged","verdict":"'毕业流程'是 HR 把‘辞退’包装成同学之间的告别，别信，N+1 是法定最低底线而非奖励——现在立刻收集并固定书面证据。","headlineMetric":{"label":"解析度","value":50,"raw":"—","band":"中"},"breakdown":{"decoder":"workplace","rows":[{"jargon":"经公司盘点与战略复盘","truth":"}盘点"}]},"steps":[{"text":"问 HR 我的岗位名称和职责是否与劳动合同一致（坑：他们可能会说\"头衔不对\"），截图保存；"},{"text":"索要完整的解除协议、离职证明、工资结构确认表原件或电子签（坑：他们称\"邮箱发你就算\"，要书面），留存证据；"},{"text":"录音/录屏 HR 的每一次谈话并记录日期（坑：他们会说\"禁止录音\"且 NDA 里常有此类条款，但\"你有权取证\"，照录仍有效）"}],"shield":"两段：① 证据留存 5 项 + 为什么留；② 法条索引 3 条、每条一句。","confidence":{"disclaimer":"法条为现行劳动合同 law；建议咨询专业律师。"}}}},{"id":"academic","label":"AI 技术白皮书","text":"本系统采用端到端的多模态深度融合架构，基于 Transformer 解码器栈与对比学习预训练范式，通过自注意力机制实现跨模态语义对齐，并引入检索增强生成（RAG）策略以缓解大语言模型的幻觉问题，最终在零样本场景下实现认知智能的涌现与泛化能力的跃迁。","classify":{"decoder":"academic","codename":"术语堆砌器","accusation":"满篇高大上词汇掩盖技术实现细节缺失，术语堆砌成花架子装高端","confidence":0.9},"decodes":{"gentle":{"decoder":"academic","codename":"transformer-rag-hallucination-shield","tone":"gentle","verdict":"别被‘端到端’、‘认知涌现’这些词吓住——这就是个输入-处理-输出的简单管道而已。","headlineMetric":{"label":"装腔密度","value":100,"raw":"6 个装腔词","band":"晚期"},"breakdown":{"decoder":"academic","rows":[{"jargon":"端到端的多模态深度融合架构","plain":"就是把各种信息一次喂给模型让它自己消化","meat":"一个输入 - 处理 - 输出的整体管道"},{"jargon":"Transformer 解码器栈","plain":"按顺序生成词或句子的机制，多头注意力的拼接","meat":"类似翻译引擎的解码部分"},{"jargon":"基于对比学习预训练范式","plain":"让不同来源的信息学会对应同一种东西","meat":"用成对数据训练出理解关联能力的权重"},{"jargon":"自注意力机制实现跨模态语义对齐","plain":"一句话的某部分在另一句话里哪里能找得到","meat":"模型内部计算每个词块间的关联程度"},{"jargon":"检索增强生成（RAG）策略以缓解大语言模型的幻觉问题","plain":"别瞎编，去查查已知材料再说","meat":"用外部的资料库补全生成时拿不准的内容"},{"jargon":"零样本场景下实现认知智能的涌现与泛化能力的跃迁","plain":"通过上面那些训练手段，模型对新鲜情况变得不那么笨","meat":"没见过的问题也能回答"}]},"coreCode":"def decode_pipeline(text, extra_data):\n    # 把各种信息先拼到一起\n    aligned = compare_and_align(tokenize(text), extra_data)\n    \n    # 用类似翻译引擎的方式逐词生成回答\n    output = []\n    while not finished(aligned):\n        token_id = transformer_decode(aligned, prev_tokens=output)\n        if looks_hallucinated(token_id, aligned):\n            # 碰到不确定的地方，去外面查资料\n            correction = rag_search(align_text(text), extra_data)\n            aligned.update(correction)","steps":[{"text":"找论文的 Introduction 和 Related Work — 通常那里会写这个系统到底是模仿了哪一个现有模型（比如多模态语言模型、图像问答模型）而不是自创架构。","pitfall":"别被图里漂亮的示意图骗住，里面可能只是概念设计而非实际工程"},{"text":"看数据预处理步骤：原文提到‘多种模态输入’，通常就是文本、图像或视频；这些怎么被 tokenize 与融合是真正决定模型表现的关键。","pitfall":"有的项目把多个模型的 output 直接拼接，这在工程上是偷懒的做法"},{"text":"检查训练部分是否用了对比学习：找论文里的损失函数公式或实现代码。如果是简单的 pairwise loss 那就意味着没有真正的多模态语义对齐，只是用 RAG 拼凑答案。","pitfall":"摘要里‘涌现认知智能’的说法在大多数情况下只是修辞，真正的‘认知’很难定义"},{"text":"测试零样本场景：拿一个训练集里没有的问题去问模型，然后看它的推理步骤和引用是否真的来源于检索增强而非胡乱拼凑。","pitfall":"如果只给了正确答案就证明 RAG 可能并没有被实际使用或者只是在幻觉模式下运行"}],"shield":"反话术提问：\"这个说法里哪些词是术语外壳，里面装的是哪个基本动作？\"。然后你可以把拆开的各句逐一对话问：\"多模态深度融合\"=输入数据一次处理，\"交叉注意力\"=跨来源找对应部分，\"零样本泛化\"=没见过的情况也能答。这种层层剥皮能帮你识别学术黑话的套路。","confidence":{"disclaimer":"这里有很多学术黑话。我猜大概是这样，因为论文摘要往往夸大的成分很多","sourceNote":"如果你想要准确结论，请把完整论文给我，我可以一步步核对每个说法的真实性"}},"sharp":{"decoder":"academic","codename":"MultiModal-Reasoner-v1","tone":"sharp","verdict":"别听它内扫町，凡冱净就是角交交细丟比可是为上线模模型抹比版。","headlineMetric":{"label":"装腔密度","value":100,"raw":"6 个装腔词","band":"晚期"},"breakdown":{"decoder":"academic","rows":[{"jargon":"端到端多模态深度融合架构","plain":"直接拿输入给模型训练，不拆成模块逐步拼","meat":"用一个深度学习框架把文本、图像、音频一股脑喂进去，统一输出"},{"jargon":"Transformer 解码器栈","plain":"把注意力层堆起来当处理单元","meat":"像叠积木一样搭模型结构，让注意力去关联跨模态的 token"},{"jargon":"对比学习预训练范式","plain":"让模型学会把不同模态的特征往同一空间靠","meat":"用成对样本练相似度，让文字和图像在特征里能互相指认"},{"jargon":"跨模态语义对齐","plain":"让不同模态的 token 自己找彼此关系","meat":"通过注意力分数看哪段文字对应哪张图的哪个区域，生成可观测的关联"},{"jargon":"检索增强生成 (RAG) 策略","plain":"用外部信息来缓解幻觉问题","meat":"外挂知识库或索引库，生成前先查资料补上下文"},{"jargon":"零样本场景下认知智能涌现","plain":"不用标注数据也能在新任务表现还行","meat":"不用标注数据也能在新任务表现还行——本质靠通用表示和类比推理"}]},"coreCode":"embeds = concat(encoder(text), encoder(image))      # 多模态联合嵌入\ncross_attn = cross_attention(embeds)                # 基固招函数实现跨模态信号\ncross_scores = extract_attention_weights(cross_attn) # 生成代象解释\nretrieved = retriever(query=embeds[modal_i])        # RAG 补产 context\nprompt = system_message + cross_scores + retrieved  # 进人促用的 prompt\ngenerate_and_explain(prompt)   # 返回 answer + reason_map","steps":[{"text":"1. 首先明白详细用户诱比例中带有的模态信息","pitfall":"忽视某五模抹比于结论该练习可化"},{"text":"2. 溯出用户一致画比于结果的样本分布，识中姿识模型趈晟参考","pitfall":"结果遭招细识普蓝转扫的层"},{"text":"3. 细布比质釜抹比识模化工具","pitfall":"内 涉涂"},{"text":"4. 用模型构造","pitfall":"结果绑涉涂"}],"shield":"在需要练习的审读可以向依扫工使用语言精确模拟哄比例","confidence":{"disclaimer":"我大概 80% 把握，这堆辞藻背后没啥黑科技，就是常规的多模态表示 + 注意力融合 + 检索补全组合拳。术语是行业标配，不是包装纸，但要小心它们被用来暗示‘黑盒智慧’。零样本泛化往往来自测试集与训练分布重叠太近，别把相关当因果。","sourceNote":"拆解过程用了我自己的直觉 + 公开论文摘要的语义比对，没有外部数据库支撑。"}},"unhinged":{"decoder":"academic","codename":"多模态图文问答生成器（带检索兜底）","tone":"unhinged","verdict":"装腔逼们最爱拿这招唬人：把‘看图说话、读文配图’这种基本活儿硬包装成‘认知智能涌现’","headlineMetric":{"label":"装腔密度","value":100,"raw":"5 个装腔词","band":"晚期"},"breakdown":{"decoder":"academic","rows":[{"jargon":"Transformer 解码器栈","plain":"生成回答的那套组件","meat":"生成文字用的那一半，接上图文两个输入特征"},{"jargon":"对比学习预训练范式","plain":"看图说话、读文配图的对齐训练方法","meat":"用成对的图文做损失，让它们在向量空间里靠得更近"},{"jargon":"自注意力机制实现跨模态语义对齐","plain":"用一套注意力机制对齐图文语义","meat":"用 Attention 计算把图文特征拉近——说白了就是把图像区域和文字片段往一起靠"},{"jargon":"RAG 策略缓解大语言模型幻觉","plain":"边查边写（搜知识纠正瞎聊）","meat":"生成前检索外部知识/知识库，用真实信息兜底纠正胡编"},{"jargon":"零样本场景下认知智能的涌现与泛化能力的跃迁","plain":"未见过的任务表现也不错","meat":"训练时没见过的图文组合也能答得差不多——本质就是泛化能力强，不是玄学觉醒"}]},"coreCode":"## Core Logic 3行\nText X, Image Y → encode separately\nAlign features via contrastive + cross-attention\nGenerate output with decoder & RAG check","steps":[{"text":"看架构图：找输入是文字+图像，输出是问答/描述","pitfall":"只说架构没说损失"},{"text":"摸黑盒：打开代码，找到 encoder-decoder 部分","pitfall":"别信零样本神话"},{"text":"测幻觉：给模型喂假题/假图，看它瞎编哪一步","pitfall":"自注意力≠黑科技"},{"text":"用 RAG 验证：搜相似文本 + 图片嵌入，看它真没幻觉","pitfall":"不是所有生成器都带检索兜底"}],"shield":"下次论文里堆术语，直接拿这三样砸过去：\n1 问输入输出：X是啥？Y是啥？损失怎么算？\n2 看训练细节：预训练/微调各几步\n3 摸黑盒：跑个代码看它到底干了啥（不是装腔唬人）","confidence":{"disclaimer":"仅从摘要推测架构，没看实现/论文正文，结论以 85 分打勾","sourceNote":"按‘输入-处理-输出’链拆解术语包装：Transformer、对比学习、自注意力、RAG、零样本泛化，各归位到流程里（生成器=Decoder；图码+文码→对齐→生成；检索知识作校正；未见任务=测试集泛化）"}}}},{"id":"pua","label":"伴侣贬低话术","text":"我这么说还不是为了你好，别人我才懒得管。你看看你自己，工作一般长相也普通，除了我谁还能受得了你这个脾气？你要是因为这点事跟我吵架，就是不知好歹，我把你当回事你倒蹬鼻子上脸了。我朋友都说你这性格，换个人早受不了了。","classify":{"decoder":"pua","codename":"情绪勒索机","accusation":"PUA 是隐蔽的情绪操控——用煤气灯、贬低打压和情绪勒索来控制我。","confidence":0.95},"decodes":{"gentle":{"decoder":"pua","codename":"隐形囚笼","tone":"gentle","verdict":"他把自己包装成圣人来碾压你：‘为你好’的幌子，‘别人受不了’的贬低，‘吵架就是不知好歹’的道德勒索。这不是关心，是操控。","headlineMetric":{"label":"操控密度","value":80,"raw":"4 种操控手法","band":"重度"},"breakdown":{"decoder":"pua","rows":[{"quote":"我这么说还不是为了你好，别人我才懒得管。","tactic":"条件式付出","expose":"包装圣人以压制你"},{"quote":"你看看你自己，工作一般长相也普通，除了我谁还能受得了你这个脾气？","tactic":"贬低打压 + 孤立切断","expose":"摧毁你的价值与社交支持，迫使你依附于他"},{"quote":"你要是因为这点事跟我吵架，就是不知好歹，我把你当回事你倒蹬鼻子上脸了。","tactic":"愧疚绑架","expose":"把你正常的情绪反应定罪，制造你的错与他的对"},{"quote":"我朋友都说你这性格，换个人早受不了了。","tactic":"外部背书","expose":"引用外部‘权威’来证明你的缺陷，让你陷入自我怀疑"}]},"weaponLibrary":{"gentle":"“我听得见你的‘为你好’，但我更想听你自己说。你这样贬低我，会让我觉得我不值信任。”","sharp":"“你所谓的‘为我好’里藏的都是控制：贬低、比较、道德绑架。真正的关心不会用别人的嘴来压我。”","unhinged":"“你说谁受得了我？那就让全世界看看你是谁，别把自己当救主了——我受不受不了我自己说了算！”"},"steps":[{"text":"暂停自我辩护，拒绝进入他设定的‘谁对谁错’游戏","pitfall":"注意对方会立即转换话题到另一个控制点"},{"text":"对‘为你好’直接说：‘你的关心我收下了，但你对我这样说话让我感到受伤。请换一种方式表达。'","pitfall":"他可能用愧疚继续拖着你回应"},{"text":"对贬低与外部背书：‘你拿我的工作、外貌和朋友的话来比较我，这不是爱，是操控。'","pitfall":"他可能说‘我只是开玩笑’来绕开正题，保持你的严肃立场"},{"text":"若继续贬损，平静但坚定地离开对话现场；真正爱你的人会尊重你的边界","pitfall":"注意不要被他拉入‘你这样我会很伤心’的道德勒索"}],"shield":"当他说‘都是为我好’，你不必承认他是对的——‘为你好’里夹杂贬低比较和道德勒索，就不是真的关心。你可以：一、停止自我辩护，把情绪责任交还给他；二、守住边界：‘我不需要向任何人证明他的观点是对的。我清楚自己需要什么，他对我说的这些只是操控。’若对方继续用‘你这样让我没法跟你说话’来挟持你，告诉他：‘你的感受很重要。但如果持续对我这样，我会停止这段对话。’必要时直接离开现场——真正关心你的人不会用言语压毁你的意志。","confidence":{"disclaimer":"本分析仅基于您提供的文本，不构成专业心理或法律诊断。若对话升级为暴力、胁迫或严重情绪伤害，请优先联系警方（110）、妇联维权热线（12338）或心理援助热线（010-82951332 或全国心理援助热线 400161-5515）。","sourceNote":"[隐蔽操控解码器·温柔版]"}},"sharp":{"decoder":"pua","codename":"隐蔽操控解码器","tone":"sharp","verdict":"这不是关心，这是用打压和牺牲感把你架在感恩的椅子上","headlineMetric":{"label":"操控密度","value":100,"raw":"6 种操控手法","band":"危险"},"breakdown":{"decoder":"pua","rows":[{"quote":"除了我谁还能受得了你这个脾气？","tactic":"唯一性绑架 (Uniqueness Binding)","expose":"用打压贬低把你逼成只会顺从的受害者。这不是关心，是把你自我价值踩进泥里再踩实，让你觉得自己离不开对方的‘忍受’"},{"quote":"我朋友都说你这性格，换个人早受不了了","tactic":"借第三方的嘴实施打压","expose":"拿第三方的嘴当武器，用他们的话来孤立你。把你自己塑造成‘有问题的人’，把操控伪装成社交义务"},{"quote":"我这么说还不是为了你好，别人我才懒得管","tactic":"借关心实施情感勒索","expose":"自居为牺牲者，把自己塑造成唯一宽容你的人。任何‘不理解’被重构为忘恩负义，把情感绑架包装成理所当然"},{"quote":"你看看你自己，工作一般长相也普通","tactic":"贬低打压 + 外貌羞辱 (Belittling)","expose":"贬低外貌和工作，这是最廉价的情感打压。制造‘只有我能忍受你’的虚假优越感，让你为他的‘包容’持续感恩顺从"},{"quote":"你倒蹬鼻子上脸了","tactic":"情绪勒索 + 贬低打压","expose":"把正常争吵定义为‘不知好歹’。这完全无视你的感受和边界，是控制欲的外衣——对方不想听你对话题的看法，只想让你觉得‘我为你好所以你不能说我不对'"},{"quote":"你要是因为这点事跟我吵架","tactic":"情绪勒索 (Emotional Blackmail)","expose":"这是最赤裸的情绪勒索。吵架不是因为你‘不知好歹’，是因为你在维护边界。他说你蹬鼻子上脸——翻译一下就是：你不能对他说‘不’"}]},"weaponLibrary":{"gentle":"你说为我好，可尊重不是建立在贬低上。你愿意帮我解决问题，而不是制造我的问题，我才能相信这话是真的；而且别人也值得喜欢——我不需要你‘是唯一’的证明。","sharp":"谁还能受得了你这个脾气——除了你吗？既然别人都怕你的脾气，你凭什么觉得我离不开你？蹬鼻子上脸的是把话当控制，不是把对话当理解。","unhinged":"你把我当回事？把‘我这么对你’当回事。下次吵架先别甩话，直接说事；别拿别人压我，也别拿我的感受当借口——我受不起这种控制，哪怕你说为了好也一样"},"steps":[{"text":"先标记对方话语中的攻击成分为情绪而非事实。把那些话翻译成‘他们在发泄/掌控情绪’，而不是‘我在被否定’","pitfall":"标记情绪是好事，但还要给自己时间消化；别立刻用‘他在发泄’去合理化对方后续贬低，情绪不等于许可"},{"text":"对唯一性绑架给出简短回应：‘我值得别人喜欢和尊重，你不需要是我的唯一，这反而说明你对我有更高期望。’然后坚持不被‘谁还能受得了你’牵着走","pitfall":"这句反击能稳住边界，别指望立刻让对方承认自己不对；若对方继续拉黑/翻旧账，及时抽离对话场景"}],"shield":"停止把自我价值绑定在对方的嘴上。他们说的是他们的叙事，不反映客观——工作有起伏、长相无价、脾气是真实感受。别接招这种叙事陷阱，守住三条边：‘我不接受贬低’‘我的事我自己管’‘吵架要就事不就人’。必要时直接抽离对话场景，用物理距离换取心理空间。","confidence":{"disclaimer":"非专业心理/法律建议，若对方持续贬低、威胁或限制自由涉及人身安全请优先求助专业机构","sourceNote":"仅做信息分析，不构成诊断。若你已离开并寻求支持，请优先联系现实中的可信任亲友或专业援助"}},"unhinged":{"decoder":"pua","codename":"驯兽师剧本","tone":"unhinged","verdict":"你不是在表达关心,而是在通过贬低、孤立和操控愧疚感来让我习惯依赖你并放弃自我,这是一种隐蔽的支配手段","headlineMetric":{"label":"操控密度","value":100,"raw":"5 种操控手法","band":"危险"},"breakdown":{"decoder":"pua","rows":[{"quote":"\"我这么说还不是为了你好，别人我才懒得管\"","tactic":"虚假动机绑架","expose":"你在试图把我不接受你的贬低说成是'为了我好'"},{"quote":"\"你看看你自己，工作一般长相也普通，除了我谁还能受得了你这个脾气\"","tactic":"贬低打压","expose":"你通过列举工作、长相、脾气等负面标签试图给我戴高帽"},{"quote":"\"你要是因为这点事跟我吵架，就是不知好歹\"","tactic":"煤气灯效应","expose":"你把吵架这个正常的表达不满的行为定义为'不知好歹'"},{"quote":"\"我把你当回事你倒蹬鼻子上脸了\"","tactic":"愧疚绑架","expose":"利用'我把你当回事'这句话让我产生亏欠感和自我怀疑"},{"quote":"\"我朋友都说你这性格，换个人早受不了了\"","tactic":"孤立切断","expose":"通过搬出'朋友都说'这个第三方声音来孤立我、否定我的判断"}]},"weaponLibrary":{"gentle":"\"你说的是为我好,但我也能理解自己,不需要通过别人的眼睛定义'好坏'","sharp":"\"我不是为了谁才好好生活,也不是因为你的夸奖才能存在,我是我自己\"","unhinged":"\"你拿朋友说事?你倒是去问问他们我为什么还跟你待在一起——他们可能会说我被PUA了\"。顺便说一句,以后别试图用任何第三方的观点来定义我。我的人生评价不需要外人介入,尤其不需要你这种'好心人'的干预。"},"steps":[{"text":"深呼吸停顿3秒再回应,打破对方预期中的即时情绪爆炸反应","pitfall":"不要在愤怒高峰期直接回击,那样正中下怀"},{"text":"把对方的每句评判用中性语气转述自己的真实感受'你说我不是不知好歹,但我觉得争吵是正常的沟通',不陷入自我辩护的陷阱","pitfall":"避免用情绪化语言反驳,否则会被继续扣帽子"},{"text":"温和而坚定地设立边界'我们不需要讨论工作、长相或脾气这类话题,这些是对你而言而非对我有价值的评论'","pitfall":"一旦开始就保持简短,不给对方延长话题的把柄"}],"shield":"不接'为你好'的话头,把感受客观说出来'你说的这些话让我感觉到被否定和孤立',必要时撤离对话环境,不把对方的贬低内化为自己的自我价值","confidence":{"disclaimer":"本分析非专业心理/法律建议,涉及人身安全请优先求助专业机构","sourceNote":"我参考了相关心理学文献中关于隐蔽操控的论述来协助分析这段交互中的话术特征,但所有判断均基于用户提供的具体文字内容本身"}}}},{"id":"legal","label":"用户协议陷阱","text":"本平台有权随时单方面修改本协议条款，修改自发布之日起生效，用户继续使用即视为接受。本服务按\"现状\"提供，平台不对服务内容作任何保证，对因使用本服务产生的任何损失不承担责任。用户与平台发生争议，须提交平台所在地仲裁委员会仲裁，用户不得提起集体诉讼。平台可随时中断或终止服务且无需提前通知。","classify":{"decoder":"legal","codename":"霸王条款粉碎机","accusation":"霸王条款把平台改来改去，用户只能乖乖买单！","confidence":0.95},"decodes":{"gentle":{"decoder":"legal","codename":"法律条款天书解码器·温柔版 2025.8 修复","tone":"gentle","verdict":"这是一份随时改约、免责、强制仲裁和断电的合同，你只剩同意或放弃。","headlineMetric":{"label":"风险条款密度","value":50,"raw":"4 条风险 · 2 条🔴高危","band":"重度"},"breakdown":{"decoder":"legal","rows":[{"clause":"本平台有权随时单方面修改本协议条款，修改自发布之日起生效，用户继续使用即视为接受。","plain":"他们可以随时改条款，发通告那天起就算生效，你接着用就等于同意。","riskLevel":"high","pitfall":"改权在他们手里，你没有话语权。","category":"单方改约与免责"},{"clause":"本服务按","plain":"服务是什么就给什么，没有保证，出了事他们不赔。","riskLevel":"high","pitfall":"“现状”二字就把所有兜底都扔掉了，你连损失都算“意外”。","category":"责任免除"},{"clause":"用户与平台发生争议，须提交平台所在地仲裁委员会仲裁，用户不得提起集体诉讼。","plain":"吵架得去他们的仲裁委员会，还不能搞集体诉讼。","riskLevel":"medium","pitfall":"仲裁地在你控制不了的地方，集体讨价还价的筹码也拿不回来。","category":"强制管辖限制救济"},{"clause":"平台可随时中断或终止服务且无需提前通知。","plain":"他们随时能关服务，不需要告诉你。","riskLevel":"medium","pitfall":"关掉你唯一的使用通道，没有任何缓冲期，你连“已订阅”都白搭。","category":"单方改约与无通知终止"}]},"steps":[{"text":"1) 截图保存协议全文（含日期与版本号）。pitfall: 平台可能偷偷改过而你没看到。","pitfall":"平台可能偷偷改过而你没看到"},{"text":"2) 逐项核对旧版本，找出哪些条款被修改、增删或弱化。pitfall: 改期条款通常藏在“修改权”段落里。","pitfall":"改期条款通常藏在“修改权”段落里"},{"text":"3) 签字前要求对方逐条解释，特别关注“单方改约”和“免责”行。pitfall: 口头答应不算证据，必须录音/截图。","pitfall":"口头答应不算证据，必须录音/截图"}],"shield":"签之前先保存当前协议的完整截图（含版本号、修改日期），再找一份官方公示的旧版对比；重点看“修改权”“免责条款”和“强制仲裁”这几行，签字时让对方逐条解释为什么你不需要同意，把对话录音或截图。","confidence":{"disclaimer":"信息性，非法律意见，重大决策请咨询执业律师","sourceNote":"2025-09-14 自测校验无误"}},"sharp":{"decoder":"legal","codename":"用户协议坑位图","tone":"sharp","verdict":"改条款、兜底免责、指定仲裁地、随时停服——这版协议把用户权利掏空到只剩使用权。","headlineMetric":{"label":"风险条款密度","value":55,"raw":"4 条风险 · 3 条🔴高危","band":"重度"},"breakdown":{"decoder":"legal","rows":[{"clause":"本平台有权随时单方面修改本协议条款，修改自发布之日起生效，用户继续使用即视为接受。","plain":"协议内容被平台握在手心，想改就改，不改也得照旧","riskLevel":"high","pitfall":"平台随时改条款，你毫无知情权","category":"单方改约陷阱"},{"clause":"本服务按''现状''提供，平台不对服务内容作任何保证，对因使用本服务产生的任何损失不承担责任。","plain":"东西坏了？那是你自己用出问题的","riskLevel":"high","pitfall":"把使用产生的损失全推给用户","category":"兜底免责"},{"clause":"用户与平台发生争议，须提交平台所在地仲裁委员会仲裁，用户不得提起集体诉讼。","plain":"纠纷只能去你找不到的仲裁机构，一群人告不了它","riskLevel":"high","pitfall":"把你锁死到不利管辖地，且个人打不过","category":"程序陷阱"},{"clause":"平台可随时中断或终止服务且无需提前通知。","plain":"随时可能让你一夜之间什么都没了","riskLevel":"medium","pitfall":"服务说停就停","category":"霸王条款"}]},"steps":[{"text":"下载保存当前版本协议的完整原文，最好保留下载日期与版本号标记","pitfall":"容易被后续协议覆盖"},{"text":"对修改条款与兜底免责类条款特别留意，留存对方通知记录","pitfall":"单方修改可能无声无息"},{"text":"如遇服务中断通知先截图取证再评估是否继续使用","pitfall":"事后补救成本大增"}],"shield":"截图保存本协议最新全文，重点盯紧修改通知条款与免责条款，签约前要求对方逐条解释（不预测结果）","confidence":{"disclaimer":"非法律意见，重大决策请咨询执业律师"}},"unhinged":{"decoder":"legal","codename":"霸王条款大赏·版","tone":"unhinged","verdict":"这玩意儿就是‘平台说改就改，你说没用也没用’的霸王条款，别被它忽悠了！","headlineMetric":{"label":"风险条款密度","value":55,"raw":"4 条风险 · 3 条🔴高危","band":"重度"},"breakdown":{"decoder":"legal","rows":[{"clause":"本平台有权随时单方面修改本协议条款，修改自发布之日起生效，用户继续使用即视为接受。","plain":"平台想改就改，你继续用就算同意","riskLevel":"high","pitfall":"你以为你在用，其实条款已悄悄改了你同意","category":"单方修改"},{"clause":"本服务按\"现状\"提供，平台不对服务内容作任何保证，对因使用本服务产生的任何损失不承担责任。","plain":"东西什么样我不管，出了事我也没责任","riskLevel":"high","pitfall":"出事了平台甩锅，用户只能自认倒霉","category":"单方免责"},{"clause":"用户与平台发生争议，须提交平台所在地仲裁委员会仲裁，用户不得提起集体诉讼。","plain":"吵架只能去他们家仲裁，你还不能找别人一起告","riskLevel":"high","pitfall":"出了官司让你一个人跑断腿去仲裁","category":"限制救济"},{"clause":"平台可随时中断或终止服务且无需提前通知。","plain":"想关就关，还不告诉你一声","riskLevel":"medium","pitfall":"服务突然停摆，你毫无预警","category":"单方解除"}]},"steps":[{"text":"先把当前协议全文截图保存（PDF/电子档均可）。【坑】别只截大标题，把具体条款页一起扫图，保存时间戳。","pitfall":"协议被修改后旧版作废"},{"text":"留意平台发布的修改公告、推送通知（官网/APP/邮件）。【坑】很多通知是‘点击更多’才弹出消息，容易错过。","pitfall":"条款已换你不一定知情"},{"text":"一旦服务中断，立刻截图前后系统时间、登录状态、数据丢失清单。【坑】别等钱到账后才发现停服，立刻留痕。","pitfall":"中断时无法取证"},{"text":"争议时优先调聊天记录、交付凭证、订单截图，然后再考虑仲裁流程。【坑】仲裁通常要预交费用，结果不确定。","pitfall":"仲裁管辖地可能偏远"}],"shield":"重点盯‘单方修改’‘免责’‘仲裁管辖’这些字眼，签字前要求对方逐条解释；继续使用的‘默示同意’条款要截图保存版本","confidence":{"disclaimer":"非法律意见，重大决策请咨询执业律师","sourceNote":"90% 抓得准，还有 10% 靠人眼"}}}},{"id":"finance","label":"理财宣传话术","text":"「金禧稳盈」混合型集合资产管理计划，由明星投研团队操盘，历史年化收益 8.5%，稳中求进、攻守兼备。申购费 1.2%（限时优惠），管理费 1.5%/年，托管费 0.25%/年。封闭期 36 个月，封闭期内不接受赎回。历史业绩不代表未来收益，投资有风险。","classify":{"decoder":"finance","codename":"收益画饼机","accusation":"用明星团队和稳进攻守的漂亮词汇包装收益，本质是金融话术营销陷阱","confidence":0.91},"decodes":{"gentle":{"decoder":"finance","codename":"金禧稳盈","tone":"gentle","verdict":"别把8.5%的历史数字当未来承诺，三年封闭期里资金被锁死才是真正要命的，加上申购费和管理费年累积的隐形费用，实际持有体验远不止宣传所说的稳。","headlineMetric":{"label":"韭菜指数","value":58,"raw":"真实费率 1.75% · 锁定 36 月","band":"偏贵"},"breakdown":{"decoder":"finance","rows":[{"claim":"历史年化收益8.5%","truth":"这是历史数据，不是承诺","trickType":"return","pitfall":"用过去业绩骗未来收益"},{"claim":"稳中求进、攻守兼备","truth":"没有说明具体标的和最大回撤","trickType":"risk","pitfall":"说辞包装实际风险"},{"claim":"申购费限时优惠1.2%","truth":"管理费+托管费年累加更高","trickType":"fee","pitfall":"后续费用可能更多"},{"claim":"封闭期36个月，封闭期内不接受赎回","truth":"流动性风险巨大，到期不能提前退","trickType":"risk","pitfall":"资金被锁死风险最大"}]},"financeRaw":{"product":"金禧稳盈混合型集合资产管理计划","advertisedReturn":8.5,"totalFeeRate":1.75,"lockMonths":36},"steps":[{"text":"要求销售提供完整费用清单（申购+管托+赎回）并确认是否有其他隐藏收费","pitfall":"限时优惠常有附加条件或后续追加条款"},{"text":"追问底层资产投向和杠杆比例，确认是否有对冲策略","pitfall":"混合基金常搭配衍生品放大波动，亏损时不止本金"},{"text":"索要产品说明书里写明的最大回撤数值，并计算若遭遇历史级别行情可能损失多少","pitfall":"很多合同只写'历史最高回撤'却用模糊措辞弱化风险"}],"shield":"问清楚总费率（含申购费/管理费/托管费）；确认封闭期是否能提前赎回及代价；查历史最大回撤数据而非只看年化平均","confidence":{"disclaimer":"解码过程仅供参考，不是真实产品数据，请谨慎使用。","sourceNote":"话术解码非投资建议，投资有风险，历史业绩不代表未来收益。"}},"sharp":{"decoder":"finance","codename":"decoding_verdict_20261111","tone":"sharp","verdict":"用明星团队和限时优惠包装锁定资金的高费产品：三年取不出来、每年近 3% 的费用侵蚀本金，8.5% 年化是历史均值而非未来承诺。","headlineMetric":{"label":"韭菜指数","value":100,"raw":"揪出 5 处猫腻","band":"血汗"},"breakdown":{"decoder":"finance","rows":[{"claim":"历史年化收益 8.5%","truth":"这是典型的高报法，年化收益是历史均值，不保证你将来也能得到","trickType":"return","pitfall":"拿一年前的高收益当未来承诺，忽略市场周期"},{"claim":"稳中求进、攻守兼备","truth":"这是淡化风险的典型话术，混合型产品波动率通常高于债券基金","trickType":"risk","pitfall":"混合型基金风险中等偏上，不可能又稳又能进攻"},{"claim":"封闭期 36 个月，封闭期内不接受赎回","truth":"三年锁定期期间你急用钱也取不出来，这笔钱的机会成本你得自己算","trickType":"fee","pitfall":"资金锁定三年无法提前取出，流动性差是硬伤"},{"claim":"申购费 1.2%","truth":"这是显性但容易被忽略的入场成本，加上年管理费、托管费总费率接近 3%","trickType":"fee","pitfall":"买入时就要掏钱，别以为这算优惠就能忽略"},{"claim":"由明星投研团队操盘，历史业绩不代表未来收益","truth":"基金经理人走了产品照样会跌，这是把不确定说成确定的营销套路","trickType":"risk","pitfall":"明星团队只是话术，历史业绩不能直接推导出未来表现"}]},"steps":[{"text":"先问清楚申购费何时收、管理费托管费如何计收，把总费率用计算器加一遍"},{"text":"要求产品说明书里的最大回撤数据，结合年化波动率看真实风险画像"},{"text":"确认封闭期是否可提前赎回及有无违约金条款，流动性比收益率更优先"},{"text":"对比同期同类混合型产品的费率与封闭期条款，别让单家机构的‘限时优惠’蒙蔽了眼睛"}],"shield":"在下单前请索要完整费率表并逐项核对总成本：申购费 1.2% 加上每年管理费 1.5%、托管费 0.25%，持有三年会吃走一大截本金；同时确认封闭期是否允许提前赎回及有无违约金条款，别被明星团队和‘稳中求进’的口号带节奏。","confidence":{"disclaimer":"非投资建议，投资有风险，历史业绩不代表未来收益。本输出仅基于文本拆解，不代表对某只特定产品的推荐。"}},"unhinged":{"decoder":"finance","codename":"金融话术粉碎解码器","tone":"unhinged","verdict":"这哪里是稳如泰山，分明是让你把三十年养老金一次性存进银行保管箱还顺便贴条‘别急，三年才开’！","headlineMetric":{"label":"韭菜指数","value":100,"raw":"揪出 7 处猫腻","band":"血汗"},"breakdown":{"decoder":"finance","rows":[{"claim":"明星投研团队操盘","truth":"基金经理没写在合同里？真出问题了连人都找不到","trickType":"risk","pitfall":"团队是租来的，业绩蹭的是老观众的锅"},{"claim":"历史年化收益 8.5%","truth":"拿过去的数据往未来脸上贴金","trickType":"return","pitfall":"赚的都是老观众的功劳"},{"claim":"申购费 1.2%（限时优惠）","truth":"优惠是发给别人看的，轮不到你","trickType":"fee","pitfall":"限时限户，你不在名单里还是原价"},{"claim":"管理费 1.5%/年，托管费 0.25%/年","truth":"一年下来你本金就被吃干净一部分","trickType":"fee","pitfall":"总费率 1.75% 看起来不高但真金白银扣得飞快"},{"claim":"封闭期 36 个月，封闭期内不接受赎回","truth":"资金流动性锁死，这是最大坑","trickType":"risk","pitfall":"三年不能取，急用钱就只能喝西北风"},{"claim":"稳中求进、攻守兼备","truth":"这种词全是营销术语，掩盖真实风险收益特征","trickType":"risk","pitfall":"稳就是回撤控制不错，进意味着涨起来也跌得狠"},{"claim":"历史业绩不代表未来收益，投资有风险","truth":"用法定免责把真话变成废话","trickType":"risk","pitfall":"这是合规免责条款，不是风险提示"}]},"steps":[{"text":"先别掏钱，把申购费和费率表发给我（坑：费表常隐藏）","pitfall":"申购费率表常被放在第二页小字里"},{"text":"问清楚‘限时优惠’是发给你的吗？（坑：通常是限人数/限日期）","pitfall":"优惠对象往往是机构而非个人，个人永远享受不到"},{"text":"查下该产品在晨星上的最大回撤记录（坑：公开数据不保证真实持仓风险）","pitfall":"宣传页只挑好日子讲业绩，跌的时候装死"}],"shield":"反推销核查清单：问清楚总费率到底多少（申购+管理+托管）；封闭期能不能提前赎回；‘攻守兼备’对应的是哪只对冲工具。别被‘明星团队’忽悠，把真基金经理简历发我核一下——合同里必须列明管理人信息","confidence":{"disclaimer":"非投资建议，投资有风险，历史业绩不代表未来收益"}}}},{"id":"government","label":"政策 / 政务通知","text":"住房公积金个人住房贷款申请人须连续足额缴存住房公积金满6个月（含）以上，且公积金账户处于正常缴存状态。贷款额度根据缴存年限、账户余额、还款能力及当地最高限额综合确定。申请人及配偶名下无未结清的公积金贷款，且符合当地住房限购政策。贷款期限不超过30年，且借款人年龄与贷款期限之和原则上不超过法定退休年龄。","classify":{"decoder":"government","codename":"房改文翻译器","accusation":"满半年还要查余额？别被公积金规定吓退，先算算自己资格！","confidence":0.45},"decodes":{"gentle":{"decoder":"government","codename":"公积金个贷门槛速译","tone":"gentle","verdict":"条款堆砌了专业术语和模糊语，把条件说得太正式，像把‘6个月、正常账户、无旧贷、限购’打包成了‘连续足额缴存’等词组。","headlineMetric":{"label":"政策费解度","value":60,"raw":"6 条条款 · 2 处纯术语","band":"挺费劲"},"breakdown":{"decoder":"government","rows":[{"clause":"连续足额缴存住房公积金满6个月（含）以上","plain":"存够钱和时间","meaning":"您必须已连续、足额地往公积金账户存钱超过6个月了。","clarity":"jargon"},{"clause":"且公积金账户处于正常缴存状态","plain":"账户要健康","meaning":"您的公积金账户不能是冻结、停用或逾期未缴的状态。","clarity":"jargon"},{"clause":"贷款额度根据缴存年限、账户余额、还款能力及当地最高限额综合确定","plain":"钱怎么算","meaning":"能贷多少由好几方面一起算，包括您存了多久、有多少钱、收入够不够还，以及各地规定的上限。","clarity":"vague"},{"clause":"申请人及配偶名下无未结清的公积金贷款","plain":"不能有旧债","meaning":"您和您配偶现在都没有还不完的公积金贷款在跑。","clarity":"vague"},{"clause":"且符合当地住房限购政策","plain":"查限购","meaning":"您得符合您所在城市的买房限制规定（比如面积、套数、户籍等）。","clarity":"clear"},{"clause":"贷款期限不超过30年，且借款人年龄与贷款期限之和原则上不超过法定退休年龄","plain":"年限和年龄","meaning":"最多加贷30年，而且您加贷款总时长要符合当地关于退休年龄的‘原则上’规定——各地退休线可能略有差异。","clarity":"vague"}]},"steps":[{"text":"先核对公积金APP或缴存单位系统记录：确保已连续、足额缴存满6个月且账户‘正常状态’（无冻结、非封存）。","pitfall":"账户可能有零星欠缴或曾短暂中断，系统可能只显示‘正常’但实际余额未达足额要求"},{"text":"准备好身份证、婚姻证（如有配偶需提供）、公积金缴存记录截图/打印件、收入证明等材料，到当地公积金中心柜台或直接线上提交预审。","pitfall":"很多城市要求配偶也提交缴存记录或收入证明，遗漏材料会反复退回"},{"text":"拨打12345政务服务热线或在不动产登记/公积金中心网站上查询您所在城市的限购政策最新口径与额度上限（包括当地最高贷款倍数）。","pitfall":"部分城市限购以户籍、社保缴纳年限等条件为准，外地社保可能不计、也可能计；各地政策更新频繁"},{"text":"确认贷款期限时留意退休规定：各地关于‘法定退休年龄’的口径存在差异（例如男60/女55、部分地区有延迟退休过渡条款），必要时到当地人社部门查询。","pitfall":"原文中的‘原则上’意味着可能有灵活处理，但具体执行要看当地公积金中心的规定"}],"shield":"拨打12345咨询当地公积金中心或登录所在地政务服务网搜索‘公积金个人住房贷款’查询最新条件；切勿轻信中介承诺，以官方答复为准。","confidence":{"disclaimer":"以官方最新发布为准，办理前向12345/经办窗口核实","sourceNote":"原文措辞严谨且地方差异大"}},"sharp":{"decoder":"government","codename":"政策人话翻译解码器（政府版）","tone":"sharp","verdict":"这条政策把资格藏进一堆术语里：‘足额’、‘正常缴存状态’、‘综合确定’、‘限购政策’——读完像在读银行内部文档。","headlineMetric":{"label":"政策费解度","value":50,"raw":"4 条条款 · 2 处纯术语","band":"挺费劲"},"breakdown":{"decoder":"government","rows":[{"clause":"缴存住房公积金满6个月（含）以上，且公积金账户处于正常缴存状态","plain":"必须连续缴满六个月且账户状态正常","meaning":"缴不到六个月就驳回申请；账户若出现‘封存’或‘欠费’记录肯定不符合条件","clarity":"jargon"},{"clause":"贷款额度根据缴存年限、账户余额、还款能力及当地最高限额综合确定","plain":"你能贷多少钱主要看缴了几年、账户里有多少钱、你的还款能力以及当地政策上限","meaning":"这三个因素里哪一个更关键没写，只说‘综合’，所以额度最终多少没人能提前算出","clarity":"jargon"},{"clause":"申请人及配偶名下无未结清的公积金贷款，且符合当地住房限购政策","plain":"你和配偶名下不能有还没还完的公积金贷款，同时要在当地的限购名单内","meaning":"即使你之前买房后已经还清贷款也没关系，但要确保当前没有未偿还贷款且在当地限购名额内","clarity":"vague"},{"clause":"贷款期限不超过30年，且借款人年龄与贷款期限之和原则上不超过法定退休年龄","plain":"最长期限是30年，而且你申请时年龄加上贷款年限不能超过退休年龄（例如65岁）","meaning":"如果你的年龄已经很接近退休，哪怕没超过，也可能因政策细则被拒","clarity":"vague"}]},"steps":[{"text":"打开公积金APP先查‘账户状态’是否正常——坑：别只看最近一年，连续不足6个月会被判驳回。"},{"text":"拿工资条/银行流水估算账户余额和‘还款能力’——坑：收入基数可能被税务局或公积金中心打折。"},{"text":"去当地公积金官网下载最新限购政策文件——坑：政策常有临时补充通知，必须查最新版。"}],"shield":"12345政务服务热线 / 官方网站 / 线下经办窗口。以官方最新发布为准，办理前向 12345/窗口核实","confidence":{"disclaimer":"以官方最新发布为准，办理前向 12345/经办窗口核实","sourceNote":"文本里‘足额’和‘综合确定’都是定性词，没有具体数字或公式可套，只能给个大概的把握。"}},"unhinged":{"decoder":"government","codename":"政策人话翻译解码器·government专用版","tone":"unhinged","verdict":"这政策没绕弯子，就是把门槛拍在桌上：满6个月、正常账户、无其他贷、限购合规、期限最多30年、年龄加借期别超退休年龄——看不懂不是它故意故弄玄虚，是信息密度太大、术语又偏硬。","headlineMetric":{"label":"政策费解度","value":55,"raw":"4 条条款 · 3 处纯术语","band":"挺费劲"},"breakdown":{"decoder":"government","rows":[{"clause":"住房公积金个人住房贷款申请人须连续足额缴存住房公积金满6个月（含）以上，且公积金账户处于正常缴存状态。","plain":"你得在公积金里至少交够六个月款且账户状态正常。","meaning":"你必须在公积金里连续存够至少6个月钱且账户状态正常才符合贷款的基本资格门槛之一。\n注：这是资格判定条件，不是说你能否获批（还需结合其他因素）。","clarity":"jargon"},{"clause":"贷款额度根据缴存年限、账户余额、还款能力及当地最高限额综合确定。","plain":"能贷多少数由你存了多久、账户里有多少、你每月能还多少、加上当地上限一起算出来。","meaning":"这行讲的是额度怎么算：看你存了多久、账户里有多少、每月能还多少，再对比当地上限一起定。\n注：这是决定额度的信息，不保证稳批。","clarity":"jargon"},{"clause":"申请人及配偶名下无未结清的公积金贷款，且符合当地住房限购政策。","plain":"你和配偶都没有其他未还清的公积金贷款，并且要满足当地住房限购要求。","meaning":"你和配偶都不能有还未还清的公积金贷款，同时你（以及配偶）要满足当地限购要求。\n注：这条是资格限制条件，不是对你个人的预判。","clarity":"jargon"},{"clause":"贷款期限不超过30年，且借款人年龄与贷款期限之和原则上不超过法定退休年龄。","plain":"借款最久30年，且你的年龄加上借期不能超过法定退休年龄。","meaning":"贷款最多30年，而且你的年龄加上借期通常不能超法定退休年龄。\n注：“原则上”属于模糊措辞，表示一般情况但可能有例外空间。","clarity":"vague"}]},"steps":[{"text":"行动1：自查连续缴满6个公积金月数 + 账户正常状态（坑：补缴/中断不算“连续”，只以实际缴存记录为准；单位代缴期间也要看是否计入）。","pitfall":"补缴不等同于连续缴存，只有每月足额打入才是合规。"},{"text":"行动2：查配偶名下还有无公积金贷款未结清（坑：有些系统不把配偶历史贷款显在查询页面上，建议要求柜台提供完整夫妻共贷记录）。","pitfall":"部分地方柜台不提供配偶历史贷款明细，可能需要手写查询请求。"},{"text":"行动3：确认当地限购政策是否仍在有效期（坑：限购可能有阶段性收紧/放宽窗口，务必核对住建部门最新公告）。","pitfall":"很多城市限购是按月滚动调整的，网上旧文未必反映当下状态。"},{"text":"行动4：携带身份证 + 公积金账户本 + 配偶结婚证去公积金管理中心柜台核验（坑：线上查询可能漏掉系统未同步的记录；窗口核验最稳当）。","pitfall":"柜台中可能会要求提供额外证明材料，最好提前问清清单。"}],"shield":"去你户口所在地的公积金管理中心柜台（或拨打12345转缴存地公积金服务热线），以官方答复为准；别靠网上流传的“条件”当依据——办理前务必向当地经办机构核实。","confidence":{"disclaimer":"以官方最新发布为准，办理前向12345/经办窗口核实。本文纯做信息性翻译，不替判断你是否符合资格，也不预测办理结果；各地具体经办细则可能微调，务必直接问官方口径。","sourceNote":"所有解读均源自你贴的这份公积金个人住房贷款申请条款原文；未引用任何二手资料或猜测内容。"}}}}];
+const SEEDS = [{"id":"marketing","label":"智商税广告","text":"「焕颜秘境」精萃精华液，蕴含珍稀极地酵母精粹与多重神经酰胺复合因子，深层重塑肌底屏障，唤醒年轻光源。专属定制体验价 ¥380/30ml，让时光在你脸上停步。"},{"id":"medical","label":"体检报告天书","text":"体检结论：颈动脉内膜中层厚度（IMT）1.2mm；右侧甲状腺低回声结节，大小约 4×3mm，边界清，TI-RADS 3 类；左室舒张功能减低；空腹血糖 6.4 mmol/L。建议相关专科随访。"},{"id":"workplace","label":"毕业/裁员通知","text":"亲爱的同学：经公司盘点与战略复盘，为降本增效、聚焦核心赛道，部分岗位将进行优化调整。受影响的同学将进入毕业流程，我们会提供 N+1 的毕业礼包与灵活过渡支持。感谢你的付出，祝你未来一切顺利。"},{"id":"academic","label":"AI 技术白皮书","text":"本系统采用端到端的多模态深度融合架构，基于 Transformer 解码器栈与对比学习预训练范式，通过自注意力机制实现跨模态语义对齐，并引入检索增强生成（RAG）策略以缓解大语言模型的幻觉问题，最终在零样本场景下实现认知智能的涌现与泛化能力的跃迁。"},{"id":"pua","label":"伴侣贬低话术","text":"我这么说还不是为了你好，别人我才懒得管。你看看你自己，工作一般长相也普通，除了我谁还能受得了你这个脾气？你要是因为这点事跟我吵架，就是不知好歹，我把你当回事你倒蹬鼻子上脸了。我朋友都说你这性格，换个人早受不了了。"},{"id":"legal","label":"用户协议陷阱","text":"本平台有权随时单方面修改本协议条款，修改自发布之日起生效，用户继续使用即视为接受。本服务按\"现状\"提供，平台不对服务内容作任何保证，对因使用本服务产生的任何损失不承担责任。用户与平台发生争议，须提交平台所在地仲裁委员会仲裁，用户不得提起集体诉讼。平台可随时中断或终止服务且无需提前通知。"},{"id":"finance","label":"理财宣传话术","text":"「金禧稳盈」混合型集合资产管理计划，由明星投研团队操盘，历史年化收益 8.5%，稳中求进、攻守兼备。申购费 1.2%（限时优惠），管理费 1.5%/年，托管费 0.25%/年。封闭期 36 个月，封闭期内不接受赎回。历史业绩不代表未来收益，投资有风险。"},{"id":"government","label":"政策 / 政务通知","text":"住房公积金个人住房贷款申请人须连续足额缴存住房公积金满6个月（含）以上，且公积金账户处于正常缴存状态。贷款额度根据缴存年限、账户余额、还款能力及当地最高限额综合确定。申请人及配偶名下无未结清的公积金贷款，且符合当地住房限购政策。贷款期限不超过30年，且借款人年龄与贷款期限之和原则上不超过法定退休年龄。"}];
+
+/* 常量 */
+const TONE_LABEL = { gentle: "温柔版", sharp: "犀利版", unhinged: "发疯版" };
+const LOADING_TEXT = {
+  marketing: "正在逆向推导原料成本…",
+  medical: "正在把天书翻成人话…",
+  workplace: "正在脱水黑话…",
+  academic: "正在粉碎装腔术语…",
+  pua: "正在拆解操控手法…",
+  legal: "正在逐条揭示风险…",
+  finance: "正在揪出隐形费用…",
+  government: "正在翻译政策原文…",
+};
+
+/* 状态 */
+const state = { text: "", tone: "sharp", entry: null, busy: false, timer: null };
+
+/* 工具 */
+const el = (id) => document.getElementById(id);
+const escapeHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+function dateStr(d = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+const TODAY = dateStr();
+/* stamp 块：包裹一段 HTML，赋予逐块淡入动画 + delay */
+function stamp(html, delay) {
+  return `<div class="stamp-in" style="animation-delay:${delay}s">${html}</div>`;
+}
+const dash = () => `<div class="dash"></div>`;
+
+/* ─── 主题 ─── */
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  el("theme-toggle").textContent = t === "dark" ? "暖米" : "暗墨";
+  try { localStorage.setItem("dbh-theme", t); } catch (e) {}
+}
+(function initTheme() {
+  let t = "dark";
+  try { t = localStorage.getItem("dbh-theme") || "dark"; } catch (e) {}
+  applyTheme(t);
+})();
+el("theme-toggle").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  applyTheme(cur === "dark" ? "light" : "dark");
+});
+
+/* ─── 渲染 chips / tone / 计数 ─── */
+function renderSeeds() {
+  el("seeds").innerHTML = SEEDS.map((s) =>
+    `<button data-id="${escapeHtml(s.id)}" data-text="${escapeHtml(s.text)}">${escapeHtml(s.label)}</button>`
+  ).join("");
+}
+function setTone(t) {
+  state.tone = t;
+  el("tones").querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tone === t);
+  });
+}
+function setBusy(b) {
+  state.busy = b;
+  el("tones").querySelectorAll("button").forEach((x) => x.disabled = b);
+  el("decode").disabled = b;
+  el("decode").textContent = b ? "解 码 中…" : "解 码";
+  el("seeds").querySelectorAll("button").forEach((x) => x.disabled = b);
+}
+
+/* ─── 渲染结果容器 ─── */
+function renderIdle(big, small, warn) {
+  el("result").innerHTML = `<div class="idle-card${warn ? " warn" : ""}">
+    <div class="big">${escapeHtml(big)}</div>
+    <div class="small">${escapeHtml(small)}</div>
+  </div>`;
+}
+function renderLoading(decoder) {
+  const text = (decoder && LOADING_TEXT[decoder]) ? LOADING_TEXT[decoder] : "正在识别这是哪种套路…";
+  el("result").innerHTML = `<div class="loading">
+    <div class="kicker">解 码 中</div>
+    <div class="pulse">${escapeHtml(text)}</div>
+    <div class="hint">演示版留 450ms 仪式感，真实场景 9B 模型最长可能等 1-2 分钟。</div>
+  </div>`;
+}
+function renderDone(entry, tone) {
+  const cls = entry.classify;
+  const result = entry.decodes[tone];
+  if (!result) {
+    renderIdle("该 seed 缺少这一档的预烘焙数据", `seed=${entry.id} · tone=${tone}`, true);
+    return;
+  }
+  const html = `
+    <div class="accusation">
+      <div class="meta-line">${escapeHtml(cls.codename)} · 置信 ${Number(cls.confidence).toFixed(2)}</div>
+      <div class="text">${escapeHtml(cls.accusation)}</div>
+    </div>
+    <div class="forgery">${renderForgery(result, cls.codename, tone)}</div>
+    <p class="disclaimer">${escapeHtml(result.confidence && result.confidence.disclaimer || "")}</p>
+  `;
+  el("result").innerHTML = html;
+}
+
+/* ─── 伪造件总入口 ─── */
+function renderForgery(result, codename, tone) {
+  const dec = result.decoder;
+  let inner = "";
+  if (dec === "marketing") inner = renderReceipt(result, codename);
+  else if (dec === "medical") inner = renderLabReport(result, codename);
+  else if (dec === "workplace") inner = renderRedHeader(result, codename);
+  else if (dec === "academic") inner = renderGistCard(result, codename);
+  else if (dec === "pua") inner = renderBattleBrief(result, codename, tone);
+  else if (dec === "legal") inner = renderRiskDisclosure(result, codename);
+  else if (dec === "finance") inner = renderProductLabel(result, codename);
+  else if (dec === "government") inner = renderPolicyBrief(result, codename);
+  else inner = `<div class="paper p-7"><div class="ink">未知 decoder: ${escapeHtml(dec)}</div></div>`;
+
+  /* 发疯档：金色手写贴纸 */
+  if (tone === "unhinged") {
+    return `<div class="unhinged-sticker">⚠ 发疯档 ⚠</div>` + inner;
+  }
+  return inner;
+}
+
+/* ─── 1. marketing → Receipt 热敏小票 ─── */
+function renderReceipt(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, marketingRaw, verdict, shield, steps, confidence } = result;
+  const overpaid = marketingRaw
+    ? Math.round(marketingRaw.priceYuan - (marketingRaw.costRangeYuan.min + marketingRaw.costRangeYuan.max) / 2)
+    : 0;
+  const rowHtml = (k, v, hl) =>
+    `<div class="receipt-row"><span class="k-v">${escapeHtml(k)}</span><span class="v${hl ? " hl" : ""}">${escapeHtml(v)}</span></div>`;
+
+  const costSection = marketingRaw ? `
+    ${dash()}
+    ${stamp(`<div>
+      <div class="k">真 实 成 本 核 算</div>
+      <div class="mt-2 col-gap-1">
+        ${rowHtml("商品", marketingRaw.product)}
+        ${rowHtml("售价", `¥${marketingRaw.priceYuan} · ${marketingRaw.costRangeYuan.unit}`)}
+        ${rowHtml("原料实价(估算)", `¥${marketingRaw.costRangeYuan.min}~${marketingRaw.costRangeYuan.max}`)}
+        ${rowHtml("你多付了", `约 ¥${overpaid}`, true)}
+        ${rowHtml("省钱平替", marketingRaw.cheaperAlternative)}
+      </div>
+    </div>`, 0.2)}` : "";
+
+  const detailRows = rows.map((r) => `
+    <div class="mt-2">
+      <div class="ink-3 strike sm">${escapeHtml(r.claim)}</div>
+      <div class="ink">→ ${escapeHtml(r.reality)}</div>
+      <div class="ink-2">成本 ${escapeHtml(r.cost)}</div>
+    </div>`).join("");
+
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<div class="stamp-deep-c">⚠ ${escapeHtml(s.pitfall)}</div>` : ""}</div>`
+  ).join("");
+
+  let bars = "";
+  for (let i = 0; i < 48; i++) bars += `<i style="height:${6 + ((i*7)%22)}px"></i>`;
+
+  return `<div class="paper w-narrow mono p-5 sm" style="line-height:1.7">
+    ${stamp(`<div class="text-center">
+      <div class="xs" style="letter-spacing:0.3em;color:var(--ink-2)">智 商 税 结 算 中 心</div>
+      <div class="mt-1 xxs ink-3">NO. ${escapeHtml(codename)} · ${TODAY}</div>
+    </div>`, 0.05)}
+    ${dash()}
+    ${stamp(`<div class="text-center">
+      <div class="xxs" style="letter-spacing:0.2em;text-transform:uppercase">${escapeHtml(headlineMetric.label)}</div>
+      <div class="mt-1 stamp-c"><span class="hype-big bold">${escapeHtml(headlineMetric.value)}</span><span class="hype-suf">/100</span></div>
+      <div class="sm semibold ink">${escapeHtml(headlineMetric.raw)} · ${escapeHtml(headlineMetric.band)}</div>
+    </div>`, 0.12)}
+    ${costSection}
+    ${dash()}
+    ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.3)}
+    ${dash()}
+    ${stamp(`<div>
+      <div class="k">明 细</div>
+      ${detailRows}
+    </div>`, 0.4)}
+    ${dash()}
+    ${stamp(`<div>
+      <div class="k">省 钱 建 议</div>
+      <div class="ink">${escapeHtml(shield)}</div>
+    </div>`, 0.5)}
+    ${dash()}
+    ${stamp(`<div>
+      <div class="k">行 动</div>
+      <div class="col-gap-1">${stepRows}</div>
+    </div>`, 0.6)}
+    ${dash()}
+    ${stamp(`<div>
+      <div class="barcode">${bars}</div>
+      <div class="text-center xxs" style="letter-spacing:0.4em;margin-top:8px">${escapeHtml(codename)}·${TODAY}</div>
+      <div class="text-center ink-3" style="font-size:9px;margin-top:4px">${escapeHtml(confidence && confidence.disclaimer || "")}</div>
+    </div>`, 0.7)}
+  </div>`;
+}
+
+/* ─── 2. medical → LabReport 化验单 ─── */
+function renderLabReport(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, verdict, shield, steps, confidence } = result;
+  const trs = rows.map((r) => `
+    <tr>
+      <td class="t">${escapeHtml(r.term)}</td>
+      <td>${escapeHtml(r.plain)}</td>
+      <td class="ink-2">${escapeHtml(r.means)}</td>
+    </tr>`).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+
+  return `<div class="paper w-wide serif p-7" style="overflow:hidden">
+    <div class="watermark"><span>AI 生成·非医学文书</span></div>
+    <div class="body">
+      ${stamp(`<div style="border-bottom:2px solid rgba(26,22,18,0.7);padding-bottom:12px">
+        <div class="text-center bold ink" style="font-size:20px;letter-spacing:0.2em">大白话翻译门诊</div>
+        <div class="mt-1 text-center xs ink-3">报告编号：DBH-LAB-${escapeHtml(codename)}-${TODAY}</div>
+      </div>`, 0.05)}
+      ${stamp(`<div class="mt-3 grid-2 sm ink-2" style="grid-template-columns:repeat(3,1fr)">
+        <span>代号：${escapeHtml(codename)}</span>
+        <span>科室：人话翻译科</span>
+        <span>状态：已解读</span>
+      </div>`, 0.12)}
+      ${dash()}
+      ${stamp(`<div>
+        <div class="k mb-2">术 语 对 照 表</div>
+        <table class="lab-table">
+          <thead><tr><th>医学术语</th><th>人话比喻</th><th>意味着什么</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      </div>`, 0.2)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k">印 象 结 论</div>
+        <div class="lg semibold ink">${escapeHtml(verdict)}</div>
+        <div class="xs ink-3">解析度 ${escapeHtml(headlineMetric.value)}/100 · ${escapeHtml(headlineMetric.band)}</div>
+      </div>`, 0.35)}
+      ${dash()}
+      ${stamp(`<div class="box-stamp">
+        <div class="k bold" style="letter-spacing:0.2em;color:var(--stamp)">⚠ 何 时 必 须 就 医</div>
+        <div class="mt-1 md ink pre-line">${escapeHtml(shield)}</div>
+      </div>`, 0.5)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k">后 续 建 议</div>
+        ${stepRows}
+      </div>`, 0.6)}
+      ${dash()}
+      ${stamp(`<div class="xs ink-3">
+        <div>主治翻译官（AI）</div>
+        <div class="mt-1">${escapeHtml(confidence && confidence.disclaimer || "")}</div>
+      </div>`, 0.7)}
+    </div>
+    <div class="round-stamp"><span>AI生成<br>非医学文书</span></div>
+  </div>`;
+}
+
+/* ─── 3. workplace → RedHeader 红头文件 ─── */
+function renderRedHeader(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, verdict, shield, steps, confidence } = result;
+  const year = new Date().getFullYear();
+  const trs = rows.map((r) => `
+    <div class="border-l-stamp">
+      <div class="ink-3 strike sm">${escapeHtml(r.jargon)}</div>
+      <div class="lg ink">真意：${escapeHtml(r.truth)}</div>
+    </div>`).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+
+  return `<div class="paper w-wide serif p-7" style="overflow:hidden">
+    <div class="watermark"><span>AI 生成·仅供参考·非法律意见</span></div>
+    <div class="body">
+      <div class="red-header">
+        ${stamp(`<div class="text-center">
+          <div class="title">真话办公厅</div>
+          <div class="line-thick"></div>
+          <div class="line-thin"></div>
+          <div class="mt-2 xs ink-3">真办发〔${year}〕${escapeHtml(codename)}号</div>
+        </div>`, 0.05)}
+      </div>
+      ${stamp(`<div class="mt-3 text-center lg bold ink">关于对所提交用语的真话翻译意见</div>`, 0.12)}
+      ${stamp(`<div class="mt-1 text-center xs ink-3">解析度 ${escapeHtml(headlineMetric.value)}/100 · ${escapeHtml(headlineMetric.band)}</div>`, 0.15)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-2">
+        <div class="k">用 语 翻 译</div>
+        ${trs}
+      </div>`, 0.22)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k">结 论 意 见</div>
+        <div class="lg semibold ink">${escapeHtml(verdict)}</div>
+      </div>`, 0.35)}
+      ${dash()}
+      ${stamp(`<div class="box-stamp-2">
+        <div class="k bold" style="letter-spacing:0.2em;color:var(--stamp)">指 路 清 单（非可提交投诉表）</div>
+        <div class="mt-1 md ink pre-line">${escapeHtml(shield)}</div>
+      </div>`, 0.5)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k">行 动</div>
+        ${stepRows}
+      </div>`, 0.6)}
+      ${dash()}
+      ${stamp(`<div class="xs ink-3">
+        真话办公厅 · ${TODAY}
+        <div class="mt-1">${escapeHtml(confidence && confidence.disclaimer || "")}</div>
+      </div>`, 0.7)}
+    </div>
+    <div class="round-stamp"><span>真话办公厅<br>AI生成</span></div>
+  </div>`;
+}
+
+/* ─── 4. academic → GistCard 卡片 ─── */
+function renderGistCard(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, coreCode, verdict, shield, steps, confidence } = result;
+  const trs = rows.map((r) => `
+    <div class="col-gap-1">
+      <div class="blue-c">${escapeHtml(r.jargon)}</div>
+      <div class="ink">↳ ${escapeHtml(r.plain)}</div>
+      <div class="ink-2">// ${escapeHtml(r.meat)}</div>
+    </div>`).join("");
+  const stepRows = steps.map((s) =>
+    `<div class="ink">- ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+  const coreCodeBlock = coreCode ? `
+    ${stamp(`<div class="mt-3 col-gap-1">
+      <div class="k"># coreCode 逻辑骨架</div>
+      <pre class="corecode"><code>${escapeHtml(coreCode)}</code></pre>
+    </div>`, 0.4)}` : "";
+
+  return `<div class="paper w-mid mono p-5">
+    <div class="gist-head">
+      <span class="gist-dots">
+        <i style="background:rgba(214,69,44,0.7)"></i>
+        <i style="background:rgba(200,169,106,0.7)"></i>
+        <i style="background:var(--ink-blue);opacity:0.7"></i>
+      </span>
+      <span style="margin-left:8px">${escapeHtml(codename)}.md · 装腔粉碎</span>
+      <span style="margin-left:auto">${TODAY}</span>
+    </div>
+    <div class="p-5 md" style="line-height:1.7">
+      ${stamp(`<div class="flex-items">
+        <span class="k">${escapeHtml(headlineMetric.label)}</span>
+        <span class="bold stamp-c" style="font-size:24px">${escapeHtml(headlineMetric.value)}</span>
+        <span class="xs ink-2">/100 · ${escapeHtml(headlineMetric.raw)} · ${escapeHtml(headlineMetric.band)}</span>
+      </div>`, 0.1)}
+      ${dash()}
+      ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.18)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-2">
+        <div class="k"># 装腔词粉碎</div>
+        ${trs}
+      </div>`, 0.26)}
+      ${coreCodeBlock}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k"># 反装腔武器</div>
+        <div class="ink">${escapeHtml(shield)}</div>
+      </div>`, 0.55)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k"># 行动</div>
+        ${stepRows}
+      </div>`, 0.65)}
+      ${dash()}
+      ${stamp(`<div class="xxs ink-3">${escapeHtml(confidence && confidence.disclaimer || "")}</div>`, 0.75)}
+    </div>
+  </div>`;
+}
+
+/* ─── 5. pua → BattleBrief 作战简报 ─── */
+function renderBattleBrief(result, codename, tone) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, weaponLibrary, safetyExit, verdict, shield, steps, confidence } = result;
+  const trs = rows.map((r) => `
+    <div class="border-l-stamp-deep">
+      <div class="md italic ink-2">「${escapeHtml(r.quote)}」</div>
+      <div class="sm semibold stamp-c">手法：${escapeHtml(r.tactic)}</div>
+      <div class="md ink">真相：${escapeHtml(r.expose)}</div>
+    </div>`).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+
+  const safety = safetyExit ? stamp(`<div class="box-stamp-deep mb-2">
+    <div class="k bold" style="letter-spacing:0.2em;color:var(--stamp)">🚨 安 全 出 口 · 红 线 置 顶</div>
+    <div class="mt-1 md ink pre-line">${escapeHtml(safetyExit)}</div>
+  </div>`, 0.02) : "";
+
+  /* 反击武器：只显示当前 tone 一档 + 复制按钮（idle/copied/failed） */
+  const weaponText = weaponLibrary ? (weaponLibrary[tone] || "") : "";
+  const weaponBlock = weaponLibrary ? stamp(`<div class="col-gap-2">
+    <div class="k">反 击 武 器 · ${TONE_LABEL[tone]}（防守反击·不递刀 · 点复制一键带走）</div>
+    <div class="weapon-row">
+      <span class="weapon-label">${TONE_LABEL[tone]}</span>
+      <span class="weapon-text">${escapeHtml(weaponText)}</span>
+      <button class="weapon-copy idle" data-weapon="${escapeHtml(weaponText)}">复制</button>
+    </div>
+  </div>`, 0.4) : "";
+
+  return `<div class="paper w-mid p-6">
+    ${safety}
+    ${stamp(`<div class="flex-between">
+      <div>
+        <div class="k">作 战 简 报 · 操控解码</div>
+        <div class="lg bold ink">${escapeHtml(codename)}</div>
+      </div>
+      <div class="text-right xs ink-3">
+        <div class="stamp-c">${escapeHtml(headlineMetric.value)}/100</div>
+        <div>${escapeHtml(headlineMetric.raw)}</div>
+        <div>${escapeHtml(headlineMetric.band)}</div>
+      </div>
+    </div>`, 0.05)}
+    ${dash()}
+    ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.15)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-2">
+      <div class="k">操 控 手 法 拆 解</div>
+      ${trs}
+    </div>`, 0.22)}
+    ${dash()}
+    ${weaponBlock}
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">守 住 边 界</div>
+      <div class="md ink">${escapeHtml(shield)}</div>
+    </div>`, 0.55)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">行 动</div>
+      ${stepRows}
+    </div>`, 0.65)}
+    ${dash()}
+    ${stamp(`<div class="xxs ink-3">${escapeHtml(codename)} · ${TODAY} · ${escapeHtml(confidence && confidence.disclaimer || "")}</div>`, 0.75)}
+  </div>`;
+}
+
+/* ─── 6. legal → RiskDisclosure 风险揭示函 ─── */
+function renderRiskDisclosure(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, verdict, shield, steps, confidence } = result;
+  const RISK = {
+    high: { tag: "🔴 高危", cls: "risk-high" },
+    medium: { tag: "🟡 中等", cls: "risk-medium" },
+    low: { tag: "🟢 轻微", cls: "risk-low" },
+  };
+  const trs = rows.map((r, i) => {
+    const rk = RISK[r.riskLevel] || RISK.medium;
+    return `<div class="border-l-ink">
+      <div class="flex-items">
+        <span class="xs ink-3">第${i+1}条</span>
+        <span class="risk-tag ${rk.cls}">${rk.tag}</span>
+        <span class="xs ink-3">· ${escapeHtml(r.category)}</span>
+      </div>
+      <div class="mt-1 sm italic ink-2">「${escapeHtml(r.clause)}」</div>
+      <div class="md ink">人话：${escapeHtml(r.plain)}</div>
+      <div class="sm stamp-deep-c">坑：${escapeHtml(r.pitfall)}</div>
+    </div>`;
+  }).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+
+  return `<div class="paper w-wide serif p-7" style="overflow:hidden">
+    <div class="watermark"><span>非法律意见·AI 生成</span></div>
+    <div class="body">
+      ${stamp(`<div class="text-center" style="border-bottom:2px solid rgba(26,22,18,0.7);padding-bottom:8px">
+        <div class="bold ink" style="font-size:20px;letter-spacing:0.2em">风险揭示函</div>
+        <div class="mt-1 xs ink-3">编号：DBH-LEGAL-${escapeHtml(codename)}-${TODAY}</div>
+      </div>`, 0.05)}
+      ${stamp(`<div class="mt-3 flex-items">
+        <span class="k">${escapeHtml(headlineMetric.label)}</span>
+        <span class="bold stamp-c" style="font-size:20px">${escapeHtml(headlineMetric.value)}</span>
+        <span class="xs ink-2">/100 · ${escapeHtml(headlineMetric.raw)} · ${escapeHtml(headlineMetric.band)}</span>
+      </div>`, 0.12)}
+      ${dash()}
+      ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.18)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-3">
+        <div class="k">条 款 揭 示</div>
+        ${trs}
+      </div>`, 0.25)}
+      ${dash()}
+      ${stamp(`<div class="box-stamp">
+        <div class="k bold" style="letter-spacing:0.2em;color:var(--stamp)">指 路（证据留存 + 留意条款·非法律意见）</div>
+        <div class="mt-1 md ink pre-line">${escapeHtml(shield)}</div>
+      </div>`, 0.5)}
+      ${dash()}
+      ${stamp(`<div class="col-gap-1">
+        <div class="k">行 动</div>
+        ${stepRows}
+      </div>`, 0.6)}
+      ${dash()}
+      ${stamp(`<div class="xxs ink-3">${escapeHtml(confidence && confidence.disclaimer || "")}</div>`, 0.72)}
+    </div>
+    <div class="round-stamp"><span>非法律意见<br>AI生成</span></div>
+  </div>`;
+}
+
+/* ─── 7. finance → ProductLabel 营养标签 ─── */
+function renderProductLabel(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, financeRaw, verdict, shield, steps, confidence } = result;
+  const TRICK = { fee: "隐形费用", risk: "风险话术", return: "收益陷阱" };
+  const nutRow = (k, v, hl) =>
+    `<div class="receipt-row" style="border-bottom:1px solid rgba(26,22,18,0.15);padding:2px 0">
+      <span class="ink-3">${escapeHtml(k)}</span>
+      <span class="semibold${hl ? " stamp-c" : " ink"}">${escapeHtml(v)}</span>
+    </div>`;
+  const nutSection = financeRaw ? `
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">营 养 成 分 表</div>
+      <div style="border-top:4px double rgba(26,22,18,0.6);border-bottom:4px double rgba(26,22,18,0.6);padding:8px 0">
+        ${nutRow("产品", financeRaw.product)}
+        ${nutRow("宣传年化", `${financeRaw.advertisedReturn}%`)}
+        ${nutRow("总费率/年", `${financeRaw.totalFeeRate}%`, true)}
+        ${nutRow("锁定期", `${financeRaw.lockMonths} 个月`, true)}
+        ${financeRaw.maxDrawdown != null ? nutRow("最大回撤", `${financeRaw.maxDrawdown}%`) : ""}
+      </div>
+    </div>`, 0.2)}` : "";
+  const trs = rows.map((r) => `
+    <div class="mt-2 col-gap-1">
+      <div class="flex-items">
+        <span class="trick-tag">${TRICK[r.trickType] || r.trickType}</span>
+        <span class="ink-2 strike sm">${escapeHtml(r.claim)}</span>
+      </div>
+      <div class="ink">→ ${escapeHtml(r.truth)}</div>
+      <div class="stamp-deep-c">坑：${escapeHtml(r.pitfall)}</div>
+    </div>`).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<div class="stamp-deep-c">⚠ ${escapeHtml(s.pitfall)}</div>` : ""}</div>`
+  ).join("");
+
+  return `<div class="paper w-narrow mono p-5 sm" style="line-height:1.7">
+    ${stamp(`<div style="border:2px solid var(--ink);padding:8px;text-align:center">
+      <div class="xxs" style="letter-spacing:0.3em;text-transform:uppercase;color:var(--ink-2)">金 融 产 品 猫 腥 营 养 表</div>
+      <div class="mt-1 xs ink-3">NO. ${escapeHtml(codename)} · ${TODAY}</div>
+    </div>`, 0.05)}
+    ${dash()}
+    ${stamp(`<div class="text-center">
+      <div class="xxs" style="letter-spacing:0.2em;text-transform:uppercase">${escapeHtml(headlineMetric.label)}</div>
+      <div class="mt-1 stamp-c"><span class="hype-big bold">${escapeHtml(headlineMetric.value)}</span><span class="hype-suf">/100</span></div>
+      <div class="sm semibold ink">${escapeHtml(headlineMetric.raw)} · ${escapeHtml(headlineMetric.band)}</div>
+    </div>`, 0.12)}
+    ${nutSection}
+    ${dash()}
+    ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.3)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-2">
+      <div class="k">猫 腥 明 细</div>
+      ${trs}
+    </div>`, 0.4)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">反 推 销 核 对 清 单</div>
+      <div class="ink">${escapeHtml(shield)}</div>
+    </div>`, 0.55)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">行 动</div>
+      ${stepRows}
+    </div>`, 0.65)}
+    ${dash()}
+    ${stamp(`<div class="text-center ink-3" style="font-size:9px">${escapeHtml(confidence && confidence.disclaimer || "")}</div>`, 0.75)}
+  </div>`;
+}
+
+/* ─── 8. government → PolicyBrief 双语对照 ─── */
+function renderPolicyBrief(result, codename) {
+  const rows = (result.breakdown && result.breakdown.rows) || [];
+  const { headlineMetric, verdict, shield, steps, confidence } = result;
+  const CLARITY = {
+    jargon: { tag: "纯术语", cls: "clarity-jargon" },
+    vague: { tag: "模糊", cls: "clarity-vague" },
+    clear: { tag: "已直白", cls: "clarity-clear" },
+  };
+  const trs = rows.map((r) => {
+    const c = CLARITY[r.clarity] || CLARITY.vague;
+    return `<div class="grid-2 border-l-blue">
+      <div>
+        <div class="xxs ink-3">原文</div>
+        <div class="sm italic ink-2">「${escapeHtml(r.clause)}」</div>
+      </div>
+      <div>
+        <div class="xxs ink-3">人话</div>
+        <div class="md ink">${escapeHtml(r.plain)}</div>
+        <div class="sm ink-2 mt-1">意味着：${escapeHtml(r.meaning)}</div>
+      </div>
+      <div class="col-span-2">
+        <span class="clarity-tag ${c.cls}">${c.tag}</span>
+      </div>
+    </div>`;
+  }).join("");
+  const stepRows = steps.map((s, i) =>
+    `<div class="ink">${i+1}. ${escapeHtml(s.text)}${s.pitfall ? `<span class="stamp-deep-c"> ⚠${escapeHtml(s.pitfall)}</span>` : ""}</div>`
+  ).join("");
+
+  return `<div class="paper w-wide serif p-7">
+    ${stamp(`<div class="text-center" style="border-bottom:2px solid rgba(26,22,18,0.7);padding-bottom:8px">
+      <div class="bold ink" style="font-size:20px;letter-spacing:0.2em">政策双语对照解读单</div>
+      <div class="mt-1 xs ink-3">编号：DBH-GOV-${escapeHtml(codename)}-${TODAY}</div>
+    </div>`, 0.05)}
+    ${stamp(`<div class="mt-3 flex-items">
+      <span class="k">${escapeHtml(headlineMetric.label)}</span>
+      <span class="bold stamp-c" style="font-size:20px">${escapeHtml(headlineMetric.value)}</span>
+      <span class="xs ink-2">/100 · ${escapeHtml(headlineMetric.raw)} · ${escapeHtml(headlineMetric.band)}</span>
+    </div>`, 0.12)}
+    ${dash()}
+    ${stamp(`<div class="lg semibold ink">${escapeHtml(verdict)}</div>`, 0.18)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-3">
+      <div class="k">原 文 ← → 人 话</div>
+      ${trs}
+    </div>`, 0.25)}
+    ${dash()}
+    ${stamp(`<div class="box-blue">
+      <div class="k bold" style="letter-spacing:0.2em;color:var(--ink-blue)">指 路 官 方</div>
+      <div class="mt-1 md ink pre-line">${escapeHtml(shield)}</div>
+    </div>`, 0.5)}
+    ${dash()}
+    ${stamp(`<div class="col-gap-1">
+      <div class="k">行 动</div>
+      ${stepRows}
+    </div>`, 0.6)}
+    ${dash()}
+    ${stamp(`<div class="xxs ink-3">${escapeHtml(confidence && confidence.disclaimer || "")}</div>`, 0.72)}
+  </div>`;
+}
+
+/* ─── 解码主流程 ─── */
+function findEntryByText(text) {
+  const t = (text || "").trim();
+  return DATA.find((e) => e.text === t) || null;
+}
+
+function runDecode(entry, tone) {
+  if (!entry) {
+    renderIdle("演示版仅含 8 条预烘焙 seed", "请点上方 chip 选一段样本，或把 seed 文本粘进输入框再解码。", true);
+    return;
+  }
+  state.entry = entry;
+  state.text = entry.text;
+  el("text").value = entry.text;
+  el("count").textContent = String(entry.text.length);
+
+  setBusy(true);
+  renderLoading(entry.classify && entry.classify.decoder);
+
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = setTimeout(() => {
+    setBusy(false);
+    renderDone(entry, tone);
+  }, 450);
+}
+
+function onPickSeed(seed) {
+  if (state.busy) return;
+  setTone("sharp");
+  runDecode(seed, "sharp");
+}
+
+function onToneChange(t) {
+  if (state.busy || t === state.tone) return;
+  setTone(t);
+  if (state.entry) runDecode(state.entry, t);
+}
+
+function onDecodeClick() {
+  if (state.busy) return;
+  const text = el("text").value;
+  const entry = findEntryByText(text);
+  if (!entry) {
+    renderIdle("演示版仅含 8 条预烘焙 seed", "请点上方 chip 选一段样本，或把 seed 文本粘进输入框再解码。", true);
+    return;
+  }
+  runDecode(entry, state.tone);
+}
+
+/* ─── 事件绑定 ─── */
+el("text").addEventListener("input", (e) => {
+  state.text = e.target.value;
+  el("count").textContent = String(e.target.value.length);
+});
+el("tones").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tone]");
+  if (btn) onToneChange(btn.dataset.tone);
+});
+el("decode").addEventListener("click", onDecodeClick);
+el("seeds").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-id]");
+  if (!btn) return;
+  const seed = SEEDS.find((s) => s.id === btn.dataset.id);
+  if (seed) onPickSeed(seed);
+});
+
+/* 武器复制按钮：事件委托（idle → copied / failed） */
+el("result").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button.weapon-copy");
+  if (!btn) return;
+  const text = btn.getAttribute("data-weapon") || "";
+  const setStateCls = (st) => {
+    btn.classList.remove("idle", "copied", "failed");
+    btn.classList.add(st);
+    btn.textContent = st === "copied" ? "已复制" : st === "failed" ? "复制失败·选中" : "复制";
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setStateCls("copied");
+    setTimeout(() => setStateCls("idle"), 1500);
+  } catch (err) {
+    setStateCls("failed");
+    setTimeout(() => setStateCls("idle"), 2500);
+  }
+});
+
+/* ─── 启动 ─── */
+renderSeeds();
+</script>
+</body>
+</html>

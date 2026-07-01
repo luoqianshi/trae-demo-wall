@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第一关 · 海上世界 → 南海意馆咖啡</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root {
+    --nes-black:#0D0D0D; --nes-dark:#1A1A2E; --nes-gray:#4A4A6A;
+    --nes-white:#F8F8F8; --nes-yellow:#FFD700; --nes-red:#E74C3C;
+    --nes-green:#2ECC71; --nes-cyan:#00D2D3;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    background: var(--nes-black);
+    font-family: 'Press Start 2P', 'Courier New', monospace;
+    color: var(--nes-white);
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.top-bar {
+    background: var(--nes-dark);
+    border-bottom: 3px solid var(--nes-gray);
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    flex-shrink: 0;
+    z-index: 50;
+}
+.top-bar .stage-info { color: var(--nes-yellow); }
+.top-bar .progress-info { color: var(--nes-green); }
+
+.map-section {
+    flex: 3;
+    position: relative;
+    overflow: hidden;
+    background: var(--nes-dark);
+    min-height: 0;
+}
+#mapCanvas { display:block; width:100%; height:100%; }
+.map-overlay {
+    position: absolute; top:10px; right:10px;
+    background: rgba(13,13,13,0.85);
+    border: 2px solid var(--nes-white);
+    padding: 6px 12px; font-size: 10px;
+    color: var(--nes-yellow); z-index: 10;
+}
+.divider {
+    height: 4px;
+    background: repeating-linear-gradient(90deg,
+        var(--nes-yellow) 0, var(--nes-yellow) 8px,
+        var(--nes-black) 8px, var(--nes-black) 16px);
+    flex-shrink: 0; z-index: 50;
+}
+.game-section {
+    flex: 2;
+    position: relative;
+    overflow: hidden;
+    background: #1a0f0a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+}
+#gameCanvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 3px solid #444;
+    box-shadow: 0 0 20px rgba(255,204,0,0.2);
+}
+.scanlines {
+    position: fixed; top:0; left:0;
+    width:100%; height:100%;
+    background: repeating-linear-gradient(0deg,
+        rgba(0,0,0,0.12) 0, rgba(0,0,0,0.12) 1px,
+        transparent 1px, transparent 3px);
+    pointer-events: none; z-index: 999;
+}
+.controls {
+    position: fixed; bottom: 16px; right: 16px; z-index: 100;
+    display: flex; gap: 10px;
+}
+.btn {
+    background: var(--nes-red); color: var(--nes-white);
+    border: 3px solid var(--nes-white);
+    padding: 10px 20px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px; cursor: pointer;
+    box-shadow: 4px 4px 0 var(--nes-black);
+    transition: transform 0.1s;
+}
+.btn:active { transform: translate(2px,2px); box-shadow: 2px 2px 0 var(--nes-black); }
+.btn:disabled { opacity:0.5; cursor:not-allowed; }
+.btn.green { background: var(--nes-green); }
+.btn.yellow { background: var(--nes-yellow); color: var(--nes-black); }
+.loading {
+    position: fixed; top:50%; left:50%;
+    transform: translate(-50%,-50%);
+    color: var(--nes-yellow); font-size: 14px; z-index: 1000;
+}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+    <span class="stage-info" id="stageInfo">STAGE 1/5: 海上世界 → 南海意馆咖啡</span>
+    <span class="progress-info" id="progressInfo">就绪 — 点击出发开始</span>
+</div>
+
+<div class="map-section">
+    <canvas id="mapCanvas"></canvas>
+    <div class="map-overlay" id="mapOverlay">📍 深圳南山 | zoom 15</div>
+</div>
+
+<div class="divider"></div>
+
+<div class="game-section">
+    <canvas id="gameCanvas" width="480" height="270"></canvas>
+</div>
+
+<div class="controls">
+    <button class="btn" id="startBtn">▶ 出发</button>
+</div>
+
+<div class="scanlines"></div>
+<div class="loading" id="loading">加载地图数据中...</div>
+
+<script>
+'use strict';
+
+// ==========================================
+// 配置
+// ==========================================
+const VIEW_W = 480, VIEW_H = 270;
+const TILE = 16;
+
+const gameCanvas = document.getElementById('gameCanvas');
+const gctx = gameCanvas.getContext('2d');
+gctx.imageSmoothingEnabled = false;
+
+const mapCanvas = document.getElementById('mapCanvas');
+const mctx = mapCanvas.getContext('2d');
+
+// ==========================================
+// NES 调色板
+// ==========================================
+const PAL = {
+    floor:'#8b5a2b', floorDk:'#6b4423', floorLt:'#ab7a4b',
+    wall:'#6b4423', wallDk:'#4a2f1a', wallLt:'#8b5a2b',
+    bar:'#4a2f1a', barDk:'#2a180a', barLt:'#6b4423', barTop:'#3a2010',
+    machine:'#2a2a2a', machineDk:'#0a0a0a', machineLt:'#5a5a5a',
+    machineBtn:'#cc3333', coffee:'#4a2810',
+    table:'#6b4423', tableDk:'#3a2010', tableLt:'#8b5a2b',
+    chair:'#5a3a1a', chairDk:'#3a2010',
+    lamp:'#ffcc00', lampDk:'#cc6600', lampGlow:'#ffee88',
+    boardFrame:'#2a180a', boardBg:'#f5f5dc', boardText:'#2a180a',
+    windowSky:'#6cb4e8', windowFrame:'#4a2f1a',
+    plant:'#2d5016', plantLt:'#4a7c3a', pot:'#8b5a2b', potDk:'#6b4423',
+    skin:'#ffd5b5', skinDk:'#e8b890',
+    shirt:'#cc3333', shirtDk:'#992222', shirtLt:'#ff5555',
+    pants:'#3333cc', pantsDk:'#222288',
+    hair:'#4a2810', shoe:'#222222',
+    black:'#000000', white:'#ffffff',
+    star:'#ffdd44', starLt:'#ffff88',
+    // 行进场景
+    sky1:'#87CEEB', sky2:'#B0E0E6',
+    ground1:'#8B7355', ground2:'#6B5333', grass:'#2ECC71',
+    bldg1:'#B0B0B0', bldg2:'#C0C0C0', bldg3:'#A0A0A0',
+    bldgWindow:'#FFD700', bldgWindow2:'#FF8C00',
+    treeTrunk:'#6B5333',
+};
+
+// ==========================================
+// 纹理生成工具
+// ==========================================
+function makeTex(w, h, drawFn) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    drawFn(g);
+    return c;
+}
+
+// ==========================================
+// 咖啡馆场景纹理
+// ==========================================
+const TEX = {
+    floorA: makeTex(16,16, g => {
+        g.fillStyle=PAL.floor; g.fillRect(0,0,16,16);
+        g.fillStyle=PAL.floorDk; g.fillRect(0,5,16,1); g.fillRect(0,11,16,1);
+        g.fillStyle=PAL.floorLt; g.fillRect(0,0,16,1); g.fillRect(0,6,16,1); g.fillRect(0,12,16,1);
+        g.fillStyle=PAL.floorDk; g.fillRect(7,1,1,4); g.fillRect(3,7,1,4); g.fillRect(11,13,1,3);
+    }),
+    floorB: makeTex(16,16, g => {
+        g.fillStyle=PAL.floorLt; g.fillRect(0,0,16,16);
+        g.fillStyle=PAL.floor; g.fillRect(0,5,16,1); g.fillRect(0,11,16,1);
+        g.fillStyle=PAL.floorDk; g.fillRect(5,1,1,4); g.fillRect(9,7,1,4); g.fillRect(0,6,16,1); g.fillRect(0,12,16,1);
+    }),
+    wallFloor: makeTex(16,16, g => {
+        g.fillStyle=PAL.wallDk; g.fillRect(0,0,16,6);
+        g.fillStyle=PAL.wallLt; g.fillRect(0,0,16,1);
+        g.fillStyle=PAL.floor; g.fillRect(0,6,16,10);
+        g.fillStyle=PAL.floorDk; g.fillRect(0,11,16,1);
+        g.fillStyle=PAL.floorLt; g.fillRect(0,6,16,1); g.fillRect(0,12,16,1);
+    }),
+    wall: makeTex(16,16, g => {
+        g.fillStyle=PAL.wall; g.fillRect(0,0,16,16);
+        g.fillStyle=PAL.wallDk;
+        g.fillRect(0,3,16,1); g.fillRect(0,7,16,1); g.fillRect(0,11,16,1); g.fillRect(0,15,16,1);
+        g.fillRect(7,0,1,4); g.fillRect(3,4,1,4); g.fillRect(11,8,1,4); g.fillRect(7,12,1,4);
+        g.fillStyle=PAL.wallLt; g.fillRect(0,0,16,1);
+    }),
+    bar: makeTex(32,16, g => {
+        g.fillStyle=PAL.bar; g.fillRect(0,0,32,16);
+        g.fillStyle=PAL.barTop; g.fillRect(0,0,32,2);
+        g.fillStyle=PAL.barLt; g.fillRect(0,2,32,1);
+        g.fillStyle=PAL.barDk; g.fillRect(0,14,32,2);
+        g.fillStyle=PAL.barDk; g.fillRect(5,5,1,8); g.fillRect(15,5,1,8); g.fillRect(25,5,1,8);
+    }),
+    machine: makeTex(32,32, g => {
+        g.fillStyle=PAL.machine; g.fillRect(2,6,28,24);
+        g.fillStyle=PAL.machineDk; g.fillRect(0,2,32,6);
+        g.fillStyle=PAL.machineLt; g.fillRect(2,6,1,24); g.fillRect(29,6,1,24); g.fillRect(2,6,28,1);
+        g.fillStyle=PAL.black; g.fillRect(6,10,8,4);
+        g.fillStyle='#44ff44'; g.fillRect(7,11,1,2); g.fillRect(9,11,1,2); g.fillRect(11,11,1,2);
+        g.fillStyle=PAL.machineBtn; g.fillRect(18,10,3,3);
+        g.fillStyle=PAL.lamp; g.fillRect(23,10,3,3);
+        g.fillStyle=PAL.machineDk; g.fillRect(12,18,8,6);
+        g.fillStyle=PAL.machineLt; g.fillRect(12,18,8,1);
+        g.fillStyle=PAL.white; g.fillRect(14,24,4,4);
+        g.fillStyle=PAL.coffee; g.fillRect(14,24,4,1);
+    }),
+    table: makeTex(24,16, g => {
+        g.fillStyle=PAL.table; g.fillRect(0,0,24,8);
+        g.fillStyle=PAL.tableLt; g.fillRect(0,0,24,2);
+        g.fillStyle=PAL.tableDk; g.fillRect(0,6,24,2);
+        g.fillStyle=PAL.tableDk; g.fillRect(4,8,2,6); g.fillRect(18,8,2,6);
+        g.fillStyle=PAL.white; g.fillRect(10,2,4,3);
+        g.fillStyle=PAL.coffee; g.fillRect(11,3,2,1);
+    }),
+    chair: makeTex(16,16, g => {
+        g.fillStyle=PAL.chair; g.fillRect(0,0,16,14);
+        g.fillStyle=PAL.chairDk; g.fillRect(0,12,16,2);
+        g.fillStyle=PAL.tableLt; g.fillRect(0,0,16,1);
+        g.fillStyle=PAL.chairDk; g.fillRect(2,0,1,4); g.fillRect(13,0,1,4); g.fillRect(2,0,12,1);
+    }),
+    lamp: makeTex(16,16, g => {
+        g.fillStyle='#222222'; g.fillRect(7,0,2,6);
+        g.fillStyle=PAL.lampDk; g.fillRect(2,6,12,6);
+        g.fillStyle=PAL.lamp; g.fillRect(3,7,10,4);
+        g.fillStyle=PAL.lampGlow; g.fillRect(5,9,6,1); g.fillRect(6,10,4,1);
+    }),
+    menu: makeTex(32,24, g => {
+        g.fillStyle=PAL.boardFrame; g.fillRect(0,0,32,24);
+        g.fillStyle=PAL.boardBg; g.fillRect(2,2,28,20);
+        g.fillStyle=PAL.boardText;
+        g.fillRect(6,4,2,1); g.fillRect(9,4,2,1); g.fillRect(12,4,2,1); g.fillRect(15,4,2,1); g.fillRect(18,4,2,1);
+        g.fillRect(4,8,16,1); g.fillRect(4,11,12,1); g.fillRect(4,14,18,1);
+        g.fillStyle=PAL.machineBtn; g.fillRect(22,8,6,1); g.fillRect(22,11,6,1); g.fillRect(22,14,6,1);
+    }),
+    window: makeTex(32,24, g => {
+        g.fillStyle=PAL.windowFrame; g.fillRect(0,0,32,24);
+        g.fillStyle=PAL.windowSky; g.fillRect(2,2,28,20);
+        g.fillStyle=PAL.white;
+        g.fillRect(5,5,8,3); g.fillRect(7,4,4,1);
+        g.fillRect(18,9,6,2); g.fillRect(4,14,5,2); g.fillRect(18,15,7,3);
+        g.fillStyle=PAL.windowFrame; g.fillRect(15,2,2,20); g.fillRect(2,11,28,2);
+    }),
+    plant: makeTex(16,24, g => {
+        g.fillStyle=PAL.pot; g.fillRect(0,12,16,12);
+        g.fillStyle=PAL.potDk; g.fillRect(0,22,16,2);
+        g.fillStyle=PAL.tableLt; g.fillRect(0,12,16,1);
+        g.fillStyle=PAL.plant; g.fillRect(2,6,4,6); g.fillRect(6,2,4,10); g.fillRect(10,6,4,6);
+        g.fillStyle=PAL.plantLt; g.fillRect(3,7,2,4); g.fillRect(7,3,2,8); g.fillRect(11,7,2,4);
+    }),
+    star: makeTex(16,12, g => {
+        g.fillStyle=PAL.star;
+        g.fillRect(6,0,4,2); g.fillRect(4,2,8,2); g.fillRect(0,4,16,4);
+        g.fillRect(4,8,8,2); g.fillRect(2,10,4,2); g.fillRect(10,10,4,2);
+        g.fillStyle=PAL.starLt; g.fillRect(7,1,2,1); g.fillRect(6,4,4,2);
+    }),
+};
+
+// ==========================================
+// 玩家精灵（俯视 4方向 × 2帧）
+// ==========================================
+function drawPlayerFrame(g, dir, frame) {
+    const x=0, y=0, step=frame;
+    g.fillStyle='rgba(0,0,0,0.35)'; g.fillRect(x+3,y+14,10,2);
+    if (dir===0) {
+        g.fillStyle=PAL.hair; g.fillRect(x+4,y+1,8,3); g.fillRect(x+3,y+2,10,2);
+        g.fillStyle=PAL.skin; g.fillRect(x+4,y+3,8,5);
+        g.fillStyle=PAL.skinDk; g.fillRect(x+4,y+7,8,1);
+        g.fillStyle=PAL.black; g.fillRect(x+6,y+5,1,2); g.fillRect(x+9,y+5,1,2);
+        g.fillStyle=PAL.shirt; g.fillRect(x+3,y+8,10,5);
+        g.fillStyle=PAL.shirtLt; g.fillRect(x+4,y+8,8,1);
+        g.fillStyle=PAL.shirtDk; g.fillRect(x+3,y+12,10,1);
+        g.fillStyle=PAL.skin; g.fillRect(x+1,y+9+(step?1:0),2,4); g.fillRect(x+13,y+9-(step?1:0),2,4);
+        g.fillStyle=PAL.pants; g.fillRect(x+4,y+13,3,2+(step?0:1)); g.fillRect(x+9,y+13,3,2+(step?1:0));
+        g.fillStyle=PAL.shoe; g.fillRect(x+4,y+15,3,1); g.fillRect(x+9,y+15,3,1);
+    } else if (dir===1) {
+        g.fillStyle=PAL.hair; g.fillRect(x+4,y+1,8,5); g.fillRect(x+3,y+2,10,3);
+        g.fillStyle=PAL.skin; g.fillRect(x+4,y+6,8,2);
+        g.fillStyle=PAL.shirt; g.fillRect(x+3,y+8,10,5);
+        g.fillStyle=PAL.shirtLt; g.fillRect(x+4,y+8,8,1);
+        g.fillStyle=PAL.shirtDk; g.fillRect(x+3,y+12,10,1);
+        g.fillStyle=PAL.skin; g.fillRect(x+1,y+9+(step?1:0),2,4); g.fillRect(x+13,y+9-(step?1:0),2,4);
+        g.fillStyle=PAL.pants; g.fillRect(x+4,y+13,3,2+(step?0:1)); g.fillRect(x+9,y+13,3,2+(step?1:0));
+        g.fillStyle=PAL.shoe; g.fillRect(x+4,y+15,3,1); g.fillRect(x+9,y+15,3,1);
+    } else {
+        const flip = dir===2;
+        g.save();
+        if (flip) { g.translate(16,0); g.scale(-1,1); }
+        g.fillStyle=PAL.hair; g.fillRect(4,1,8,3); g.fillRect(3,2,10,2);
+        g.fillStyle=PAL.skin; g.fillRect(4,3,8,5);
+        g.fillStyle=PAL.skinDk; g.fillRect(4,7,8,1);
+        g.fillStyle=PAL.black; g.fillRect(9,5,1,2);
+        g.fillStyle=PAL.shirt; g.fillRect(3,8,10,5);
+        g.fillStyle=PAL.shirtLt; g.fillRect(4,8,8,1);
+        g.fillStyle=PAL.shirtDk; g.fillRect(3,12,10,1);
+        g.fillStyle=PAL.skin; g.fillRect(1,9+(step?1:0),2,4); g.fillRect(13,9-(step?1:0),2,4);
+        g.fillStyle=PAL.pants; g.fillRect(5,13,3,2+(step?1:0)); g.fillRect(9,13,3,2+(step?0:1));
+        g.fillStyle=PAL.shoe; g.fillRect(5,15+(step?1:0),3,1); g.fillRect(9,15+(step?0:1),3,1);
+        g.restore();
+    }
+}
+
+const playerTex = [];
+for (let dir=0; dir<4; dir++) {
+    playerTex[dir] = [];
+    for (let f=0; f<2; f++) {
+        playerTex[dir][f] = makeTex(16,16, g => drawPlayerFrame(g,dir,f));
+    }
+}
+const playerHoldTex = makeTex(16,16, g => {
+    drawPlayerFrame(g,0,0);
+    g.fillStyle=PAL.white; g.fillRect(11,9,4,4);
+    g.fillStyle=PAL.coffee; g.fillRect(12,10,2,1);
+    g.fillStyle=PAL.skin; g.fillRect(10,10,1,3);
+});
+
+// ==========================================
+// 行进场景纹理
+// ==========================================
+// 建筑（32x48）
+function makeBuildingTex(color, winColor) {
+    return makeTex(32, 48, g => {
+        // 主体
+        g.fillStyle = color; g.fillRect(0, 8, 32, 40);
+        // 屋顶
+        g.fillStyle = PAL.wallDk; g.fillRect(0, 0, 32, 8);
+        g.fillStyle = PAL.wallLt; g.fillRect(0, 0, 32, 1);
+        // 窗户（2行3列）
+        g.fillStyle = winColor;
+        for (let row=0; row<3; row++) {
+            for (let col=0; col<3; col++) {
+                g.fillRect(4+col*9, 14+row*10, 5, 6);
+            }
+        }
+        // 门
+        g.fillStyle = PAL.wallDk; g.fillRect(13, 38, 6, 10);
+        g.fillStyle = PAL.lamp; g.fillRect(17, 42, 1, 1);
+    });
+}
+const buildingTex = [
+    makeBuildingTex(PAL.bldg1, PAL.bldgWindow),
+    makeBuildingTex(PAL.bldg2, PAL.bldgWindow2),
+    makeBuildingTex(PAL.bldg3, PAL.bldgWindow),
+];
+// 树（16x32）
+const treeTex = makeTex(16, 32, g => {
+    g.fillStyle = PAL.treeTrunk; g.fillRect(6, 20, 4, 12);
+    g.fillStyle = PAL.plant; g.fillRect(2, 4, 12, 16);
+    g.fillStyle = PAL.plantLt; g.fillRect(4, 6, 8, 12);
+    g.fillStyle = PAL.plant; g.fillRect(0, 8, 4, 8); g.fillRect(12, 8, 4, 8);
+    g.fillStyle = PAL.plantLt; g.fillRect(6, 2, 4, 4);
+});
+// 云（32x16）
+const cloudTex = makeTex(32, 16, g => {
+    g.fillStyle = PAL.white;
+    g.fillRect(8, 4, 16, 8);
+    g.fillRect(4, 6, 24, 4);
+    g.fillRect(12, 2, 8, 4);
+    g.fillRect(16, 10, 8, 4);
+});
+
+// ==========================================
+// 地图数据
+// ==========================================
+const MAP_CENTER_LNG = 113.920;
+const MAP_CENTER_LAT = 22.484;
+const MAP_ZOOM = 15;
+const MAP_IMG_W = 800, MAP_IMG_H = 600;
+
+// 第一关路线数据（内联，避免 file:// 协议下 fetch 被拦截）
+const routeData = {
+    places: [
+        { name: '海上世界', lng: 113.917846, lat: 22.482264 },
+        { name: '南海意馆', lng: 113.917656, lat: 22.486738 }
+    ],
+    routes: [{
+        from: '海上世界', to: '南海意馆',
+        points: [
+            {lng:113.917873,lat:22.48224},{lng:113.917995,lat:22.48237},
+            {lng:113.918368,lat:22.482869},{lng:113.918368,lat:22.482869},
+            {lng:113.918464,lat:22.483012},{lng:113.918464,lat:22.483012},
+            {lng:113.91852,lat:22.483082},{lng:113.91852,lat:22.483082},
+            {lng:113.918837,lat:22.483455},{lng:113.919197,lat:22.48375},
+            {lng:113.91947,lat:22.483915},{lng:113.91947,lat:22.483915},
+            {lng:113.920156,lat:22.484232},{lng:113.920156,lat:22.484232},
+            {lng:113.920048,lat:22.48457},{lng:113.919744,lat:22.485326},
+            {lng:113.919744,lat:22.485326},{lng:113.919657,lat:22.485508},
+            {lng:113.919657,lat:22.485508},{lng:113.919614,lat:22.485647},
+            {lng:113.919614,lat:22.485647},{lng:113.919592,lat:22.485747},
+            {lng:113.919592,lat:22.485747},{lng:113.919544,lat:22.486029},
+            {lng:113.919444,lat:22.486476},{lng:113.919444,lat:22.486476},
+            {lng:113.919444,lat:22.486506},{lng:113.91944,lat:22.486506},
+            {lng:113.919418,lat:22.486489},{lng:113.919418,lat:22.486489},
+            {lng:113.919336,lat:22.486445},{lng:113.919336,lat:22.486445},
+            {lng:113.919201,lat:22.48638},{lng:113.919201,lat:22.48638},
+            {lng:113.918095,lat:22.485937},{lng:113.91809,lat:22.485933},
+            {lng:113.917817,lat:22.486467},{lng:113.917817,lat:22.486467},
+            {lng:113.917721,lat:22.486615},{lng:113.917669,lat:22.48674}
+        ],
+        distance: '836', duration: '669'
+    }]
+};
+
+let mapImgLoaded = false;
+const mapImg = new Image();
+// 注意：不设置 crossOrigin，避免 file:// 协议下图片加载失败
+mapImg.src = '../docs/maps/shenzhen_full.png';
+mapImg.onload = () => { mapImgLoaded = true; document.getElementById('loading').style.display='none'; drawMap(); };
+mapImg.onerror = () => {
+    mapImgLoaded = false;
+    document.getElementById('loading').style.display = 'none';
+    drawMap(); // 仍然绘制路径（用 fallback 背景）
+    console.warn('地图图片加载失败，使用纯色背景。如需完整地图，请通过 http server 打开。');
+};
+// 若 100ms 内图片未加载完成，先隐藏 loading 并用 fallback 绘制
+setTimeout(() => {
+    if (!mapImgLoaded) {
+        document.getElementById('loading').style.display = 'none';
+        drawMap();
+    }
+}, 100);
+
+function lngLatToPixel(lng, lat) {
+    const R = 6378137, ts = 256;
+    const res = 2 * Math.PI * R / ts / Math.pow(2, MAP_ZOOM);
+    const x = R * lng * Math.PI / 180;
+    const y = R * Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360));
+    const cx = R * MAP_CENTER_LNG * Math.PI / 180;
+    const cy = R * Math.log(Math.tan(Math.PI/4 + MAP_CENTER_LAT*Math.PI/360));
+    return { x: (x-cx)/res + MAP_IMG_W/2, y: (cy-y)/res + MAP_IMG_H/2 };
+}
+
+function resizeMapCanvas() {
+    const rect = mapCanvas.parentElement.getBoundingClientRect();
+    mapCanvas.width = rect.width;
+    mapCanvas.height = rect.height;
+    drawMap();
+}
+window.addEventListener('resize', resizeMapCanvas);
+
+function drawMap() {
+    if (!routeData) return;
+    const cw = mapCanvas.width, ch = mapCanvas.height;
+    mctx.clearRect(0, 0, cw, ch);
+
+    const route = routeData.routes[0]; // 第一关
+    const points = route.points.map(p => lngLatToPixel(p.lng, p.lat));
+
+    let minPx=Infinity, maxPx=-Infinity, minPy=Infinity, maxPy=-Infinity;
+    points.forEach(p => {
+        if (p.x<minPx) minPx=p.x; if (p.x>maxPx) maxPx=p.x;
+        if (p.y<minPy) minPy=p.y; if (p.y>maxPy) maxPy=p.y;
+    });
+    const padX=(maxPx-minPx)*0.3, padY=(maxPy-minPy)*0.3;
+    minPx-=padX; maxPx+=padX; minPy-=padY; maxPy+=padY;
+    const routeW=maxPx-minPx, routeH=maxPy-minPy;
+    const fillRatio=0.8;
+    const scale=Math.min(cw/routeW*fillRatio, ch/routeH*fillRatio);
+    const drawW=MAP_IMG_W*scale, drawH=MAP_IMG_H*scale;
+    const rcx=(minPx+maxPx)/2, rcy=(minPy+maxPy)/2;
+    const offX=cw/2-rcx*scale, offY=ch/2-rcy*scale;
+
+    // 绘制地图底图（若图片未加载则用纯色背景）
+    if (mapImgLoaded) {
+        mctx.drawImage(mapImg, offX, offY, drawW, drawH);
+    } else {
+        // fallback: 纯色背景 + 网格
+        mctx.fillStyle = '#2d3a4a';
+        mctx.fillRect(0, 0, cw, ch);
+        mctx.strokeStyle = '#3a4a5a';
+        mctx.lineWidth = 1;
+        for (let x=0; x<cw; x+=40) { mctx.beginPath(); mctx.moveTo(x,0); mctx.lineTo(x,ch); mctx.stroke(); }
+        for (let y=0; y<ch; y+=40) { mctx.beginPath(); mctx.moveTo(0,y); mctx.lineTo(cw,y); mctx.stroke(); }
+    }
+
+    const canvasPoints = points.map(p => ({ x: offX+p.x*scale, y: offY+p.y*scale }));
+
+    // 路径发光层
+    mctx.strokeStyle = 'rgba(231,76,60,0.3)';
+    mctx.lineWidth = 10; mctx.lineCap='round'; mctx.lineJoin='round';
+    mctx.beginPath();
+    canvasPoints.forEach((p,j) => j===0 ? mctx.moveTo(p.x,p.y) : mctx.lineTo(p.x,p.y));
+    mctx.stroke();
+    // 主路径
+    mctx.strokeStyle = '#E74C3C'; mctx.lineWidth = 4;
+    mctx.beginPath();
+    canvasPoints.forEach((p,j) => j===0 ? mctx.moveTo(p.x,p.y) : mctx.lineTo(p.x,p.y));
+    mctx.stroke();
+
+    // 起点终点
+    const sp = routeData.places[0], ep = routeData.places[1];
+    const sPos = lngLatToPixel(sp.lng, sp.lat);
+    const ePos = lngLatToPixel(ep.lng, ep.lat);
+    const sC = { x: offX+sPos.x*scale, y: offY+sPos.y*scale };
+    const eC = { x: offX+ePos.x*scale, y: offY+ePos.y*scale };
+    drawMapMarker(sC.x, sC.y, '#2ECC71', 'S', sp.name);
+    drawMapMarker(eC.x, eC.y, '#FFD700', 'G', ep.name);
+
+    // 移动中标记
+    if (flow.phase === 'walking') {
+        const idx = Math.floor((flow.progress/100) * (canvasPoints.length-1));
+        const pos = canvasPoints[idx];
+        if (pos) {
+            mctx.strokeStyle = 'rgba(231,76,60,0.6)'; mctx.lineWidth = 2;
+            const r = 14 + Math.sin(Date.now()/200)*5;
+            mctx.beginPath(); mctx.arc(pos.x, pos.y, r, 0, Math.PI*2); mctx.stroke();
+            mctx.fillStyle = '#E74C3C';
+            mctx.beginPath(); mctx.arc(pos.x, pos.y, 8, 0, Math.PI*2); mctx.fill();
+            mctx.fillStyle = '#F8F8F8';
+            mctx.beginPath(); mctx.arc(pos.x, pos.y, 4, 0, Math.PI*2); mctx.fill();
+        }
+    } else if (flow.phase === 'arrived' || flow.phase === 'coffee' || flow.phase === 'clear') {
+        mctx.fillStyle = '#E74C3C';
+        mctx.beginPath(); mctx.arc(eC.x, eC.y, 8, 0, Math.PI*2); mctx.fill();
+        mctx.fillStyle = '#F8F8F8';
+        mctx.beginPath(); mctx.arc(eC.x, eC.y, 4, 0, Math.PI*2); mctx.fill();
+    }
+}
+
+function drawMapMarker(x, y, color, label, name) {
+    const grad = mctx.createRadialGradient(x, y, 0, x, y, 18);
+    grad.addColorStop(0, 'rgba(255,215,0,0.3)');
+    grad.addColorStop(1, 'rgba(255,215,0,0)');
+    mctx.fillStyle = grad;
+    mctx.beginPath(); mctx.arc(x, y, 18, 0, Math.PI*2); mctx.fill();
+    mctx.fillStyle = color;
+    mctx.beginPath(); mctx.arc(x, y, 12, 0, Math.PI*2); mctx.fill();
+    mctx.fillStyle = '#F8F8F8';
+    mctx.beginPath(); mctx.arc(x, y, 7, 0, Math.PI*2); mctx.fill();
+    mctx.fillStyle = '#0D0D0D'; mctx.font = 'bold 11px monospace';
+    mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+    mctx.fillText(label, x, y);
+    mctx.fillStyle = 'rgba(13,13,13,0.85)';
+    mctx.fillRect(x-45, y-32, 90, 18);
+    mctx.fillStyle = '#FFD700'; mctx.font = '11px monospace';
+    mctx.fillText(name, x, y-23);
+}
+
+// ==========================================
+// 流程状态机
+// ==========================================
+const flow = {
+    phase: 'ready',   // ready / walking / arrived / coffee / clear / done
+    progress: 0,      // 行进进度 0-100
+    walkTimer: null,
+};
+
+function setProgress(text) {
+    document.getElementById('progressInfo').textContent = text;
+}
+
+function startWalking() {
+    if (flow.phase !== 'ready') return;
+    flow.phase = 'walking';
+    flow.progress = 0;
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('startBtn').textContent = '行进中...';
+    setProgress('行进中 0%');
+
+    flow.walkTimer = setInterval(() => {
+        flow.progress += 2;
+        if (flow.progress >= 100) {
+            flow.progress = 100;
+            arriveAtDestination();
+        }
+        setProgress('行进中 ' + Math.floor(flow.progress) + '%');
+    }, 50);
+}
+
+function arriveAtDestination() {
+    clearInterval(flow.walkTimer);
+    flow.phase = 'arrived';
+    setProgress('到达南海意馆！');
+    // 短暂停留后播放转场动画
+    setTimeout(() => {
+        flow.phase = 'transition';
+        transitionAnim.t = 0;
+        transitionAnim.phase = 0;
+        transitionAnim.coffeeInited = false;
+    }, 600);
+}
+
+// ==========================================
+// 转场动画（行进 → 关底）
+// ==========================================
+const transitionAnim = { t: 0, phase: 0, coffeeInited: false };
+
+function updateTransition(dt) {
+    transitionAnim.t += dt;
+    const a = transitionAnim;
+    // phase 0: 黑条合拢遮住行进场景 (400ms)
+    // phase 1: 全黑 + 显示进入文字 (900ms)，中途初始化关底场景
+    // phase 2: 黑条展开露出关底场景 (400ms) → 进入 coffee
+    if (a.phase === 0 && a.t > 400) {
+        a.phase = 1; a.t = 0;
+    } else if (a.phase === 1) {
+        // 中途初始化关底场景（只执行一次）
+        if (a.t > 450 && !a.coffeeInited) {
+            CoffeeScene.init();
+            a.coffeeInited = true;
+        }
+        // 到 900ms 进入展开阶段
+        if (a.t > 900) {
+            a.phase = 2; a.t = 0;
+        }
+    } else if (a.phase === 2 && a.t > 400) {
+        a.phase = 3; a.t = 0;
+        flow.phase = 'coffee';
+        setProgress('自动前往吧台...');
+    }
+}
+
+function drawTransition() {
+    const a = transitionAnim;
+    if (flow.phase !== 'transition') return;
+    const coverH = VIEW_H / 2;
+    let topBarH = 0, botBarH = 0;
+
+    if (a.phase === 0) {
+        // 合拢
+        const t = a.t / 400;
+        const ease = 1 - Math.pow(1 - t, 3);
+        topBarH = coverH * ease;
+        botBarH = coverH * ease;
+    } else if (a.phase === 1) {
+        // 全黑
+        topBarH = coverH;
+        botBarH = coverH;
+    } else if (a.phase === 2) {
+        // 展开
+        const t = a.t / 400;
+        const ease = Math.pow(t, 3);
+        topBarH = coverH * (1 - ease);
+        botBarH = coverH * (1 - ease);
+    }
+
+    gctx.fillStyle = PAL.black;
+    gctx.fillRect(0, 0, VIEW_W, topBarH);
+    gctx.fillRect(0, VIEW_H - botBarH, VIEW_W, botBarH);
+
+    // phase 1 显示进入文字
+    if (a.phase === 1) {
+        const flicker = 0.7 + Math.sin(a.t / 100) * 0.3;
+        gctx.fillStyle = `rgba(255,204,0,${flicker})`;
+        gctx.font = '12px "Press Start 2P", monospace';
+        gctx.textAlign = 'center';
+        gctx.textBaseline = 'middle';
+        gctx.fillText('进入南海意馆咖啡...', VIEW_W / 2, VIEW_H / 2 - 12);
+        gctx.fillStyle = PAL.white;
+        gctx.font = '8px "Press Start 2P", monospace';
+        gctx.fillText('任务: 点一杯「孤独的星球」', VIEW_W / 2, VIEW_H / 2 + 12);
+        gctx.textAlign = 'left';
+        gctx.textBaseline = 'alphabetic';
+    }
+}
+
+function onCoffeeComplete() {
+    flow.phase = 'clear';
+    clearAnim.t = 0;
+    clearAnim.phase = 0;
+    setProgress('STAGE CLEAR!');
+}
+
+// ==========================================
+// 行进场景
+// ==========================================
+const WalkScene = {
+    // 背景元素（world 坐标，循环宽度 480）
+    clouds: [
+        {x: 20, y: 20}, {x: 180, y: 35}, {x: 320, y: 15}, {x: 440, y: 40}
+    ],
+    buildings: [
+        {x: 0, type: 0}, {x: 50, type: 1}, {x: 100, type: 2},
+        {x: 160, type: 0}, {x: 210, type: 1}, {x: 270, type: 2},
+        {x: 320, type: 0}, {x: 380, type: 1}, {x: 430, type: 2},
+    ],
+    trees: [
+        {x: 30}, {x: 130}, {x: 240}, {x: 350}, {x: 460},
+    ],
+    charFrame: 0,
+    charTimer: 0,
+
+    update(dt) {
+        this.charTimer += dt;
+        if (this.charTimer > 150) {
+            this.charFrame = this.charFrame ? 0 : 1;
+            this.charTimer = 0;
+        }
+    },
+
+    render() {
+        const p = flow.progress;
+        // 天空渐变
+        const grad = gctx.createLinearGradient(0, 0, 0, VIEW_H * 0.7);
+        grad.addColorStop(0, PAL.sky1);
+        grad.addColorStop(1, PAL.sky2);
+        gctx.fillStyle = grad;
+        gctx.fillRect(0, 0, VIEW_W, VIEW_H * 0.7);
+
+        // 云层（慢速，偏移 = p * 0.5）
+        const cloudOff = p * 0.5;
+        for (const c of this.clouds) {
+            let x = c.x - cloudOff;
+            x = ((x % 480) + 480) % 480;
+            gctx.drawImage(cloudTex, Math.round(x), c.y);
+            if (x > 480 - 32) gctx.drawImage(cloudTex, Math.round(x - 480), c.y);
+        }
+
+        // 建筑层（中速，偏移 = p * 2）
+        const bldgOff = p * 2;
+        for (const b of this.buildings) {
+            let x = b.x - bldgOff;
+            x = ((x % 480) + 480) % 480;
+            gctx.drawImage(buildingTex[b.type], Math.round(x), VIEW_H * 0.7 - 48);
+            if (x > 480 - 32) gctx.drawImage(buildingTex[b.type], Math.round(x - 480), VIEW_H * 0.7 - 48);
+        }
+
+        // 树木层（中速，偏移 = p * 3）
+        const treeOff = p * 3;
+        for (const t of this.trees) {
+            let x = t.x - treeOff;
+            x = ((x % 480) + 480) % 480;
+            gctx.drawImage(treeTex, Math.round(x), VIEW_H * 0.7 - 32);
+            if (x > 480 - 16) gctx.drawImage(treeTex, Math.round(x - 480), VIEW_H * 0.7 - 32);
+        }
+
+        // 地面（快速滚动条纹）
+        const groundY = VIEW_H * 0.7;
+        // 草地
+        gctx.fillStyle = PAL.grass;
+        gctx.fillRect(0, groundY, VIEW_W, 6);
+        // 路面
+        const groundOff = (p * 6) % 32;
+        for (let x = -groundOff; x < VIEW_W; x += 32) {
+            gctx.fillStyle = PAL.ground1; gctx.fillRect(x, groundY + 6, 16, VIEW_H - groundY - 6);
+            gctx.fillStyle = PAL.ground2; gctx.fillRect(x + 16, groundY + 6, 16, VIEW_H - groundY - 6);
+        }
+
+        // 角色（从左 15% 走到右 75%，逐步接近终点旗）
+        // 玩家纹理 16x16，底部对齐草地顶部
+        const charX = VIEW_W * 0.15 + (p / 100) * VIEW_W * 0.6;
+        const charY = groundY - 16;
+        gctx.drawImage(playerTex[3][this.charFrame], Math.round(charX), Math.round(charY));
+
+        // 终点旗（固定在右侧 80%，小人逐步接近，进度100%时重叠）
+        const flagX = VIEW_W * 0.78;
+        const flagBob = Math.sin(Date.now() / 300) * 2;
+        gctx.font = '20px monospace';
+        gctx.textBaseline = 'alphabetic';
+        gctx.fillText('🏁', Math.round(flagX), Math.round(groundY - 5 + flagBob));
+
+        // 进度条
+        gctx.fillStyle = 'rgba(0,0,0,0.6)';
+        gctx.fillRect(0, VIEW_H - 8, VIEW_W, 8);
+        gctx.fillStyle = PAL.lamp;
+        gctx.fillRect(0, VIEW_H - 8, VIEW_W * p / 100, 8);
+
+        // 阶段提示
+        gctx.fillStyle = PAL.white;
+        gctx.font = '8px "Press Start 2P", monospace';
+        gctx.textAlign = 'center';
+        gctx.fillText('STAGE 1 · 前往南海意馆咖啡', VIEW_W / 2, 16);
+        gctx.textAlign = 'left';
+    }
+};
+
+// ==========================================
+// 咖啡馆关底场景
+// ==========================================
+const tx = i => i * TILE;
+const ty = i => i * TILE;
+
+const coffeeDecorations = [
+    { type:'lamp', x:tx(4), y:ty(0) }, { type:'lamp', x:tx(10), y:ty(0) },
+    { type:'lamp', x:tx(16), y:ty(0) }, { type:'lamp', x:tx(22), y:ty(0) },
+    { type:'lamp', x:tx(27), y:ty(0) },
+    { type:'menu', x:tx(1), y:ty(2) },
+    { type:'window', x:tx(26), y:ty(2) },
+    { type:'bar', x:tx(2), y:ty(8) }, { type:'bar', x:tx(4), y:ty(8) },
+    { type:'machine', x:tx(3), y:ty(6) },
+    { type:'plant', x:tx(7), y:ty(7) }, { type:'plant', x:tx(28), y:ty(7) },
+    { type:'table', x:tx(10), y:ty(10) }, { type:'chair', x:tx(9), y:ty(11) }, { type:'chair', x:tx(13), y:ty(11) },
+    { type:'table', x:tx(16), y:ty(10) }, { type:'chair', x:tx(15), y:ty(11) }, { type:'chair', x:tx(19), y:ty(11) },
+    { type:'table', x:tx(22), y:ty(10) }, { type:'chair', x:tx(21), y:ty(11) }, { type:'chair', x:tx(25), y:ty(11) },
+];
+
+const coffeeColliders = [
+    { x:tx(2), y:ty(8), w:64, h:16 },
+    { x:tx(3), y:ty(6), w:32, h:32 },
+    { x:tx(9), y:ty(10), w:40, h:24 },
+    { x:tx(15), y:ty(10), w:40, h:24 },
+    { x:tx(21), y:ty(10), w:40, h:24 },
+    { x:tx(7), y:ty(7), w:16, h:24 },
+    { x:tx(28), y:ty(7), w:16, h:24 },
+    { x:0, y:0, w:30*16, h:ty(6) },
+    { x:0, y:ty(16), w:30*16, h:16 },
+];
+
+const coffeeTaskPoint = { x: tx(4)+16, y: ty(10) };
+
+const CoffeeScene = {
+    player: null,
+    phase: 'auto_move',  // auto_move / popup / ordering / done
+    steamParticles: [],
+    path: [],            // 自动移动路径点
+    pathIdx: 0,
+    popupBtn: null,      // 弹窗按钮区域
+    popupHover: false,
+    orderTimer: null,
+
+    init() {
+        this.player = {
+            x: tx(20), y: ty(14),
+            w: 12, h: 8, dir: 0, frame: 0,
+            moving: false, animTimer: 0, speed: 0.9, holding: false,
+        };
+        this.phase = 'auto_move';
+        this.steamParticles = [];
+        // 自动移动路径：从入口走到柜台前
+        this.path = [
+            { x: tx(15), y: ty(14) },
+            { x: tx(10), y: ty(14) },
+            { x: tx(7),  y: ty(13) },
+            { x: tx(5),  y: ty(11) }, // 柜台前（咖啡机右下）
+        ];
+        this.pathIdx = 0;
+        this.popupBtn = { x: VIEW_W/2 - 70, y: VIEW_H/2 + 18, w: 140, h: 22 };
+        this.popupHover = false;
+        if (this.orderTimer) { clearTimeout(this.orderTimer); this.orderTimer = null; }
+    },
+
+    update(dt) {
+        if (this.phase === 'auto_move') {
+            this.updateAutoMove(dt);
+        }
+        this.updateSteam(dt);
+    },
+
+    updateAutoMove(dt) {
+        const p = this.player;
+        if (this.pathIdx >= this.path.length) {
+            // 到达柜台
+            this.phase = 'popup';
+            p.moving = false;
+            p.dir = 2; // 朝左（面对吧台/咖啡机）
+            p.frame = 0;
+            setProgress('到达吧台 — 请确认点单');
+            return;
+        }
+        const target = this.path[this.pathIdx];
+        const dx = target.x - p.x;
+        const dy = target.y - p.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < p.speed) {
+            p.x = target.x; p.y = target.y;
+            this.pathIdx++;
+        } else {
+            p.moving = true;
+            // 朝向（优先主轴）
+            if (Math.abs(dx) > Math.abs(dy)) {
+                p.dir = dx > 0 ? 3 : 2;
+            } else {
+                p.dir = dy > 0 ? 0 : 1;
+            }
+            p.x += (dx / dist) * p.speed;
+            p.y += (dy / dist) * p.speed;
+            // 走路动画
+            p.animTimer += dt;
+            if (p.animTimer > 140) { p.frame = p.frame ? 0 : 1; p.animTimer = 0; }
+        }
+    },
+
+    confirmOrder() {
+        if (this.phase !== 'popup') return;
+        this.phase = 'ordering';
+        setProgress('点单中... 正在制作「孤独的星球」');
+        this.player.holding = false;
+        // 蒸汽粒子
+        for (let i = 0; i < 6; i++) {
+            this.steamParticles.push({
+                x: tx(3) + 16 + (Math.random() - 0.5) * 8,
+                y: ty(6) + 8,
+                vy: -0.4 - Math.random() * 0.3,
+                vx: (Math.random() - 0.5) * 0.2,
+                life: 1.0, delay: i * 200,
+            });
+        }
+        this.orderTimer = setTimeout(() => {
+            this.player.holding = true;
+            setProgress('获得「孤独的星球」！');
+            this.orderTimer = setTimeout(() => {
+                this.phase = 'done';
+                onCoffeeComplete();
+            }, 800);
+        }, 2500);
+    },
+
+    // 鼠标点击弹窗按钮
+    handleClick(mx, my) {
+        if (this.phase !== 'popup') return false;
+        const b = this.popupBtn;
+        if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+            this.confirmOrder();
+            return true;
+        }
+        return false;
+    },
+
+    // 鼠标移动检测 hover
+    handleMouseMove(mx, my) {
+        if (this.phase !== 'popup') { this.popupHover = false; return; }
+        const b = this.popupBtn;
+        this.popupHover = (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h);
+    },
+
+    updateSteam(dt) {
+        for (const p of this.steamParticles) {
+            if (p.delay > 0) { p.delay -= dt; continue; }
+            p.x += p.vx; p.y += p.vy;
+            p.life -= dt / 1500;
+        }
+        this.steamParticles = this.steamParticles.filter(p => p.life > 0);
+    },
+
+    render() {
+        gctx.fillStyle = '#1a0f0a';
+        gctx.fillRect(0, 0, VIEW_W, VIEW_H);
+        this.drawBackground();
+        this.drawDecorations();
+        if (this.phase !== 'ordering' && this.phase !== 'done') this.drawTaskPoint();
+        this.drawPlayer();
+        this.drawSteam();
+        this.drawLighting();
+        // 顶部任务提示
+        gctx.fillStyle = PAL.white;
+        gctx.font = '8px "Press Start 2P", monospace';
+        gctx.textAlign = 'center';
+        gctx.fillText('STAGE 1 · 南海意馆咖啡', VIEW_W / 2, 16);
+        gctx.fillStyle = PAL.lamp;
+        gctx.font = '7px "Press Start 2P", monospace';
+        gctx.fillText('任务: 点一杯「孤独的星球」', VIEW_W / 2, 28);
+        // 自动移动提示
+        if (this.phase === 'auto_move') {
+            gctx.fillStyle = '#aaa';
+            gctx.font = '7px "Press Start 2P", monospace';
+            gctx.fillText('自动前往吧台...', VIEW_W / 2, VIEW_H - 14);
+        }
+        // 弹窗
+        if (this.phase === 'popup') this.drawPopup();
+        gctx.textAlign = 'left';
+    },
+
+    drawBackground() {
+        for (let y = 0; y < 6; y++)
+            for (let x = 0; x < 30; x++) gctx.drawImage(TEX.wall, tx(x), ty(y));
+        for (let y = 6; y < 8; y++)
+            for (let x = 0; x < 30; x++) gctx.drawImage(TEX.wallFloor, tx(x), ty(y));
+        for (let y = 8; y < 16; y++)
+            for (let x = 0; x < 30; x++)
+                gctx.drawImage((x + y) % 2 === 0 ? TEX.floorA : TEX.floorB, tx(x), ty(y));
+    },
+
+    drawDecorations() {
+        for (const d of coffeeDecorations) {
+            const t = TEX[d.type];
+            if (t) gctx.drawImage(t, d.x, d.y);
+        }
+    },
+
+    drawTaskPoint() {
+        const bob = Math.sin(Date.now() / 300) * 3;
+        gctx.drawImage(TEX.star, coffeeTaskPoint.x - 8, coffeeTaskPoint.y - 22 + bob);
+    },
+
+    drawPlayer() {
+        const p = this.player;
+        const tex = p.holding ? playerHoldTex : playerTex[p.dir][p.frame];
+        gctx.drawImage(tex, Math.round(p.x - 8), Math.round(p.y - 16));
+    },
+
+    drawSteam() {
+        for (const p of this.steamParticles) {
+            if (p.delay > 0) continue;
+            gctx.fillStyle = `rgba(255,255,255,${p.life * 0.6})`;
+            gctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+            gctx.fillRect(Math.round(p.x + 2), Math.round(p.y - 2), 1, 1);
+        }
+    },
+
+    drawLighting() {
+        gctx.fillStyle = 'rgba(255,170,68,0.06)';
+        gctx.fillRect(0, 0, VIEW_W, VIEW_H);
+        const lamps = coffeeDecorations.filter(d => d.type === 'lamp');
+        for (const l of lamps) {
+            const cx = l.x + 8, cy = l.y + 14;
+            const grad = gctx.createRadialGradient(cx, cy, 0, cx, cy, 40);
+            grad.addColorStop(0, 'rgba(255,238,136,0.25)');
+            grad.addColorStop(1, 'rgba(255,238,136,0)');
+            gctx.fillStyle = grad;
+            gctx.fillRect(cx - 40, cy - 40, 80, 80);
+        }
+    },
+
+    drawPopup() {
+        // 半透明遮罩
+        gctx.fillStyle = 'rgba(0,0,0,0.55)';
+        gctx.fillRect(0, 0, VIEW_W, VIEW_H);
+        // 弹窗框
+        const bx = VIEW_W / 2 - 100, by = VIEW_H / 2 - 45, bw = 200, bh = 90;
+        gctx.fillStyle = PAL.black;
+        gctx.fillRect(bx, by, bw, bh);
+        gctx.strokeStyle = PAL.lamp;
+        gctx.lineWidth = 2;
+        gctx.strokeRect(bx, by, bw, bh);
+        // 标题
+        gctx.fillStyle = PAL.lamp;
+        gctx.font = '10px "Press Start 2P", monospace';
+        gctx.textAlign = 'center';
+        gctx.textBaseline = 'alphabetic';
+        gctx.fillText('☕ 吧台点单', VIEW_W / 2, by + 18);
+        // 任务文字
+        gctx.fillStyle = PAL.white;
+        gctx.font = '8px "Press Start 2P", monospace';
+        gctx.fillText('点一杯「孤独的星球」', VIEW_W / 2, by + 36);
+        gctx.fillStyle = '#aaa';
+        gctx.font = '7px "Press Start 2P", monospace';
+        gctx.fillText('¥45 · 1h · HP -20', VIEW_W / 2, by + 50);
+        // 确认按钮
+        const btn = this.popupBtn;
+        gctx.fillStyle = this.popupHover ? PAL.shirtLt : PAL.shirt;
+        gctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+        gctx.strokeStyle = PAL.white;
+        gctx.lineWidth = 2;
+        gctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+        gctx.fillStyle = PAL.white;
+        gctx.font = '9px "Press Start 2P", monospace';
+        gctx.textBaseline = 'middle';
+        gctx.fillText('✓ 确认点单 (Space)', btn.x + btn.w / 2, btn.y + btn.h / 2);
+        gctx.textBaseline = 'alphabetic';
+    }
+};
+
+// ==========================================
+// STAGE CLEAR 动画
+// ==========================================
+const clearAnim = { t: 0, phase: 0 };
+
+function updateClearAnim(dt) {
+    clearAnim.t += dt;
+    const a = clearAnim;
+    if (a.phase===0 && a.t>200) { a.phase=1; a.t=0; }
+    else if (a.phase===1 && a.t>400) { a.phase=2; a.t=0; }
+    else if (a.phase===2 && a.t>600) { a.phase=3; a.t=0; flow.phase='done'; }
+}
+
+function drawClearOverlay() {
+    if (flow.phase !== 'clear' && flow.phase !== 'done') return;
+    const a = clearAnim;
+    // 闪白
+    if (a.phase === 0) {
+        gctx.fillStyle = `rgba(255,255,255,${1-a.t/200})`;
+        gctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    }
+    // 黑边
+    if (a.phase >= 1) {
+        const t = a.phase===1 ? a.t/400 : 1;
+        const ease = 1 - Math.pow(1-t, 3);
+        const barH = VIEW_H/2 * ease;
+        gctx.fillStyle = PAL.black;
+        gctx.fillRect(0, 0, VIEW_W, barH);
+        gctx.fillRect(0, VIEW_H-barH, VIEW_W, barH);
+    }
+    // STAGE CLEAR 文字
+    if (a.phase >= 2) {
+        const t = a.phase===2 ? a.t/600 : 1;
+        const scale = 1 + Math.sin(t*Math.PI)*0.3;
+        gctx.save();
+        gctx.translate(VIEW_W/2, VIEW_H/2 - 20);
+        gctx.scale(scale, scale);
+        gctx.fillStyle = PAL.lamp;
+        gctx.font = 'bold 24px "Press Start 2P", monospace';
+        gctx.textAlign = 'center'; gctx.textBaseline = 'middle';
+        gctx.strokeStyle = PAL.black; gctx.lineWidth = 4;
+        gctx.strokeText('STAGE CLEAR', 0, 0);
+        gctx.fillText('STAGE CLEAR', 0, 0);
+        gctx.restore();
+    }
+    // 任务回顾
+    if (a.phase === 3) {
+        gctx.fillStyle = PAL.white;
+        gctx.font = '10px "Press Start 2P", monospace';
+        gctx.textAlign = 'center';
+        gctx.fillText('任务: 点一杯「孤独的星球」 ✓', VIEW_W/2, VIEW_H/2+20);
+        gctx.fillStyle = PAL.lampGlow;
+        gctx.font = '9px "Press Start 2P", monospace';
+        gctx.fillText('消耗 ¥45 · 时长 1h · HP -20', VIEW_W/2, VIEW_H/2+40);
+        if (Math.floor(Date.now()/500)%2 === 0) {
+            gctx.fillStyle = '#888';
+            gctx.font = '8px "Press Start 2P", monospace';
+            gctx.fillText('第一关完成！', VIEW_W/2, VIEW_H/2+70);
+        }
+    }
+}
+
+// ==========================================
+// 输入处理
+// ==========================================
+// Space 确认点单
+window.addEventListener('keydown', e => {
+    if (flow.phase === 'coffee' && e.key === ' ' && CoffeeScene.phase === 'popup') {
+        CoffeeScene.confirmOrder();
+        e.preventDefault();
+    }
+});
+
+// 鼠标点击弹窗按钮（需把屏幕坐标转换为 canvas 内部坐标）
+gameCanvas.addEventListener('click', e => {
+    if (flow.phase !== 'coffee') return;
+    const rect = gameCanvas.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) / rect.width * VIEW_W;
+    const sy = (e.clientY - rect.top) / rect.height * VIEW_H;
+    CoffeeScene.handleClick(sx, sy);
+});
+gameCanvas.addEventListener('mousemove', e => {
+    if (flow.phase !== 'coffee') return;
+    const rect = gameCanvas.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) / rect.width * VIEW_W;
+    const sy = (e.clientY - rect.top) / rect.height * VIEW_H;
+    CoffeeScene.handleMouseMove(sx, sy);
+    gameCanvas.style.cursor = CoffeeScene.popupHover ? 'pointer' : 'default';
+});
+
+document.getElementById('startBtn').addEventListener('click', startWalking);
+
+// ==========================================
+// 主循环
+// ==========================================
+let lastTime = 0;
+function gameLoop(now) {
+    const dt = Math.min(now - lastTime, 50);
+    lastTime = now;
+
+    // 更新
+    if (flow.phase === 'walking' || flow.phase === 'ready') {
+        WalkScene.update(dt);
+    } else if (flow.phase === 'transition') {
+        updateTransition(dt);
+    } else if (flow.phase === 'coffee') {
+        CoffeeScene.update(dt);
+    } else if (flow.phase === 'clear') {
+        updateClearAnim(dt);
+    }
+
+    // 渲染游戏场景
+    if (flow.phase === 'ready' || flow.phase === 'walking' || flow.phase === 'arrived') {
+        WalkScene.render();
+    } else if (flow.phase === 'transition') {
+        // 转场前半段渲染行进场景，后半段渲染关底场景
+        if (transitionAnim.phase <= 1) WalkScene.render();
+        else CoffeeScene.render();
+        drawTransition();
+    } else if (flow.phase === 'coffee') {
+        CoffeeScene.render();
+    } else if (flow.phase === 'clear' || flow.phase === 'done') {
+        CoffeeScene.render();
+        drawClearOverlay();
+    }
+
+    // 刷新地图（移动标记动画）
+    if (flow.phase === 'walking' || flow.phase === 'arrived' || flow.phase === 'transition') {
+        drawMap();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ==========================================
+// 启动
+// ==========================================
+function fitGameCanvas() {
+    const section = gameCanvas.parentElement;
+    const rect = section.getBoundingClientRect();
+    const scale = Math.min(rect.width / VIEW_W, rect.height / VIEW_H);
+    gameCanvas.style.width = (VIEW_W * scale) + 'px';
+    gameCanvas.style.height = (VIEW_H * scale) + 'px';
+}
+window.addEventListener('resize', fitGameCanvas);
+
+resizeMapCanvas();
+fitGameCanvas();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

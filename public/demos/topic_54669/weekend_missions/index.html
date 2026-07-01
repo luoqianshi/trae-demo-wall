@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Weekend Missions - 周末密令</title>
+<style>
+@font-face {
+    font-family: 'Press Start 2P';
+    src: url('docs/fonts/PressStart2P-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+:root {
+    --nes-black:#0D0D0D; --nes-dark:#1A1A2E; --nes-gray:#4A4A6A;
+    --nes-white:#F8F8F8; --nes-yellow:#FFD700; --nes-red:#E74C3C;
+    --nes-green:#2ECC71; --nes-cyan:#00D2D3; --nes-blue:#3B5998;
+    --nes-purple:#8E44AD; --nes-orange:#E67E22; --nes-pink:#FD79A8;
+    --font-pixel:'Press Start 2P','Courier New',monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+    height:100%;
+    background:radial-gradient(ellipse at 50% 0%, #2a2a40 0%, #14141f 60%, #0a0a12 100%);
+    font-family:var(--font-pixel);
+    color:var(--nes-white);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+}
+
+/* ====== FC 卡带屏外壳（全局） ====== */
+.console-shell {
+    aspect-ratio: 880 / 1102;
+    height:96vh;
+    max-height:96vh;
+    max-width:96vw;
+    background:linear-gradient(160deg,#3a3a4e 0%,#23232f 100%);
+    border-radius:18px;
+    padding:1.6% 2%;
+    box-shadow:
+        0 18px 50px rgba(0,0,0,0.6),
+        inset 0 2px 0 rgba(255,255,255,0.08),
+        inset 0 -4px 12px rgba(0,0,0,0.5);
+    position:relative;
+    display:flex;
+    flex-direction:column;
+}
+.shell-top {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 6px 8px;
+    flex-shrink:0;
+}
+.shell-brand { font-size:clamp(7px,1.1vh,10px); color:var(--nes-yellow); letter-spacing:1px; }
+.shell-led { display:flex; align-items:center; gap:6px; font-size:clamp(5px,0.8vh,7px); color:#888; }
+.shell-led::before {
+    content:''; width:8px; height:8px; border-radius:50%;
+    background:var(--nes-red); box-shadow:0 0 8px var(--nes-red);
+    animation:ledBlink 2s infinite;
+}
+@keyframes ledBlink { 0%,80%{opacity:1;} 90%{opacity:0.3;} 100%{opacity:1;} }
+
+/* 屏幕内框（CRT） */
+.screen {
+    flex:1 1 auto;
+    min-height:0;
+    background:#000;
+    border:4px solid #0a0a0a;
+    border-radius:8px;
+    padding:5px;
+    box-shadow:inset 0 0 30px rgba(0,0,0,0.9);
+    position:relative;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+}
+
+/* 扫描线（覆盖全屏） */
+.scanlines {
+    position:absolute; inset:0;
+    background:repeating-linear-gradient(0deg,
+        rgba(0,0,0,0.10) 0,rgba(0,0,0,0.10) 1px,
+        transparent 1px,transparent 3px);
+    pointer-events:none; z-index:50;
+}
+
+/* ====== 层切换 ====== */
+.layer { position:absolute; inset:5px; display:flex; flex-direction:column; }
+.layer.hidden { display:none; }
+
+/* ====== Canvas 层（引擎） ====== */
+#game-layer { padding:0; }
+.top-bar {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#12121c;
+    padding:6px 10px;
+    font-size:clamp(7px,1.1vh,9px);
+    border-bottom:2px solid var(--nes-gray);
+    flex-shrink:0;
+}
+.top-bar .stage-info { color: var(--nes-yellow); }
+.top-bar .progress-info { color: var(--nes-green); }
+.map-section {
+    position:relative;
+    width:100%;
+    flex:52 1 0;
+    min-height:0;
+    overflow:hidden;
+    background:#1a2a3a;
+}
+#mapCanvas { display:block; width:100%; height:100%; }
+.divider {
+    height:5px;
+    background:repeating-linear-gradient(90deg,
+        var(--nes-yellow) 0,var(--nes-yellow) 8px,
+        var(--nes-black) 8px,var(--nes-black) 16px);
+    flex-shrink:0;
+}
+.game-section {
+    position:relative;
+    width:100%;
+    flex:48 1 0;
+    min-height:0;
+    overflow:hidden;
+    background:#1a0f0a;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+#gameCanvas {
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+    display:block;
+}
+.loading {
+    position:absolute; top:35%; left:50%;
+    transform:translate(-50%,-50%);
+    color:var(--nes-yellow); font-size:11px; z-index:60;
+}
+
+/* ====== DOM 层通用 ====== */
+#dom-layer {
+    background:var(--nes-black);
+    overflow-y:auto;
+}
+.page { display:none; flex:1; flex-direction:column; }
+.page.active { display:flex; }
+
+/* boot */
+.boot-screen {
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--nes-black);
+}
+.boot-title {
+    font-size:clamp(12px,2.4vh,22px);
+    color:var(--nes-yellow);
+    opacity:0;
+    animation:fadeIn 0.3s step-end 0.4s forwards;
+    text-align:center;
+}
+@keyframes fadeIn { 0%{opacity:0;} 100%{opacity:1;} }
+
+/* home → ai-chat */
+.ai-chat-content {
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:clamp(18px,4vh,38px);
+    overflow:hidden;
+    text-align:center;
+}
+.home-title-block {
+    flex-shrink:0;
+    margin-bottom:clamp(14px,3vh,28px);
+    text-align:center;
+}
+.home-title-block.compact { margin-bottom:clamp(10px,2.2vh,20px); }
+.home-title {
+    font-size:clamp(14px,2.5vh,24px);
+    color:var(--nes-yellow);
+    letter-spacing:1px;
+    text-shadow:3px 3px 0 #3a2f00;
+    margin-bottom:10px;
+}
+.home-subtitle {
+    font-size:clamp(12px,2vh,18px);
+    color:var(--nes-cyan);
+    text-shadow:2px 2px 0 var(--nes-black);
+}
+.ai-command-panel {
+    width:min(88%,560px);
+    min-height:0;
+    background:linear-gradient(180deg,rgba(26,26,46,0.96),rgba(10,10,18,0.98));
+    border:4px solid;
+    border-color:#5d5d82 #171722 #171722 #5d5d82;
+    box-shadow:0 0 0 4px rgba(0,0,0,0.55), inset 0 0 24px rgba(0,210,211,0.06);
+    padding:clamp(16px,3vh,26px);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:clamp(14px,2.4vh,22px);
+}
+.generating-panel { min-height:clamp(360px,58vh,520px); }
+.ai-avatar-row {
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+}
+.ai-avatar {
+    flex-shrink:0;
+    width:56px;
+    height:56px;
+    background:var(--nes-green);
+    color:var(--nes-black);
+    border:4px solid;
+    border-color:#fff #1a1a1a #1a1a1a #fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:14px;
+    font-weight:bold;
+    box-shadow:0 0 14px rgba(46,204,113,0.35);
+}
+.ai-dialog-wrap { flex:1; min-width:0; max-width:410px; text-align:left; }
+.ai-name {
+    font-size:clamp(9px,1.5vh,12px);
+    color:var(--nes-yellow);
+    margin-bottom:7px;
+}
+.ai-bubble {
+    width:100%;
+    background:#101022;
+    border:4px solid var(--nes-gray);
+    padding:14px 16px;
+    font-size:clamp(11px,1.8vh,15px);
+    color:var(--nes-cyan);
+    line-height:1.85;
+    min-height:78px;
+    display:flex;
+    align-items:center;
+}
+.chip-section {
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:clamp(14px,2.2vh,20px);
+}
+.chip-group {
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:9px;
+}
+.chip-label {
+    font-size:clamp(10px,1.6vh,13px);
+    color:var(--nes-yellow);
+    letter-spacing:2px;
+}
+.chips {
+    display:flex;
+    justify-content:center;
+    gap:10px;
+    flex-wrap:wrap;
+}
+.chip {
+    min-width:86px;
+    font-size:clamp(10px,1.55vh,13px);
+    padding:10px 14px;
+    background:var(--nes-dark);
+    color:var(--nes-white);
+    border:4px solid;
+    border-color:#636383 #11111a #11111a #636383;
+    cursor:pointer;
+    font-family:var(--font-pixel);
+    transition:transform 0.12s, background 0.12s, color 0.12s;
+}
+.chip:hover:not(.locked) { transform:translateY(-2px); }
+.chip.selected {
+    background:var(--nes-green);
+    color:var(--nes-black);
+    border-color:#fff #116b3a #116b3a #fff;
+}
+.chip.locked { opacity:0.58; cursor:not-allowed; }
+.chip:disabled, .pixel-btn-start:disabled { opacity:0.45; cursor:not-allowed; }
+.mission-generate-btn {
+    width:min(100%,360px);
+    margin-top:4px;
+    font-size:clamp(10px,1.8vh,14px);
+    padding:14px 20px;
+}
+
+/* ai-generating 思考步骤 */
+.thinking-steps {
+    width:min(100%,420px);
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+}
+.think-step {
+    text-align:left;
+    font-size:clamp(11px,1.8vh,15px);
+    color:#555;
+    padding:10px 12px;
+    background:rgba(255,255,255,0.03);
+    border:2px solid rgba(255,255,255,0.08);
+    transition:color 0.3s, border-color 0.3s, background 0.3s;
+}
+.think-step.active {
+    color:var(--nes-yellow);
+    border-color:rgba(255,215,0,0.55);
+    background:rgba(255,215,0,0.08);
+}
+.think-step.done {
+    color:var(--nes-green);
+    border-color:rgba(46,204,113,0.5);
+    background:rgba(46,204,113,0.08);
+}
+.think-step.done::after { content:' ✓'; }
+.blink { animation:txtBlink 1.2s step-end infinite; }
+@keyframes txtBlink { 0%,100%{opacity:1;} 50%{opacity:0;} }
+
+/* dialog */
+.dialog-header { padding:5% 5% 2%; text-align:center; flex-shrink:0; }
+#dialog-theme-title { font-size:clamp(9px,1.6vh,14px); color:var(--nes-yellow); }
+.dialog-box {
+    background:var(--nes-black);
+    border:4px solid;
+    border-color:var(--nes-white) var(--nes-gray) var(--nes-gray) var(--nes-white);
+    padding:18px; margin:5%;
+    flex:1; min-height:0;
+    display:flex; flex-direction:column; justify-content:center;
+}
+.dialog-text { font-size:clamp(8px,1.5vh,11px); color:var(--nes-cyan); line-height:1.9; }
+.dialog-arrow { text-align:center; color:var(--nes-cyan); margin-top:10px; }
+.loading-text { font-size:clamp(7px,1.4vh,10px); color:var(--nes-yellow); text-align:center; margin:10px; }
+.skip-btn {
+    font-size:clamp(6px,1.2vh,8px); padding:10px 20px;
+    background:var(--nes-gray); color:var(--nes-white);
+    border:4px solid; border-color:var(--nes-white) var(--nes-gray) var(--nes-gray) var(--nes-white);
+    display:block; margin:0 auto 5%; cursor:pointer; font-family:var(--font-pixel);
+}
+
+/* result（结算） */
+.result-screen {
+    flex:1; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; padding:5%; text-align:center;
+}
+.result-title { font-size:clamp(14px,2.6vh,22px); color:var(--nes-yellow); margin-bottom:4%; }
+.result-summary-card {
+    width:min(100%,430px);
+    background:rgba(0,0,0,0.66);
+    border:4px solid;
+    border-color:var(--nes-yellow) #8b6a00 #8b6a00 var(--nes-yellow);
+    padding:16px;
+    margin-bottom:4%;
+    box-shadow:0 0 0 3px rgba(255,215,0,0.12);
+}
+.result-title-line { color:var(--nes-white); font-size:clamp(10px,1.7vh,14px); margin-bottom:10px; line-height:1.6; }
+.result-stats { font-size:clamp(8px,1.5vh,11px); color:var(--nes-cyan); margin-bottom:10px; line-height:1.35; }
+.result-stats p { margin:6px 0; }
+.result-share-line { color:var(--nes-green); font-size:clamp(8px,1.45vh,11px); line-height:1.7; }
+.result-rank { margin-bottom:4%; }
+.rank-letter { font-size:clamp(32px,7vh,56px); color:var(--nes-yellow); }
+.result-buttons { display:grid; grid-template-columns:1fr; gap:10px; width:min(100%,360px); }
+
+/* share */
+.template-selector { display:flex; gap:8px; padding:3% 5% 1%; justify-content:center; flex-wrap:wrap; flex-shrink:0; }
+.template-btn {
+    font-size:clamp(6px,1.2vh,8px); padding:8px 10px;
+    background:var(--nes-gray); color:var(--nes-white);
+    border:2px solid var(--nes-gray); cursor:pointer; font-family:var(--font-pixel);
+}
+.template-btn.active { background:var(--nes-yellow); color:var(--nes-black); border-color:var(--nes-yellow); }
+.card-preview { display:flex; justify-content:center; align-items:center; flex:1; min-height:0; padding:2% 5%; }
+#share-canvas { border:3px solid var(--nes-gray); max-width:100%; max-height:100%; height:auto; width:auto; }
+.share-buttons { display:flex; flex-direction:column; gap:10px; padding:2% 5% 4%; justify-content:center; flex-shrink:0; }
+
+/* 通用像素按钮 */
+.pixel-btn-a, .pixel-btn-b, .pixel-btn-start {
+    font-size:clamp(8px,1.5vh,11px); padding:12px 18px;
+    border:4px solid; cursor:pointer; font-family:var(--font-pixel);
+}
+.pixel-btn-a { background:var(--nes-red); color:var(--nes-white); border-color:#ff8a80 #8b0000 #8b0000 #ff8a80; }
+.pixel-btn-a:active { border-color:#8b0000 #ff8a80 #ff8a80 #8b0000; }
+.pixel-btn-b { background:var(--nes-blue); color:var(--nes-white); border-color:#6d8cc4 #1a2f5a #1a2f5a #6d8cc4; }
+.pixel-btn-start { background:var(--nes-yellow); color:var(--nes-black); border-color:#fff #555 #555 #fff; }
+</style>
+</head>
+<body>
+
+<div class="console-shell">
+    <div class="shell-top">
+        <span class="shell-brand">WEEKEND MISSIONS</span>
+        <span class="shell-led">POWER</span>
+    </div>
+    <div class="screen">
+
+        <!-- ====== DOM 层 ====== -->
+        <div id="dom-layer" class="layer">
+
+            <div id="page-boot" class="page active">
+                <div class="boot-screen">
+                    <h1 class="boot-title">WEEKEND<br>MISSIONS</h1>
+                </div>
+            </div>
+
+            <div id="page-ai-chat" class="page">
+                <div class="ai-chat-content">
+                    <div class="home-title-block">
+                        <h1 class="home-title">WEEKEND MISSIONS</h1>
+                        <div class="home-subtitle">周 末 密 令</div>
+                    </div>
+                    <div class="ai-command-panel">
+                        <div class="ai-avatar-row">
+                            <div class="ai-avatar">AI</div>
+                            <div class="ai-dialog-wrap">
+                                <div class="ai-name">AI 指挥官</div>
+                                <div class="ai-bubble" id="ai-greeting"></div>
+                            </div>
+                        </div>
+                        <div class="chip-section">
+                            <div class="chip-group">
+                                <div class="chip-label">场景</div>
+                                <div class="chips" id="chips-scene"></div>
+                            </div>
+                            <div class="chip-group">
+                                <div class="chip-label">预算</div>
+                                <div class="chips" id="chips-budget"></div>
+                            </div>
+                            <div class="chip-group">
+                                <div class="chip-label">人数</div>
+                                <div class="chips" id="chips-people"></div>
+                            </div>
+                        </div>
+                        <button id="generate-btn" class="pixel-btn-start mission-generate-btn" disabled>生成密令 ▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-ai-generating" class="page">
+                <div class="ai-chat-content">
+                    <div class="home-title-block compact">
+                        <h1 class="home-title">MISSION GENERATOR</h1>
+                        <div class="home-subtitle">AI 正在生成密令</div>
+                    </div>
+                    <div class="ai-command-panel generating-panel">
+                        <div class="ai-avatar-row">
+                            <div class="ai-avatar">AI</div>
+                            <div class="ai-dialog-wrap">
+                                <div class="ai-name">AI 指挥官</div>
+                                <div class="ai-bubble" id="ai-response"></div>
+                            </div>
+                        </div>
+                        <div class="thinking-steps" id="thinking-steps">
+                            <div class="think-step" data-step="0">▸ 读取出行偏好</div>
+                            <div class="think-step" data-step="1">▸ 匹配城市任务池</div>
+                            <div class="think-step" data-step="2">▸ 计算预算与体力消耗</div>
+                            <div class="think-step" data-step="3">▸ 规划路线顺序</div>
+                            <div class="think-step" data-step="4">▸ 生成像素密令</div>
+                        </div>
+                        <button id="enter-mission-btn" class="pixel-btn-start mission-generate-btn" style="visibility:hidden;">进入任务 ▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-dialog" class="page">
+                <div class="dialog-header">
+                    <h2 id="dialog-theme-title"></h2>
+                </div>
+                <div class="dialog-box">
+                    <div id="dialog-text" class="dialog-text"></div>
+                    <div class="dialog-arrow blink">▼</div>
+                </div>
+                <div id="loading-text" class="loading-text"></div>
+                <button id="skip-dialog-btn" class="skip-btn">跳过 ▶</button>
+            </div>
+
+            <div id="page-result" class="page">
+                <div class="result-screen">
+                    <h1 class="result-title">MISSION<br>COMPLETE</h1>
+                    <div class="result-summary-card">
+                        <div id="result-title-line" class="result-title-line"></div>
+                        <div id="result-stats" class="result-stats"></div>
+                        <div id="result-share-line" class="result-share-line"></div>
+                    </div>
+                    <div id="result-rank" class="result-rank"></div>
+                    <div class="result-buttons">
+                        <button id="share-btn" class="pixel-btn-start">生成分享卡片</button>
+                        <button id="regenerate-btn" class="pixel-btn-a">重新生成当前路线</button>
+                        <button id="home-btn" class="pixel-btn-b">返回首页</button>
+                        <button id="restart-btn" class="pixel-btn-b">再来一局</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-share" class="page">
+                <div class="template-selector">
+                    <button class="template-btn active" data-template="pixel">像素复古</button>
+                    <button class="template-btn" data-template="modern">现代简约</button>
+                    <button class="template-btn" data-template="literary">文艺清新</button>
+                </div>
+                <div class="card-preview">
+                    <canvas id="share-canvas" width="540" height="960"></canvas>
+                </div>
+                <div class="share-buttons">
+                    <button id="download-btn" class="pixel-btn-a">下载 PNG</button>
+                    <button id="back-result-btn" class="pixel-btn-b">返回</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ====== Canvas 层（引擎） ====== -->
+        <div id="game-layer" class="layer hidden">
+            <div class="top-bar">
+                <span class="stage-info" id="stageInfo">STAGE 1</span>
+                <span class="progress-info" id="progressInfo">加载中...</span>
+            </div>
+            <div class="map-section">
+                <canvas id="mapCanvas"></canvas>
+                <div class="loading" id="loading">加载地图数据中...</div>
+            </div>
+            <div class="divider"></div>
+            <div class="game-section">
+                <canvas id="gameCanvas" width="480" height="270"></canvas>
+            </div>
+        </div>
+
+        <div class="scanlines"></div>
+    </div>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/map.js"></script>
+<script src="js/stages.js"></script>
+<script src="js/scenes/intro.js"></script>
+<script src="js/scenes/walk.js"></script>
+<script src="js/scenes/transition.js"></script>
+<script src="js/scenes/clear.js"></script>
+<script src="js/scenes/finale.js"></script>
+<script src="js/scenes/endings/base.js"></script>
+<script src="js/scenes/endings/variants.js"></script>
+<script src="js/scenes/endings/coffee.js"></script>
+<script src="js/scenes/endings/bookstore.js"></script>
+<script src="js/scenes/endings/mall.js"></script>
+<script src="js/scenes/endings/park.js"></script>
+<script src="js/scenes/endings/mountain.js"></script>
+<script src="js/scenes/endings/bund.js"></script>
+<script src="js/flow.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
