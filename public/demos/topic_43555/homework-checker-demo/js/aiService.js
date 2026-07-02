@@ -12,7 +12,7 @@ var AIService = {
   // SiliconFlow API 配置
   // 注意：此 Demo 将 API Key 放在前端仅为演示方便。
   // 生产环境请务必通过后端代理调用 API，避免 Key 泄露。
-  API_KEY: window.SILICONFLOW_API_KEY || 'sk-plmzfrfapfqqypjmznwxkueqzeasahnarrujnyfojqaygbyh',
+  API_KEY: window.SILICONFLOW_API_KEY || 'YOUR_API_KEY_HERE',
   API_URL: 'https://api.siliconflow.cn/v1/chat/completions',
   // ★ 使用 SiliconFlow 平台实际可用的视觉语言模型
   // Qwen3-VL 系列支持图片理解，8B 轻量快速适合 Demo

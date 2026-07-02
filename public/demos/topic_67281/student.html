@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>不三迁 · 学生端</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <a href="launcher.html" class="back-link">← 返回</a>
+      <h1>不三迁 · 学生端</h1>
+      <span style="width:40px"></span>
+    </header>
+
+    <div class="app-body">
+      <!-- 场景状态栏 -->
+      <div class="card scene-status-card">
+        <div class="scene-status-row">
+          <span class="scene-badge" id="scene-badge">通勤中</span>
+          <span class="scene-state" id="scene-state">任务切换</span>
+          <span class="scene-focus" id="scene-focus">专注 0min</span>
+        </div>
+        <div class="scene-meta" id="scene-meta">搭子正在观察周围环境…</div>
+      </div>
+
+      <!-- 摄像头识物 -->
+      <div class="card">
+        <div class="card-title">🎒 AI 搭子随身伴</div>
+        <div class="card-subtitle">对准周围事物，搭子会自动识别并做知识桥接</div>
+        <div class="camera-wrap">
+          <video id="camera" autoplay playsinline muted></video>
+          <canvas id="camera-canvas"></canvas>
+          <div class="camera-overlay">
+            <span id="model-status" class="camera-status">加载模型中…</span>
+            <span id="fps" class="camera-status">-- FPS</span>
+          </div>
+          <div id="detected-card" class="detected-object" style="display:none;">
+            识别到：<strong id="detected-name">--</strong><br>
+            <span id="detected-bridge" style="color:var(--ink-soft);">--</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="toggle-camera" class="btn btn-sage" style="flex:1">开启摄像头</button>
+          <button id="capture-problem" class="btn btn-primary" style="flex:1;display:none;">📷 识别题目</button>
+        </div>
+        <div id="interest-bridge" style="margin-top:10px;display:none;">
+          <span class="tag tag-gold" id="interest-tag">🎮 兴趣桥接</span>
+          <span id="interest-bridge-text" style="font-size:0.82rem;color:var(--ink-soft);"></span>
+        </div>
+      </div>
+
+      <!-- 人脸情绪识别 -->
+      <div class="card">
+        <div class="card-title">😊 人脸情绪识别</div>
+        <div class="card-subtitle">实时检测面部表情，搭子根据情绪调整互动方式</div>
+        <div class="camera-wrap">
+          <video id="face-video" autoplay playsinline muted style="transform:scaleX(-1);"></video>
+          <canvas id="face-canvas"></canvas>
+          <div class="camera-overlay">
+            <span id="face-model-status" class="camera-status">情绪模型未加载</span>
+          </div>
+          <div id="emotion-display" class="emotion-panel">
+            <div class="emotion-main">
+              <div class="emotion-label">等待检测…</div>
+              <div class="emotion-confidence">--</div>
+            </div>
+            <div class="emotion-bars" id="emotion-bars"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="toggle-face" class="btn btn-sage" style="flex:1">开启人脸情绪检测</button>
+        </div>
+      </div>
+
+      <!-- 声音情绪识别 -->
+      <div class="card">
+        <div class="card-title">🎙️ 声音情绪识别</div>
+        <div class="card-subtitle">分析语音声学特征（音高/能量/语速），推断情绪状态</div>
+        <div id="voice-emotion-panel" class="voice-emotion-panel">
+          <div class="voice-emotion-status" id="voice-emotion-status">点击下方按钮开始声音情绪分析</div>
+          <div class="voice-emotion-metrics" id="voice-emotion-metrics" style="display:none;">
+            <div class="metric-row"><span>基频(F0)：</span><span id="metric-f0">--</span></div>
+            <div class="metric-row"><span>能量：</span><span id="metric-energy">--</span></div>
+            <div class="metric-row"><span>语速：</span><span id="metric-rate">--</span></div>
+            <div class="metric-row"><span>音高变化：</span><span id="metric-variation">--</span></div>
+          </div>
+          <div class="voice-emotion-result" id="voice-emotion-result" style="display:none;"></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="toggle-voice-emotion" class="btn btn-sage" style="flex:1">开始声音情绪分析</button>
+        </div>
+      </div>
+
+      <!-- 场景交互引擎可视化 -->
+      <div class="card">
+        <div class="card-title">🧠 场景交互引擎</div>
+        <div class="card-subtitle">多模态信号融合 → 状态推断 → 交互策略（5信号加权 + 状态转移概率矩阵）</div>
+        <div id="scene-interaction-panel">
+          <div class="scene-signals">
+            <div class="scene-signal" id="sig-face">
+              <div class="sig-label">人脸情绪</div>
+              <div class="sig-value">--</div>
+            </div>
+            <div class="scene-signal" id="sig-voice">
+              <div class="sig-label">声音情绪</div>
+              <div class="sig-value">--</div>
+            </div>
+            <div class="scene-signal" id="sig-focus">
+              <div class="sig-label">专注时长</div>
+              <div class="sig-value">0min</div>
+            </div>
+            <div class="scene-signal" id="sig-camera">
+              <div class="sig-label">摄像头</div>
+              <div class="sig-value">idle</div>
+            </div>
+            <div class="scene-signal" id="sig-history">
+              <div class="sig-label">交互历史</div>
+              <div class="sig-value">0次</div>
+            </div>
+          </div>
+          <div class="scene-inference" id="scene-inference">
+            <div class="inference-state">
+              <div class="state-label">推断状态</div>
+              <div class="state-value" id="inferred-state">任务切换</div>
+              <div class="state-confidence" id="inferred-confidence">置信度 --%</div>
+            </div>
+            <div class="inference-scores" id="inference-scores"></div>
+          </div>
+          <div class="scene-reasons" id="scene-reasons"></div>
+          <div class="scene-strategy" id="scene-strategy">
+            <div class="strategy-action">等待信号输入…</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button id="scene-respond-positive" class="btn btn-sage" style="flex:1;font-size:0.8rem;">👍 积极回应</button>
+            <button id="scene-respond-neutral" class="btn" style="flex:1;font-size:0.8rem;">😐 中性</button>
+            <button id="scene-respond-ignore" class="btn" style="flex:1;font-size:0.8rem;background:var(--coral);color:#fff;">🙈 忽略</button>
+          </div>
+          <div style="font-size:0.7rem;color:var(--muted);margin-top:8px;">点击上方按钮模拟互动反馈，场景引擎会据此调整后续策略</div>
+        </div>
+      </div>
+
+      <!-- 健康守护 -->
+      <div class="card" id="health-card" style="display:none;">
+        <div class="card-title">⏰ 健康守护</div>
+        <div id="health-content"></div>
+      </div>
+
+      <!-- 苏格拉底式学习引导 -->
+      <div class="card">
+        <div class="card-title">🧠 学习中卡住了？</div>
+        <div class="card-subtitle">输入题目，搭子用苏格拉底式提问引导你思考，不直接给答案</div>
+        <div id="study-problem-input">
+          <textarea id="problem-text" placeholder="把题目贴在这里，例如：一辆汽车以 60km/h 行驶 2 小时，走了多少千米？"></textarea>
+          <div style="display:flex;gap:10px;margin-top:10px;">
+            <button id="start-guide" class="btn btn-primary" style="flex:1">开始引导我思考</button>
+            <button id="simulate-game" class="btn btn-sage" style="flex:1">🎮 模拟游戏场景</button>
+          </div>
+        </div>
+        <div id="study-guide" style="display:none;">
+          <div class="guide-status">
+            <span id="guide-status-text">思考中…</span>
+            <span id="stuck-timer">已停顿 0 秒</span>
+          </div>
+          <div id="scaffold-level" style="margin-top:8px;"></div>
+          <div id="guide-chat" class="chat-list" style="margin-top:12px;"></div>
+          <div class="decision-input" style="margin-top:10px;">
+            <input id="guide-input" type="text" placeholder="输入你的想法…">
+            <button id="guide-send">发送</button>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px;">
+            <button id="give-hint" class="btn btn-sage" style="flex:1">我需要一点提示</button>
+            <button id="end-guide" class="btn" style="flex:1;background:var(--surface-alt);color:var(--ink-soft);">结束引导</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 游戏场景知识桥接 -->
+      <div class="card" id="game-bridge-card" style="display:none;">
+        <div class="card-title">🎮 游戏知识桥接</div>
+        <div class="card-subtitle" id="game-session-info">本次游戏已植入 0/3 个知识点</div>
+        <div id="game-bridge-chat" class="chat-list"></div>
+      </div>
+
+      <!-- 间隔重复复习 -->
+      <div class="card">
+        <div class="card-title">🔁 知识巩固</div>
+        <div class="card-subtitle">基于艾宾浩斯遗忘曲线的间隔复习</div>
+        <div id="sr-due-list"></div>
+        <div id="sr-all-list" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- 语音问答 -->
+      <div class="card">
+        <div class="card-title">💬 语音问答</div>
+        <div class="card-subtitle">按住下方麦克风，向搭子提问或聊天</div>
+        <div id="chat-list" class="chat-list">
+          <div class="chat-bubble ai">你好呀，我是你的 AI 搭子，有什么想问的吗？</div>
+        </div>
+      </div>
+
+      <!-- 搭子性格 -->
+      <div class="card">
+        <div class="card-title">🎭 搭子性格</div>
+        <div class="card-subtitle">搭子性格会随互动动态演化</div>
+        <div id="personality-display"></div>
+      </div>
+    </div>
+
+    <div class="voice-bar">
+      <button id="voice-btn" class="voice-btn">🎙️</button>
+      <div id="voice-hint" class="voice-hint">正在请求麦克风权限…</div>
+      <button id="mic-permission-btn" class="btn btn-sage" style="font-size:0.75rem;padding:6px 12px;margin-left:8px;display:none;" onclick="requestMicPermission()">开启麦克风</button>
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="student.js"></script>
+</body>
+</html>

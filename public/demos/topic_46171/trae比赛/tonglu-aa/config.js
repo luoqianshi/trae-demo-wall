@@ -13,7 +13,7 @@ const CONFIG = {
   // --- AI 文案生成 (MiMo / OpenAI 兼容格式) ---
   // 如需启用 AI，请填入你的 API Key。留空则自动使用本地模板 fallback。
   AI: {
-    API_KEY: 'sk-cw3cgmpuewrqriqru59p7apqs7xhc4bj4mfn4puxqy4btcd5',
+    API_KEY: 'YOUR_API_KEY_HERE',
     BASE_URL: 'https://api.xiaomimimo.com/v1/chat/completions',
     MODEL: 'mimo-v2-flash',
     ENABLED: true, // 设为 false 可完全跳过 AI 调用

@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上海幼儿园招生区域查询</title>
+    <script src="data.js"></script>
+    <script src="boundaries.js"></script>
+    <script src="school_coords.js"></script>
+    <script src="kg_pois.js"></script>
+    <script src="https://webapi.amap.com/loader.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: #f0f2f5; height: 100vh; overflow: hidden;
+        }
+        .app { display: flex; height: 100vh; }
+
+        /* 左侧栏 */
+        .sidebar {
+            width: 360px; min-width: 360px; background: white;
+            display: flex; flex-direction: column;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 10;
+        }
+        .sidebar-header {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white; padding: 20px; text-align: center;
+        }
+        .sidebar-header h1 { font-size: 18px; }
+        .sidebar-header p { font-size: 12px; opacity: 0.8; margin-top: 5px; }
+        .sidebar-stats {
+            display: flex; background: rgba(255,255,255,0.15);
+            border-radius: 8px; padding: 8px; margin-top: 10px;
+            justify-content: center; gap: 20px; font-size: 12px;
+        }
+        .sidebar-search {
+            padding: 12px 15px; border-bottom: 1px solid #eee;
+        }
+        .sidebar-search input {
+            width: 100%; padding: 10px 15px; border: 2px solid #e0e0e0;
+            border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.3s;
+        }
+        .sidebar-search input:focus { border-color: #e74c3c; }
+
+        /* 区域筛选标签 */
+        .district-tags {
+            padding: 10px 15px; border-bottom: 1px solid #eee;
+            display: flex; flex-wrap: wrap; gap: 5px;
+        }
+        .district-tag {
+            padding: 4px 10px; border-radius: 12px; font-size: 11px;
+            cursor: pointer; background: #f0f0f0; color: #666;
+            transition: all 0.2s; border: 1px solid transparent;
+        }
+        .district-tag:hover { background: #e0e0e0; }
+        .district-tag.active { background: #e74c3c; color: white; border-color: #c0392b; }
+
+        /* 幼儿园列表 */
+        .kg-list {
+            flex: 1; overflow-y: auto; padding: 0;
+        }
+        .kg-item {
+            padding: 12px 15px; border-bottom: 1px solid #f0f0f0;
+            cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 12px;
+        }
+        .kg-item:hover { background: #f8f9fa; }
+        .kg-item.active { background: #fde8e8; border-left: 3px solid #e74c3c; }
+        .kg-dot {
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+        }
+        .kg-info { flex: 1; min-width: 0; }
+        .kg-name { font-size: 13px; font-weight: bold; color: #333; }
+        .kg-meta { font-size: 11px; color: #999; margin-top: 2px; }
+        .kg-comm-count {
+            font-size: 11px; background: #e74c3c; color: white;
+            padding: 2px 8px; border-radius: 10px; flex-shrink: 0;
+        }
+
+        /* 地图区域 */
+        .map-area { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        /* 图例 */
+        .map-legend {
+            position: absolute; bottom: 30px; right: 15px; z-index: 100;
+            background: rgba(255,255,255,0.95); border-radius: 8px;
+            padding: 10px 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            font-size: 12px; line-height: 1.6;
+        }
+        .map-legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot {
+            width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+            border: 1px solid rgba(0,0,0,0.2);
+        }
+
+        /* 右侧信息面板 */
+        .info-panel {
+            width: 340px; min-width: 340px; background: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column;
+        }
+        .info-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 20px; text-align: center;
+        }
+        .info-header h2 { font-size: 16px; }
+        .info-body {
+            flex: 1; overflow-y: auto; padding: 15px;
+        }
+        .info-placeholder {
+            text-align: center; color: #999; padding: 60px 20px;
+        }
+        .school-card {
+            background: #f8f9fa; border-radius: 10px; padding: 15px;
+            margin-bottom: 10px; border-left: 4px solid #e74c3c;
+        }
+        .school-card h4 { font-size: 14px; margin-bottom: 5px; }
+        .school-card p { font-size: 12px; color: #666; margin: 3px 0; }
+        .kg-detail-card {
+            background: #fde8e8; border-radius: 10px; padding: 15px; margin-bottom: 15px;
+        }
+        .kg-detail-card h3 { font-size: 16px; color: #c0392b; }
+        .kg-detail-card p { font-size: 13px; color: #666; margin: 5px 0; }
+        .comm-item {
+            padding: 10px 12px; background: #f0f2f5; border-radius: 8px;
+            margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+        }
+        .comm-item .comm-dot { width: 8px; height: 8px; border-radius: 50%; background: #3498db; flex-shrink: 0; }
+        .comm-item .comm-name { font-size: 13px; flex: 1; }
+        .comm-item .comm-addr { font-size: 11px; color: #999; }
+
+        @media (max-width: 1100px) {
+            .info-panel { display: none; }
+            .sidebar { width: 300px; min-width: 300px; }
+        }
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; min-width: auto; position: absolute; z-index: 100; height: 100%; }
+            .sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- 左侧：幼儿园列表 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>上海幼儿园招生区域查询</h1>
+                <p>点击幼儿园查看其对口招生范围</p>
+                <div class="sidebar-stats">
+                    <span id="statKg">1890 所幼儿园</span>
+                    <span>覆盖 16 个区</span>
+                    <span id="statComm">68 个小区</span>
+                </div>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" id="kgSearch" placeholder="搜索幼儿园名称..." oninput="filterKindergartens()">
+            </div>
+            <div class="district-tags" id="districtTags"></div>
+            <div class="kg-list" id="kgList"></div>
+        </div>
+
+        <!-- 中间：地图 -->
+        <div class="map-area">
+            <div id="map"></div>
+            <div class="map-legend">
+                <div class="map-legend-item"><div class="legend-dot" style="background:#3498db;"></div> 招生小区</div>
+                <div class="map-legend-item"><div class="legend-dot" style="background:#e74c3c;"></div> 幼儿园</div>
+                <div class="map-legend-item"><div class="legend-dot" style="background:transparent;border:2px dashed #e74c3c;width:14px;height:14px;"></div> 招生区域范围</div>
+            </div>
+        </div>
+
+        <!-- 右侧：详情 -->
+        <div class="info-panel">
+            <div class="info-header">
+                <h2>幼儿园详情</h2>
+            </div>
+            <div class="info-body" id="infoBody">
+                <div class="info-placeholder">
+                    <p style="font-size:40px;margin-bottom:15px;">🏫</p>
+                    <p>从左侧选择一所幼儿园</p>
+                    <p style="font-size:13px;margin-top:10px;color:#ccc;">查看其对口招生小区和区域</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var ENCODED_KEY = 'ZmExODdjZTRjN2VmMDg5ZDczYjk0MmIzYTUyOGM5NDM=';
+
+        function decodeKey(enc) {
+            try { return window.atob(enc); } catch(e) { return ''; }
+        }
+
+        var map, selectedKgMarker;
+        var kgMarkers = [], enrollmentMarkers = [], enrollmentLines = [], enrollmentPolygon;
+        var allKindergartens = [], filteredKindergartens = [];
+        var currentDistrictFilter = null;
+        var currentKgName = null;
+
+        // ========== 构建幼儿园索引（从POI数据 + 对口数据） ==========
+        function buildKindergartenIndex() {
+            // 先从schoolDatabase构建对口小区映射
+            var enrollmentMap = {};
+            for (var comm in schoolDatabase) {
+                var data = schoolDatabase[comm];
+                if (!data.kindergarten) continue;
+                var kgName = data.kindergarten.name;
+                if (!enrollmentMap[kgName]) {
+                    enrollmentMap[kgName] = {
+                        info: data.kindergarten,
+                        communities: [],
+                        districts: new Set(),
+                        streets: new Set()
+                    };
+                }
+                enrollmentMap[kgName].communities.push({
+                    name: comm,
+                    district: data.district,
+                    street: data.street,
+                    coordinates: data.coordinates,
+                    address: data.address
+                });
+                enrollmentMap[kgName].districts.add(data.district);
+                enrollmentMap[kgName].streets.add(data.street);
+            }
+
+            // 从POI数据构建完整幼儿园列表
+            allKindergartens = [];
+            var seenNames = {};
+            if (typeof kgPois !== 'undefined') {
+                for (var district in kgPois) {
+                    kgPois[district].forEach(function(poi) {
+                        var enr = enrollmentMap[poi.name];
+                        seenNames[poi.name] = true;
+                        allKindergartens.push({
+                            name: poi.name,
+                            address: poi.address,
+                            district: poi.district,
+                            coordinates: poi.location,
+                            tel: poi.tel,
+                            info: enr ? enr.info : { name: poi.name, level: 'C', type: '公办' },
+                            communities: enr ? enr.communities : [],
+                            districts: enr ? enr.districts : new Set([poi.district]),
+                            streets: enr ? enr.streets : new Set(),
+                            hasEnrollment: !!enr
+                        });
+                    });
+                }
+            }
+
+            // 补充：schoolDatabase中有对口数据但POI中没有的幼儿园
+            for (var kgName in enrollmentMap) {
+                if (seenNames[kgName]) continue;
+                var enr = enrollmentMap[kgName];
+                var coord = schoolCoordinates[kgName];
+                var firstComm = enr.communities[0];
+                allKindergartens.push({
+                    name: kgName,
+                    address: firstComm ? firstComm.address : '',
+                    district: firstComm ? firstComm.district : '未知',
+                    coordinates: coord,
+                    tel: '',
+                    info: enr.info,
+                    communities: enr.communities,
+                    districts: enr.districts,
+                    streets: enr.streets,
+                    hasEnrollment: true
+                });
+            }
+
+            // 更新统计
+            var withEnr = allKindergartens.filter(function(k) { return k.hasEnrollment; }).length;
+            document.getElementById('statKg').textContent = allKindergartens.length + ' 所幼儿园';
+            document.getElementById('statComm').textContent = withEnr + ' 所有对口数据';
+
+            return allKindergartens;
+        }
+
+        // ========== 高德地图初始化 ==========
+        function initMap() {
+            var key = decodeKey(ENCODED_KEY);
+            if (!key) { console.error('Key无效'); return; }
+
+            window.AMapLoader.load({
+                key: key, version: "2.0",
+                plugins: ['AMap.Scale', 'AMap.ToolBar', 'AMap.Circle', 'AMap.MarkerCluster']
+            }).then(function(AMap) {
+                map = new AMap.Map('map', { zoom: 11, center: [121.4737, 31.2304] });
+                map.addControl(new AMap.Scale());
+                map.addControl(new AMap.ToolBar({ position: 'LB' }));
+
+                buildKindergartenIndex();
+                // 默认选中浦东新区，避免一次性渲染全部1948个
+                currentDistrictFilter = '浦东新区';
+                filterKindergartens();
+                renderSidebar();
+                renderKgMarkers();
+
+                // 全局点击事件：点击地图任意位置检测最近的幼儿园
+                map.on('click', function(e) {
+                    var clickedLng = e.lnglat.getLng();
+                    var clickedLat = e.lnglat.getLat();
+                    var minDist = Infinity;
+                    var closestKg = null;
+                    // 只在当前筛选结果中查找
+                    filteredKindergartens.forEach(function(kg) {
+                        if (!kg.coordinates) return;
+                        var dx = kg.coordinates[0] - clickedLng;
+                        var dy = kg.coordinates[1] - clickedLat;
+                        var dist = dx * dx + dy * dy;
+                        if (dist < minDist) {
+                            minDist = dist;
+                            closestKg = kg;
+                        }
+                    });
+                    // 阈值约500米（0.00002度^2 ≈ 500米^2的平方）
+                    // 经度1度≈111km，0.005度≈555米
+                    if (closestKg && minDist < 0.000025) {
+                        selectKindergarten(closestKg.name);
+                    }
+                });
+
+            }).catch(function(e) {
+                console.error('地图加载失败:', e);
+                document.getElementById('map').innerHTML =
+                    '<div style="display:flex;justify-content:center;align-items:center;height:100%;color:#999;">' +
+                    '<p>地图加载失败，请检查网络连接</p></div>';
+            });
+        }
+
+        // ========== 侧边栏渲染 ==========
+        function renderDistrictTags() {
+            var districts = {};
+            allKindergartens.forEach(function(kg) {
+                kg.districts.forEach(function(d) { districts[d] = true; });
+            });
+            var sorted = Object.keys(districts).sort();
+            var container = document.getElementById('districtTags');
+            var html = '<span class="district-tag' + (!currentDistrictFilter ? ' active' : '') + '" onclick="setDistrictFilter(null)">全部</span>';
+            sorted.forEach(function(d) {
+                html += '<span class="district-tag' + (d === currentDistrictFilter ? ' active' : '') + '" onclick="setDistrictFilter(\'' + d + '\')">' + d + '</span>';
+            });
+            container.innerHTML = html;
+        }
+
+        function renderSidebar() {
+            renderDistrictTags();
+            renderKgList();
+        }
+
+        function setDistrictFilter(district) {
+            currentDistrictFilter = district;
+            renderDistrictTags();
+            filterKindergartens();
+        }
+
+        function filterKindergartens() {
+            var searchTerm = document.getElementById('kgSearch').value.trim().toLowerCase();
+            filteredKindergartens = allKindergartens.filter(function(kg) {
+                // 区域筛选
+                if (currentDistrictFilter && !kg.districts.has(currentDistrictFilter)) return false;
+                // 搜索筛选
+                if (searchTerm && kg.name.toLowerCase().indexOf(searchTerm) === -1) return false;
+                // 必须有坐标
+                if (!kg.coordinates) return false;
+                return true;
+            });
+            renderKgList();
+            updateKgMarkers();
+        }
+
+        function renderKgList() {
+            var container = document.getElementById('kgList');
+            if (filteredKindergartens.length === 0) {
+                container.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">没有匹配的幼儿园</div>';
+                return;
+            }
+            var html = '';
+            filteredKindergartens.forEach(function(kg) {
+                var isActive = (kg.name === currentKgName);
+                var districts = Array.from(kg.districts).join(' / ');
+                var badge = kg.hasEnrollment ? ('<span style="background:#3498db;">' + kg.communities.length + '</span>') : '<span style="background:#bbb;">0</span>';
+                html += '<div class="kg-item' + (isActive ? ' active' : '') + '" onclick="selectKindergarten(\'' + kg.name.replace(/'/g, "\\'") + '\')">' +
+                    '<div class="kg-dot" style="background:' + (kg.hasEnrollment ? '#e74c3c' : '#ccc') + '"></div>' +
+                    '<div class="kg-info">' +
+                    '<div class="kg-name">' + kg.name + (kg.hasEnrollment ? ' <span style="color:#e74c3c;font-size:10px;">有对口</span>' : '') + '</div>' +
+                    '<div class="kg-meta">' + districts + ' · ' + (kg.info.type || '') + '</div>' +
+                    '</div>' +
+                    '<div class="kg-comm-count">' + badge + '</div>' +
+                    '</div>';
+            });
+            container.innerHTML = html;
+        }
+
+        // ========== 地图标记（MarkerCluster聚合） ==========
+        var markerCluster = null;
+
+        function renderKgMarkers() {
+            // 清除旧标记
+            if (markerCluster) {
+                markerCluster.setMap(null);
+                markerCluster = null;
+            }
+            kgMarkers.forEach(function(m) { map.remove(m); });
+            kgMarkers = [];
+
+            // 只渲染当前筛选结果中的幼儿园（避免1948个同时渲染）
+            var points = [];
+            filteredKindergartens.forEach(function(kg) {
+                if (!kg.coordinates) return;
+                points.push({
+                    lnglat: kg.coordinates,
+                    name: kg.name,
+                    hasEnrollment: kg.hasEnrollment
+                });
+            });
+
+            if (points.length === 0) return;
+
+            // 少于50个直接渲染，多于50个用聚合
+            if (points.length <= 50) {
+                points.forEach(function(p) {
+                    var color = p.hasEnrollment ? '#e74c3c' : '#999';
+                    var marker = new AMap.Marker({
+                        position: p.lnglat,
+                        title: p.name,
+                        content: '<div style="width:10px;height:10px;background:' + color + ';border:2px solid white;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3);transform:translate(-50%,-50%);"></div>',
+                        offset: new AMap.Pixel(0, 0),
+                        zIndex: 50
+                    });
+                    marker._kgName = p.name;
+                    marker.on('click', function() { selectKindergarten(this._kgName); });
+                    map.add(marker);
+                    kgMarkers.push(marker);
+                });
+            } else {
+                // 使用MarkerCluster聚合
+                markerCluster = new AMap.MarkerCluster(map, points, {
+                    gridSize: 60,
+                    renderClusterMarker: function(context) {
+                        var count = context.count;
+                        var size = Math.min(40, 20 + count / 5);
+                        var div = document.createElement('div');
+                        div.style.width = size + 'px';
+                        div.style.height = size + 'px';
+                        div.style.background = 'rgba(231,76,60,0.85)';
+                        div.style.border = '2px solid white';
+                        div.style.borderRadius = '50%';
+                        div.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+                        div.style.display = 'flex';
+                        div.style.alignItems = 'center';
+                        div.style.justifyContent = 'center';
+                        div.style.color = 'white';
+                        div.style.fontSize = Math.min(14, size / 2) + 'px';
+                        div.style.fontWeight = 'bold';
+                        div.innerText = count;
+                        context.marker.setContent(div);
+                        context.marker.setOffset(new AMap.Pixel(-size/2, -size/2));
+                    },
+                    renderMarker: function(context) {
+                        var p = context.data[0];
+                        var color = p.hasEnrollment ? '#e74c3c' : '#999';
+                        var div = document.createElement('div');
+                        div.style.width = '10px';
+                        div.style.height = '10px';
+                        div.style.background = color;
+                        div.style.border = '2px solid white';
+                        div.style.borderRadius = '50%';
+                        div.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+                        context.marker.setContent(div);
+                        context.marker.setOffset(new AMap.Pixel(-5, -5));
+                        context.marker._kgName = p.name;
+                        context.marker.on('click', function() {
+                            selectKindergarten(this._kgName);
+                        });
+                    }
+                });
+            }
+        }
+
+        function updateKgMarkers() {
+            renderKgMarkers();
+        }
+
+        // ========== 圆角凸包算法（生成自然招生区域边界） ==========
+        function roundConvexHull(points, cornerRadiusMeters, bufferMeters) {
+            if (points.length < 3) return points;
+
+            // 经纬度转米（上海纬度约31.2°）
+            var latFactor = 111000;
+            var lngFactor = 111000 * Math.cos(31.2 * Math.PI / 180);
+
+            // 标准凸包
+            var hull = convexHullRaw(points);
+            if (hull.length < 3) return hull;
+
+            // 外扩 + 圆角
+            var result = [];
+            var n = hull.length;
+            var cornerRadLng = cornerRadiusMeters / lngFactor;
+            var cornerRadLat = cornerRadiusMeters / latFactor;
+            var bufLng = bufferMeters / lngFactor;
+            var bufLat = bufferMeters / latFactor;
+
+            for (var i = 0; i < n; i++) {
+                var prev = hull[(i - 1 + n) % n];
+                var curr = hull[i];
+                var next = hull[(i + 1) % n];
+
+                // 向量（归一化）
+                var v1x = prev[0] - curr[0], v1y = prev[1] - curr[1];
+                var v1len = Math.sqrt(v1x * v1x + v1y * v1y);
+                var v2x = next[0] - curr[0], v2y = next[1] - curr[1];
+                var v2len = Math.sqrt(v2x * v2x + v2y * v2y);
+
+                if (v1len < 0.0001 || v2len < 0.0001) continue;
+
+                // 归一化
+                v1x /= v1len; v1y /= v1len;
+                v2x /= v2len; v2y /= v2len;
+
+                // 外扩方向（法线方向，向外）
+                var nx = -(v1y + v2y);
+                var ny = (v1x + v2x);
+                var nlen = Math.sqrt(nx * nx + ny * ny);
+                if (nlen > 0) { nx /= nlen; ny /= nlen; }
+
+                // 圆角起点和终点（沿两边向内移动圆角半径）
+                var startX = curr[0] + v1x * cornerRadLng + nx * bufLng;
+                var startY = curr[1] + v1y * cornerRadLat + ny * bufLat;
+                var endX = curr[0] + v2x * cornerRadLng + nx * bufLng;
+                var endY = curr[1] + v2y * cornerRadLat + ny * bufLat;
+
+                // 圆角中心
+                var bisectX = (v1x + v2x);
+                var bisectY = (v1y + v2y);
+                var bisectLen = Math.sqrt(bisectX * bisectX + bisectY * bisectY);
+                if (bisectLen > 0) { bisectX /= bisectLen; bisectY /= bisectLen; }
+
+                var centerX = curr[0] + nx * bufLng + bisectX * cornerRadLng * 0.5;
+                var centerY = curr[1] + ny * bufLat + bisectY * cornerRadLat * 0.5;
+
+                // 插入圆弧上的点（8个点）
+                for (var k = 0; k <= 8; k++) {
+                    var t = k / 8;
+                    // 使用二次贝塞尔曲线近似圆弧
+                    var ax = startX + (centerX - startX) * t;
+                    var ay = startY + (centerY - startY) * t;
+                    var bx = centerX + (endX - centerX) * t;
+                    var by = centerY + (endY - centerY) * t;
+                    var cx = ax + (bx - ax) * t;
+                    var cy = ay + (by - ay) * t;
+                    result.push([cx, cy]);
+                }
+            }
+            return result;
+        }
+
+        function convexHullRaw(points) {
+            if (points.length < 3) return points;
+            var start = 0;
+            for (var i = 1; i < points.length; i++) {
+                if (points[i][1] < points[start][1] || (points[i][1] === points[start][1] && points[i][0] < points[start][0])) {
+                    start = i;
+                }
+            }
+            var tmp = points[0]; points[0] = points[start]; points[start] = tmp;
+            var pivot = points[0];
+            var rest = points.slice(1).sort(function(a, b) {
+                var angleA = Math.atan2(a[1] - pivot[1], a[0] - pivot[0]);
+                var angleB = Math.atan2(b[1] - pivot[1], b[0] - pivot[0]);
+                if (angleA !== angleB) return angleA - angleB;
+                var distA = (a[0]-pivot[0])*(a[0]-pivot[0]) + (a[1]-pivot[1])*(a[1]-pivot[1]);
+                var distB = (b[0]-pivot[0])*(b[0]-pivot[0]) + (b[1]-pivot[1])*(b[1]-pivot[1]);
+                return distA - distB;
+            });
+            var hull = [pivot];
+            for (var i = 0; i < rest.length; i++) {
+                while (hull.length > 1) {
+                    var top = hull[hull.length - 1];
+                    var second = hull[hull.length - 2];
+                    var cross = (top[0] - second[0]) * (rest[i][1] - second[1]) - (top[1] - second[1]) * (rest[i][0] - second[0]);
+                    if (cross <= 0) {
+                        hull.pop();
+                    } else {
+                        break;
+                    }
+                }
+                hull.push(rest[i]);
+            }
+            return hull;
+        }
+
+        // ========== 选中幼儿园后的核心逻辑 ==========
+        function selectKindergarten(kgName) {
+            currentKgName = kgName;
+            renderKgList();
+
+            // 找到幼儿园数据
+            var kg = null;
+            for (var i = 0; i < allKindergartens.length; i++) {
+                if (allKindergartens[i].name === kgName) { kg = allKindergartens[i]; break; }
+            }
+            if (!kg || !kg.coordinates) return;
+
+            // 清除之前的招生覆盖物
+            clearEnrollmentOverlays();
+
+            var lng = kg.coordinates[0];
+            var lat = kg.coordinates[1];
+
+            // 1. 幼儿园标记（大红色圆点+光环）
+            selectedKgMarker = new AMap.Marker({
+                position: [lng, lat],
+                title: kg.name,
+                content: '<div style="width:18px;height:18px;background:#e74c3c;border:3px solid white;border-radius:50%;box-shadow:0 0 8px rgba(231,76,60,0.8);transform:translate(-50%,-50%);"></div>',
+                offset: new AMap.Pixel(0, 0),
+                zIndex: 200
+            });
+            map.add(selectedKgMarker);
+
+            // 2. 招生小区标记 + 连线
+            var communityCoords = [];
+            var displayBounds = [selectedKgMarker];
+
+            kg.communities.forEach(function(comm) {
+                var c = comm.coordinates;
+                if (!c) return;
+                communityCoords.push(c);
+
+                // 小区标记（蓝色）
+                var cm = new AMap.Marker({
+                    position: c,
+                    title: comm.name,
+                    content: '<div style="width:12px;height:12px;background:#3498db;border:2px solid white;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.3);transform:translate(-50%,-50%);"></div>',
+                    offset: new AMap.Pixel(0, 0),
+                    zIndex: 100
+                });
+                map.add(cm);
+                enrollmentMarkers.push(cm);
+                displayBounds.push(cm);
+
+                // 小区到幼儿园的虚线连线
+                var line = new AMap.Polyline({
+                    path: [c, [lng, lat]],
+                    strokeColor: '#3498db', strokeWeight: 1.5,
+                    strokeOpacity: 0.4, strokeStyle: 'dashed', zIndex: 30
+                });
+                map.add(line);
+                enrollmentLines.push(line);
+            });
+
+            // 3. 招生区域多边形（圆角凸包+外扩缓冲生成自然边界）
+            if (communityCoords.length >= 3) {
+                var smoothHull = roundConvexHull(
+                    communityCoords.map(function(c) { return [c[0], c[1]]; }),
+                    500,   // 圆角半径500米
+                    300    // 外扩缓冲300米
+                );
+                if (smoothHull.length >= 3) {
+                    enrollmentPolygon = new AMap.Polygon({
+                        path: smoothHull,
+                        fillColor: '#e74c3c', fillOpacity: 0.08,
+                        strokeColor: '#c0392b', strokeWeight: 2, strokeOpacity: 0.5,
+                        strokeStyle: 'solid', zIndex: 10
+                    });
+                    map.add(enrollmentPolygon);
+                    displayBounds.push(enrollmentPolygon);
+                }
+            } else if (communityCoords.length > 0) {
+                // 少于3个点，用圆形近似
+                var circle = new AMap.Circle({
+                    center: [lng, lat],
+                    radius: 800,
+                    fillColor: '#e74c3c', fillOpacity: 0.08,
+                    strokeColor: '#c0392b', strokeWeight: 2, strokeOpacity: 0.4,
+                    strokeStyle: 'dashed', zIndex: 10
+                });
+                map.add(circle);
+                enrollmentMarkers.push(circle);
+                displayBounds.push(circle);
+            }
+
+            // 自动调整视野
+            if (displayBounds.length > 0) {
+                map.setFitView(displayBounds, false, [80, 80, 80, 80]);
+            } else {
+                map.setZoomAndCenter(14, [lng, lat]);
+            }
+
+            // 4. 更新右侧信息面板
+            updateInfoPanel(kg);
+        }
+
+        function clearEnrollmentOverlays() {
+            if (selectedKgMarker) { map.remove(selectedKgMarker); selectedKgMarker = null; }
+            if (enrollmentPolygon) { map.remove(enrollmentPolygon); enrollmentPolygon = null; }
+            enrollmentMarkers.forEach(function(m) { map.remove(m); });
+            enrollmentMarkers = [];
+            enrollmentLines.forEach(function(l) { map.remove(l); });
+            enrollmentLines = [];
+        }
+
+        // ========== 信息面板 ==========
+        function updateInfoPanel(kg) {
+            var body = document.getElementById('infoBody');
+            var districts = Array.from(kg.districts).join('、');
+            var streets = Array.from(kg.streets).join('、');
+
+            var html = '<div class="kg-detail-card">' +
+                '<h3>' + kg.name + '</h3>' +
+                '<p>📍 ' + districts + '</p>' +
+                (kg.address ? '<p>🏠 ' + kg.address + '</p>' : '') +
+                (kg.tel ? '<p>📞 ' + kg.tel + '</p>' : '') +
+                '<p>🏫 性质：' + (kg.info.type || '公办') + ' · ' + (kg.info.level === 'A' ? '市示范' : kg.info.level === 'B' ? '区示范' : '普通') + '</p>' +
+                '</div>';
+
+            if (kg.hasEnrollment && kg.communities.length > 0) {
+                // 覆盖街道信息
+                var streetSet = {};
+                kg.communities.forEach(function(comm) { streetSet[comm.street] = true; });
+                var streetList = Object.keys(streetSet);
+                if (streetList.length > 0) {
+                    html += '<div style="padding:12px;background:#e8f4fd;border-radius:8px;margin-bottom:12px;border-left:3px solid #3498db;">' +
+                        '<p style="font-size:12px;color:#666;margin:0;"><strong>覆盖街道：</strong>' + streetList.join('、') + '</p>' +
+                        '<p style="font-size:11px;color:#999;margin:4px 0 0 0;">以上街道内的以下小区为该园对口招生范围</p>' +
+                        '</div>';
+                }
+
+                html += '<h4 style="margin-bottom:10px;font-size:14px;color:#e74c3c;">对口招生小区（' + kg.communities.length + '个）</h4>';
+                kg.communities.forEach(function(comm) {
+                    html += '<div class="comm-item">' +
+                        '<div class="comm-dot"></div>' +
+                        '<div><div class="comm-name">' + comm.name + '</div><div class="comm-addr">' + comm.district + ' · ' + comm.street + '</div></div>' +
+                        '</div>';
+                });
+
+                html += '<div style="padding:10px;background:#fff3e0;border-radius:8px;margin-top:10px;">' +
+                    '<p style="font-size:11px;color:#e67e22;margin:0;">地图红色区域：基于对口小区位置的近似范围，非官方招生地段边界。具体招生范围请以区教育局当年公布为准。</p>' +
+                    '</div>';
+            } else {
+                html += '<div style="padding:20px;background:#f8f9fa;border-radius:8px;text-align:center;color:#999;">' +
+                    '<p>该幼儿园暂无对口小区数据</p>' +
+                    '<p style="font-size:12px;margin-top:5px;">建议直接联系幼儿园或查阅区教育局招生地段表</p>' +
+                    '</div>';
+            }
+
+            html += '<h4 style="margin:15px 0 10px;font-size:14px;color:#666;">本区域内其他幼儿园</h4>';
+
+            // 同区域其他幼儿园（最多显示10个）
+            var districtNames = Array.from(kg.districts);
+            var others = allKindergartens.filter(function(k) {
+                if (k.name === kg.name) return false;
+                for (var i = 0; i < districtNames.length; i++) {
+                    if (k.districts.has(districtNames[i])) return true;
+                }
+                return false;
+            }).slice(0, 10);
+
+            others.forEach(function(k) {
+                var enrBadge = k.hasEnrollment ? ('<span style="color:#e74c3c;">' + k.communities.length + '个对口</span>') : '<span style="color:#bbb;">无对口数据</span>';
+                html += '<div class="comm-item" style="cursor:pointer;" onclick="selectKindergarten(\'' + k.name.replace(/'/g, "\\'") + '\')">' +
+                    '<div class="comm-dot" style="background:' + (k.hasEnrollment ? '#e74c3c' : '#ccc') + ';"></div>' +
+                    '<div><div class="comm-name">' + k.name + '</div><div class="comm-addr">' + enrBadge + '</div></div>' +
+                    '</div>';
+            });
+
+            body.innerHTML = html;
+        }
+
+        // ========== 启动 ==========
+        window.onload = function() {
+            initMap();
+        };
+    </script>
+</body>
+</html>

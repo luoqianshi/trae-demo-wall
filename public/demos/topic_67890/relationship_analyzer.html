@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>关系分析器 — 六度人脉网络</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-deep: #0a0e1a;
+            --bg-panel: rgba(16, 22, 40, 0.92);
+            --bg-hover: rgba(30, 40, 70, 0.95);
+            --accent: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.4);
+            --phone: #10b981;
+            --qq: #f59e0b;
+            --wechat: #22c55e;
+            --voice: #8b5cf6;
+            --location: #ef4444;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --border: rgba(148, 163, 184, 0.15);
+            --glass: rgba(16, 22, 40, 0.75);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+            background: var(--bg-deep);
+            color: var(--text);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Background grid effect */
+        .bg-grid {
+            position: fixed;
+            inset: 0;
+            background-image:
+                radial-gradient(circle at 20% 30%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 70%, rgba(139,92,246,0.06) 0%, transparent 50%),
+                linear-gradient(rgba(148,163,184,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(148,163,184,0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Header */
+        .header {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 56px;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 100;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .header-brand .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent-glow);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 24px;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .header-stats span strong {
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        /* Main layout */
+        .main {
+            position: fixed;
+            top: 56px; left: 0; right: 0; bottom: 0;
+            display: flex;
+            z-index: 1;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 320px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-section {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        /* Path finder */
+        .path-inputs {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .path-inputs select {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .path-inputs select:focus {
+            border-color: var(--accent);
+        }
+
+        .btn {
+            padding: 8px 16px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover { background: rgba(255,255,255,0.12); }
+
+        /* Legend */
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
+        .legend-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* Activity log */
+        .activity-log {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(148,163,184,0.08);
+            display: flex;
+            gap: 8px;
+            line-height: 1.5;
+        }
+
+        .log-time {
+            color: var(--text-dim);
+            flex-shrink: 0;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        .log-type {
+            flex-shrink: 0;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .log-type.phone { background: rgba(16,185,129,0.15); color: var(--phone); }
+        .log-type.qq { background: rgba(245,158,11,0.15); color: var(--qq); }
+        .log-type.wechat { background: rgba(34,197,94,0.15); color: var(--wechat); }
+        .log-type.voice { background: rgba(139,92,246,0.15); color: var(--voice); }
+        .log-type.location { background: rgba(239,68,68,0.15); color: var(--location); }
+
+        .log-desc { color: var(--text); }
+
+        /* Graph container */
+        .graph-area {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #graph-svg {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #graph-svg:active { cursor: grabbing; }
+
+        /* Floating controls */
+        .float-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            padding: 8px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            z-index: 50;
+        }
+
+        .float-btn {
+            width: 36px; height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .float-btn:hover {
+            background: rgba(255,255,255,0.08);
+            color: var(--text);
+        }
+
+        /* Node tooltip / panel */
+        .node-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 280px;
+            background: var(--bg-hover);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            z-index: 40;
+            opacity: 0;
+            transform: translateX(20px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+
+        .node-panel.active {
+            opacity: 1;
+            transform: translateX(0);
+            pointer-events: auto;
+        }
+
+        .node-panel-avatar {
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .node-panel h3 {
+            font-size: 16px;
+            margin-bottom: 4px;
+        }
+
+        .node-panel .meta {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-bottom: 16px;
+        }
+
+        .relation-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(148,163,184,0.08);
+            font-size: 13px;
+        }
+
+        .relation-stat .label { color: var(--text-dim); }
+        .relation-stat .value { font-weight: 600; }
+
+        /* Path result overlay */
+        .path-result {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-hover);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 24px;
+            z-index: 40;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            max-width: 600px;
+        }
+
+        .path-result.active { display: flex; }
+
+        .path-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .path-node {
+            padding: 6px 12px;
+            background: rgba(59,130,246,0.15);
+            border: 1px solid var(--accent);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .path-arrow {
+            color: var(--text-dim);
+            font-size: 16px;
+        }
+
+        .path-close {
+            margin-left: 8px;
+            width: 24px; height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.08);
+            border: none;
+            border-radius: 6px;
+            color: var(--text-dim);
+            cursor: pointer;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.2); border-radius: 2px; }
+
+        /* D3 Styles */
+        .node circle {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node:hover circle {
+            filter: brightness(1.2);
+        }
+
+        .node text {
+            font-size: 11px;
+            fill: var(--text);
+            pointer-events: none;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+        }
+
+        .link {
+            stroke-opacity: 0.4;
+            transition: all 0.3s;
+        }
+
+        .link.highlighted {
+            stroke-opacity: 1;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 4px currentColor);
+        }
+
+        .node.highlighted circle {
+            stroke: #fff;
+            stroke-width: 3px;
+            filter: drop-shadow(0 0 8px currentColor);
+        }
+
+        .link.dimmed { stroke-opacity: 0.05; }
+        .node.dimmed { opacity: 0.2; }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+
+    <header class="header">
+        <div class="header-brand">
+            <div class="dot"></div>
+            <span>RELATIONSHIP ANALYZER</span>
+        </div>
+        <div class="header-stats">
+            <span><strong id="stat-nodes">0</strong> 人物</span>
+            <span><strong id="stat-links">0</strong> 关系</span>
+            <span><strong id="stat-density">0%</strong> 网络密度</span>
+        </div>
+    </header>
+
+    <div class="main">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">六度路径查找</div>
+                <div class="path-inputs">
+                    <select id="person-a">
+                        <option value="">选择人物 A</option>
+                    </select>
+                    <select id="person-b">
+                        <option value="">选择人物 B</option>
+                    </select>
+                    <button class="btn" onclick="findPath()">查找关联路径</button>
+                    <button class="btn btn-secondary" onclick="resetHighlight()">清除高亮</button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">关系类型图例</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--phone)"></div>手机通讯录</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--qq)"></div>QQ 好友</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--wechat)"></div>微信好友</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--voice)"></div>声纹匹配</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--location)"></div>地点交集</div>
+            </div>
+
+            <div class="sidebar-section" style="flex:1; display:flex; flex-direction:column; padding:0;">
+                <div class="sidebar-title" style="padding:16px 20px 0;">实时分析日志</div>
+                <div class="activity-log" id="activity-log"></div>
+            </div>
+        </aside>
+
+        <div class="graph-area">
+            <svg id="graph-svg"></svg>
+
+            <div class="path-result" id="path-result">
+                <span style="font-size:12px;color:var(--text-dim);white-space:nowrap;">关联路径：</span>
+                <div class="path-step" id="path-steps"></div>
+                <button class="path-close" onclick="resetHighlight()">✕</button>
+            </div>
+
+            <div class="node-panel" id="node-panel">
+                <div class="node-panel-avatar" id="panel-avatar">A</div>
+                <h3 id="panel-name">--</h3>
+                <div class="meta" id="panel-meta">--</div>
+                <div class="relation-stat"><span class="label">关系总数</span><span class="value" id="panel-relations">0</span></div>
+                <div class="relation-stat"><span class="label">手机联系</span><span class="value" id="panel-phone">0</span></div>
+                <div class="relation-stat"><span class="label">QQ 好友</span><span class="value" id="panel-qq">0</span></div>
+                <div class="relation-stat"><span class="label">微信好友</span><span class="value" id="panel-wechat">0</span></div>
+                <div class="relation-stat"><span class="label">声纹匹配</span><span class="value" id="panel-voice">0</span></div>
+                <div class="relation-stat"><span class="label">地点交集</span><span class="value" id="panel-location">0</span></div>
+                <div class="relation-stat"><span class="label">网络中心度</span><span class="value" id="panel-centrality">0.00</span></div>
+            </div>
+
+            <div class="float-controls">
+                <button class="float-btn" onclick="zoomIn()" title="放大">+</button>
+                <button class="float-btn" onclick="zoomOut()" title="缩小">−</button>
+                <button class="float-btn" onclick="resetZoom()" title="重置">⟲</button>
+                <button class="float-btn" onclick="toggleSimulation()" title="暂停/继续">⏸</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== DATA GENERATION ====================
+
+        const FIRST_NAMES = ['伟', '芳', '娜', '敏', '静', '丽', '强', '磊', '军', '洋', '勇', '艳', '杰', '娟', '涛', '明', '超', '秀', '霞', '平', '刚', '桂', '英', '华', '建', '文', '辉', '宇', '博', '浩', '然', '思', '雨', '晨', '曦', '瑶', '琳', '琪', '翔', '瑞', '鑫', '佳', '欣', '怡', '慧', '嘉', '轩', '昊', '泽', '宸'];
+        const LAST_NAMES = ['王', '李', '张', '刘', '陈', '杨', '黄', '赵', '周', '吴', '徐', '孙', '马', '朱', '胡', '郭', '何', '林', '罗', '高', '郑', '梁', '谢', '宋', '唐', '许', '韩', '冯', '邓', '曹', '彭', '曾', '肖', '田', '董', '潘', '袁', '蔡', '蒋', '余', '于', '杜', '叶', '程', '苏', '魏', '吕', '丁', '任', '沈'];
+        const JOBS = ['软件工程师', '产品经理', '设计师', '销售经理', '市场专员', 'HR', '财务', '运营', '教师', '医生', '律师', '记者', '摄影师', '厨师', '建筑师', '数据分析师', '运营总监', '投资经理', '咨询顾问', '研究员'];
+        const COMPANIES = ['字节跳动', '阿里巴巴', '腾讯', '百度', '美团', '京东', '小米', '华为', '滴滴', '快手', '网易', '拼多多', 'B站', '携程', '知乎'];
+        const LOCATIONS = ['公司食堂', '中央公园', '万达广场', '星巴克咖啡', '图书馆', '健身房', '地铁站', '医院', '电影院', '购物中心', '社区花园', '篮球场', '瑜伽馆', '音乐酒吧', '科技园餐厅'];
+        const QQ_PREFIXES = ['133', '147', '198', '238', '285', '305', '338', '356', '368', '385', '398', '405', '416', '425', '438'];
+
+        function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+        function randChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+        function randSubset(arr, n) {
+            const shuffled = [...arr].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, n);
+        }
+
+        function generatePerson(id) {
+            const fname = randChoice(FIRST_NAMES);
+            const lname = randChoice(LAST_NAMES);
+            const name = lname + fname;
+            const job = randChoice(JOBS);
+            const company = randChoice(COMPANIES);
+            return {
+                id: id,
+                name: name,
+                avatar: name[0],
+                job: job,
+                company: company,
+                phone: '1' + randInt(30, 99) + '****' + randInt(1000, 9999),
+                qq: randChoice(QQ_PREFIXES) + randInt(1000000, 9999999),
+                wechat: 'wx_' + String.fromCharCode(97+randInt(0,25)) + randInt(1000,9999),
+                locations: randSubset(LOCATIONS, randInt(2, 5)),
+                voicePrint: 'VP-' + randInt(10000, 99999)
+            };
+        }
+
+        // Generate 60 people
+        const NODES_COUNT = 60;
+        const nodes = Array.from({length: NODES_COUNT}, (_, i) => generatePerson(i));
+
+        // Relationship types: phone, qq, wechat, voice, location
+        const links = [];
+        const linkMap = new Map(); // key: "min-max"
+
+        function addLink(source, target, type, strength, remark) {
+            const key = Math.min(source, target) + '-' + Math.max(source, target);
+            if (linkMap.has(key)) {
+                // Merge: add type, average strength
+                const existing = linkMap.get(key);
+                if (!existing.types.includes(type)) {
+                    existing.types.push(type);
+                    existing.strength = Math.max(existing.strength, strength);
+                }
+                return;
+            }
+            const link = { source, target, types: [type], strength, remark };
+            linkMap.set(key, link);
+            links.push(link);
+        }
+
+        // 1. Phone contacts (通讯录) - based on companies and random
+        nodes.forEach((p, i) => {
+            // Same company connections
+            const sameCompany = nodes.filter((q, j) => j !== i && q.company === p.company);
+            sameCompany.slice(0, randInt(2, 5)).forEach(q => {
+                addLink(i, q.id, 'phone', randInt(6, 10), `${q.job}@${q.company}`);
+            });
+            // Random phone contacts
+            const randomOthers = nodes.filter((q, j) => j !== i && q.company !== p.company);
+            randSubset(randomOthers, randInt(1, 3)).forEach(q => {
+                addLink(i, q.id, 'phone', randInt(3, 7), '通讯录联系人');
+            });
+        });
+
+        // 2. QQ connections
+        nodes.forEach((p, i) => {
+            const others = nodes.filter((q, j) => j !== i);
+            randSubset(others, randInt(3, 8)).forEach(q => {
+                addLink(i, q.id, 'qq', randInt(3, 8), 'QQ好友');
+            });
+        });
+
+        // 3. WeChat connections
+        nodes.forEach((p, i) => {
+            const others = nodes.filter((q, j) => j !== i);
+            randSubset(others, randInt(5, 12)).forEach(q => {
+                addLink(i, q.id, 'wechat', randInt(4, 10), '微信好友');
+            });
+        });
+
+        // 4. Voice print matches (声纹设备) - people at same location with voice match
+        LOCATIONS.forEach(loc => {
+            const atLoc = nodes.filter(p => p.locations.includes(loc));
+            if (atLoc.length >= 2) {
+                for (let i = 0; i < atLoc.length; i++) {
+                    for (let j = i + 1; j < atLoc.length; j++) {
+                        if (Math.random() < 0.15) { // 15% chance of voice match at same location
+                            addLink(atLoc[i].id, atLoc[j].id, 'voice', randInt(5, 9), `${loc}声纹匹配`);
+                        }
+                    }
+                }
+            }
+        });
+
+        // 5. Location intersections (地点聊天记录分析)
+        LOCATIONS.forEach(loc => {
+            const atLoc = nodes.filter(p => p.locations.includes(loc));
+            if (atLoc.length >= 2) {
+                for (let i = 0; i < atLoc.length; i++) {
+                    for (let j = i + 1; j < atLoc.length; j++) {
+                        if (Math.random() < 0.25) { // 25% chance of chat intersection
+                            addLink(atLoc[i].id, atLoc[j].id, 'location', randInt(3, 7), `${loc}聊天记录`);
+                        }
+                    }
+                }
+            }
+        });
+
+        // ==================== ANALYSIS ENGINE ====================
+
+        function buildAdjacency() {
+            const adj = new Map();
+            nodes.forEach(n => adj.set(n.id, []));
+            links.forEach(l => {
+                adj.get(l.source).push({ id: l.target, link: l });
+                adj.get(l.target).push({ id: l.source, link: l });
+            });
+            return adj;
+        }
+
+        const adjacency = buildAdjacency();
+
+        // Calculate centrality (simple degree centrality normalized)
+        nodes.forEach(n => {
+            n.centrality = adjacency.get(n.id).length / (nodes.length - 1);
+        });
+
+        // BFS path finding with max depth 6
+        function findShortestPath(startId, endId) {
+            if (startId === endId) return [startId];
+            const queue = [[startId]];
+            const visited = new Set([startId]);
+
+            while (queue.length > 0) {
+                const path = queue.shift();
+                const current = path[path.length - 1];
+                if (path.length > 7) continue; // max 6 degrees (7 nodes)
+
+                const neighbors = adjacency.get(current);
+                for (const { id: next } of neighbors) {
+                    if (visited.has(next)) continue;
+                    const newPath = [...path, next];
+                    if (next === endId) return newPath;
+                    visited.add(next);
+                    queue.push(newPath);
+                }
+            }
+            return null;
+        }
+
+        // ==================== ACTIVITY LOG ====================
+
+        const activityLog = document.getElementById('activity-log');
+        const logEntries = [];
+
+        function addLog(type, desc) {
+            const now = new Date();
+            const time = now.toTimeString().slice(0, 8);
+            const typeLabels = { phone: '手机', qq: 'QQ', wechat: '微信', voice: '声纹', location: '地点' };
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">${time}</span><span class="log-type ${type}">${typeLabels[type]}</span><span class="log-desc">${desc}</span>`;
+            activityLog.insertBefore(entry, activityLog.firstChild);
+            if (activityLog.children.length > 50) activityLog.lastChild.remove();
+        }
+
+        // Generate initial logs
+        const initialLogs = [];
+        links.slice(0, 30).forEach((l, i) => {
+            const type = l.types[0];
+            const p1 = nodes[l.source].name;
+            const p2 = nodes[l.target].name;
+            const descs = [
+                `发现 ${p1} 与 ${p2} 的${type === 'phone' ? '通讯录关联' : type === 'qq' ? 'QQ好友关系' : type === 'wechat' ? '微信好友关系' : type === 'voice' ? '声纹相似度85%' : '地点聊天记录'}`,
+                `${p1} 和 ${p2} 通过${type === 'location' ? '食堂聊天' : type === 'voice' ? '公园声纹设备' : '社交数据'}建立关联`,
+                `分析确认：${p1} → ${p2} (${l.remark})`
+            ];
+            initialLogs.push({ type, desc: descs[i % 3] });
+        });
+        initialLogs.forEach(l => addLog(l.type, l.desc));
+
+        // ==================== D3 VISUALIZATION ====================
+
+        const svg = d3.select('#graph-svg');
+        const width = window.innerWidth - 320;
+        const height = window.innerHeight - 56;
+        svg.attr('viewBox', [0, 0, width, height]);
+
+        const g = svg.append('g');
+
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (e) => g.attr('transform', e.transform));
+        svg.call(zoom);
+
+        const colorMap = {
+            phone: '#10b981',
+            qq: '#f59e0b',
+            wechat: '#22c55e',
+            voice: '#8b5cf6',
+            location: '#ef4444'
+        };
+
+        const typePriority = { phone: 0, qq: 1, wechat: 2, voice: 3, location: 4 };
+
+        function getLinkColor(link) {
+            return link.types.sort((a, b) => typePriority[a] - typePriority[b])
+                .map(t => colorMap[t])[0];
+        }
+
+        // Prepare data for D3
+        const graphNodes = nodes.map(n => ({ ...n }));
+        const graphLinks = links.map(l => ({ ...l }));
+
+        const simulation = d3.forceSimulation(graphNodes)
+            .force('link', d3.forceLink(graphLinks).id(d => d.id).distance(d => 120 - d.strength * 5))
+            .force('charge', d3.forceManyBody().strength(-300))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(d => Math.sqrt(adjacency.get(d.id).length) * 5 + 15));
+
+        let linkElements = g.append('g')
+            .selectAll('line')
+            .data(graphLinks)
+            .join('line')
+            .attr('class', 'link')
+            .attr('stroke', d => getLinkColor(d))
+            .attr('stroke-width', d => Math.max(1, d.strength / 2));
+
+        const nodeGroup = g.append('g')
+            .selectAll('g')
+            .data(graphNodes)
+            .join('g')
+            .attr('class', 'node')
+            .call(d3.drag()
+                .on('start', (e, d) => {
+                    if (!e.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+                .on('end', (e, d) => {
+                    if (!e.active) simulation.alphaTarget(0);
+                    d.fx = null; d.fy = null;
+                }));
+
+        nodeGroup.append('circle')
+            .attr('r', d => Math.sqrt(adjacency.get(d.id).length) * 4 + 8)
+            .attr('fill', d => {
+                const types = new Set();
+                adjacency.get(d.id).forEach(({ link }) => link.types.forEach(t => types.add(t)));
+                if (types.has('phone')) return '#10b981';
+                if (types.has('wechat')) return '#22c55e';
+                if (types.has('qq')) return '#f59e0b';
+                if (types.has('voice')) return '#8b5cf6';
+                return '#ef4444';
+            })
+            .attr('stroke', 'rgba(255,255,255,0.2)')
+            .attr('stroke-width', 1.5);
+
+        nodeGroup.append('text')
+            .attr('dy', d => Math.sqrt(adjacency.get(d.id).length) * 4 + 22)
+            .attr('text-anchor', 'middle')
+            .text(d => d.name);
+
+        nodeGroup.append('text')
+            .attr('dy', 4)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#fff')
+            .attr('font-size', '10px')
+            .attr('font-weight', '600')
+            .text(d => d.avatar);
+
+        simulation.on('tick', () => {
+            linkElements
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+
+            nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        // Node click -> show panel
+        nodeGroup.on('click', (e, d) => {
+            e.stopPropagation();
+            showNodePanel(d);
+        });
+
+        svg.on('click', () => {
+            document.getElementById('node-panel').classList.remove('active');
+        });
+
+        function showNodePanel(d) {
+            const panel = document.getElementById('node-panel');
+            const rels = adjacency.get(d.id);
+            const counts = { phone: 0, qq: 0, wechat: 0, voice: 0, location: 0 };
+            rels.forEach(({ link }) => {
+                link.types.forEach(t => { if (counts[t] !== undefined) counts[t]++; });
+            });
+
+            document.getElementById('panel-avatar').textContent = d.avatar;
+            document.getElementById('panel-name').textContent = d.name;
+            document.getElementById('panel-meta').textContent = `${d.job} @ ${d.company}`;
+            document.getElementById('panel-relations').textContent = rels.length;
+            document.getElementById('panel-phone').textContent = counts.phone;
+            document.getElementById('panel-qq').textContent = counts.qq;
+            document.getElementById('panel-wechat').textContent = counts.wechat;
+            document.getElementById('panel-voice').textContent = counts.voice;
+            document.getElementById('panel-location').textContent = counts.location;
+            document.getElementById('panel-centrality').textContent = d.centrality.toFixed(3);
+            panel.classList.add('active');
+        }
+
+        // ==================== PATH FINDING UI ====================
+
+        const selectA = document.getElementById('person-a');
+        const selectB = document.getElementById('person-b');
+
+        nodes.forEach(n => {
+            const optA = document.createElement('option');
+            optA.value = n.id; optA.textContent = n.name;
+            selectA.appendChild(optA);
+
+            const optB = document.createElement('option');
+            optB.value = n.id; optB.textContent = n.name;
+            selectB.appendChild(optB);
+        });
+
+        function findPath() {
+            const a = parseInt(selectA.value);
+            const b = parseInt(selectB.value);
+            if (isNaN(a) || isNaN(b)) {
+                alert('请选择两个人物');
+                return;
+            }
+
+            const path = findShortestPath(a, b);
+            const resultEl = document.getElementById('path-result');
+            const stepsEl = document.getElementById('path-steps');
+
+            if (!path) {
+                stepsEl.innerHTML = '<span style="color:#ef4444">未找到6度以内的关联路径</span>';
+                resultEl.classList.add('active');
+                resetHighlight();
+                return;
+            }
+
+            // Build path HTML
+            let html = '';
+            path.forEach((nodeId, i) => {
+                const node = nodes[nodeId];
+                html += `<span class="path-node">${node.name}</span>`;
+                if (i < path.length - 1) html += '<span class="path-arrow">→</span>';
+            });
+            html += `<span style="margin-left:8px;font-size:12px;color:var(--text-dim)">(${path.length - 1}度)</span>`;
+            stepsEl.innerHTML = html;
+            resultEl.classList.add('active');
+
+            // Highlight path
+            resetHighlight();
+            const pathSet = new Set(path);
+            const linkSet = new Set();
+            for (let i = 0; i < path.length - 1; i++) {
+                linkSet.add(Math.min(path[i], path[i+1]) + '-' + Math.max(path[i], path[i+1]));
+            }
+
+            nodeGroup.classed('dimmed', d => !pathSet.has(d.id));
+            nodeGroup.classed('highlighted', d => pathSet.has(d.id));
+            linkElements.classed('dimmed', d => !linkSet.has(Math.min(d.source.id, d.target.id) + '-' + Math.max(d.source.id, d.target.id)));
+            linkElements.classed('highlighted', d => linkSet.has(Math.min(d.source.id, d.target.id) + '-' + Math.max(d.source.id, d.target.id)));
+
+            // Log
+            addLog('location', `路径分析: ${nodes[a].name} → ${nodes[b].name}, 经过 ${path.length - 1} 个中间人`);
+        }
+
+        function resetHighlight() {
+            nodeGroup.classed('dimmed', false).classed('highlighted', false);
+            linkElements.classed('dimmed', false).classed('highlighted', false);
+            document.getElementById('path-result').classList.remove('active');
+        }
+
+        // ==================== CONTROLS ====================
+
+        function zoomIn() {
+            svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+        }
+
+        function zoomOut() {
+            svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+        }
+
+        function resetZoom() {
+            svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+        }
+
+        let simRunning = true;
+        function toggleSimulation() {
+            if (simRunning) {
+                simulation.stop();
+            } else {
+                simulation.restart();
+            }
+            simRunning = !simRunning;
+        }
+
+        // ==================== STATS ====================
+
+        document.getElementById('stat-nodes').textContent = nodes.length;
+        document.getElementById('stat-links').textContent = links.length;
+        const density = (2 * links.length / (nodes.length * (nodes.length - 1)) * 100).toFixed(1);
+        document.getElementById('stat-density').textContent = density + '%';
+
+        // ==================== REAL-TIME SIMULATION ====================
+
+        // Periodically "discover" new relationships
+        setInterval(() => {
+            const type = randChoice(['phone', 'qq', 'wechat', 'voice', 'location']);
+            const p1 = randInt(0, nodes.length - 1);
+            let p2 = randInt(0, nodes.length - 1);
+            while (p2 === p1) p2 = randInt(0, nodes.length - 1);
+
+            const key = Math.min(p1, p2) + '-' + Math.max(p1, p2);
+            if (linkMap.has(key)) return; // Already linked
+
+            const strength = randInt(3, 9);
+            const remarks = {
+                phone: ['新录入通讯录', '通话记录关联', '号码归属地匹配'],
+                qq: ['QQ群共同成员', '新加好友', 'QQ空间互动'],
+                wechat: ['朋友圈点赞', '微信群共同', '新添加好友'],
+                voice: ['声纹设备匹配', '同地点声纹', '语音特征相似'],
+                location: ['地点共现', '蓝牙设备交互', 'WiFi连接记录']
+            };
+
+            addLink(p1, p2, type, strength, randChoice(remarks[type]));
+            addLog(type, `${nodes[p1].name} 与 ${nodes[p2].name} 发现新关联: ${randChoice(remarks[type])}`);
+
+            // Update stats
+            document.getElementById('stat-links').textContent = links.length;
+            const newDensity = (2 * links.length / (nodes.length * (nodes.length - 1)) * 100).toFixed(1);
+            document.getElementById('stat-density').textContent = newDensity + '%';
+
+            // Refresh graph with new link
+            const newLink = { source: p1, target: p2, types: [type], strength, remark: randChoice(remarks[type]) };
+            graphLinks.push(newLink);
+
+            linkElements = g.selectAll('.link').data(graphLinks)
+                .join(
+                    enter => enter.append('line')
+                        .attr('class', 'link')
+                        .attr('stroke', d => getLinkColor(d))
+                        .attr('stroke-width', d => Math.max(1, d.strength / 2)),
+                    update => update,
+                    exit => exit.remove()
+                );
+            simulation.force('link').links(graphLinks);
+            simulation.alpha(0.3).restart();
+        }, 3000);
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            const newWidth = window.innerWidth - 320;
+            const newHeight = window.innerHeight - 56;
+            svg.attr('viewBox', [0, 0, newWidth, newHeight]);
+            simulation.force('center', d3.forceCenter(newWidth / 2, newHeight / 2));
+            simulation.alpha(0.3).restart();
+        });
+
+        // Initial log
+        addLog('wechat', '系统初始化完成，已加载 ' + nodes.length + ' 个人物数据');
+        addLog('voice', '声纹分析引擎就绪，覆盖 ' + LOCATIONS.length + ' 个监测点');
+        addLog('location', '地点聊天记录分析模块启动');
+    </script>
+</body>
+</html>

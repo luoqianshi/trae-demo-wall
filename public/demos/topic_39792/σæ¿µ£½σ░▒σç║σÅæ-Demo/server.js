@@ -10,7 +10,7 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'sk-0ad0dcbe9ef84c6db7b9746007abf741';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'YOUR_API_KEY_HERE';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
 const systemPrompt = `你是一个专业的旅行规划助手"周末就出发"。

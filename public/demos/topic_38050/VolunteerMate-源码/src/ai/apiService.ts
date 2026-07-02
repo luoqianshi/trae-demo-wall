@@ -118,7 +118,7 @@ export interface AIResponse {
 }
 
 // 预配置的 API Key（硅基流动 nex-agi/Nex-N2-Pro 限免模型，已验证可用）
-const PRESET_API_KEY = 'sk-xxawjyrlfojopuzxrcyugjghcqgrgxpymrknunopuswemxbn';
+const PRESET_API_KEY = 'YOUR_API_KEY_HERE';
 
 // 获取当前配置
 export const getCurrentConfig = (): { provider: APIProviderConfig; apiKey: string; model: string } => {
