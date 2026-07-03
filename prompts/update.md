@@ -467,6 +467,47 @@ git push origin main
 ### Q13: demo 打开后 404 — 项目无有效 HTML 文件
 **处理**: 部分作品只包含 `.bat` 启动脚本、`package.json` 等非 HTML 文件，没有可在线预览的 demo。修复方法：将这类项目标记为 `type=none`，前端会自动隐藏"在线体验"按钮。Step 3.5.2 中的修复脚本会自动处理。
 
+### Q14: 爬虫在处理某条帖子时无限挂起（不继续输出）
+**处理**: `downloader.py` 使用 `stream=True` 下载 ZIP 文件时，`timeout=60` 仅控制连接建立和单次读取间隔超时。如果服务器极慢地持续发送数据（如每秒几个字节），下载会无限挂起，导致整个爬虫停滞。
+
+**修复方法**（已在 `downloader.py` 中实现）：
+```python
+import time
+
+def download_file(url, save_path, timeout=60, max_total_time=120):
+    resp = requests.get(url, headers=HEADERS, timeout=timeout, stream=True)
+    resp.raise_for_status()
+    deadline = time.monotonic() + max_total_time
+    with open(save_path, 'wb') as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if time.monotonic() > deadline:
+                raise TimeoutError(f'Download exceeded {max_total_time}s: {url}')
+            f.write(chunk)
+    return save_path
+```
+- `max_total_time` 强制限制单次下载总时长（默认 120 秒），超过即抛出 `TimeoutError`
+- 爬虫捕获该异常后记录 WARN 并跳过该作品，继续处理下一条
+- 若爬虫已挂起，使用 `kill -9 <PID>` 终止后重新运行，`incremental_scraper.py` 会自动跳过已处理项目
+
+### Q15: 批量 demo 文件中包含硬编码 API Key，Push Protection 拦截推送
+**处理**: 用户提交的 demo 项目中经常在 HTML/JS 文件里直接写死 DeepSeek/Kimi/OpenRouter 等 API Key。GitHub Push Protection 会逐条拦截，导致推送失败。
+
+**修复方法**：
+1. 不要只扫描错误信息中指定的单个文件，应使用 `find` 批量扫描所有 demo 文件：
+```bash
+cd /workspace/trae-demo-wall/public/demos
+find . -type f \( -name "*.html" -o -name "*.js" -o -name "*.json" -o -name "*.md" -o -name "*.py" -o -name "*.ts" \) \
+  -exec grep -l 'sk-[a-zA-Z0-9]\{30,\}' {} + 2>/dev/null | while read f; do
+    sed -i -E "s/sk-[a-zA-Z0-9]{30,}/YOUR_API_KEY_HERE/g" "$f"
+    echo "Fixed: $f"
+  done
+```
+2. 注意：Windows ZIP 解压后可能出现反斜杠文件名（如 `js\inline-all.js`），`find` 可能无法直接匹配，需额外处理：
+```bash
+find . -name '*\\*' -exec sed -i -E "s/sk-[a-zA-Z0-9]{30,}/YOUR_API_KEY_HERE/g" {} +
+```
+3. 替换后重新提交：`git add -A && git commit --amend --no-edit && git push origin main`
+
 ---
 
 ## 禁止事项
