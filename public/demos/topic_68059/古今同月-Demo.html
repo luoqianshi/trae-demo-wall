@@ -1,0 +1,3813 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  古今同月 - H5 原型页面
+  ============================================================
+  项目简介：
+    "古今同月" 是一款以"一图一诗一古人"为核心的 H5 应用。
+    用户拍照上传后，AI 从千年诗海中匹配最契合的诗词，
+    并生成可分享的精美卡片（6 种风格）。
+
+  文件作用：
+    本文件是项目的主前端入口，单页应用（SPA）形式实现，
+    包含 3 个 Tab 页（首页 / 结果 / 寻诗录）+ 4 个子页面
+    （识别中 / 诗词详情 / 作者介绍 / 分享卡片）。
+
+  技术要点：
+    1. 纯原生 HTML + CSS + JavaScript，无任何框架依赖
+    2. 字体加载机制：背景元素立即显示，文字在字体加载完成后淡入
+    3. 页面状态栈管理：Tab 层与子页面层分离
+    4. 底部导航栏共享组件
+    5. 统一的 closeSubPage() 返回函数
+    6. 6 种分享卡片样式（A拍立得 / B Apple引用卡 / C宽银幕 /
+       D博物馆 / E明信片 / F杂志）
+    7. 卡片尺寸严格按设计提案：A(4:5), B(3:4), C(9:5),
+       D(3:4), E(3:4), F(3:4.5)
+    8. 诗词详情页有上一首 / 下一首循环导航
+
+  结构概览：
+    <head>   : 元数据 + 内联 CSS 样式（约 1500 行）
+    <body>   : HTML 结构（约 430 行）
+    <script> : JavaScript 路由与业务逻辑（约 1040 行）
+  ============================================================
+-->
+<html lang="zh-CN">
+<!-- ========= 头部元数据区：定义文档编码、视口、缓存策略、标题 ========= -->
+<head>
+<meta charset="UTF-8">  <!-- 统一使用 UTF-8 编码，确保中文字符正确显示 -->
+<!-- 视口设置：宽度=设备宽度，初始缩放=1.0，禁止用户缩放（移动端 App 体验） -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- 缓存控制：禁止缓存，确保每次访问拿到最新版本（开发期 H5 原型常用） -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">  <!-- HTTP/1.0 兼容性缓存禁用 -->
+<meta http-equiv="Expires" content="0">  <!-- 过期时间设为 0，立即失效 -->
+<title>古今同月 - H5原型</title>  <!-- 浏览器标签页标题 -->
+
+<!-- 不使用 Google Fonts，全部用系统自带中文字体，避免加载闪烁 -->
+<!-- 说明：中文字体文件体积大，远程加载会出现 FOIT/FOUT 闪烁，
+     改用 iOS/Android 系统自带的 STSong/STKaiti/STXingkai 等字体可秒开 -->
+
+<style>
+/* ============================================================ */
+/* ========= CSS 文件头：H5 原型页面全部样式（内联） ========= */
+/* ============================================================ */
+/* 作用页面：仅本 H5 原型页面（index 等价物）                  */
+/* 样式分区：变量定义 / 基础重置 / 布局 / 组件 / 动画 / 响应式 */
+/* 设计风格：水墨古风 + 宣纸质感 + 朱砂红 + 金色 + 青色点缀    */
+
+/* ========== CSS变量：全局设计 Token，统一管理色彩与尺寸 ========== */
+/* 作用范围：:root 即 <html> 元素，所有子元素可通过 var() 引用 */
+/* 设计哲学：通过 CSS 变量实现"主题化"，方便后续做暗色模式或主题切换 */
+:root {
+  --paper: #F5F0E8;          /* 宣纸主色：温润米黄，作为页面底色（典型取值：#F5F0E8 ~ #FCF8F0） */
+  --paper-light: #FCF8F0;    /* 宣纸浅色：更亮的米白，用于卡片背景，与主色形成层次 */
+  --paper-dark: #E8E0D0;     /* 宣纸深色：略深的米色，用于次级容器或分隔区 */
+  --ink: #2C1810;            /* 墨色主色：深棕黑，作为正文字色（典型取值：#2C1810 ~ #1a1a1a） */
+  --ink-light: #7B6B5E;      /* 墨色浅：灰棕，用于次要文字（作者、描述等） */
+  --ink-lighter: #B8A99A;    /* 墨色更浅：浅灰棕，用于占位、边框、辅助提示 */
+  --vermillion: #C23B22;     /* 朱砂红：中国传统色，主按钮、强调色、激活态（典型取值：#C23B22） */
+  --vermillion-dark: #8B1A1A;/* 朱砂深红：按钮按下态、深色强调 */
+  --gold: #C4A35A;           /* 金色：装饰色，用于中等匹配度徽章、金色标签 */
+  --gold-light: #E8D49C;     /* 浅金色：深色背景上的金色文字（如详情页标题） */
+  --cyan: #2D5A6D;           /* 青色：冷色调点缀，用于低匹配度、赏析区块、引用块 */
+  --seal: #C23B22;           /* 印章红：与朱砂红同色，专用于印章组件（语义分离便于后续调整） */
+  --shadow: rgba(44,24,16,0.08); /* 阴影色：半透明墨色，用于卡片投影，营造宣纸浮起感 */
+  --radius: 12px;            /* 圆角半径：统一卡片、按钮的圆角尺寸（典型取值：8px ~ 16px） */
+  --page-max-width: 420px;   /* 页面最大宽度：移动端 H5 标准宽度，居中显示在桌面浏览器 */
+  --tab-height: 60px;        /* 底部导航栏高度：Tab 页内容需预留此高度的底部内边距，避免被遮挡 */
+}
+
+/* ========== 基础重置：消除浏览器默认样式差异，保证跨平台一致性 ========== */
+/* 作用范围：所有元素及其伪元素/伪类 */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }  /* 统一盒模型为 border-box，清除外边距和内边距 */
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }  /* 根字体 16px（rem 基准）；禁止 iOS 横屏自动放大文字 */
+/* body：页面最外层容器，居中布局 app-container，桌面端两侧露出深色背景 */
+body {
+  font-family: 'STSong', 'SimSun', 'STSong', serif;  /* 优先使用 macOS 的 STSong（宋体），回退到 Windows 的 SimSun */
+  background: #1a1a1a;  /* 桌面端两侧深色背景，衬托中间的"宣纸"app-container */
+  color: var(--ink);  /* 默认文字色为墨色 */
+  min-height: 100vh;  /* 最小高度为视口高度，确保短内容时背景也铺满 */
+  display: flex;  /* 启用 flex 布局，用于水平居中 app-container */
+  justify-content: center;  /* 水平居中：app-container 在桌面浏览器中居中显示 */
+  overflow-x: hidden;  /* 禁止水平滚动，防止水墨装饰元素溢出导致横向滚动条 */
+}
+
+/* ========== App容器：模拟移动端"手机壳"视图 ========== */
+/* 作用范围：包裹所有 Tab 页和子页面的最外层容器 */
+/* 设计目的：在桌面浏览器中也能呈现移动端 H5 的窄屏效果 */
+.app-container {
+  width: 100%;  /* 宽度 100%，移动端铺满屏幕 */
+  max-width: var(--page-max-width);  /* 最大宽度 420px，桌面端居中显示窄屏 */
+  min-height: 100vh;  /* 最小高度铺满视口 */
+  background: var(--paper);  /* 宣纸主色作为底色 */
+  position: relative;  /* 定位上下文：子页面、水墨背景均相对此定位 */
+  overflow: hidden;  /* 溢出隐藏：水墨 splash 装饰不超出容器边界 */
+  box-shadow: 0 0 40px rgba(0,0,0,0.3);  /* 桌面端投影，营造"手机浮起"的层次感 */
+}
+
+/* ========== Tab 容器（首页/结果/寻诗录）========== */
+/* 作用范围：3 个主 Tab 页的通用容器，通过 .active 切换显示 */
+/* 设计目的：Tab 切换时带淡入动画，底部预留导航栏空间 */
+.tab-page {
+  display: none;  /* 默认隐藏，由 .active 控制显示 */
+  animation: pageIn 0.4s ease-out;  /* Tab 切换时的淡入上移动画（0.4s） */
+  padding-bottom: var(--tab-height);  /* 底部预留 60px，避免内容被固定导航栏遮挡 */
+}
+.tab-page.active { display: block; }  /* 激活态：显示该 Tab 页 */
+
+/* ========== 子页面（弹层，覆盖Tab）========== */
+/* 作用范围：识别中 / 诗词详情 / 作者介绍 / 分享卡片 等子页面 */
+/* 设计目的：以全屏弹层形式覆盖 Tab 页，z-index 高于 Tab 和底部导航 */
+.sub-page {
+  display: none;  /* 默认隐藏，由 .active 控制显示 */
+  position: fixed;  /* 固定定位：相对视口，不随页面滚动 */
+  top: 0; left: 50%;  /* 顶部对齐，水平 50% 起始（配合 translateX 居中） */
+  transform: translateX(-50%);  /* 水平居中：向左偏移自身宽度的一半 */
+  width: 100%;  /* 宽度 100%，移动端铺满 */
+  max-width: var(--page-max-width);  /* 最大宽度与 app-container 一致 */
+  height: 100vh;  /* 高度铺满视口 */
+  background: var(--paper);  /* 宣纸底色，与 Tab 页保持一致 */
+  z-index: 200;  /* 层级 200，高于 Tab 页（默认）和底部导航（100） */
+  overflow-y: auto;  /* 内容超出时纵向滚动 */
+  animation: subPageIn 0.3s ease-out;  /* 子页面入场动画：淡入 + 上移 20px */
+}
+.sub-page.active { display: block; }  /* 激活态：显示该子页面 */
+
+/* ========== 关键帧动画定义 ========== */
+/* pageIn：Tab 页入场动画，从下方 8px 淡入到原位 */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(8px); }  /* 起始：透明 + 下移 8px */
+  to { opacity: 1; transform: translateY(0); }  /* 终止：不透明 + 归位 */
+}
+/* subPageIn：子页面入场动画，需保留 translateX(-50%) 居中变换 */
+@keyframes subPageIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }  /* 起始：透明 + 下方 20px */
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }  /* 终止：不透明 + 归位 */
+}
+
+/* ========== 顶部导航栏（子页面用）========== */
+/* 作用范围：所有子页面顶部的"返回按钮 + 标题"栏 */
+/* 设计目的：sticky 粘性定位，滚动时固定在顶部，便于随时返回 */
+.top-bar {
+  display: flex;  /* flex 布局，左右分布返回按钮和右侧操作 */
+  align-items: center;  /* 垂直居中对齐 */
+  justify-content: space-between;  /* 两端对齐：左侧返回+标题，右侧操作按钮 */
+  padding: 16px 20px;  /* 内边距：上下 16px，左右 20px */
+  background: var(--paper);  /* 宣纸底色，与页面一致 */
+  position: sticky;  /* 粘性定位：滚动到顶部时固定 */
+  top: 0;  /* 固定在视口顶部 */
+  z-index: 10;  /* 层级 10，高于子页面内容但低于弹窗 */
+  border-bottom: 1px solid var(--ink-lighter);  /* 底部细分隔线 */
+}
+.top-bar-left { display: flex; align-items: center; gap: 12px; }  /* 左侧容器：返回按钮 + 标题，间距 12px */
+/* 返回按钮：纯文字风格，无背景无边框 */
+.back-btn {
+  background: none;  /* 无背景 */
+  border: none;  /* 无边框 */
+  font-size: 22px;  /* 箭头图标字号 22px */
+  color: var(--ink);  /* 墨色 */
+  cursor: pointer;  /* 手型光标 */
+  padding: 4px 8px;  /* 点击热区扩展 */
+  display: flex;  /* flex 布局，便于图标对齐 */
+  align-items: center;  /* 垂直居中 */
+  font-family: 'STSong', 'SimSun', serif;  /* 与正文一致的宋体 */
+}
+.page-title {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体，标题更具古风 */
+  font-size: 18px;  /* 标题字号 18px */
+  color: var(--ink);  /* 墨色 */
+}
+
+/* ========== 底部导航（公共组件）========== */
+/* 作用范围：app-container 底部固定的 3 个 Tab 切换按钮 */
+/* 设计目的：固定在底部，所有 Tab 页共享，点击切换主页面 */
+.bottom-nav {
+  position: fixed;  /* 固定定位：相对视口，不随页面滚动 */
+  bottom: 0;  /* 固定在底部 */
+  left: 50%;  /* 水平 50% 起始 */
+  transform: translateX(-50%);  /* 水平居中 */
+  width: 100%;  /* 宽度 100% */
+  max-width: var(--page-max-width);  /* 最大宽度与 app-container 一致 */
+  background: var(--paper-light);  /* 浅宣纸底色，与主内容区区分 */
+  border-top: 1px solid var(--ink-lighter);  /* 顶部分隔线 */
+  display: flex;  /* flex 布局，水平排列 3 个导航项 */
+  justify-content: space-around;  /* 均匀分布，间距相等 */
+  padding: 8px 0;  /* 上下内边距 8px */
+  padding-bottom: max(8px, env(safe-area-inset-bottom));  /* 底部适配 iPhone 刘海屏安全区 */
+  z-index: 100;  /* 层级 100，高于 Tab 内容但低于子页面（200） */
+}
+/* 单个导航项：图标 + 文字垂直排列 */
+.nav-item {
+  display: flex;  /* flex 布局 */
+  flex-direction: column;  /* 纵向排列：图标在上，文字在下 */
+  align-items: center;  /* 水平居中 */
+  gap: 2px;  /* 图标与文字间距 2px */
+  background: none;  /* 无背景 */
+  border: none;  /* 无边框 */
+  color: var(--ink-light);  /* 默认墨色浅，未激活态 */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 11px;  /* 文字字号 11px */
+  cursor: pointer;  /* 手型光标 */
+  padding: 4px 12px;  /* 内边距，扩展点击热区 */
+  transition: color 0.3s;  /* 颜色过渡 0.3s，激活态切换更柔和 */
+}
+.nav-item.active { color: var(--vermillion); }  /* 激活态：朱砂红高亮 */
+.nav-icon { font-size: 22px; line-height: 1.2; }  /* 导航图标字号 22px，行高 1.2 紧凑 */
+
+/* ========== 水墨背景装饰：首页底层的动态水墨晕染效果 ========== */
+/* 作用范围：首页 tab-home 内的水墨背景容器，纯装饰性 */
+.ink-bg {
+  position: absolute;  /* 绝对定位，铺满父容器 */
+  inset: 0;  /* 等同于 top/right/bottom/left: 0，铺满父容器 */
+  pointer-events: none;  /* 禁止鼠标事件，避免遮挡按钮点击 */
+  z-index: 0;  /* 层级 0，位于内容之下 */
+  overflow: hidden;  /* 溢出隐藏，水墨 splash 不超出边界 */
+}
+/* 单个水墨晕染色块：模糊的圆形渐变，模拟宣纸上的水墨晕开 */
+.ink-splash {
+  position: absolute;  /* 绝对定位，由 :nth-child 分别定位 */
+  border-radius: 50%;  /* 圆形 */
+  opacity: 0.04;  /* 透明度极低（4%），作为背景氛围 */
+  filter: blur(60px);  /* 60px 高斯模糊，营造晕染感 */
+}
+/* 三个水墨色块：分别用墨色、朱砂红、青色，错位分布 + 错时动画 */
+.ink-splash:nth-child(1) { width: 300px; height: 300px; background: var(--ink); top: -80px; right: -60px; animation: floatSplash 8s ease-in-out infinite; }  /* 墨色块，右上角，8s 循环 */
+.ink-splash:nth-child(2) { width: 200px; height: 200px; background: var(--vermillion); bottom: 60px; left: -40px; animation: floatSplash 10s ease-in-out infinite 2s; }  /* 朱砂红块，左下角，10s 循环，延迟 2s */
+.ink-splash:nth-child(3) { width: 250px; height: 250px; background: var(--cyan); bottom: -100px; right: 20px; animation: floatSplash 12s ease-in-out infinite 4s; }  /* 青色块，右下角，12s 循环，延迟 4s */
+/* floatSplash：水墨色块缓慢漂浮 + 微缩放，营造"水墨流动"的动态感 */
+@keyframes floatSplash {
+  0%, 100% { transform: translate(0, 0) scale(1); }  /* 起止：原位 + 原大小 */
+  50% { transform: translate(20px, -20px) scale(1.1); }  /* 中间：右上偏移 20px + 放大 10% */
+}
+
+/* ========== 通用组件：按钮、卡片、徽章、印章等可复用组件 ========== */
+/* 按钮系统：主按钮（朱砂红实心）、次按钮（朱砂红描边）、图标按钮、文字按钮 */
+
+/* 主按钮：朱砂红实心，用于核心 CTA（拍照识别、生成卡片等） */
+.btn-primary {
+  display: flex; align-items: center; justify-content: center; gap: 8px;  /* flex 居中，图标文字间距 8px */
+  width: 100%; padding: 16px 24px;  /* 宽度 100%，内边距 16px 上下 */
+  background: var(--vermillion); color: white;  /* 朱砂红底 + 白字 */
+  border: none; border-radius: var(--radius);  /* 无边框，圆角 12px */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 17px; font-weight: 600;  /* 字号 17px，加粗 */
+  cursor: pointer;  /* 手型光标 */
+  transition: all 0.3s;  /* 所有属性 0.3s 过渡 */
+  box-shadow: 0 4px 16px rgba(194,59,34,0.25);  /* 朱砂红投影，营造按钮浮起感 */
+}
+.btn-primary:active { transform: scale(0.97); background: var(--vermillion-dark); }  /* 按下态：缩小 3% + 深朱砂红 */
+
+/* 次按钮：朱砂红描边，用于次要操作（作者介绍、分享等） */
+.btn-secondary {
+  display: flex; align-items: center; justify-content: center; gap: 8px;  /* flex 居中 */
+  width: 100%; padding: 14px 24px;  /* 宽度 100%，内边距 14px 上下（略小于主按钮） */
+  background: transparent; color: var(--vermillion);  /* 透明底 + 朱砂红字 */
+  border: 1.5px solid var(--vermillion); border-radius: var(--radius);  /* 1.5px 朱砂红描边 */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 16px; font-weight: 600;  /* 字号 16px，加粗 */
+  cursor: pointer;  /* 手型光标 */
+  transition: all 0.3s;  /* 所有属性 0.3s 过渡 */
+}
+.btn-secondary:active { background: rgba(194,59,34,0.06); transform: scale(0.97); }  /* 按下态：淡红背景 + 缩小 3% */
+
+/* 按钮行：两个按钮并排布局（如"作者介绍"+"生成分享卡"） */
+.btn-row { display: flex; gap: 10px; }  /* flex 横向排列，间距 10px */
+.btn-row .btn-primary,
+.btn-row .btn-secondary { flex: 1; }  /* 行内按钮均分宽度 */
+
+/* 图标按钮：纯图标，无背景无边框（如收藏、分享图标） */
+.btn-icon {
+  background: none; border: none;  /* 无背景无边框 */
+  font-size: 20px; cursor: pointer;  /* 图标 20px，手型光标 */
+  padding: 8px; color: var(--ink-light);  /* 内边距 8px，墨色浅 */
+  transition: color 0.3s;  /* 颜色过渡 0.3s */
+}
+.btn-icon:active { color: var(--vermillion); }  /* 按下态：朱砂红 */
+
+/* 文字按钮：纯文字链接样式（如"再来一张"） */
+.btn-text {
+  background: none; border: none;  /* 无背景无边框 */
+  color: var(--ink-light); cursor: pointer;  /* 墨色浅，手型光标 */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 14px;  /* 字号 14px */
+  padding: 8px 16px;  /* 内边距，扩展点击热区 */
+}
+
+/* 卡片容器：宣纸浅色底 + 圆角 + 投影，用于内容承载 */
+.card {
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: var(--radius);  /* 圆角 12px */
+  padding: 20px;  /* 内边距 20px */
+  margin: 12px 16px;  /* 外边距：上下 12px，左右 16px */
+  box-shadow: 0 2px 12px var(--shadow);  /* 轻投影，营造浮起感 */
+  border: 1px solid rgba(184,169,154,0.2);  /* 极淡边框，强化边界 */
+}
+
+/* 匹配度徽章：用于显示"极高匹配/高匹配/中等匹配" */
+.match-badge {
+  display: inline-flex; align-items: center; gap: 4px;  /* 行内 flex，图标文字间距 4px */
+  padding: 4px 12px; border-radius: 20px;  /* 内边距，圆角 20px（药丸形） */
+  font-size: 13px; font-weight: 600;  /* 字号 13px，加粗 */
+}
+.match-high { background: rgba(194,59,34,0.12); color: var(--vermillion); }  /* 高匹配：朱砂红浅底 + 朱砂红字 */
+.match-mid { background: rgba(196,163,90,0.15); color: var(--gold); }  /* 中匹配：金色浅底 + 金色字 */
+.match-low { background: rgba(45,90,109,0.12); color: var(--cyan); }  /* 低匹配：青色浅底 + 青色字 */
+
+/* 匹配度环形指示器：圆形数字显示匹配百分比 */
+.score-ring {
+  width: 48px; height: 48px;  /* 尺寸 48×48px */
+  border-radius: 50%;  /* 圆形 */
+  display: flex; align-items: center; justify-content: center;  /* 数字居中 */
+  font-weight: 700; font-size: 16px;  /* 加粗，字号 16px */
+  background: rgba(194,59,34,0.1);  /* 朱砂红浅底 */
+  color: var(--vermillion);  /* 朱砂红字 */
+  border: 2px solid var(--vermillion);  /* 2px 朱砂红描边 */
+}
+.score-ring.mid { background: rgba(196,163,90,0.1); color: var(--gold); border-color: var(--gold); }  /* 中匹配：金色 */
+.score-ring.low { background: rgba(45,90,109,0.1); color: var(--cyan); border-color: var(--cyan); }  /* 低匹配：青色 */
+.score-ring-sm { width: 36px; height: 36px; font-size: 12px; }  /* 小号环形：36×36px，字号 12px（用于历史记录列表） */
+
+/* 寻诗录"查看"按钮：历史记录中已匹配诗作的快捷查看入口 */
+.history-item .btn-view {
+  background: none; border: 1px solid var(--vermillion);  /* 无底，朱砂红描边 */
+  color: var(--vermillion); border-radius: 4px;  /* 朱砂红字，圆角 4px */
+  padding: 2px 10px; font-size: 11px;  /* 紧凑内边距，小字号 */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  cursor: pointer; white-space: nowrap;  /* 手型光标，禁止换行 */
+}
+.history-item .btn-view:active { background: rgba(194,59,34,0.06); }  /* 按下态：淡红底 */
+
+/* 删除模式复选框：寻诗录多选删除时的勾选框 */
+.history-item .delete-checkbox {
+  width: 18px; height: 18px;  /* 尺寸 18×18px */
+  accent-color: var(--vermillion);  /* 选中态颜色：朱砂红（支持现代浏览器） */
+  cursor: pointer;  /* 手型光标 */
+  flex-shrink: 0;  /* 不允许收缩，保持固定尺寸 */
+  display: none;  /* 默认隐藏，仅在删除模式显示 */
+}
+.history-item.delete-active .delete-checkbox { display: block; }  /* 删除模式：显示复选框 */
+.history-item.delete-active { cursor: default; }  /* 删除模式：禁用整项的指针光标 */
+.history-item.delete-active.selected { border-color: var(--vermillion); background: rgba(194,59,34,0.04); }  /* 选中态：朱砂红边框 + 淡红底 */
+
+/* 删除模式确认栏：顶部固定，显示已选数量 + 确认/取消按钮 */
+.delete-confirm-bar {
+  display: none;  /* 默认隐藏 */
+  padding: 12px 16px;  /* 内边距 */
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-bottom: 1px solid var(--ink-lighter);  /* 底部分隔线 */
+  align-items: center; justify-content: space-between;  /* 两端对齐 */
+}
+.delete-confirm-bar.active { display: flex; }  /* 激活态：显示为 flex 布局 */
+
+/* 印章组件：模拟中国传统印章，朱砂红方框 + 行楷字 */
+.seal {
+  display: inline-flex; align-items: center; justify-content: center;  /* 行内 flex，内容居中 */
+  width: 52px; height: 52px;  /* 尺寸 52×52px */
+  border: 2px solid var(--seal); border-radius: 6px;  /* 朱砂红 2px 描边，圆角 6px */
+  color: var(--seal);  /* 朱砂红字 */
+  font-family: 'STXingkai', 'STKaiti', 'KaiTi', cursive;  /* 行楷优先，更具印章质感 */
+  font-size: 14px; line-height: 1.2;  /* 字号 14px，紧凑行高 */
+  text-align: center;  /* 文字居中 */
+  transform: rotate(-3deg);  /* 逆时针旋转 3°，模拟手盖印章的随意感 */
+}
+.seal-sm { width: 40px; height: 40px; font-size: 11px; }  /* 小号印章：40×40px，字号 11px */
+
+/* 分隔线：渐变透明线，用于内容分区 */
+.divider {
+  height: 1px;  /* 高度 1px */
+  background: linear-gradient(to right, transparent, var(--ink-lighter), transparent);  /* 左右透明 + 中间墨色浅的渐变 */
+  margin: 16px 0;  /* 上下外边距 16px */
+}
+
+/* 标签：用于诗词标签（如"夜晚""明月""思乡"） */
+.tag {
+  display: inline-block;  /* 行内块，可并排显示 */
+  padding: 2px 10px; border-radius: 4px;  /* 内边距，圆角 4px */
+  font-size: 11px; font-family: 'STSong', 'SimSun', serif;  /* 小字号，宋体 */
+  border: 1px solid var(--ink-lighter); color: var(--ink-light);  /* 默认：墨色浅描边和文字 */
+}
+.tag-vermillion { border-color: var(--vermillion); color: var(--vermillion); }  /* 朱砂红标签：用于第一个标签（强调） */
+.tag-gold { border-color: var(--gold); color: var(--gold); }  /* 金色标签：用于第二个标签 */
+
+/* ========== Tab 1：首页样式 ========== */
+/* 作用范围：tab-home 首页内的所有元素 */
+/* 包含：标题 Logo、水墨山水场景、诗词横幅、行动按钮区 */
+
+/* 首页头部：标题 Logo 居中显示 */
+.home-header {
+  text-align: center;  /* 文字居中 */
+  padding: 48px 24px 8px;  /* 上 48px（避开状态栏），下 8px */
+  position: relative; z-index: 1;  /* 相对定位，层级 1（高于水墨背景 0） */
+}
+/* Logo 容器：主标题 + 副标题垂直排列 */
+.home-logo { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 16px; }  /* flex 纵向居中，间距 4px */
+/* 主标题"古今同月"：行楷大字 */
+.home-logo-main {
+  font-family: 'STXingkai', 'STKaiti', 'KaiTi', cursive;  /* 行楷优先，最具古风 */
+  font-size: 48px; color: var(--ink);  /* 字号 48px，墨色 */
+  font-weight: bold;  /* 加粗 */
+  letter-spacing: 8px;  /* 字间距 8px，舒展大气 */
+  text-shadow: 2px 2px 4px var(--shadow);  /* 投影，增强立体感 */
+}
+/* 副标题"一图·一诗·一古人"：楷体小字 */
+.home-logo-sub {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 14px; color: var(--ink-light);  /* 字号 14px，墨色浅 */
+  letter-spacing: 6px;  /* 字间距 6px */
+}
+.home-seal { display: flex; justify-content: center; margin: 8px 0; }  /* 印章容器：居中，上下 8px */
+
+/* 首页场景区：水墨山水画面，280px 高 */
+.home-scene {
+  position: relative;  /* 相对定位，作为画面元素的定位上下文 */
+  height: 280px;  /* 固定高度 280px */
+  margin: 20px 16px 32px;  /* 外边距：上 20px，左右 16px，下 32px */
+  border-radius: var(--radius);  /* 圆角 12px */
+  overflow: hidden;  /* 溢出隐藏，山水元素不超出圆角 */
+  z-index: 1;  /* 层级 1 */
+}
+/* 场景背景：天空到水面的渐变 */
+.home-scene-bg {
+  width: 100%; height: 100%;  /* 铺满父容器 */
+  background: linear-gradient(180deg, #D4CFC4 0%, #B8C4C8 30%, #8A9A9E 60%, #6B7B8D 100%);  /* 自上而下：米灰→青灰→深青→深蓝灰，模拟天→水 */
+  position: relative; overflow: hidden;  /* 相对定位，溢出隐藏 */
+}
+/* 山峦层容器 */
+.mountain-layer { position: absolute; width: 100%; height: 100%; }  /* 绝对定位铺满 */
+/* 单个山峦：半圆形，半透明墨色 */
+.mountain-layer .mt {
+  position: absolute; bottom: 0;  /* 绝对定位，底部对齐 */
+  background: rgba(44,24,16,0.12);  /* 半透明墨色 */
+  border-radius: 50% 50% 0 0;  /* 顶部圆角，底部直角，形成半圆山形 */
+}
+.mt-1 { left: -10%; width: 60%; height: 55%; }  /* 左侧山峦：偏左，较小 */
+.mt-2 { right: -5%; width: 50%; height: 65%; }  /* 右侧山峦：偏右，较高 */
+.mt-3 { left: 20%; width: 70%; height: 40%; }  /* 中间山峦：最矮，形成层次 */
+
+/* 水面层：底部 35%，青色渐变 */
+.water-layer {
+  position: absolute; bottom: 0; width: 100%; height: 35%;  /* 绝对定位，底部 35% */
+  background: linear-gradient(180deg, rgba(90,138,158,0.2), rgba(45,90,109,0.3));  /* 青色渐变，模拟水深 */
+}
+/* 水面波纹：2px 高的白色横向流动光带 */
+.water-layer::after {
+  content: ''; position: absolute;  /* 伪元素，绝对定位 */
+  top: 0; left: 0; right: 0; height: 2px;  /* 顶部 2px 高 */
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);  /* 中间白色亮带 */
+  animation: waterRipple 3s ease-in-out infinite;  /* 3s 循环波纹动画 */
+}
+/* waterRipple：水面波纹左右流动 */
+@keyframes waterRipple {
+  0%, 100% { transform: translateX(-20px); }  /* 起止：左偏 20px */
+  50% { transform: translateX(20px); }  /* 中间：右偏 20px */
+}
+/* 月亮：右上角，暖白色圆形 + 光晕 */
+.home-moon {
+  position: absolute; top: 40px; right: 50px;  /* 右上角定位 */
+  width: 60px; height: 60px;  /* 尺寸 60×60px */
+  border-radius: 50%;  /* 圆形 */
+  background: radial-gradient(circle, #FFF8E7, #F5E6C8);  /* 径向渐变：暖白→米黄 */
+  box-shadow: 0 0 30px rgba(245,230,200,0.5), 0 0 60px rgba(245,230,200,0.2);  /* 双层光晕 */
+  animation: moonGlow 4s ease-in-out infinite;  /* 4s 光晕呼吸动画 */
+}
+/* moonGlow：月光光晕呼吸效果 */
+@keyframes moonGlow {
+  0%, 100% { box-shadow: 0 0 30px rgba(245,230,200,0.5), 0 0 60px rgba(245,230,200,0.2); }  /* 起止：标准光晕 */
+  50% { box-shadow: 0 0 40px rgba(245,230,200,0.6), 0 0 80px rgba(245,230,200,0.3); }  /* 中间：光晕扩大 */
+}
+/* 飞鸟：水墨画面中的小剪影 */
+.bird { position: absolute; font-size: 14px; opacity: 0.5; color: var(--ink); }  /* 绝对定位，半透明 */
+.bird-1 { top: 70px; left: 40px; animation: flyBird 8s linear infinite; }  /* 鸟 1：左上，8s 飞行 */
+.bird-2 { top: 90px; left: 80px; animation: flyBird 10s linear infinite 2s; }  /* 鸟 2：稍下，10s 飞行，延迟 2s */
+/* flyBird：飞鸟向右飞行 100px */
+@keyframes flyBird {
+  0% { transform: translateX(0); }  /* 起始：原位 */
+  100% { transform: translateX(100px); }  /* 终止：右移 100px */
+}
+
+/* 诗词横幅：直接浮在水面上，自适应缩放，无背景框，无动画 */
+/* 设计目的：诗句与水墨画面融为一体，不破坏画面整体感 */
+.home-poem-banner {
+  position: absolute;  /* 绝对定位，浮于水面 */
+  left: 50%;  /* 水平 50% 起始 */
+  bottom: 10%;  /* 距底部 10%，正好浮在水面上 */
+  transform: translateX(-50%);  /* 水平居中 */
+  z-index: 5;  /* 层级 5，高于山水元素 */
+  text-align: center;  /* 文字居中 */
+  width: 90%;  /* 宽度 90% */
+  max-width: 360px;  /* 最大 360px */
+  padding: 0;  /* 无内边距 */
+  background: transparent;  /* 透明背景，与画面融合 */
+  box-shadow: none;  /* 无投影 */
+}
+/* 诗词正文：楷体，暖白色，带阴影确保在画面上可读 */
+.home-poem-text {
+  font-family: 'STKaiti', 'KaiTi', 'STSong', serif;  /* 楷体优先 */
+  font-size: clamp(13px, 4vw, 17px);  /* 响应式字号：13px ~ 17px，随视口宽度变化 */
+  color: #F5EFE6;  /* 暖白色，与水墨画面形成对比 */
+  letter-spacing: 2px;  /* 字间距 2px */
+  line-height: 1.7;  /* 行高 1.7，宽松易读 */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5), 0 0 8px rgba(0,0,0,0.2);  /* 双层阴影，确保浅色文字在深色背景上可读 */
+  word-wrap: break-word;  /* 长词换行 */
+  word-break: keep-all;  /* 中文不在字与字之间断行 */
+}
+/* 诗词作者署名：行楷小字 */
+.home-poem-author {
+  font-family: 'STXingkai', 'STKaiti', 'KaiTi', cursive;  /* 行楷 */
+  font-size: clamp(11px, 2.8vw, 13px);  /* 响应式字号：11px ~ 13px */
+  color: rgba(245,239,230,0.9);  /* 90% 不透明的暖白 */
+  letter-spacing: 2px;  /* 字间距 2px */
+  margin-top: 6px;  /* 与正文间距 6px */
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);  /* 文字阴影 */
+}
+/* 首页行动按钮区：纵向排列的描述文字 + 主按钮 + 次按钮 */
+.home-actions {
+  padding: 0 24px 24px;  /* 内边距：左右 24px，下 24px */
+  display: flex; flex-direction: column; gap: 14px;  /* flex 纵向，间距 14px */
+  position: relative; z-index: 2;  /* 层级 2，高于水墨背景 */
+}
+/* 首页描述文字：引导用户拍照 */
+.home-desc {
+  text-align: center;  /* 居中 */
+  color: var(--ink-light);  /* 墨色浅 */
+  font-size: 14px; line-height: 1.6;  /* 字号 14px，行高 1.6 */
+  margin-bottom: 8px; letter-spacing: 1px;  /* 下边距 8px，字间距 1px */
+}
+
+/* ========== Tab 2：结果页样式 ========== */
+/* 作用范围：tab-result 结果页内的所有元素 */
+/* 包含：空状态、结果主卡片、更多匹配列表 */
+
+/* 空状态：用户尚未拍照时的引导 */
+.result-empty {
+  display: flex; flex-direction: column;  /* flex 纵向 */
+  align-items: center; justify-content: center;  /* 居中 */
+  padding: 100px 24px;  /* 上下大边距 100px */
+  color: var(--ink-lighter);  /* 墨色更浅 */
+  text-align: center;  /* 文字居中 */
+}
+.result-empty-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.4; }  /* 大图标 56px，半透明 */
+.result-empty-text { font-size: 15px; margin-bottom: 20px; line-height: 1.6; }  /* 引导文字 */
+
+/* 结果主卡片：戏曲形象 + 匹配度 + 诗词信息 */
+.result-hero {
+  position: relative;  /* 相对定位 */
+  margin: 8px 16px 0;  /* 外边距：上 8px，左右 16px */
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: var(--radius);  /* 圆角 12px */
+  overflow: hidden;  /* 溢出隐藏 */
+  box-shadow: 0 4px 20px var(--shadow);  /* 较深投影，强调主卡片 */
+  border: 1px solid rgba(184,169,154,0.15);  /* 极淡边框 */
+}
+/* 结果卡片顶部背景：深色渐变或用户原图 */
+.result-hero-bg {
+  height: 200px;  /* 固定高度 200px */
+  background: linear-gradient(135deg, #2C1810 0%, #4A3B30 100%);  /* 默认深棕渐变 */
+  position: relative; overflow: hidden;  /* 相对定位，溢出隐藏 */
+  display: flex; align-items: flex-end; justify-content: center;  /* 戏曲形象底部居中 */
+}
+/* 有照片时：覆盖背景为用户原图 */
+.result-hero-bg.photo-bg {
+  background-size: cover;  /* 背景铺满 */
+  background-position: center;  /* 居中显示 */
+}
+/* 默认背景的金色径向光晕装饰 */
+.result-hero-bg::before {
+  content: ''; position: absolute; inset: 0;  /* 伪元素铺满 */
+  background: radial-gradient(ellipse at 30% 50%, rgba(196,163,90,0.15), transparent 70%);  /* 30% 50% 位置的金色光晕 */
+  z-index: 1;  /* 层级 1 */
+}
+/* 有照片时：顶部到底部的深色渐变遮罩，确保文字可读 */
+.result-hero-bg.photo-bg::before {
+  background: linear-gradient(180deg, rgba(44,24,16,0.45) 0%, rgba(44,24,16,0.15) 50%, rgba(44,24,16,0.35) 100%);  /* 上中下三段渐变 */
+}
+/* 底部淡出过渡：从背景渐变到卡片内容区 */
+.result-hero-bg::after {
+  content: ''; position: absolute;  /* 伪元素 */
+  bottom: 0; left: 0; right: 0; height: 60%;  /* 底部 60% 高度 */
+  background: linear-gradient(0deg, var(--paper-light) 0%, transparent 100%);  /* 从浅宣纸到透明 */
+  z-index: 1;  /* 层级 1 */
+}
+/* 戏曲形象：底部居中的 Q 版人物 */
+.opera-figure {
+  position: absolute;  /* 绝对定位 */
+  bottom: 0; left: 50%;  /* 底部水平居中 */
+  transform: translateX(-50%);  /* 居中 */
+  width: 140px; height: 190px;  /* 尺寸 140×190px */
+  z-index: 2;  /* 层级 2，高于光晕 */
+  display: flex; flex-direction: column; align-items: center;  /* 纵向居中 */
+}
+/* 戏曲形象主体：椭圆形容器 */
+.opera-figure-body {
+  width: 120px; height: 160px;  /* 尺寸 120×160px */
+  border-radius: 50% 50% 30% 30%;  /* 上圆下尖，类似蛋形 */
+  position: relative;  /* 相对定位 */
+  overflow: hidden;  /* 溢出隐藏 */
+  box-shadow: 0 4px 12px rgba(194,59,34,0.3);  /* 朱砂红投影 */
+}
+/* 戏曲形象名称：底部小字 */
+.opera-figure-name {
+  font-size: 11px; color: var(--ink-light);  /* 字号 11px，墨色浅 */
+  margin-top: 4px;  /* 上边距 4px */
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+}
+.result-hero-content { padding: 20px; text-align: center; }  /* 主卡片内容区：内边距 20px，居中 */
+/* 匹配度展示区：环形数字 + 徽章 */
+.result-match-score {
+  display: flex; align-items: center; justify-content: center;  /* 居中 */
+  gap: 8px; margin-bottom: 12px;  /* 间距 8px，下边距 12px */
+}
+/* 诗词标题：行楷大字 */
+.result-poem-title {
+  font-family: 'STXingkai', 'STKaiti', 'KaiTi', cursive;  /* 行楷 */
+  font-size: 24px; color: var(--ink);  /* 字号 24px，墨色 */
+  margin-bottom: 4px;  /* 下边距 4px */
+}
+.result-poem-author { color: var(--ink-light); font-size: 14px; margin-bottom: 12px; }  /* 作者：墨色浅，字号 14px */
+/* 诗词引文块：青色左边框 + 浅青底 */
+.result-poem-line {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 18px; color: var(--cyan);  /* 字号 18px，青色 */
+  line-height: 1.8; margin: 12px 0;  /* 行高 1.8，上下边距 12px */
+  padding: 12px;  /* 内边距 12px */
+  background: rgba(45,90,109,0.04);  /* 极浅青色底 */
+  border-radius: 8px;  /* 圆角 8px */
+  border-left: 3px solid var(--cyan);  /* 左侧 3px 青色边框 */
+  text-align: left;  /* 左对齐 */
+}
+/* 标签容器：居中横向排列，可换行 */
+.result-tags {
+  display: flex; justify-content: center;  /* 居中 */
+  gap: 8px; flex-wrap: wrap; margin: 12px 0;  /* 间距 8px，可换行 */
+}
+/* 结果行动按钮区 */
+.result-actions {
+  display: flex; flex-direction: column; gap: 10px;  /* 纵向，间距 10px */
+  padding: 16px;  /* 内边距 16px */
+}
+
+/* "更多匹配诗词"区域 */
+.more-section { padding: 0 16px; margin-top: 12px; }  /* 内边距左右 16px，上边距 12px */
+.more-title {
+  display: flex; align-items: center; gap: 8px;  /* flex，间距 8px */
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 16px; color: var(--ink);  /* 字号 16px，墨色 */
+  margin-bottom: 12px;  /* 下边距 12px */
+}
+/* 横向滚动列表：可滑动浏览更多匹配 */
+.more-list {
+  display: flex; gap: 12px;  /* flex 横向，间距 12px */
+  overflow-x: auto; padding-bottom: 8px;  /* 横向滚动，底部内边距 8px */
+  -webkit-overflow-scrolling: touch;  /* iOS 惯性滚动 */
+  scrollbar-width: none;  /* Firefox 隐藏滚动条 */
+}
+.more-list::-webkit-scrollbar { display: none; }  /* WebKit 隐藏滚动条 */
+/* 单个匹配项卡片：固定宽度 140px */
+.more-item {
+  flex: 0 0 140px;  /* 不伸缩，固定 140px 宽 */
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: 10px; padding: 14px;  /* 圆角 10px，内边距 14px */
+  border: 1px solid rgba(184,169,154,0.15);  /* 极淡边框 */
+  cursor: pointer; transition: all 0.3s;  /* 手型光标，0.3s 过渡 */
+}
+.more-item:active { transform: scale(0.96); border-color: var(--vermillion); }  /* 按下态：缩小 + 朱砂红边框 */
+.more-item-rank { font-size: 11px; color: var(--ink-lighter); margin-bottom: 4px; }  /* 排名文字 */
+.more-item-title { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }  /* 标题 */
+.more-item-author { font-size: 12px; color: var(--ink-light); margin-bottom: 6px; }  /* 作者 */
+.more-item-score { font-size: 11px; font-weight: 600; }  /* 匹配分数 */
+
+/* ========== Tab 3：寻诗录样式 ========== */
+/* 作用范围：tab-history 寻诗录页内的所有元素 */
+/* 功能：展示历史拍照记录，支持多选删除 */
+.history-list { padding: 0 16px; }  /* 列表容器，左右内边距 16px */
+/* 单条历史记录卡片 */
+.history-item {
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: var(--radius);  /* 圆角 12px */
+  padding: 16px; margin-bottom: 12px;  /* 内边距 16px，下边距 12px */
+  border: 1px solid rgba(184,169,154,0.1);  /* 极淡边框 */
+  cursor: pointer; transition: all 0.3s;  /* 手型光标，0.3s 过渡 */
+  display: flex; gap: 14px;  /* flex 横向，间距 14px */
+}
+.history-item:active { transform: scale(0.98); border-color: var(--vermillion); }  /* 按下态：缩小 + 朱砂红边框 */
+/* 历史记录缩略图：64×64px 方形 */
+.history-item-img {
+  width: 64px; height: 64px;  /* 尺寸 64×64px */
+  border-radius: 8px;  /* 圆角 8px */
+  background: var(--paper-dark);  /* 深宣纸底（占位） */
+  flex-shrink: 0;  /* 不收缩 */
+  display: flex; align-items: center; justify-content: center;  /* 居中 */
+  font-size: 24px; color: var(--ink-lighter);  /* 占位图标 */
+}
+.history-item-info { flex: 1; }  /* 信息区：占据剩余空间 */
+.history-item-poem-title { font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }  /* 诗词标题 */
+.history-item-author { font-size: 12px; color: var(--ink-light); margin-bottom: 4px; }  /* 作者 */
+.history-item-date { font-size: 11px; color: var(--ink-lighter); }  /* 日期 */
+/* 右侧区域：匹配度环 + 查看按钮 */
+.history-item-right {
+  display: flex; flex-direction: column;  /* 纵向排列 */
+  align-items: flex-end; justify-content: center; gap: 4px;  /* 右对齐，垂直居中 */
+}
+
+/* ========== 子页面：识别中（加载页）========== */
+/* 作用范围：sub-loading 子页面，用户拍照后等待 AI 识别的过渡页 */
+/* 设计目的：水墨晕染 + 月亮脉动 + 进度条，营造"品味意境"的氛围 */
+#page-loading {
+  background: var(--paper);  /* 宣纸底 */
+}
+/* 加载页主容器：全屏居中 */
+.loading-wrap {
+  position: relative;  /* 相对定位，作为水墨晕染的定位上下文 */
+  width: 100vw;  /* 显式宽度：H5 在 iOS Safari 上 100vh + flex 布局可能让容器宽度收缩，导致 .ink-spread 绝对定位溢出 */
+  min-height: 100vh;  /* 最小高度铺满视口 */
+  display: flex; flex-direction: column;  /* flex 纵向 */
+  align-items: center; justify-content: center;  /* 居中 */
+  padding: 24px;  /* 内边距 24px */
+  /* 隐藏滚动条：
+     - .ink-spread 动画到 scale(2) 时尺寸翻倍会撑出滚动条
+     - 进度条动画导致 .loading-wrap 内容高度抖动时也会触发滚动条
+     - 两者叠加就会出现"右侧/下方滚动条时隐时现"的闪烁现象 */
+  overflow: hidden;
+}
+/* 水墨晕染：3 个扩散动画，错时播放 */
+.ink-spread {
+  position: absolute;  /* 绝对定位 */
+  width: 120px; height: 120px;  /* 尺寸 120×120px（原 200，过大导致缩放后溢出） */
+  border-radius: 50%;  /* 圆形 */
+  background: radial-gradient(circle, rgba(44,24,16,0.06), transparent 70%);  /* 径向渐变墨色 */
+  animation: inkSpread 3s ease-out infinite;  /* 3s 扩散动画 */
+  pointer-events: none;  /* 不响应鼠标事件，避免影响下方按钮 */
+  transform-origin: center;  /* 缩放中心：自身中心，避免位置漂移 */
+  will-change: transform, opacity;  /* 提示浏览器优化动画 */
+}
+.ink-spread:nth-child(1) { top: 20%; left: 10%; }  /* 第 1 个：左上 */
+.ink-spread:nth-child(2) { bottom: 25%; right: 15%; animation-delay: 1s; }  /* 第 2 个：右下，延迟 1s */
+.ink-spread:nth-child(3) { top: 40%; right: 20%; animation-delay: 2s; }  /* 第 3 个：右中，延迟 2s */
+/* inkSpread：水墨从中心向外扩散 + 淡出 */
+@keyframes inkSpread {
+  0% { transform: scale(0.5); opacity: 0; }  /* 起始：缩小 + 透明 */
+  50% { opacity: 1; }  /* 中间：完全显示 */
+  100% { transform: scale(1.6); opacity: 0; }  /* 终止：放大 1.6 倍 + 淡出（原 2.0，过大） */
+}
+/* 加载页主月亮：脉动 + 光环 */
+.loading-moon {
+  width: 80px; height: 80px;  /* 尺寸 80×80px */
+  border-radius: 50%;  /* 圆形 */
+  background: radial-gradient(circle, #FFF8E7, #F5E6C8);  /* 暖白径向渐变 */
+  box-shadow: 0 0 40px rgba(245,230,200,0.4);  /* 光晕 */
+  animation: pulseMoon 2s ease-in-out infinite;  /* 2s 脉动 */
+  margin-bottom: 32px;  /* 下边距 32px */
+  position: relative;  /* 相对定位，作为光环的定位上下文 */
+  z-index: 1;  /* 层级 1，高于水墨晕染 */
+}
+/* 月亮外圈光环：扩散 + 淡出 */
+.loading-moon::after {
+  content: '';  /* 伪元素 */
+  position: absolute; inset: -8px;  /* 比月亮大 8px */
+  border-radius: 50%;  /* 圆形 */
+  border: 2px solid var(--ink-lighter);  /* 2px 浅墨色描边 */
+  opacity: 0.3;  /* 30% 透明 */
+  animation: ringPulse 2s ease-out infinite;  /* 2s 扩散动画 */
+}
+/* pulseMoon：月亮轻微缩放，模拟呼吸 */
+@keyframes pulseMoon {
+  0%, 100% { transform: scale(1); }  /* 起止：原大小 */
+  50% { transform: scale(1.05); }  /* 中间：放大 5% */
+}
+/* ringPulse：光环从月亮向外扩散 */
+@keyframes ringPulse {
+  0% { transform: scale(1); opacity: 0.3; }  /* 起始：原大小 + 30% 透明 */
+  100% { transform: scale(1.3); opacity: 0; }  /* 终止：放大 30% + 完全透明 */
+}
+/* 加载标题："正在品味您的意境" */
+.loading-title {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 22px; color: var(--ink);  /* 字号 22px，墨色 */
+  margin-bottom: 8px;  /* 下边距 8px */
+  animation: textBlink 1.5s ease-in-out infinite;  /* 1.5s 闪烁动画 */
+  position: relative; z-index: 1;  /* 层级 1 */
+}
+/* textBlink：文字呼吸闪烁 */
+@keyframes textBlink {
+  0%, 100% { opacity: 1; }  /* 起止：完全不透明 */
+  50% { opacity: 0.5; }  /* 中间：50% 透明 */
+}
+/* 加载三点动画：三个圆点依次跳动 */
+.loading-dots { display: flex; gap: 6px; margin: 8px 0; position: relative; z-index: 1; }  /* flex，间距 6px */
+.loading-dot {
+  width: 8px; height: 8px;  /* 尺寸 8×8px */
+  border-radius: 50%;  /* 圆形 */
+  background: var(--ink-lighter);  /* 浅墨色 */
+  animation: dotBounce 1.4s ease-in-out infinite;  /* 1.4s 跳动 */
+}
+.loading-dot:nth-child(2) { animation-delay: 0.2s; }  /* 第 2 个延迟 0.2s */
+.loading-dot:nth-child(3) { animation-delay: 0.4s; }  /* 第 3 个延迟 0.4s */
+/* dotBounce：圆点上下跳动 */
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: translateY(0); }  /* 起止 + 80%：原位 */
+  40% { transform: translateY(-12px); }  /* 40%：上跳 12px */
+}
+/* 加载描述：识别阶段说明 */
+.loading-desc {
+  color: var(--ink-light); font-size: 13px;  /* 墨色浅，字号 13px */
+  margin-top: 24px; letter-spacing: 2px;  /* 上边距 24px，字间距 2px */
+  position: relative; z-index: 1;  /* 层级 1 */
+}
+/* 进度条容器 */
+.loading-progress {
+  margin-top: 40px; width: 80%; max-width: 280px;  /* 上边距 40px，宽度 80% 最大 280px */
+  position: relative; z-index: 1;  /* 层级 1 */
+}
+/* 进度条轨道 */
+.loading-progress-bar {
+  height: 4px;  /* 高度 4px */
+  background: var(--ink-lighter);  /* 浅墨色底 */
+  border-radius: 2px;  /* 圆角 2px */
+  overflow: hidden;  /* 溢出隐藏 */
+}
+/* 进度条填充：朱砂红，3s 动画推进到 100% */
+.loading-progress-fill {
+  height: 100%; width: 0%;  /* 初始 0% */
+  background: var(--vermillion);  /* 朱砂红 */
+  border-radius: 2px;  /* 圆角 */
+  animation: progressBar 3s ease-in-out forwards;  /* 3s 推进，forwards 保持终止状态 */
+}
+/* progressBar：进度从 0% 到 100%（70% 时到达 65%，模拟"思考"停顿） */
+@keyframes progressBar {
+  0% { width: 0%; }  /* 起始：0% */
+  70% { width: 65%; }  /* 70% 时间：到达 65%（模拟 AI 思考停顿） */
+  100% { width: 100%; }  /* 终止：100% */
+}
+/* 跳过按钮：演示用，跳过加载直接看结果 */
+.loading-skip {
+  margin-top: 60px;  /* 上边距 60px */
+  background: rgba(194,59,34,0.08);  /* 朱砂红浅底 */
+  border: none; color: var(--vermillion);  /* 无边框，朱砂红字 */
+  padding: 8px 20px;  /* 内边距 */
+  border-radius: 8px;  /* 圆角 8px */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 13px; cursor: pointer;  /* 字号 13px，手型光标 */
+  position: relative; z-index: 1;  /* 层级 1 */
+}
+
+/* ========== 子页面：诗词详情 ========== */
+/* 作用范围：sub-poem 子页面，展示诗词完整内容、赏析、朗读 */
+/* 包含：顶部背景图、朗读控制、诗文正文、意境赏析、上一首/下一首导航 */
+/* 顶部背景区：200px 高，深色渐变或用户原图 */
+.poem-detail-header {
+  position: relative;  /* 相对定位 */
+  height: 200px;  /* 固定高度 200px */
+  overflow: hidden;  /* 溢出隐藏 */
+  margin: 0;  /* 无外边距 */
+}
+/* 诗词详情顶部背景：深棕渐变或用户原图，居中显示标题 */
+.poem-detail-bg {
+  width: 100%; height: 100%;  /* 铺满父容器 */
+  background: linear-gradient(135deg, #2C1810 0%, #3D2E23 100%);  /* 默认深棕渐变 */
+  display: flex; flex-direction: column;  /* flex 纵向 */
+  align-items: center; justify-content: center;  /* 居中 */
+  text-align: center; padding: 24px;  /* 居中，内边距 24px */
+  position: relative;  /* 相对定位 */
+}
+/* 有照片时：覆盖背景为用户原图 */
+.poem-detail-bg.photo-bg {
+  background-size: cover;  /* 铺满 */
+  background-position: center;  /* 居中 */
+}
+/* 有照片时的深色遮罩：确保文字可读 */
+.poem-detail-bg.photo-bg::before {
+  content: '';  /* 伪元素 */
+  position: absolute; inset: 0;  /* 铺满 */
+  background: linear-gradient(180deg, rgba(44,24,16,0.55) 0%, rgba(44,24,16,0.35) 50%, rgba(44,24,16,0.55) 100%);  /* 上中下三段深色渐变 */
+  z-index: 0;  /* 层级 0，在内容之下 */
+}
+/* 有照片时：所有子元素层级提升到遮罩之上 */
+.poem-detail-bg.photo-bg > * {
+  position: relative;  /* 相对定位 */
+  z-index: 1;  /* 层级 1，高于遮罩 */
+}
+/* 详情页标题：浅金色 */
+.poem-detail-bg .result-poem-title { color: var(--gold-light); }  /* 浅金色，深色背景上可读 */
+/* 详情页作者：半透明白 */
+.poem-detail-bg .result-poem-author { color: rgba(255,255,255,0.6); }  /* 60% 透明白 */
+/* 详情页匹配徽章：金色浅底 */
+.poem-detail-bg .match-badge { margin-top: 8px; background: rgba(196,163,90,0.2); color: var(--gold-light); }  /* 金色浅底 + 浅金字 */
+
+/* 诗词详情主体内容区 */
+.poem-detail-body { padding: 24px 20px; }  /* 内边距：上下 24px，左右 20px */
+/* 诗词完整正文：大行距，居中 */
+.poem-full-text {
+  line-height: 2.2;  /* 大行距 2.2，古风阅读体验 */
+  font-size: 17px; color: var(--ink);  /* 字号 17px，墨色 */
+  text-align: center;  /* 居中 */
+  padding: 20px 0;  /* 上下内边距 20px */
+}
+.poem-full-text p { margin-bottom: 8px; }  /* 每句诗下方间距 8px */
+.poem-full-text .poem-line { display: block; letter-spacing: 1px; }  /* 块级显示，字间距 1px */
+
+/* 朗读控制条：圆形播放按钮 + 朗读信息 */
+.audio-control {
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: var(--radius);  /* 圆角 12px */
+  padding: 16px 20px;  /* 内边距 */
+  margin: 16px 0;  /* 上下边距 16px */
+  border: 1px solid rgba(184,169,154,0.15);  /* 极淡边框 */
+  display: flex; align-items: center; gap: 16px;  /* flex，间距 16px */
+}
+/* 播放按钮：朱砂红圆形 */
+.audio-play-btn {
+  width: 48px; height: 48px;  /* 尺寸 48×48px */
+  border-radius: 50%;  /* 圆形 */
+  background: var(--vermillion);  /* 朱砂红底 */
+  border: none; color: white;  /* 无边框，白字 */
+  font-size: 20px; cursor: pointer;  /* 图标 20px，手型光标 */
+  display: flex; align-items: center; justify-content: center;  /* 居中 */
+  flex-shrink: 0;  /* 不收缩 */
+  transition: all 0.3s;  /* 0.3s 过渡 */
+}
+.audio-play-btn:active { transform: scale(0.9); }  /* 按下态：缩小 10% */
+.audio-info { flex: 1; }  /* 朗读信息区：占据剩余空间 */
+.audio-info-title { font-size: 13px; color: var(--ink); font-weight: 600; }  /* 标题 */
+.audio-info-desc { font-size: 12px; color: var(--ink-light); margin-top: 2px; }  /* 描述 */
+
+/* 意境赏析区块：青色左边框 + 浅青底 */
+.appreciation {
+  background: rgba(45,90,109,0.04);  /* 极浅青色底 */
+  border-radius: var(--radius);  /* 圆角 12px */
+  padding: 16px 20px;  /* 内边距 */
+  margin: 16px 0;  /* 上下边距 16px */
+  border-left: 3px solid var(--cyan);  /* 左侧 3px 青色边框 */
+}
+.appreciation-title {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 14px; color: var(--cyan);  /* 字号 14px，青色 */
+  margin-bottom: 8px;  /* 下边距 8px */
+}
+.appreciation-text {
+  font-size: 14px; color: var(--ink-light);  /* 字号 14px，墨色浅 */
+  line-height: 1.8;  /* 行高 1.8 */
+}
+
+/* ========== 子页面：作者介绍 ========== */
+/* 作用范围：sub-author 子页面，展示诗人基本信息、代表作品、创作风格 */
+/* 作者顶部：头像 + 姓名 + 副标题，渐变背景 */
+.author-hero {
+  display: flex; flex-direction: column;  /* flex 纵向 */
+  align-items: center;  /* 水平居中 */
+  padding: 32px 20px 24px;  /* 上 32px，左右 20px，下 24px */
+  background: linear-gradient(180deg, var(--paper-dark) 0%, var(--paper) 100%);  /* 自上而下：深宣纸→宣纸 */
+}
+/* 作者头像：椭圆形，类似戏曲形象 */
+.author-avatar {
+  width: 120px; height: 160px;  /* 尺寸 120×160px */
+  border-radius: 50% 50% 20% 20%;  /* 上圆下尖 */
+  position: relative;  /* 相对定位 */
+  overflow: hidden;  /* 溢出隐藏 */
+  box-shadow: 0 4px 16px rgba(45,90,109,0.2);  /* 青色投影 */
+  margin-bottom: 12px;  /* 下边距 12px */
+}
+.author-name { font-family: 'STXingkai', 'STKaiti', 'KaiTi', cursive; font-size: 28px; color: var(--ink); }  /* 行楷，字号 28px */
+.author-sub { color: var(--ink-light); font-size: 14px; margin-top: 4px; }  /* 副标题：朝代·字·号 */
+
+/* 作者信息网格：2 列布局 */
+.author-info-grid {
+  display: grid;  /* grid 布局 */
+  grid-template-columns: 1fr 1fr;  /* 2 列等宽 */
+  gap: 12px;  /* 间距 12px */
+  padding: 0 16px;  /* 左右内边距 16px */
+  margin: 16px 0;  /* 上下边距 16px */
+}
+/* 单个信息项：朝代/籍贯/生卒年/身份 */
+.author-info-item {
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: 10px;  /* 圆角 10px */
+  padding: 14px;  /* 内边距 14px */
+  border: 1px solid rgba(184,169,154,0.12);  /* 极淡边框 */
+}
+.author-info-label { font-size: 11px; color: var(--ink-lighter); margin-bottom: 4px; }  /* 标签：朝代/籍贯等 */
+.author-info-value { font-size: 14px; color: var(--ink); font-weight: 600; }  /* 值：唐代/陇西成纪等 */
+
+/* 代表作品列表 */
+.author-works { padding: 0 16px; margin: 12px 0; }  /* 内边距左右 16px */
+.author-works-title {
+  font-family: 'STKaiti', 'KaiTi', serif;  /* 楷体 */
+  font-size: 15px; color: var(--ink);  /* 字号 15px，墨色 */
+  margin-bottom: 12px;  /* 下边距 12px */
+  display: flex; align-items: center; gap: 8px;  /* flex，间距 8px */
+}
+/* 单个作品项 */
+.work-item {
+  background: var(--paper-light);  /* 浅宣纸底 */
+  border-radius: 8px;  /* 圆角 8px */
+  padding: 12px 16px; margin-bottom: 8px;  /* 内边距，下边距 8px */
+  border: 1px solid rgba(184,169,154,0.1);  /* 极淡边框 */
+  display: flex; justify-content: space-between; align-items: center;  /* 两端对齐 */
+}
+.work-item-title { font-size: 14px; color: var(--ink); }  /* 作品标题 */
+.work-item-line { font-size: 12px; color: var(--ink-light); }  /* 作品诗句 */
+.work-item-score { font-size: 12px; font-weight: 600; color: var(--vermillion); }  /* 匹配分数 */
+
+/* 诗词详情底部：上一首 / 下一首导航 */
+/* 设计目的：循环浏览所有匹配诗词，不返回列表页 */
+.poem-nav {
+  display: flex;  /* flex 布局 */
+  gap: 10px;  /* 间距 10px */
+  margin-top: 16px;  /* 上边距 16px */
+  padding-top: 16px;  /* 上内边距 16px */
+  border-top: 1px dashed var(--ink-lighter);  /* 顶部虚线分隔 */
+}
+/* 导航按钮：横向布局，左侧按钮左对齐，右侧按钮右对齐 */
+.btn-poem-nav {
+  flex: 1;  /* 均分宽度 */
+  padding: 12px 14px;  /* 内边距 */
+  flex-direction: row;  /* 横向排列（覆盖 btn-secondary 的纵向） */
+  gap: 8px;  /* 间距 8px */
+  justify-content: flex-start;  /* 左对齐 */
+}
+.btn-poem-nav:last-child {
+  justify-content: flex-end;  /* 最后一个按钮（下一首）右对齐 */
+}
+/* 导航信息容器：标签 + 标题 */
+.poem-nav-info {
+  display: flex;  /* flex 布局 */
+  flex-direction: column;  /* 纵向 */
+  align-items: flex-start;  /* 左对齐 */
+  gap: 2px;  /* 间距 2px */
+  flex: 1;  /* 占据剩余空间 */
+  min-width: 0;  /* 允许收缩，配合 ellipsis */
+}
+.btn-poem-nav:last-child .poem-nav-info {
+  align-items: flex-end;  /* 下一首：右对齐 */
+  text-align: right;  /* 文字右对齐 */
+}
+.poem-nav-label {
+  font-size: 11px;  /* 字号 11px */
+  color: var(--ink-lighter);  /* 墨色更浅 */
+  font-weight: 400;  /* 不加粗 */
+}
+/* 导航诗词标题：朱砂红，超长省略 */
+.poem-nav-title {
+  font-size: 13px;  /* 字号 13px */
+  color: var(--vermillion);  /* 朱砂红 */
+  font-weight: 600;  /* 加粗 */
+  white-space: nowrap;  /* 不换行 */
+  overflow: hidden;  /* 溢出隐藏 */
+  text-overflow: ellipsis;  /* 省略号 */
+  max-width: 100px;  /* 最大宽度 100px */
+}
+
+/* ========== 子页面：分享卡片（6风格系统）========== */
+/* 作用范围：sub-share 子页面，用户可切换 6 种风格生成分享卡片 */
+/* 设计哲学：所有风格共用同一套 HTML 结构，通过 CSS 类名切换不同布局 */
+/* 6 种风格：A拍立得 / B Apple引用卡 / C宽银幕 / D博物馆 / E明信片 / F杂志 */
+
+/* --- 预览容器：所有风格的卡片外层 --- */
+/* 默认容器比例 = 9/16（杂志大片/Apple 引用卡风格）*/
+/* 各风格按设计提案要求覆盖 aspect-ratio */
+.share-card-preview {
+  margin: 16px;  /* 外边距 16px */
+  border-radius: 0;  /* 默认无圆角（各风格可覆盖） */
+  overflow: hidden;  /* 溢出隐藏 */
+  box-shadow: 0 4px 24px var(--shadow);  /* 较深投影，卡片浮起感 */
+  aspect-ratio: 9/16;  /* 默认宽高比 9:16（竖屏） */
+  position: relative;  /* 相对定位，作为内部元素的定位上下文 */
+}
+
+/* --- 照片层（所有风格共用）：用户上传的原图背景 --- */
+.card-photo-layer {
+  position: absolute;  /* 绝对定位铺满 */
+  inset: 0;  /* 铺满父容器 */
+  background-size: cover;  /* 背景铺满 */
+  background-position: center;  /* 居中显示 */
+  background-repeat: no-repeat;  /* 不重复 */
+}
+/* 无照片时的占位样式：深棕渐变 + "用户原图"文字 */
+.card-photo-layer.empty::before {
+  content: '';  /* 伪元素 */
+  position: absolute; inset: 0;  /* 铺满 */
+  background: linear-gradient(135deg, #2C1810, #4A3B30);  /* 深棕渐变 */
+}
+.card-photo-layer.empty::after {
+  content: '用户原图';  /* 占位文字 */
+  position: absolute; top: 50%; left: 50%;  /* 居中 */
+  transform: translate(-50%,-50%);  /* 居中偏移 */
+  color: rgba(245,230,200,0.5);  /* 半透明暖色 */
+  font-family: 'STKaiti','KaiTi',serif;  /* 楷体 */
+  font-size: 16px; letter-spacing: 6px;  /* 字间距 6px */
+}
+
+/* --- 渐变遮罩：默认隐藏，B/F 风格启用 --- */
+.card-gradient { display: none; }
+
+/* --- 顶部栏：默认隐藏，B/F 风格启用 --- */
+.card-top-bar { display: none; }
+.card-top-logo {
+  font-size: 10px; letter-spacing: 3px; font-weight: 600;  /* 小字 logo */
+}
+/* 顶部小头像：圆形 */
+.card-top-avatar {
+  width: 22px; height: 22px; border-radius: 50%;  /* 尺寸 22×22px，圆形 */
+  border: 1.5px solid #fff; overflow: hidden;  /* 白色描边 */
+  background-size: cover; background-position: center;  /* 背景图 */
+}
+
+/* --- 诗句文字区：默认隐藏，各风格按需启用 --- */
+.card-poem-area { display: none; }
+.card-poem-text {
+  font-family: 'STKaiti','KaiTi',serif;  /* 楷体 */
+  line-height: 1.8; letter-spacing: 1px;  /* 行高 1.8，字间距 1px */
+}
+.card-poem-meta { font-size: 11px; letter-spacing: 2px; }  /* 作者元信息 */
+
+/* --- 底部信息栏 --- */
+.card-footer { /* 容器本身不控制 display，由各风格独立控制子元素 */ }
+/* figure 和 qr-wrap 默认隐藏，各风格按需显示 */
+.card-figure { display: none; }
+/* Q版作者形象图 */
+.card-figure-img {
+  width: 55px; height: 65px;  /* 默认尺寸 */
+  border-radius: 50% 50% 25% 25%;  /* 上圆下尖 */
+  background-size: cover; background-position: center;  /* 背景图 */
+  overflow: hidden; box-shadow: 0 3px 10px rgba(194,59,34,0.25);  /* 朱砂红投影 */
+}
+.card-figure-name {
+  font-family: 'STXingkai','STKaiti','KaiTi',cursive;  /* 行楷 */
+  font-size: 12px; color: var(--ink);  /* 字号 12px，墨色 */
+}
+.card-qr-wrap { display: none; }  /* 二维码容器：默认隐藏 */
+/* 二维码图片：白底，圆角 */
+.card-qr-img {
+  width: 52px; height: 52px;  /* 默认尺寸 52×52px */
+  border-radius: 4px; background: #fff; padding: 3px;  /* 圆角 4px，白底，内边距 3px */
+  display: flex; align-items: center; justify-content: center;  /* 内联 SVG 居中铺满 */
+}
+.card-qr-tip { font-size: 10px; letter-spacing: 1px; }  /* 二维码提示文字 */
+
+/* --- 品牌标识：默认隐藏，A/C/D/E 风格启用 --- */
+.card-brand { display: none; }
+
+/* --- 印章：默认隐藏（保留扩展位） --- */
+.card-seal { display: none; }
+
+/* --- 画框（Gallery）：D 风格专用 --- */
+.card-frame { display: none; }
+
+/* --- 邮票（Postcard）：E 风格专用 --- */
+.card-stamp { display: none; }
+.card-stamp-qr {
+  width: 34px; height: 34px; background: #fff; padding: 2px;  /* 邮票内二维码 */
+}
+
+
+/* ========================================================= */
+/* ====== A：拍立得胶片 ====== */
+/* ========================================================= */
+/* 设计提案：width: 280px, padding: 14px 14px 80px → 比例 ≈ 4:5 */
+/* 照片 1:1 正方形为主体；头像在照片左下角；QR+logo 在下方白边 */
+/* 风格特点：复古胶片感，白色边框，轻微旋转 */
+.share-card-preview.style-a {
+  background: #fafaf5;  /* 胶片白色底 */
+  padding: 4% 4% 14%;  /* 上左右 4%，下 14%（留白边） */
+  border-radius: 0;  /* 无圆角 */
+  transform: rotate(-1.5deg);  /* 逆时针旋转 1.5°，复古随意感 */
+  aspect-ratio: 4/5;  /* 宽高比 4:5 */
+}
+/* A 风格照片层：1:1 正方形，相对定位 */
+.style-a .card-photo-layer {
+  position: relative;  /* 相对定位，脱离默认的铺满 */
+  aspect-ratio: 1/1;  /* 1:1 正方形 */
+  width: 100%; height: auto; top: auto; left: auto; bottom: auto; right: auto;  /* 重置绝对定位属性 */
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);  /* 照片投影 */
+}
+.style-a .card-photo-layer.empty::after {
+  content: '用户照片';  /* 占位文字 */
+  font-size: 12px; letter-spacing: 2px;  /* 小字，字间距 2px */
+}
+/* 诗句：下方白边区域居中（设计提案 bottom:12px） */
+.style-a .card-poem-area {
+  display: block;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 5%; left: 8%; right: 8%;  /* 距底 5%，左右 8% */
+  text-align: center;  /* 居中 */
+}
+.style-a .card-poem-title {
+  font-family: 'STKaiti','KaiTi',serif;  /* 楷体 */
+  font-size: 13px; color: #2a2520;  /* 字号 13px，深墨色 */
+  letter-spacing: 1px; margin-bottom: 2px;  /* 字间距 1px，下边距 2px */
+  display: block;  /* 块级显示 */
+}
+.style-a .card-poem-text {
+  font-size: 11px; color: #2a2520;  /* 字号 11px，深墨色 */
+  line-height: 1.6; margin-bottom: 2px;  /* 行高 1.6 */
+}
+.style-a .card-poem-meta {
+  font-size: 9px; color: #888;  /* 字号 9px，灰色 */
+  letter-spacing: 2px;  /* 字间距 2px */
+}
+/* 头像：叠放在照片中央偏下，完全在照片区域内 */
+.style-a .card-figure {
+  display: flex;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  /* 卡片 4:5，照片 1:1 占 92% 宽，照片下边缘距底部 22.4%
+     60px 头像 (W=250时约 19.2% 卡片高) 需完全在照片内
+     头像底部 = 照片下边缘 + 约 6% = 28% */
+  bottom: 28%;  /* 距底 28% */
+  left: 8%;  /* 距左 8% */
+  flex-direction: column; gap: 2px; align-items: center;  /* 纵向居中 */
+  z-index: 3;  /* 层级 3，高于照片 */
+}
+.style-a .card-figure-img {
+  width: 60px; height: 60px; border-radius: 50%;  /* 60×60px 圆形 */
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35); border: 2px solid #fafaf5;  /* 投影 + 白边 */
+}
+.style-a .card-figure-name { display: none; }  /* A 风格不显示作者名 */
+/* 二维码：照片右下角，叠在照片上，图片在上文字在下 */
+.style-a .card-qr-wrap {
+  display: flex;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 22%; right: 8%;  /* 距底 22%，距右 8% */
+  flex-direction: column; gap: 2px; align-items: center;  /* 纵向居中 */
+  z-index: 3;  /* 层级 3 */
+}
+.style-a .card-qr-img {
+  width: 30px !important; height: 30px !important; padding: 2px;  /* 30×30px，!important 覆盖默认 */
+  border-radius: 3px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);  /* 圆角 + 投影 */
+}
+.style-a .card-qr-tip { font-size: 7px; }  /* 极小字 7px */
+/* 品牌角标 "古今同月"：卡片右下角 */
+.style-a .card-brand {
+  display: block;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 1%; right: 6%;  /* 距底 1%，距右 6% */
+  font-family: 'STKaiti',serif;  /* 楷体 */
+  font-size: 7px; color: #999; letter-spacing: 2px;  /* 极小灰字 */
+  z-index: 3;  /* 层级 3 */
+}
+/* 隐藏不用的元素 */
+.style-a .card-top-bar { display: none; }
+.style-a .card-gradient { display: none; }
+.style-a .card-stamp { display: none; }
+.style-a .card-frame { display: none; }
+
+
+/* ========================================================= */
+/* ====== B：Apple 引用卡（默认） ====== */
+/* ========================================================= */
+/* 设计提案：width: 280px, aspect-ratio: 3/4（全屏照片+底部渐变）*/
+/* 风格特点：极简，全屏照片 + 底部黑色渐变 + 白色诗句 */
+.share-card-preview.style-b {
+  background: #000; border-radius: 4px;  /* 黑底，4px 圆角 */
+  aspect-ratio: 3/4;  /* 宽高比 3:4 */
+}
+.style-b .card-photo-layer {
+  inset: 0;  /* 铺满 */
+}
+/* 底部渐变遮罩：从透明到黑色，确保文字可读 */
+.style-b .card-gradient {
+  display: block;  /* 启用 */
+  position: absolute; left: 0; right: 0; bottom: 0;  /* 底部铺满 */
+  height: 45%;  /* 高度 45% */
+  background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.7) 100%);  /* 从透明到 70% 黑 */
+}
+/* 顶部栏：左侧 logo + 右侧头像 */
+.style-b .card-top-bar {
+  display: flex;  /* 启用 */
+  position: absolute; top: 0; left: 0; right: 0;  /* 顶部铺满 */
+  padding: 14px 18px;  /* 内边距 */
+  justify-content: space-between; align-items: center;  /* 两端对齐 */
+  color: #fff;  /* 白字 */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 文字阴影 */
+  z-index: 2;  /* 层级 2 */
+}
+.style-b .card-top-logo {
+  font-size: 9px; letter-spacing: 3px; font-weight: 600;  /* 小字 logo */
+}
+.style-b .card-top-avatar {
+  width: 24px; height: 24px;  /* 24×24px */
+  border-radius: 50%; border: 1.5px solid #fff; overflow: hidden;  /* 圆形白边 */
+  background-size: cover; background-position: center;  /* 背景图 */
+  flex-shrink: 0;  /* 不收缩 */
+}
+/* 诗句区：底部，白色文字 */
+.style-b .card-poem-area {
+  display: block;  /* 启用 */
+  position: absolute; bottom: 0; left: 0; right: 0;  /* 底部铺满 */
+  padding: 20px 20px 22px; color: #fff;  /* 内边距，白字 */
+  z-index: 2;  /* 层级 2 */
+}
+.style-b .card-poem-title {
+  display: block;  /* 块级 */
+  font-family: 'STSong','Songti SC',serif;  /* 宋体（Apple 风格） */
+  font-size: 18px; color: #fff;  /* 字号 18px，白字 */
+  letter-spacing: 2px; margin-bottom: 4px;  /* 字间距 2px */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 阴影 */
+}
+.style-b .card-poem-text {
+  font-family: 'STSong','Songti SC',serif;  /* 宋体 */
+  font-size: 15px; line-height: 1.8; margin-bottom: 8px;  /* 字号 15px */
+}
+.style-b .card-poem-meta {
+  font-size: 10px; color: rgba(255,255,255,0.8);  /* 80% 白 */
+  letter-spacing: 1px;  /* 字间距 1px */
+}
+/* 二维码：右上角，叠在顶部栏上 */
+.style-b .card-qr-wrap {
+  display: flex;  /* 启用 */
+  position: absolute; top: 14px; right: 18px;  /* 右上角 */
+  z-index: 3;  /* 层级 3 */
+}
+.style-b .card-qr-img {
+  width: 32px; height: 32px; padding: 2px;  /* 32×32px */
+  background: #fff; border-radius: 3px;  /* 白底圆角 */
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);  /* 投影 */
+}
+.style-b .card-qr-tip { display: none; }  /* 不显示提示 */
+/* 隐藏不用的元素 */
+.style-b .card-figure { display: none; }
+.style-b .card-brand { display: none; }
+.style-b .card-frame { display: none; }
+.style-b .card-stamp { display: none; }
+
+
+/* ========================================================= */
+/* ====== C：电影宽银幕 ====== */
+/* ========================================================= */
+/* 设计提案：width: 320px, padding: 16px 16px 32px（黑底+21:9超宽银幕）*/
+/* 布局：照片(21:9) → 诗句(两行) + 元数据 → 底部 logo + 副标 */
+/* 右侧：头像 + 二维码 垂直居中 */
+/* 风格特点：电影感，超宽屏幕比例 */
+.share-card-preview.style-c {
+  background: #000; padding: 4% 5% 6%; border-radius: 4px;
+  aspect-ratio: 9/5;
+}
+/* C 风格照片层：21:9 超宽银幕比例 */
+.style-c .card-photo-layer {
+  position: relative;
+  aspect-ratio: 21/9;
+  width: 100%; height: auto; top: auto; left: auto; bottom: auto; right: auto;
+}
+/* 宽银幕左右暗角渐变 */
+.style-c .card-gradient {
+  display: block;
+  position: absolute; top: 4%; left: 5%; right: 5%;
+  height: calc(94% * 9/21);
+  background: linear-gradient(90deg, rgba(0,0,0,0.5) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.5) 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+/* 诗句区：左下，左对齐，块级布局，文字在上，元数据在下 */
+.style-c .card-poem-area {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+  text-align: left;
+}
+.style-c .card-poem-title { display: none; }  /* 不显示独立标题 */
+.style-c .card-poem-text {
+  font-family: 'STKaiti','KaiTi',serif;
+  font-size: 12px; line-height: 1.4; color: #fff;
+  margin-bottom: 4px;
+}
+.style-c .card-poem-meta {
+  font-size: 9px; color: #aaa;
+  letter-spacing: 1px;
+}
+/* 头像：右侧中部（与诗句第一行平齐） */
+.style-c .card-figure {
+  display: flex;
+  position: absolute;
+  top: 56%;  /* 头像顶部在诗句区上沿 */
+  right: calc(5% + 56px);  /* 在二维码左侧 */
+  flex-direction: row; gap: 3px; align-items: center;
+  z-index: 3;
+}
+.style-c .card-figure-img {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #fff;
+}
+.style-c .card-figure-name {
+  font-size: 7px; color: #777;
+}
+/* 二维码：最右侧 */
+.style-c .card-qr-wrap {
+  display: flex;
+  position: absolute;
+  top: 54%;
+  right: 5%;
+  flex-direction: row; gap: 2px;
+  z-index: 3;
+}
+.style-c .card-qr-img {
+  width: 32px; height: 32px; padding: 2px; background: #fff;
+}
+.style-c .card-qr-tip { display: none; }
+/* 品牌栏：底部最左 "古今同月" */
+.style-c .card-brand {
+  display: block;
+  position: absolute; bottom: 1.5%; left: 5%;
+  font-size: 9px; color: #888; letter-spacing: 3px;
+}
+/* 隐藏不用的元素 */
+.style-c .card-top-bar { display: none; }
+.style-c .card-stamp { display: none; }
+.style-c .card-frame { display: none; }
+/* 副标 "— A CINEMATIC POEM"：底部最右 */
+.share-card-preview.style-c::after {
+  content: '— A CINEMATIC POEM';
+  position: absolute; bottom: 1.5%; right: 5%;
+  font-size: 8px; color: #666; letter-spacing: 2px;
+  z-index: 2;
+}
+
+
+/* ========================================================= */
+/* ====== D：博物馆画框 ====== */
+/* ========================================================= */
+/* 设计提案：width: 280px, padding: 24px 24px 80px（米白留白+黑框+白衬）*/
+/* 画框 4:5 照片，黑框透明叠加在照片上，标签区紧跟照片下方 */
+/* 整体比例 3:4 */
+/* 风格特点：博物馆展品感，米白留白 + 黑色画框 */
+.share-card-preview.style-d {
+  background: #fafaf5; padding: 4% 4% 8%;  /* 米白底，留白 */
+  aspect-ratio: 3/4;  /* 宽高比 3:4 */
+}
+.style-d .card-photo-layer {
+  position: relative;  /* 相对定位 */
+  aspect-ratio: 4/5;  /* 照片 4:5 */
+  width: 100%; height: auto; top: auto; left: auto; bottom: auto; right: auto;  /* 重置定位 */
+}
+/* 画框：黑框+白色内衬在照片下方（z-index:1）*/
+.style-d .card-frame {
+  display: block;  /* 启用 */
+  position: absolute; top: 3%; left: 3%; right: 3%;  /* 铺满照片区域 */
+  aspect-ratio: 4/5;  /* 与照片同比例 */
+  border: 1.5px solid #1a1a1a;  /* 黑色画框 */
+  padding: 8%;  /* 内衬留白 */
+  background: #fff;  /* 白色内衬 */
+  pointer-events: none;  /* 禁止鼠标事件 */
+  z-index: 1;  /* 层级 1，在照片之下 */
+}
+/* 照片层：z-index 提高到画框之上，避免被白边遮挡 */
+.style-d .card-photo-layer {
+  z-index: 3 !important;  /* !important 强制提升层级 */
+}
+/* 标签区：紧跟照片下方，横线分隔 */
+.style-d .card-poem-area {
+  display: block;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 2%; left: 7%; right: 7%;  /* 距底 2%，左右 7% */
+  border-top: 1px solid #d0c8b8;  /* 顶部横线分隔 */
+  padding-top: 2%;  /* 顶部内边距 2% */
+}
+.style-d .card-poem-title {
+  display: block;  /* 块级 */
+  font-family: 'STKaiti','KaiTi',serif;  /* 楷体 */
+  font-size: 12px; color: #2a2520;  /* 字号 12px */
+  letter-spacing: 1px; margin-bottom: 2px;  /* 字间距 1px */
+}
+.style-d .card-poem-text {
+  font-size: 11px; color: #2a2520; line-height: 1.5;  /* 字号 11px */
+}
+.style-d .card-poem-meta {
+  font-size: 8px; color: #888; margin-top: 2px;  /* 极小灰字 */
+}
+/* 头像：标签区右侧 */
+.style-d .card-figure {
+  display: flex;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 2%; right: calc(7% + 32px);  /* 距底 2%，距右 7%+32px（留 QR 空间） */
+  flex-direction: row; gap: 4px; align-items: center;  /* 横向 */
+}
+.style-d .card-figure-img {
+  width: 20px; height: 20px; border-radius: 50%;  /* 20×20px 圆形 */
+  border: 1px solid #888;  /* 灰边 */
+}
+.style-d .card-figure-name { display: none; }  /* 不显示作者名 */
+/* 二维码：标签区最右 */
+.style-d .card-qr-wrap {
+  display: flex;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 2%; right: 7%;  /* 距底 2%，距右 7% */
+}
+.style-d .card-qr-img {
+  width: 26px; height: 26px; padding: 2px;  /* 26×26px */
+}
+.style-d .card-qr-tip { display: none; }  /* 不显示提示 */
+/* 品牌标识：画框顶部右上角 */
+.style-d .card-brand {
+  display: block;  /* 启用 */
+  position: absolute; top: 1%; right: 4%;  /* 右上角 */
+  font-size: 7px; color: #888; letter-spacing: 3px;  /* 小灰字 */
+  background: rgba(250,250,245,0.8);  /* 半透明米白底 */
+  padding: 2px 6px; z-index: 3;  /* 内边距，层级 3 */
+}
+.style-d .card-top-bar { display: none; }
+.style-d .card-gradient { display: none; }
+.style-d .card-stamp { display: none; }
+
+
+/* ========================================================= */
+/* ====== E：旅行明信片 ====== */
+/* ========================================================= */
+/* 设计提案：width: 300px, padding: 0（牛皮纸底色+4:3照片+邮票）*/
+/* 照片 4:3，右上邮票含QR，诗句在底部，头像左下 */
+/* 整体比例 3:4 */
+/* 风格特点：旅行明信片感，牛皮纸底 + 邮票装饰 */
+.share-card-preview.style-e {
+  background: linear-gradient(180deg, #f4ead4 0%, #ede0c0 100%);  /* 牛皮纸渐变底 */
+  padding: 0;  /* 无内边距 */
+  aspect-ratio: 3/4;  /* 宽高比 3:4 */
+}
+.style-e .card-photo-layer {
+  position: relative;  /* 相对定位 */
+  aspect-ratio: 4/3;  /* 照片 4:3 横向 */
+  width: 100%; height: auto; top: auto; left: auto; bottom: auto; right: auto;  /* 重置定位 */
+}
+/* 邮票：右上角，内嵌二维码 */
+.style-e .card-stamp {
+  display: flex;  /* 启用 */
+  flex-direction: column;  /* 纵向 */
+  align-items: center;  /* 居中 */
+  justify-content: center;  /* 居中 */
+  position: absolute;  /* 绝对定位 */
+  top: 3%; right: 4%;  /* 右上角 */
+  width: 16%; aspect-ratio: 5/6;  /* 宽度 16%，比例 5:6 */
+  background: #fff;  /* 白底 */
+  border: 1px dashed #c9a96e;  /* 金色虚线边（邮票齿孔感） */
+  font-size: 7px; color: #6b4423;  /* 极小棕字 */
+  padding: 3px; text-align: center;  /* 内边距，居中 */
+  letter-spacing: 1px;  /* 字间距 1px */
+  z-index: 2;  /* 层级 2 */
+}
+.style-e .card-stamp-qr {
+  width: 75%; height: auto; aspect-ratio: 1;  /* 75% 宽，1:1 比例 */
+  background: #fff;  /* 白底 */
+}
+/* 诗句区：照片下方，横线分隔，留更多空间 */
+.style-e .card-poem-area {
+  display: block;  /* 启用 */
+  position: absolute;  /* 绝对定位 */
+  bottom: 8%; left: 6%; right: 6%;  /* 距底 8%，左右 6% */
+  padding: 6% 0 4%;  /* 上下内边距 */
+  border-top: 1px solid #c9a96e;  /* 金色横线分隔 */
+}
+.style-e .card-poem-title {
+  display: block;  /* 块级 */
+  font-family: 'STKaiti','KaiTi',serif;  /* 楷体 */
+  font-size: 14px; color: #3a2818;  /* 字号 14px，深棕 */
+  letter-spacing: 1px; margin-bottom: 4px;  /* 字间距 1px */
+}
+.style-e .card-poem-text {
+  font-size: 13px; color: #3a2818; line-height: 1.7;  /* 字号 13px，深棕 */
+}
+.style-e .card-poem-meta {
+  display: inline-block;  /* 行内块 */
+  font-size: 9px; color: #6b4423; letter-spacing: 2px; margin-top: 4px;  /* 棕色小字 */
+}
+/* 头像+品牌：移到右侧，头像在左品牌在右 */
+.style-e .card-figure {
+  display: flex;  /* 启用 */
+  position: absolute; bottom: 2%; right: 6%;  /* 距底 2%，距右 6% */
+  flex-direction: row; gap: 6px; align-items: center;  /* 横向 */
+}
+.style-e .card-figure-img {
+  width: 20px; height: 20px; border-radius: 50%;  /* 20×20px 圆形 */
+  border: 1px solid #c9a96e;  /* 金边 */
+}
+.style-e .card-figure-name {
+  font-size: 9px; color: #6b4423;  /* 棕色小字 */
+}
+.style-e .card-brand {
+  display: block;  /* 启用 */
+  position: absolute; bottom: 2%; right: calc(6% + 70px);  /* 距底 2%，距右 6%+70px */
+  font-family: 'STKaiti',serif;  /* 楷体 */
+  font-size: 9px; color: #6b4423; letter-spacing: 3px;  /* 棕色，字间距 3px */
+  font-weight: 700;  /* 加粗 */
+  white-space: nowrap;  /* 不换行 */
+}
+/* 隐藏不用的元素 */
+.style-e .card-qr-wrap { display: none; }
+.style-e .card-top-bar { display: none; }
+.style-e .card-gradient { display: none; }
+.style-e .card-frame { display: none; }
+
+
+/* ========================================================= */
+/* ====== F：杂志大片 ====== */
+/* ========================================================= */
+/* 设计提案：width: 280px, aspect-ratio: 3/4.5（全屏+上下渐变）*/
+/* 风格特点：时尚杂志感，全屏照片 + 上下渐变 + 大字诗句 */
+.share-card-preview.style-f {
+  background: #000; border-radius: 0;  /* 黑底，无圆角 */
+  aspect-ratio: 3/4.5;  /* 宽高比 3:4.5 */
+}
+.style-f .card-photo-layer {
+  inset: 0;  /* 铺满 */
+}
+/* 上下渐变遮罩：上 40% 黑 → 透明 → 下 70% 黑 */
+.style-f .card-gradient {
+  display: block;  /* 启用 */
+  position: absolute; inset: 0;  /* 铺满 */
+  background: linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 30%, transparent 60%, rgba(0,0,0,0.7) 100%);  /* 上下渐变 */
+}
+/* 顶部栏：VOL.XXVI + logo，杂志期刊感 */
+.style-f .card-top-bar {
+  display: flex;  /* 启用 */
+  position: absolute; top: 0; left: 0; right: 0;  /* 顶部铺满 */
+  padding: 14px 18px;  /* 内边距 */
+  justify-content: space-between; align-items: center;  /* 两端对齐 */
+  color: #fff;  /* 白字 */
+  z-index: 2;  /* 层级 2 */
+}
+.style-f .card-top-logo {
+  font-size: 9px; letter-spacing: 3px; font-weight: 600;  /* 小字 logo */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 阴影 */
+}
+/* 顶部栏前缀：VOL.XXVI 期刊号 */
+.style-f .card-top-bar::before {
+  content: 'VOL.XXVI';  /* 期刊号 */
+  font-size: 9px; letter-spacing: 3px;  /* 小字，字间距 3px */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 阴影 */
+}
+/* 诗句区：底部偏上，大字 */
+.style-f .card-poem-area {
+  display: block;  /* 启用 */
+  position: absolute; bottom: 65px; left: 0; right: 0;  /* 距底 65px */
+  padding: 20px 20px 10px; color: #fff;  /* 内边距，白字 */
+  z-index: 2;  /* 层级 2 */
+}
+.style-f .card-poem-text {
+  font-family: 'STKaiti',serif;  /* 楷体 */
+  font-size: 18px; line-height: 1.8; margin-bottom: 6px;  /* 大字 18px */
+  letter-spacing: 2px;  /* 字间距 2px */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 阴影 */
+}
+.style-f .card-poem-meta {
+  font-size: 10px; letter-spacing: 2px;  /* 小字 */
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);  /* 阴影 */
+}
+/* 头像和二维码：底部右下各50×50，QR在左头像在右 */
+.style-f .card-figure {
+  display: flex;  /* 启用 */
+  position: absolute; bottom: 10px; right: 20px;  /* 距底 10px，距右 20px */
+  flex-direction: row; gap: 10px; align-items: center;  /* 横向 */
+  z-index: 2;  /* 层级 2 */
+}
+.style-f .card-figure-img {
+  width: 50px; height: 50px; border-radius: 50%;  /* 50×50px 圆形 */
+  border: 2px solid #fff;  /* 白边 */
+}
+.style-f .card-figure-name { display: none; }  /* 不显示作者名 */
+.style-f .card-qr-wrap {
+  display: flex;  /* 启用 */
+  position: absolute; bottom: 10px; right: 80px;  /* 距底 10px，距右 80px（头像左侧） */
+  z-index: 2;  /* 层级 2 */
+}
+.style-f .card-qr-img {
+  width: 50px; height: 50px; padding: 4px;  /* 50×50px */
+  background: #fff; border-radius: 4px;  /* 白底圆角 */
+}
+.style-f .card-qr-tip { display: none; }  /* 不显示提示 */
+/* 隐藏不用的元素 */
+.style-f .card-poem-title { display: none; }
+.style-f .card-top-avatar { display: none; }
+.style-f .card-brand { display: none; }
+.style-f .card-frame { display: none; }
+.style-f .card-stamp { display: none; }
+
+
+/* ---------- 样式切换控件：6 个风格按钮横向滚动 ---------- */
+.style-switcher {
+  display: flex;  /* flex 布局 */
+  gap: 6px;  /* 间距 6px */
+  padding: 0 16px;  /* 左右内边距 16px */
+  margin-bottom: 12px;  /* 下边距 12px */
+  overflow-x: auto;  /* 横向滚动 */
+  -webkit-overflow-scrolling: touch;  /* iOS 惯性滚动 */
+}
+.style-switcher::-webkit-scrollbar { display: none; }  /* 隐藏滚动条 */
+/* 单个样式按钮：药丸形 */
+.style-btn {
+  flex-shrink: 0;  /* 不收缩 */
+  padding: 6px 12px;  /* 内边距 */
+  border: 1.5px solid var(--ink-lighter);  /* 浅墨色描边 */
+  border-radius: 20px;  /* 圆角 20px（药丸形） */
+  background: transparent;  /* 透明底 */
+  color: var(--ink-light);  /* 墨色浅 */
+  font-family: 'STSong', 'SimSun', serif;  /* 宋体 */
+  font-size: 12px;  /* 字号 12px */
+  cursor: pointer;  /* 手型光标 */
+  transition: all 0.3s;  /* 0.3s 过渡 */
+  white-space: nowrap;  /* 不换行 */
+}
+/* 激活态：朱砂红描边 + 朱砂红字 + 淡红底 */
+.style-btn.active {
+  border-color: var(--vermillion);  /* 朱砂红描边 */
+  color: var(--vermillion);  /* 朱砂红字 */
+  background: rgba(194,59,34,0.06);  /* 淡红底 */
+}
+
+/* 分享行动按钮区：生成卡片 + 分享好友 */
+.share-actions {
+  padding: 0 16px;  /* 左右内边距 16px */
+  display: flex; gap: 12px;  /* flex，间距 12px */
+}
+.share-actions .btn-primary,
+.share-actions .btn-secondary { flex: 1; }  /* 按钮均分宽度 */
+/* 分享提示文字 */
+.share-tip {
+  padding: 20px;  /* 内边距 20px */
+  text-align: center;  /* 居中 */
+  color: var(--ink-lighter); font-size: 12px;  /* 墨色更浅，小字 */
+}
+
+</style>
+</head>
+<!-- ============================================================ -->
+<!-- ============ <body> 主体入口 ============================== -->
+<!-- ============================================================ -->
+<!-- 作用范围：H5 应用的所有可见内容与脚本均位于 body 内 -->
+<!-- 结构划分：1) 隐藏文件选择器 2) app-container 主容器（含 3 个 Tab 页 + 公共底部导航 + 4 个子页面）3) script 脚本 -->
+<body>
+
+<!-- ============================================================ -->
+<!-- ========= 隐藏的文件选择器（用于拍照/选图） ============== -->
+<!-- ============================================================ -->
+<!-- 作用范围：全局隐藏 input，供 JS 通过 triggerPhotoInput() 程序化触发 -->
+<!-- 设计原因：原生 input[type=file] 样式难以定制，故隐藏后用自定义按钮触发 click -->
+<!-- accept="image/*"：限制只能选择图片类型（系统会弹出拍照/相册选项） -->
+<input type="file" id="photo-input" accept="image/*" style="display:none">
+
+<!-- ============================================================ -->
+<!-- ========= App 容器：模拟移动端"手机壳"视图 =============== -->
+<!-- ============================================================ -->
+<!-- 作用范围：包裹 3 个 Tab 页 + 公共底部导航 + 4 个子页面的最外层容器 -->
+<!-- 设计目的：在桌面浏览器中也能呈现移动端 H5 的窄屏效果（最大宽度 420px） -->
+<!-- 内部层级：Tab 页与子页面通过 z-index 叠放，子页面在 Tab 之上 -->
+<div class="app-container">
+
+  <!-- ========================================================== -->
+  <!-- ========== Tab 1: 首页（应用主入口页）===================== -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：应用启动后默认展示的 Tab 页，id="tab-home" -->
+  <!-- 功能：展示品牌 Logo、水墨山水场景、拍照/相册入口按钮 -->
+  <!-- active 类：默认激活显示，与 switchTab() 配合控制显隐 -->
+  <div class="tab-page active" id="tab-home">
+
+    <!-- --------- 水墨背景层：3 个墨晕装饰 --------- -->
+    <!-- 作用范围：仅本 Tab 页背景；纯装饰，不响应交互 -->
+    <div class="ink-bg">
+      <div class="ink-splash"></div>  <!-- 墨晕 1 -->
+      <div class="ink-splash"></div>  <!-- 墨晕 2 -->
+      <div class="ink-splash"></div>  <!-- 墨晕 3 -->
+    </div>
+
+    <!-- --------- 首页顶部：品牌 Logo 区域 --------- -->
+    <!-- 作用范围：展示"古今同月"主标题与副标题，建立品牌识别 -->
+    <div class="home-header">
+      <div class="home-logo">
+        <div class="home-logo-main">古今同月</div>            <!-- 主标题：毛笔字风格大标题 -->
+        <div class="home-logo-sub">一 图 · 一 诗 · 一 古 人</div>  <!-- 副标题：点明产品核心理念 -->
+      </div>
+    </div>
+
+    <!-- --------- 首页主场景：水墨山水 + 明月 + 飞鸟 + 诗词横幅 --------- -->
+    <!-- 作用范围：页面核心视觉区，营造"古今同月"的诗意氛围 -->
+    <div class="home-scene">
+      <div class="home-scene-bg">
+
+        <!-- 远山层：3 层叠加，营造层次感（mt = mountain） -->
+        <div class="mountain-layer">
+          <div class="mt mt-1"></div>  <!-- 远山 1：最远，颜色最浅 -->
+          <div class="mt mt-2"></div>  <!-- 远山 2：中景 -->
+          <div class="mt mt-3"></div>  <!-- 远山 3：近景，颜色最深 -->
+        </div>
+        <div class="water-layer"></div>  <!-- 水面层：渐变模拟水面倒影 -->
+
+        <div class="home-moon"></div>  <!-- 明月：圆形发光元素，呼应"同月"主题 -->
+
+        <!-- 飞鸟：2 只 emoji 飞鸟，增加动态感（注意：项目记忆约定首页去除过多动画，此处保留静态装饰） -->
+        <div class="bird bird-1">&#x1F426;</div>  <!-- 飞鸟 1 -->
+        <div class="bird bird-2">&#x1F426;</div>  <!-- 飞鸟 2 -->
+
+        <!-- 诗词横幅：叠加在水墨山水画面上，点题"古今同月" -->
+        <div class="home-poem-banner">
+          <div class="home-poem-text">今人不见古时月，今月曾经照古人。</div>  <!-- 诗句正文 -->
+          <div class="home-poem-author">—— 李白《把酒问月》</div>  <!-- 出处 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- --------- 首页底部操作区：功能引导 + 拍照/相册按钮 --------- -->
+    <!-- 作用范围：用户主要交互入口，两个按钮均调用 triggerPhotoInput() 触发文件选择 -->
+    <div class="home-actions">
+      <p class="home-desc">拍下一张照片，AI为你从千年诗海中<br>寻找最匹配的那一句诗词</p>  <!-- 功能引导文案 -->
+      <!-- 主按钮：拍照识别（调用系统相机） -->
+      <button class="btn-primary" onclick="triggerPhotoInput()">
+        <span>&#x1F4F7;</span> 拍照识别
+      </button>
+      <!-- 次按钮：从相册选择（调用系统相册） -->
+      <button class="btn-secondary" onclick="triggerPhotoInput()">
+        <span>&#x1F5BC;</span> 从相册选择
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== Tab 2: 结果页（识别后展示匹配诗词）============= -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：用户拍照识别后展示匹配结果的 Tab 页，id="tab-result" -->
+  <!-- 双状态切换：result-with-data（有结果）/ result-empty（空状态），通过 JS 控制 display -->
+  <div class="tab-page" id="tab-result">
+
+    <!-- --------- 有结果状态：展示匹配诗词详情 --------- -->
+    <!-- 作用范围：当 AppState.currentResult 存在时显示，由 fillResultPage() 填充内容 -->
+    <div id="result-with-data">
+
+      <!-- 顶部主视觉区：戏曲形象 + 匹配分数 + 诗词主信息 -->
+      <div class="result-hero">
+        <!-- 背景层：戏曲人物形象（CSS 绘制的 Q 版戏曲小人） -->
+        <div class="result-hero-bg">
+          <div class="opera-figure">
+            <div class="opera-figure-body"></div>  <!-- 戏曲人物身体（纯 CSS 绘制） -->
+            <span class="opera-figure-name">李白 · 戏曲形象</span>  <!-- 形象说明文字 -->
+          </div>
+        </div>
+        <!-- 内容层：匹配分数 + 诗词标题/作者/正文/标签 -->
+        <div class="result-hero-content">
+          <!-- 匹配分数区：环形分数 + 匹配等级徽章 -->
+          <div class="result-match-score">
+            <div class="score-ring">95%</div>  <!-- 分数环：JS 会动态填充实际匹配度 -->
+            <span class="match-badge match-high">&#x2605; 极高匹配</span>  <!-- 匹配等级徽章（match-high/mid/low 三档） -->
+          </div>
+          <div class="result-poem-title">《静夜思》</div>      <!-- 诗词标题（JS 填充） -->
+          <div class="result-poem-author">唐 · 李白</div>      <!-- 朝代 + 作者（JS 填充） -->
+          <!-- 诗词正文：<br> 用于换行，保持两联结构 -->
+          <div class="result-poem-line">
+            "床前明月光，疑是地上霜。<br>举头望明月，低头思故乡。"
+          </div>
+          <!-- 主题标签：4 个标签，不同颜色代表不同类别 -->
+          <div class="result-tags">
+            <span class="tag tag-vermillion">夜晚</span>  <!-- 朱砂红标签 -->
+            <span class="tag tag-gold">明月</span>        <!-- 金色标签 -->
+            <span class="tag">思乡</span>                <!-- 默认墨色标签 -->
+            <span class="tag">秋天</span>                <!-- 默认墨色标签 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 操作按钮区：3 个层级按钮（主/次/文本） -->
+      <div class="result-actions">
+        <!-- 主按钮：跳转到诗词详情子页面（朗读/赏析） -->
+        <button class="btn-primary" onclick="openSubPage('sub-poem')">
+          &#x1F50A; 查看详情 &amp; 朗读
+        </button>
+        <!-- 次按钮行：作者介绍 + 生成分享卡 -->
+        <div class="btn-row">
+          <button class="btn-secondary" onclick="openSubPage('sub-author')">
+            &#x1F9D9; 作者介绍
+          </button>
+          <button class="btn-secondary" onclick="openSubPage('sub-share')">
+            &#x1F4F8; 生成分享卡
+          </button>
+        </div>
+        <!-- 文本按钮：再来一张（重新拍照） -->
+        <button class="btn-text" style="text-align:center;" onclick="triggerPhotoInput()">
+          &#x1F504; 再来一张
+        </button>
+      </div>
+
+      <!-- 更多匹配诗词区：横向滑动列表，展示 Top 5 匹配结果 -->
+      <div class="more-section">
+        <div class="more-title">
+          <span>&#x1F50D;</span>                            <!-- 放大镜图标 -->
+          <span>更多匹配诗词</span>                          <!-- 区域标题 -->
+          <span style="font-size:12px; color:var(--ink-lighter); font-weight:400;">（滑动浏览）</span>  <!-- 提示文字 -->
+        </div>
+        <!-- 匹配列表：每个 more-item 是一条匹配结果，点击进入详情 -->
+        <div class="more-list">
+          <!-- 第 2 名匹配项 -->
+          <div class="more-item" onclick="openSubPage('sub-poem')">
+            <div class="more-item-rank">#2 匹配 87%</div>     <!-- 排名 + 分数 -->
+            <div class="more-item-title">《月下独酌》</div>   <!-- 诗词标题 -->
+            <div class="more-item-author">唐 · 李白</div>     <!-- 朝代 + 作者 -->
+            <div class="more-item-score" style="color:var(--vermillion);">&#x2605; 87%</div>  <!-- 星级分数（朱砂红表示高分） -->
+          </div>
+          <!-- 第 3 名匹配项 -->
+          <div class="more-item">
+            <div class="more-item-rank">#3 匹配 72%</div>
+            <div class="more-item-title">《望月怀远》</div>
+            <div class="more-item-author">唐 · 张九龄</div>
+            <div class="more-item-score" style="color:var(--gold);">&#x2605; 72%</div>  <!-- 金色表示中高分 -->
+          </div>
+          <!-- 第 4 名匹配项 -->
+          <div class="more-item">
+            <div class="more-item-rank">#4 匹配 65%</div>
+            <div class="more-item-title">《十五夜望月》</div>
+            <div class="more-item-author">唐 · 王建</div>
+            <div class="more-item-score" style="color:var(--gold);">&#x2605; 65%</div>
+          </div>
+          <!-- 第 5 名匹配项 -->
+          <div class="more-item">
+            <div class="more-item-rank">#5 匹配 58%</div>
+            <div class="more-item-title">《水调歌头》</div>
+            <div class="more-item-author">宋 · 苏轼</div>
+            <div class="more-item-score" style="color:var(--cyan);">&#x2605; 58%</div>  <!-- 青色表示中低分 -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- --------- 空状态：用户尚未拍照 --------- -->
+    <!-- 作用范围：当 AppState.currentResult 为空时显示，引导用户去首页拍照 -->
+    <div id="result-empty" class="result-empty" style="display:none;">
+      <div class="result-empty-icon">&#x1F50D;</div>  <!-- 放大镜图标 -->
+      <div class="result-empty-text">还没有寻诗记录<br>去首页拍一张照片吧</div>  <!-- 引导文案 -->
+      <!-- 跳转按钮：调用 switchTab() 切换到首页 -->
+      <button class="btn-primary" style="max-width:200px;" onclick="switchTab('tab-home')">
+        &#x1F4F7; 去拍照
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== Tab 3: 寻诗录（历史记录列表）=================== -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：展示用户所有识别历史记录的 Tab 页，id="tab-history" -->
+  <!-- 功能：浏览历史寻诗记录、删除记录（含批量删除模式） -->
+  <!-- 数据来源：由 loadHistoryList() 从后端拉取并渲染到 .history-list -->
+  <div class="tab-page" id="tab-history">
+
+    <!-- --------- 顶部栏：页面标题 + 删除模式切换按钮 --------- -->
+    <!-- 作用范围：寻诗录页面顶部导航条 -->
+    <div class="top-bar" style="border-bottom:none;">
+      <div class="top-bar-left">
+        <!-- 页面标题：使用行楷字体，符合古风调性 -->
+        <span class="page-title" style="font-family:'STXingkai','STKaiti','KaiTi',cursive; font-size:22px;">寻诗录</span>
+      </div>
+      <div class="top-bar-right">
+        <!-- 删除模式切换按钮：点击 toggleDeleteMode() 进入/退出批量删除模式 -->
+        <button class="btn-icon" id="history-delete-btn" title="管理记录" onclick="toggleDeleteMode()">&#x1F5D1;</button>
+      </div>
+    </div>
+
+    <!-- --------- 删除确认栏：批量删除模式下显示 --------- -->
+    <!-- 作用范围：仅在删除模式下可见，由 toggleDeleteMode() 控制 display -->
+    <!-- 显示已选数量 + 取消/确认按钮 -->
+    <div class="delete-confirm-bar" id="delete-confirm-bar">
+      <span style="font-size:13px; color:var(--ink);">选中 <span id="delete-count">0</span> 条</span>  <!-- 动态显示已选数量 -->
+      <div style="display:flex; gap:10px;">
+        <button class="btn-text" onclick="cancelDeleteMode()" style="color:var(--ink-light);">取消</button>  <!-- 取消按钮 -->
+        <button class="btn-primary" onclick="confirmDelete()" style="padding:6px 16px; font-size:13px; width:auto;">确认删除</button>  <!-- 确认删除按钮 -->
+      </div>
+    </div>
+
+    <!-- --------- 历史记录列表容器 --------- -->
+    <!-- 作用范围：动态渲染历史记录卡片，由 loadHistoryList() 填充 -->
+    <div class="history-list"></div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== 公共底部导航栏（3 个 Tab 切换）================= -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：所有 Tab 页共享的底部导航栏，固定在视口底部 -->
+  <!-- 设计目的：Tab 页之间的主要切换入口，配合 switchTab() 函数使用 -->
+  <!-- 3 个 Tab：首页 / 结果 / 寻诗录；active 类标记当前激活项 -->
+  <div class="bottom-nav">
+    <!-- 首页 Tab：data-tab 属性用于 switchTab() 识别目标 -->
+    <button class="nav-item active" data-tab="tab-home" onclick="switchTab('tab-home')">
+      <span class="nav-icon">&#x1F3E0;</span>  <!-- 房屋图标 -->
+      <span>首页</span>
+    </button>
+    <!-- 结果 Tab -->
+    <button class="nav-item" data-tab="tab-result" onclick="switchTab('tab-result')">
+      <span class="nav-icon">&#x1F50D;</span>  <!-- 放大镜图标 -->
+      <span>结果</span>
+    </button>
+    <!-- 寻诗录 Tab -->
+    <button class="nav-item" data-tab="tab-history" onclick="switchTab('tab-history')">
+      <span class="nav-icon">&#x1F4DC;</span>  <!-- 卷轴图标 -->
+      <span>寻诗录</span>
+    </button>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== 子页面 1: 识别中（加载动画页）=================== -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：用户拍照后展示识别进度的全屏子页面，id="sub-loading" -->
+  <!-- 显示时机：onPhotoSelected() 上传图片后调用 openSubPage('sub-loading') -->
+  <!-- 关闭时机：识别完成后由 loadingFinished() 跳转到结果页，或用户点击"跳过" -->
+  <!-- 子页面层级：通过 z-index 叠在 Tab 页之上，由 AppState.subPageStack 管理入栈/出栈 -->
+  <div class="sub-page" id="sub-loading">
+
+    <!-- --------- 加载动画包装层 --------- -->
+    <!-- 作用范围：包含所有加载动画元素（墨晕、明月、进度条、跳过按钮） -->
+    <div class="loading-wrap">
+      <!-- 墨晕扩散动画：3 个墨晕依次扩散，营造水墨晕染效果 -->
+      <div class="ink-spread"></div>  <!-- 墨晕 1 -->
+      <div class="ink-spread"></div>  <!-- 墨晕 2 -->
+      <div class="ink-spread"></div>  <!-- 墨晕 3 -->
+
+      <div class="loading-moon"></div>  <!-- 明月：呼应"古今同月"主题 -->
+      <div class="loading-title">正在品味您的意境</div>  <!-- 加载主文案 -->
+      <!-- 加载点动画：3 个圆点依次闪烁，表示处理中 -->
+      <div class="loading-dots">
+        <div class="loading-dot"></div>  <!-- 圆点 1 -->
+        <div class="loading-dot"></div>  <!-- 圆点 2 -->
+        <div class="loading-dot"></div>  <!-- 圆点 3 -->
+      </div>
+      <div class="loading-desc">图像识别 · 诗海搜索 · 意境匹配</div>  <!-- 流程说明：3 个步骤 -->
+      <!-- 进度条：CSS 动画驱动，模拟识别进度 -->
+      <div class="loading-progress">
+        <div class="loading-progress-bar">  <!-- 进度条外框 -->
+          <div class="loading-progress-fill"></div>  <!-- 进度条填充（CSS 动画宽度变化） -->
+        </div>
+      </div>
+      <!-- 跳过按钮：演示用，点击直接调用 loadingFinished() 跳过等待 -->
+      <button class="loading-skip" onclick="loadingFinished()">
+        跳过（演示用）
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== 子页面 2: 诗词详情（赏析+朗读）================== -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：展示当前匹配诗词完整内容的子页面，id="sub-poem" -->
+  <!-- 功能：诗词朗读（Web Speech API）、意境赏析、上一首/下一首导航 -->
+  <!-- 数据绑定：内容随 AppState.currentPoemIndex 变化，由 refreshPoemDetail() 填充 -->
+  <!-- 循环导航：第一首的上一首 = 最后一首；最后一首的下一首 = 第一首 -->
+  <div class="sub-page" id="sub-poem">
+
+    <!-- --------- 顶部栏：返回按钮 + 标题 + 分享入口 --------- -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <!-- 返回按钮：调用 closeSubPage() 弹出状态栈，返回上一页 -->
+        <button class="back-btn" onclick="closeSubPage()">&#x2190;</button>
+        <span class="page-title">诗词赏析</span>
+      </div>
+      <div class="top-bar-right">
+        <!-- 分享按钮：跳转到分享卡片子页面 -->
+        <button class="btn-text" onclick="openSubPage('sub-share')">分享</button>
+      </div>
+    </div>
+
+    <!-- --------- 详情头部：诗词标题 + 作者 + 匹配度 --------- -->
+    <div class="poem-detail-header">
+      <div class="poem-detail-bg">
+        <div class="result-poem-title">《静夜思》</div>  <!-- 诗词标题（JS 填充） -->
+        <div class="result-poem-author">唐 · 李白</div>  <!-- 朝代 + 作者（JS 填充） -->
+        <span class="match-badge match-high" style="margin-top:8px;">&#x2605; 极高匹配 95%</span>  <!-- 匹配度徽章 -->
+      </div>
+    </div>
+
+    <!-- --------- 详情主体：朗读 + 全文 + 赏析 + 导航 --------- -->
+    <div class="poem-detail-body">
+
+      <!-- 朗读控制区：播放按钮 + 朗读说明 -->
+      <div class="audio-control">
+        <!-- 播放按钮：调用 toggleSpeakPoem() 切换朗读/停止 -->
+        <button class="audio-play-btn" onclick="toggleSpeakPoem()">&#x25B6;</button>
+        <div class="audio-info">
+          <div class="audio-info-title">&#x1F50A; 古风朗读</div>          <!-- 朗读功能标题 -->
+          <div class="audio-info-desc">点击播放 · 浏览器内置语音合成</div>  <!-- 朗读说明（基于 Web Speech API） -->
+        </div>
+      </div>
+
+      <!-- 诗词全文：按联分两段显示 -->
+      <div class="poem-full-text">
+        <p><span class="poem-line">床前明月光，疑是地上霜。</span></p>  <!-- 上联 -->
+        <p><span class="poem-line">举头望明月，低头思故乡。</span></p>  <!-- 下联 -->
+      </div>
+
+      <div class="divider"></div>  <!-- 分隔线 -->
+
+      <!-- 意境赏析区：AI 生成的诗词赏析文字 -->
+      <div class="appreciation">
+        <div class="appreciation-title">&#x1F4D6; 意境赏析</div>  <!-- 区域标题 -->
+        <!-- 赏析正文：解释诗词意境与用户照片的匹配度 -->
+        <div class="appreciation-text">
+          这首诗以"明月"为引，将月光喻为秋霜，营造出清冷孤寂的氛围。
+          诗人"举头望月"的动态，引出"低头思乡"的静态，一仰一俯间，
+          将游子思乡之情娓娓道来。您照片中的月夜场景，
+          与诗中"明月光""思故乡"的意境高度契合，匹配度达到95%。
+        </div>
+      </div>
+
+      <!-- 作者介绍入口按钮：跳转到作者子页面，并加载当前诗作者信息 -->
+      <div class="result-actions" style="padding:0;">
+        <button class="btn-secondary" onclick="openSubPage('sub-author'); loadAuthorInfo(PoemList[AppState.currentPoemIndex] && PoemList[AppState.currentPoemIndex].author)">
+          &#x1F9D9; 了解诗人生平
+        </button>
+      </div>
+
+      <!-- --------- 上一首 / 下一首导航（循环导航）--------- -->
+      <!-- 设计目的：在诗词详情页内浏览所有匹配诗词，无需返回结果页 -->
+      <!-- 循环逻辑：goPrevPoem()/goNextPoem() 中实现首尾相连 -->
+      <div class="poem-nav">
+        <!-- 上一首按钮：调用 goPrevPoem() 切换到上一首诗 -->
+        <button class="btn-secondary btn-poem-nav" onclick="goPrevPoem()">
+          <span>&#x2190;</span>  <!-- 左箭头 -->
+          <div class="poem-nav-info">
+            <div class="poem-nav-label">上一首</div>  <!-- 标签 -->
+            <div class="poem-nav-title" id="prev-poem-title">月下独酌</div>  <!-- 上一首标题（JS 填充） -->
+          </div>
+        </button>
+        <!-- 下一首按钮：调用 goNextPoem() 切换到下一首诗 -->
+        <button class="btn-secondary btn-poem-nav" onclick="goNextPoem()">
+          <div class="poem-nav-info">
+            <div class="poem-nav-label">下一首</div>  <!-- 标签 -->
+            <div class="poem-nav-title" id="next-poem-title">望月怀远</div>  <!-- 下一首标题（JS 填充） -->
+          </div>
+          <span>&#x2192;</span>  <!-- 右箭头 -->
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== 子页面 3: 作者介绍（诗人生平）=================== -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：展示当前诗词作者详细信息的子页面，id="sub-author" -->
+  <!-- 数据来源：由 loadAuthorInfo() 从后端获取并渲染到页面 -->
+  <!-- 硬约束：作者代表作品区不显示匹配度（项目记忆约定） -->
+  <div class="sub-page" id="sub-author">
+
+    <!-- --------- 顶部栏：返回按钮 + 标题 + 收藏按钮 --------- -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <button class="back-btn" onclick="closeSubPage()">&#x2190;</button>  <!-- 返回按钮 -->
+        <span class="page-title">诗人介绍</span>
+      </div>
+      <div class="top-bar-right">
+        <button class="btn-icon">&#x2665;</button>  <!-- 收藏按钮（爱心图标） -->
+      </div>
+    </div>
+
+    <!-- --------- 作者主视觉区：Q 版头像 + 姓名 + 朝代字号 --------- -->
+    <div class="author-hero">
+      <div class="author-avatar"></div>  <!-- Q 版头像（CSS 绘制或背景图） -->
+      <div class="author-name">李白</div>  <!-- 作者姓名（JS 填充） -->
+      <div class="author-sub">唐 · 字太白 · 号青莲居士</div>  <!-- 朝代 + 字 + 号（JS 填充） -->
+    </div>
+
+    <!-- --------- 作者信息网格：4 项基本信息（朝代/籍贯/生卒/身份）--------- -->
+    <!-- 作用范围：以 2x2 网格形式展示作者基本信息 -->
+    <div class="author-info-grid">
+      <div class="author-info-item">
+        <div class="author-info-label">朝&emsp;代</div>  <!-- 字段标签（&emsp; 全角空格对齐） -->
+        <div class="author-info-value">唐代</div>  <!-- 字段值（JS 填充） -->
+      </div>
+      <div class="author-info-item">
+        <div class="author-info-label">籍&emsp;贯</div>
+        <div class="author-info-value">陇西成纪</div>
+      </div>
+      <div class="author-info-item">
+        <div class="author-info-label">生卒年</div>
+        <div class="author-info-value">701年 — 762年</div>
+      </div>
+      <div class="author-info-item">
+        <div class="author-info-label">身&emsp;份</div>
+        <div class="author-info-value">诗人 · 酒仙 · 剑客</div>
+      </div>
+    </div>
+
+    <!-- --------- 代表作品区：仅标题列表，不显示匹配度 --------- -->
+    <!-- 硬约束：根据项目记忆，代表作品区不显示匹配度 -->
+    <div class="author-works">
+      <div class="author-works-title">
+        <span>&#x1F4DC;</span> 代表作品  <!-- 区域标题（卷轴图标） -->
+      </div>
+      <!-- 作品列表：每项只显示标题，无匹配度信息 -->
+      <div class="work-item">
+        <div class="work-item-title">《静夜思》</div>  <!-- 作品 1 -->
+      </div>
+      <div class="work-item">
+        <div class="work-item-title">《月下独酌》</div>  <!-- 作品 2 -->
+      </div>
+      <div class="work-item">
+        <div class="work-item-title">《望庐山瀑布》</div>  <!-- 作品 3 -->
+      </div>
+    </div>
+
+    <!-- --------- 创作风格赏析区 --------- -->
+    <!-- 作用范围：展示作者创作风格说明，并点明与用户照片意境的关联 -->
+    <div class="appreciation" style="margin:0 16px 24px;">
+      <div class="appreciation-title">创作风格</div>  <!-- 区域标题 -->
+      <div class="appreciation-text">
+        <!-- 风格说明：李白诗风特点 + 与用户照片意境的关联 -->
+        李白的诗以雄奇奔放、飘逸不群著称。
+        善于运用夸张想象，语言清新自然，意境开阔宏大。
+        其月夜诗作尤为经典，以明月寄相思，将个人情感与自然景物完美交融。
+        您照片中的意境，正是李白诗中常见的"月光"与"思乡"主题。
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================== -->
+  <!-- ========== 子页面 4: 分享卡片（6 风格切换）================= -->
+  <!-- ========================================================== -->
+  <!-- 作用范围：生成并预览分享卡片的子页面，id="sub-share" -->
+  <!-- 核心功能：6 种风格切换（A 拍立得 / B Apple引用卡 / C 宽银幕 / D 博物馆 / E 明信片 / F 杂志） -->
+  <!-- 卡片尺寸（严格按设计提案）：A(3:5) / B(3:4) / C(9:5) / D(1:2) / E(3:4) / F(3:4.5) -->
+  <!-- 默认风格：B-Apple 引用卡（项目记忆约定） -->
+  <!-- 必含元素：客户原图、完整诗词内容（含标题）、作者、朝代、Q版作者形象、二维码、"古今同月"logo -->
+  <div class="sub-page" id="sub-share">
+
+    <!-- --------- 顶部栏：返回按钮 + 标题 --------- -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <button class="back-btn" onclick="closeSubPage()">&#x2190;</button>  <!-- 返回按钮 -->
+        <span class="page-title">分享卡片</span>  <!-- 页面标题 -->
+      </div>
+    </div>
+
+    <!-- --------- 样式切换按钮组（6 选 1）--------- -->
+    <!-- 作用范围：6 个按钮对应 6 种卡片风格，data-style 属性标识风格 -->
+    <!-- active 类：标记当前选中风格，默认 B 为 active -->
+    <!-- 切换逻辑：点击调用 switchCardStyle(styleName, this) 切换风格 -->
+    <div class="style-switcher">
+      <button class="style-btn" data-style="style-a" onclick="switchCardStyle('style-a', this)">A 拍立得</button>
+      <button class="style-btn active" data-style="style-b" onclick="switchCardStyle('style-b', this)">B Apple引用卡</button>  <!-- 默认选中 -->
+      <!-- C/D/E 三种风格暂时禁用，后续有空再调整：
+           - 按钮 HTML 保留但加 style="display:none" 隐藏（而非注释掉 DOM），避免后续调整时还要重新写一遍
+           - CSS 规则同样保留（switchCardStyle 函数仍能正常切换）
+           - 后续只需移除 style="display:none" 即可恢复显示 -->
+      <button class="style-btn" data-style="style-c" onclick="switchCardStyle('style-c', this)" style="display:none;">C 宽银幕</button>
+      <button class="style-btn" data-style="style-d" onclick="switchCardStyle('style-d', this)" style="display:none;">D 博物馆</button>
+      <button class="style-btn" data-style="style-e" onclick="switchCardStyle('style-e', this)" style="display:none;">E 明信片</button>
+      <button class="style-btn" data-style="style-f" onclick="switchCardStyle('style-f', this)">F 杂志</button>
+    </div>
+
+    <!-- --------- 卡片预览容器（6 风格共用 HTML，CSS 类名切换风格）--------- -->
+    <!-- 作用范围：所有 6 种风格共用此 DOM 结构，通过切换 class 名（style-a ~ style-f）改变样式 -->
+    <!-- 当前类名：style-b（默认），由 switchCardStyle() 动态切换 -->
+    <!-- 设计约束：预览与生成图片必须保持一致的尺寸和样式 -->
+    <div class="share-card-preview style-b" id="shareCardPreview">
+
+      <!-- 照片层：6 风格共用，通过 background-image 设置用户上传的原图 -->
+      <!-- empty 类：初始无图片状态；有图片时由 JS 移除 empty 并设置 background-image -->
+      <div class="card-photo-layer empty" id="shareCardPhotoLayer"></div>
+
+      <!-- 渐变遮罩：增强诗句文字在照片上的可读性 -->
+      <div class="card-gradient"></div>
+
+      <!-- 顶部栏：品牌 logo + 作者头像 -->
+      <div class="card-top-bar">
+        <span class="card-top-logo">古今同月</span>  <!-- 品牌 logo（左上角） -->
+        <div class="card-top-avatar" id="shareCardTopAvatar"></div>  <!-- 作者头像（右上角，JS 填充） -->
+      </div>
+
+      <!-- 诗句文字区：标题 + 正文 + 作者朝代 -->
+      <!-- 必含元素：完整诗词内容（含标题）、作者、朝代 -->
+      <div class="card-poem-area">
+        <div class="card-poem-title" id="shareCardPoemTitle">静夜思</div>  <!-- 诗词标题（JS 填充） -->
+        <!-- 诗词正文：<br> 换行保持两联结构 -->
+        <div class="card-poem-text" id="shareCardPoemText">床前明月光，疑是地上霜。<br>举头望明月，低头思故乡。</div>
+        <div class="card-poem-meta" id="shareCardPoemMeta">— 唐·李白</div>  <!-- 朝代 + 作者（JS 填充） -->
+      </div>
+
+      <!-- 底部信息栏：Q 版作者形象 + 二维码 -->
+      <!-- 必含元素：Q版作者形象、二维码 -->
+      <div class="card-footer" id="shareCardFooter">
+        <!-- Q 版作者形象区：图片 + 姓名 -->
+        <div class="card-figure">
+          <div class="card-figure-img" id="shareCardFigureImg"></div>  <!-- Q 版形象图（JS 填充） -->
+          <span class="card-figure-name" id="shareCardFigureName">李白</span>  <!-- 作者姓名（JS 填充） -->
+        </div>
+        <!-- 二维码区：占位 SVG 二维码 + 提示文字 -->
+        <div class="card-qr-wrap">
+          <div class="card-qr-img" id="shareCardQrImg">
+            <!-- 占位 SVG 二维码：后续接入后端生成真实二维码 -->
+            <svg viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;">
+              <rect x="0" y="0" width="10" height="10" fill="#000"/>
+              <rect x="3" y="3" width="4" height="4" fill="#fff"/>
+              <rect x="40" y="0" width="10" height="10" fill="#000"/>
+              <rect x="43" y="3" width="4" height="4" fill="#fff"/>
+              <rect x="0" y="40" width="10" height="10" fill="#000"/>
+              <rect x="3" y="43" width="4" height="4" fill="#fff"/>
+              <rect x="16" y="4" width="2" height="2" fill="#000"/>
+              <rect x="22" y="6" width="2" height="2" fill="#000"/>
+              <rect x="18" y="12" width="3" height="2" fill="#000"/>
+              <rect x="26" y="14" width="2" height="2" fill="#000"/>
+              <rect x="32" y="4" width="2" height="2" fill="#000"/>
+              <rect x="14" y="20" width="2" height="2" fill="#000"/>
+              <rect x="20" y="20" width="2" height="2" fill="#000"/>
+              <rect x="26" y="20" width="2" height="2" fill="#000"/>
+              <rect x="32" y="20" width="2" height="2" fill="#000"/>
+              <rect x="38" y="20" width="2" height="2" fill="#000"/>
+              <rect x="18" y="26" width="2" height="2" fill="#000"/>
+              <rect x="24" y="26" width="2" height="2" fill="#000"/>
+              <rect x="30" y="26" width="2" height="2" fill="#000"/>
+              <rect x="18" y="32" width="2" height="2" fill="#000"/>
+              <rect x="24" y="34" width="2" height="2" fill="#000"/>
+              <rect x="30" y="32" width="2" height="2" fill="#000"/>
+              <rect x="14" y="38" width="2" height="2" fill="#000"/>
+              <rect x="20" y="40" width="2" height="2" fill="#000"/>
+              <rect x="26" y="40" width="2" height="2" fill="#000"/>
+              <rect x="32" y="38" width="2" height="2" fill="#000"/>
+              <rect x="38" y="38" width="2" height="2" fill="#000"/>
+              <rect x="44" y="40" width="2" height="2" fill="#000"/>
+              <rect x="40" y="26" width="2" height="2" fill="#000"/>
+              <rect x="44" y="32" width="2" height="2" fill="#000"/>
+            </svg>
+          </div>
+          <span class="card-qr-tip">扫码听朗读</span>  <!-- 二维码说明文字 -->
+        </div>
+      </div>
+
+      <!-- 品牌标识：底部"古今同月"logo 文字 -->
+      <div class="card-brand">古 今 同 月</div>
+
+      <!-- 画框装饰：仅 D-博物馆风格显示，模拟相框效果 -->
+      <div class="card-frame"></div>
+
+      <!-- 邮票装饰：仅 E-明信片风格显示，含二维码 -->
+      <div class="card-stamp">
+        <div class="card-stamp-qr">
+          <!-- 占位 SVG 二维码：与 card-qr-img 一致，后续接入后端生成真实二维码 -->
+          <svg viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;">
+            <rect x="0" y="0" width="10" height="10" fill="#000"/>
+            <rect x="3" y="3" width="4" height="4" fill="#fff"/>
+            <rect x="40" y="0" width="10" height="10" fill="#000"/>
+            <rect x="43" y="3" width="4" height="4" fill="#fff"/>
+            <rect x="0" y="40" width="10" height="10" fill="#000"/>
+            <rect x="3" y="43" width="4" height="4" fill="#fff"/>
+            <rect x="16" y="4" width="2" height="2" fill="#000"/>
+            <rect x="22" y="6" width="2" height="2" fill="#000"/>
+            <rect x="18" y="12" width="3" height="2" fill="#000"/>
+            <rect x="26" y="14" width="2" height="2" fill="#000"/>
+            <rect x="32" y="4" width="2" height="2" fill="#000"/>
+            <rect x="14" y="20" width="2" height="2" fill="#000"/>
+            <rect x="20" y="20" width="2" height="2" fill="#000"/>
+            <rect x="26" y="20" width="2" height="2" fill="#000"/>
+            <rect x="32" y="20" width="2" height="2" fill="#000"/>
+            <rect x="38" y="20" width="2" height="2" fill="#000"/>
+            <rect x="18" y="26" width="2" height="2" fill="#000"/>
+            <rect x="24" y="26" width="2" height="2" fill="#000"/>
+            <rect x="30" y="26" width="2" height="2" fill="#000"/>
+            <rect x="18" y="32" width="2" height="2" fill="#000"/>
+            <rect x="24" y="34" width="2" height="2" fill="#000"/>
+            <rect x="30" y="32" width="2" height="2" fill="#000"/>
+            <rect x="14" y="38" width="2" height="2" fill="#000"/>
+            <rect x="20" y="40" width="2" height="2" fill="#000"/>
+            <rect x="26" y="40" width="2" height="2" fill="#000"/>
+            <rect x="32" y="38" width="2" height="2" fill="#000"/>
+            <rect x="38" y="38" width="2" height="2" fill="#000"/>
+            <rect x="44" y="40" width="2" height="2" fill="#000"/>
+            <rect x="40" y="26" width="2" height="2" fill="#000"/>
+            <rect x="44" y="32" width="2" height="2" fill="#000"/>
+          </svg>
+        </div>
+        <span>扫码</span>  <!-- 邮票说明文字 -->
+      </div>
+    </div>
+
+    <!-- --------- 操作按钮区：生成卡片 + 分享好友 --------- -->
+    <div class="share-actions">
+      <!-- 生成卡片按钮：调用后端 API 合成精美分享卡（含原图+诗句+戏曲形象+二维码） -->
+      <button class="btn-primary" onclick="generateShareCard()">&#x1F4BE; 生成卡片</button>
+      <!-- 分享好友按钮：优先使用 navigator.share 原生分享，不支持则提示用户使用浏览器菜单 -->
+      <button class="btn-secondary" onclick="if(navigator.share){{navigator.share({{title:'古今同月',text:'我用古今同月匹配到了一首诗'}}).catch(function(){{}})}}else{{alert('请使用浏览器菜单的"分享"功能')}}" style="text-decoration:none;">&#x1F517; 分享好友</button>
+    </div>
+
+    <!-- --------- 提示文案 --------- -->
+    <!-- 作用范围：说明"生成卡片"按钮的功能与后端合成内容 -->
+    <div class="share-tip">
+      点击"生成卡片"调用后端合成精美分享卡（含原图+诗句+戏曲形象+二维码）
+    </div>
+  </div>
+
+</div>  <!-- app-container 结束 -->
+
+<!-- ============================================================ -->
+<!-- ========= JavaScript: 路由与状态管理 ====================== -->
+<!-- ============================================================ -->
+<!-- 作用范围：H5 应用的全部业务逻辑，包括： -->
+<!--   1) 全局状态管理（AppState） -->
+<!--   2) API 接口配置（API_BASE） -->
+<!--   3) 页面路由（switchTab / openSubPage / closeSubPage） -->
+<!--   4) 业务功能（拍照/识别/朗读/分享/历史记录/作者信息） -->
+<!--   5) 事件监听（DOMContentLoaded / popstate / file change） -->
+<script>
+/**
+ * 古今同月 - 独立 Demo 模式
+ * 说明：本版本在原始 H5原型页面.html 基础上，注入 mock 数据 + 拦截 fetch 请求，
+ * 无需启动 Flask 后端即可直接在浏览器中体验完整交互。
+ * 所有 mock 数据来源：mock_data.py（保持与后端代码一致）
+ */
+// ============================================================
+// Mock 数据（来自 mock_data.py）
+// ============================================================
+var MOCK_DATA = {
+  ok: true,
+  demo_mode: true,
+  image_id: "demo_001",
+  image_url: "",
+  matches: [
+    {
+      rank: 1,
+      title: "静夜思",
+      author: "李白",
+      dynasty: "唐",
+      content: "床前明月光，疑是地上霜。\n举头望明月，低头思故乡。",
+      similarity: 95,
+      reason: "场景完全匹配（夜晚明月）、氛围匹配（清冷孤寂）、意境匹配（思乡）",
+      tags: ["夜晚", "明月", "思乡", "秋天"],
+      matched_elements: ["明月", "夜晚", "思乡"]
+    },
+    {
+      rank: 2,
+      title: "月下独酌",
+      author: "李白",
+      dynasty: "唐",
+      content: "花间一壶酒，独酌无相亲。\n举杯邀明月，对影成三人。",
+      similarity: 87,
+      reason: "场景匹配（明月）、氛围匹配（孤寂）、元素匹配（独酌对月）",
+      tags: ["夜晚", "明月", "孤独", "饮酒"],
+      matched_elements: ["明月", "夜晚", "孤寂"]
+    },
+    {
+      rank: 3,
+      title: "望月怀远",
+      author: "张九龄",
+      dynasty: "唐",
+      content: "海上生明月，天涯共此时。\n情人怨遥夜，竟夕起相思。",
+      similarity: 72,
+      reason: "场景匹配（明月）、氛围匹配（相思）、意境匹配（夜望）",
+      tags: ["夜晚", "明月", "相思", "秋天"],
+      matched_elements: ["明月", "夜晚", "相思"]
+    },
+    {
+      rank: 4,
+      title: "十五夜望月",
+      author: "王建",
+      dynasty: "唐",
+      content: "中庭地白树栖鸦，冷露无声湿桂花。\n今夜月明人尽望，不知秋思落谁家。",
+      similarity: 65,
+      reason: "场景匹配（中庭月明）、季节匹配（秋）、氛围匹配（秋思）",
+      tags: ["中秋", "明月", "思乡", "秋天"],
+      matched_elements: ["明月", "庭院", "秋天", "思乡"]
+    },
+    {
+      rank: 5,
+      title: "水调歌头·明月几时有",
+      author: "苏轼",
+      dynasty: "宋",
+      content: "明月几时有，把酒问青天。\n不知天上宫阙，今夕是何年。",
+      similarity: 58,
+      reason: "场景匹配（明月）、氛围匹配（清冷）、意境匹配（问月）",
+      tags: ["中秋", "明月", "思亲", "豪放"],
+      matched_elements: ["明月", "夜晚", "清冷"]
+    }
+  ],
+  author_info: {
+    name: "李白",
+    alias: "字太白，号青莲居士，世称诗仙",
+    dynasty: "唐",
+    birth_year: "701",
+    death_year: "762",
+    birthplace: "陇西成纪（今甘肃省秦安县）",
+    identity: "浪漫主义诗人",
+    main_works: ["静夜思", "将进酒", "月下独酌", "望庐山瀑布", "行路难"],
+    life_story: "李白（701-762），唐代伟大的浪漫主义诗人。二十五岁仗剑去国，辞亲远游。曾入长安供奉翰林，因不容于权贵，赐金放还。安史之乱中被流放夜郎，途中遇赦。一生诗酒风流，留下诗作千余首。",
+    writing_style: "诗风豪放飘逸，想象奇绝，语言自然流转，开创浪漫主义诗风。与杜甫并称'李杜'。"
+  },
+  avatar: {
+    matched: true,
+    gender_label: "男",
+    dynasty_label: "唐",
+    image_filename: "preview_M5_tang_li_bai.jpg",
+    avatar_url: "/avatars/preview_M5_tang_li_bai.jpg",
+    avatar_name: "M5_Tang Li Bai",
+    avatar_description: "唐代 · 诗人 · 小生"
+  }
+};
+
+// 拦截所有 fetch 调用，返回 mock 数据
+var originalFetch = window.fetch;
+window.fetch = function(url, options) {
+  var urlStr = (typeof url === 'string') ? url : url.url;
+  // Demo 模式下拦截所有 /api/* 请求
+  if (urlStr && urlStr.indexOf('/api/') >= 0) {
+    console.log('[Mock] 拦截 API:', urlStr);
+    var mockResponse = { ok: true, json: function() { return Promise.resolve(getMockResponse(urlStr)); } };
+    return Promise.resolve(mockResponse);
+  }
+  // 其他请求（如本地图片）放行
+  return originalFetch.apply(this, arguments);
+};
+
+function getMockResponse(urlStr) {
+  if (urlStr.indexOf('/api/status') >= 0) {
+    return { ok: true, demo_mode: true, server_time: new Date().toISOString() };
+  }
+  if (urlStr.indexOf('/api/process_all') >= 0) {
+    return {
+      ok: true,
+      demo_mode: true,
+      image_id: "demo_" + Date.now(),
+      image_url: "",
+      matches: MOCK_DATA.matches,
+      author_info: MOCK_DATA.author_info,
+      avatar: MOCK_DATA.avatar
+    };
+  }
+  if (urlStr.indexOf('/api/author_info') >= 0) {
+    return { ok: true, demo_mode: true, author_info: MOCK_DATA.author_info };
+  }
+  if (urlStr.indexOf('/api/generate_card') >= 0) {
+    return {
+      ok: true,
+      demo_mode: true,
+      card_url: "",
+      card_preview: "demo_card_preview"
+    };
+  }
+  if (urlStr.indexOf('/api/history') >= 0) {
+    return { ok: true, demo_mode: true, items: [] };
+  }
+  return { ok: true, demo_mode: true };
+}
+
+// ============================================================
+// ====== 全局状态管理 ======
+// ============================================================
+// 作用范围：H5 应用所有页面共享的全局状态对象
+// 设计目的：集中管理可变状态，避免散落在各函数中的全局变量
+// 修改原则：所有状态变更都应通过明确的赋值语句，便于追踪
+/**
+ * 全局状态对象
+ * @type {Object}
+ * @property {string} currentTab - 当前激活的 Tab 页 ID（tab-home/tab-result/tab-history）
+ * @property {Array<string>} subPageStack - 子页面栈，记录打开顺序用于返回（栈顶为当前页来源）
+ * @property {boolean} hasResult - 是否已有拍照识别结果（控制结果页空/有数据状态切换）
+ * @property {number} currentPoemIndex - 当前查看的诗词在 PoemList 中的索引（用于上一首/下一首）
+ * @property {Object|null} lastResult - 最近一次 /api/process_all 接口返回的完整数据
+ * @property {Object|null} currentAuthorInfo - 当前作者信息（缓存，避免重复请求）
+ * @property {Object|null} currentAvatar - 当前戏曲形象信息（含 avatar_url 与 image_filename）
+ * @property {boolean} isSpeaking - TTS 朗读状态（true=正在朗读）
+ * @property {boolean} deleteMode - 寻诗录是否处于批量删除模式
+ * @property {Array<string>} selectedForDelete - 待删除的记录 ID 列表
+ * @property {string} currentCardStyle - 当前分享卡片风格（style-a ~ style-f，默认 style-b）
+ */
+var AppState = {
+  currentTab: 'tab-home',          // 当前激活的 Tab，初始为首页
+  subPageStack: [],                // 子页面栈：空数组表示当前在 Tab 层
+  hasResult: false,                // 初始无结果，结果页显示空状态
+  currentPoemIndex: 0,             // 当前诗词索引，从第一首开始
+  lastResult: null,                // 最近一次接口返回的完整结果
+  currentAuthorInfo: null,         // 当前作者信息缓存
+  currentAvatar: null,             // 当前戏曲形象信息
+  isSpeaking: false,               // TTS 朗读状态标志
+  deleteMode: false,               // 删除模式标志
+  selectedForDelete: [],           // 待删除记录 ID 列表
+  currentCardStyle: 'style-b'      // 默认卡片风格：B-Apple 引用卡（项目记忆约定）
+};
+
+// ============================================================
+// ====== 后端 API 基础地址配置 ======
+// ============================================================
+// 作用范围：所有 fetch 请求的基础 URL 前缀
+// 设计目的：自动适配 file:// 与 http:// 两种访问协议
+// 注意事项：直接打开 HTML（file://）会请求失败，必须通过 Flask 服务访问
+/**
+ * 后端 API 基础地址
+ * - 通过 Flask 服务访问时（http://127.0.0.1:5000），用相对路径 ''
+ * - 直接打开 HTML 文件时（file://），自动指向 Flask 服务地址
+ * @type {string}
+ */
+var API_BASE = '';
+// 立即执行函数：检测当前协议并设置 API_BASE
+(function() {
+  if (window.location.protocol === 'file:') {
+    // file:// 协议下，API 请求需要绝对地址指向 Flask 服务
+    API_BASE = 'http://127.0.0.1:5000';
+    console.info('检测到 file:// 协议，API 已指向 ' + API_BASE);
+  }
+  // http:// 协议下，API_BASE 为空字符串，使用相对路径（同源访问）
+})();
+
+/**
+ * 诗词列表（全局共享）
+ * 初始为空数组，由后端 /api/process_all 返回后填充
+ * 每个元素结构：{title, author, dynasty, content, matchScore, tags, reason, matched_elements}
+ * @type {Array<Object>}
+ */
+var PoemList = [];
+
+// ============================================================
+// ====== 拍照/选图入口 ======
+// ============================================================
+/**
+ * 触发文件选择器（拍照/选图入口）
+ * 由"拍照识别"和"从相册选择"两个按钮调用
+ * 设计原因：原生 input[type=file] 样式难以定制，故隐藏后用自定义按钮触发 click
+ * @returns {void}
+ */
+function triggerPhotoInput() {
+  var input = document.getElementById('photo-input');  // 获取隐藏的 file input
+  if (!input) {
+    alert('文件输入元素未找到');
+    return;
+  }
+  // 重置 value，否则选择同一文件不会触发 change 事件
+  input.value = '';
+  // 绑定 change 事件处理函数（每次都重新绑定，确保最新）
+  input.onchange = onPhotoSelected;
+  // 程序化触发点击，弹出系统拍照/相册选择
+  input.click();
+}
+
+/**
+ * 文件选择完成后的处理函数
+ * 业务流程：
+ *   1. 显示加载页 sub-loading（全屏加载动画）
+ *   2. 构造 FormData 上传图片到 /api/process_all
+ *   3. 接收后端返回的匹配结果，填充结果页
+ *   4. 跳转到 tab-result 展示识别结果
+ * @param {Event} event - file input 的 change 事件对象
+ * @returns {void}
+ */
+function onPhotoSelected(event) {
+  var file = event.target.files[0];  // 获取用户选择的第一个文件
+  if (!file) return;  // 未选择文件则直接返回
+
+  // 步骤 1：打开加载页，展示识别进度动画
+  openSubPage('sub-loading');
+
+  // 步骤 2：构造 FormData 上传文件（multipart/form-data 格式）
+  var formData = new FormData();
+  formData.append('file', file);  // 字段名 'file' 与后端 Flask request.files['file'] 对应
+
+  // 步骤 3：调用后端一站式接口（图像识别 + 诗海搜索 + 意境匹配）
+  fetch(API_BASE + '/api/process_all', {
+    method: 'POST',
+    body: formData  // FormData 自动设置 Content-Type 为 multipart/form-data
+  })
+  .then(function(resp) {
+    // HTTP 错误处理：解析后端返回的错误信息
+    if (!resp.ok) {
+      return resp.json().then(function(err) {
+        throw new Error(err.error || ('HTTP ' + resp.status));
+      });
+    }
+    return resp.json();
+  })
+  .then(function(data) {
+    // 业务错误处理：后端返回 {ok: false, error: '...'}
+    if (!data.ok) {
+      throw new Error(data.error || '后端返回失败');
+    }
+    // 步骤 4：保存结果到全局状态
+    AppState.lastResult = data;                    // 完整结果数据
+    AppState.currentAuthorInfo = data.author_info;  // 作者信息
+    AppState.currentAvatar = data.avatar;          // 戏曲形象信息
+    // 转换后端 matches 数组为前端 PoemList 格式（字段名映射）
+    PoemList = (data.matches || []).map(function(m) {
+      return {
+        title: m.title,                              // 诗词标题
+        author: m.author,                            // 作者
+        dynasty: m.dynasty,                          // 朝代
+        content: m.content,                          // 诗词正文
+        matchScore: m.similarity,                    // 匹配度（后端字段 similarity → 前端 matchScore）
+        tags: m.tags || [],                          // 主题标签
+        reason: m.reason || '',                      // 匹配理由（AI 生成）
+        matched_elements: m.matched_elements || []   // 匹配元素列表
+      };
+    });
+    AppState.currentPoemIndex = 0;  // 默认查看第一首（匹配度最高）
+    AppState.hasResult = true;      // 标记已有结果
+
+    // 步骤 5：填充结果页内容 + 跳转到结果 Tab
+    fillResultPage(data);
+    loadingFinished();  // 关闭加载页，切换到结果 Tab
+  })
+  .catch(function(err) {
+    // 错误处理：打印日志 + 提示用户 + 关闭加载页
+    console.error('上传失败:', err);
+    alert('识别失败：' + err.message + '\n\n请检查后端是否已启动：python app.py');
+    closeAllSubPages();  // 关闭所有子页面（包括加载页）
+  });
+}
+
+/**
+ * 用后端返回的数据填充结果页（tab-result）
+ * 作用范围：将后端返回的匹配结果渲染到结果页的各个 DOM 元素
+ * 渲染内容：戏曲形象、原图背景、匹配度环、诗词标题作者、诗句摘要、标签、更多匹配列表
+ * @param {Object} data - /api/process_all 返回值，结构：{ok, image_url, matches, author_info, avatar}
+ * @returns {void}
+ */
+function fillResultPage(data) {
+  var topPoem = (data.matches || [])[0] || {};  // 匹配度最高的诗词（Top1）
+  var author = data.author_info || {};          // 作者信息
+  var avatar = data.avatar || {};               // 戏曲形象信息
+
+  // ===== 1. 填充顶部戏曲形象区域 =====
+  // 作用：将后端返回的 Q 版戏曲形象图设置为 .opera-figure-body 的背景图
+  var operaFigureBody = document.querySelector('#tab-result .opera-figure-body');
+  if (operaFigureBody && avatar.avatar_url) {
+    operaFigureBody.style.backgroundImage = 'url(' + API_BASE + avatar.avatar_url + ')';
+    operaFigureBody.style.backgroundSize = 'cover';       // 铺满容器 */
+    operaFigureBody.style.backgroundPosition = 'center';  // 居中显示 */
+  }
+  // 戏曲形象说明文字（如"李白 · 戏曲形象"）
+  var operaFigureName = document.querySelector('#tab-result .opera-figure-name');
+  if (operaFigureName) {
+    operaFigureName.textContent = (author.name || '诗人') + ' · 戏曲形象';
+  }
+
+  // ===== 0. 结果页背景：显示用户上传的原图 =====
+  // 作用：将用户拍照上传的原图作为 result-hero 的背景，营造"照片+诗词"叠加效果
+  var heroBg = document.querySelector('#tab-result .result-hero-bg');
+  if (heroBg && data.image_url) {
+    heroBg.style.backgroundImage = 'url(' + API_BASE + data.image_url + ')';
+    heroBg.classList.add('photo-bg');  // 添加 photo-bg 类，启用照片背景样式
+  }
+
+  // ===== 2. 填充匹配度环 =====
+  // 作用：根据匹配度分数显示不同颜色的环形进度
+  // 分档规则：≥85 红色高匹配 / ≥70 金色中匹配 / <70 青色低匹配
+  var score = topPoem.similarity || 0;
+  var scoreRing = document.querySelector('#tab-result .score-ring');
+  if (scoreRing) {
+    scoreRing.textContent = score + '%';  // 显示百分比数字
+    scoreRing.className = 'score-ring';   // 重置类名
+    if (score >= 85) {
+      // 默认样式（红色高匹配），无需添加额外类
+    } else if (score >= 70) {
+      scoreRing.classList.add('mid');  // 金色中匹配
+    } else {
+      scoreRing.classList.add('low');  // 青色低匹配
+    }
+  }
+  // 匹配等级徽章文字（极高匹配 / 高匹配 / 中等匹配）
+  var matchBadge = document.querySelector('#tab-result .match-badge');
+  if (matchBadge) {
+    var badgeText = score >= 85 ? '极高匹配' : (score >= 70 ? '高匹配' : '中等匹配');
+    matchBadge.innerHTML = '&#x2605; ' + badgeText;  // &#x2605; 是星号 ★
+    matchBadge.className = 'match-badge ' + (score >= 85 ? 'match-high' : (score >= 70 ? 'match-mid' : 'match-low'));
+  }
+
+  // ===== 3. 填充顶部诗词标题与作者 =====
+  var resultPoemTitle = document.querySelector('#tab-result .result-poem-title');
+  if (resultPoemTitle) resultPoemTitle.textContent = '《' + (topPoem.title || '') + '》';
+  var resultPoemAuthor = document.querySelector('#tab-result .result-poem-author');
+  if (resultPoemAuthor) resultPoemAuthor.textContent = (topPoem.dynasty || '') + ' · ' + (topPoem.author || '');
+
+  // 顶部诗句摘要：取前两句显示（按 \n 拆分）
+  var resultPoemLine = document.querySelector('#tab-result .result-poem-line');
+  if (resultPoemLine) {
+    var firstLine = (topPoem.content || '').split('\n')[0];   // 第一句
+    var secondLine = (topPoem.content || '').split('\n')[1] || '';  // 第二句（可能不存在）
+    resultPoemLine.innerHTML = '"' + firstLine + (secondLine ? '<br>' + secondLine : '') + '"';
+  }
+
+  // ===== 4. 填充标签 =====
+  // 作用：根据后端返回的 tags 数组动态生成标签元素
+  // 样式规则：第 1 个朱砂红、第 2 个金色、其余默认墨色
+  var tagsContainer = document.querySelector('#tab-result .result-tags');
+  if (tagsContainer) {
+    tagsContainer.innerHTML = '';  // 清空旧标签
+    var tags = topPoem.tags || ['夜晚', '明月', '思乡'];  // 默认标签（后端未返回时）
+    tags.forEach(function(t, idx) {
+      var span = document.createElement('span');
+      // 第 1 个 tag-vermillion（朱砂红），第 2 个 tag-gold（金色），其余默认
+      span.className = 'tag ' + (idx === 0 ? 'tag-vermillion' : (idx === 1 ? 'tag-gold' : ''));
+      span.textContent = t;
+      tagsContainer.appendChild(span);
+    });
+  }
+
+  // ===== 5. 填充"更多匹配诗词"列表 =====
+  // 作用：渲染 Top 2~N 的匹配诗词列表，点击可跳转到对应诗词详情
+  var moreList = document.querySelector('#tab-result .more-list');
+  if (moreList) {
+    moreList.innerHTML = '';  // 清空旧列表
+    (data.matches || []).forEach(function(m, idx) {
+      if (idx === 0) return;  // Top1 已在顶部展示，跳过
+      var item = document.createElement('div');
+      item.className = 'more-item';
+      // 点击事件：切换到该诗词并打开详情页
+      item.onclick = function() {
+        AppState.currentPoemIndex = idx;  // 更新当前索引
+        openSubPage('sub-poem');          // 打开诗词详情子页面
+        refreshPoemDetail();              // 刷新详情页内容
+      };
+      // 分数颜色：≥85 朱砂红 / ≥70 金色 / <70 青色
+      var scoreColor = m.similarity >= 85 ? 'var(--vermillion)' :
+                       (m.similarity >= 70 ? 'var(--gold)' : 'var(--cyan)');
+      item.innerHTML =
+        '<div class="more-item-rank">#' + (idx + 1) + ' 匹配 ' + m.similarity + '%</div>' +
+        '<div class="more-item-title">《' + m.title + '》</div>' +
+        '<div class="more-item-author">' + m.dynasty + ' · ' + m.author + '</div>' +
+        '<div class="more-item-score" style="color:' + scoreColor + '">&#x2605; ' + m.similarity + '%</div>';
+      moreList.appendChild(item);
+    });
+  }
+
+  // ===== 6. 刷新诗词详情子页面 =====
+  // 作用：防止首次打开详情页时还是旧数据，提前同步内容
+  refreshPoemDetail();
+
+  // ===== 7. 加载历史记录 =====
+  // 作用：刷新 tab-history 列表，将本次识别结果加入寻诗录
+  loadHistoryList();
+}
+
+/**
+ * 切换 Tab（首页/结果/寻诗录）
+ * 作用范围：Tab 层级切换的核心函数，由底部导航栏按钮调用
+ * 业务流程：
+ *   1. 关闭所有子页面（Tab 切换相当于返回根层级）
+ *   2. 隐藏所有 Tab 页，显示目标 Tab
+ *   3. 更新底部导航激活态
+ *   4. 更新全局状态 AppState.currentTab
+ *   5. 根据目标 Tab 执行特定逻辑（结果页显示数据/寻诗录加载历史）
+ *   6. 滚动到顶部
+ * @param {string} tabId - 目标 Tab 的 ID（tab-home/tab-result/tab-history）
+ * @returns {void}
+ */
+function switchTab(tabId) {
+  // 1. 关闭所有子页面（Tab 切换相当于返回根，清空子页面栈）
+  closeAllSubPages();
+
+  // 2. 隐藏所有 Tab 页（移除 active 类）
+  document.querySelectorAll('.tab-page').forEach(function(el) {
+    el.classList.remove('active');
+  });
+
+  // 3. 显示目标 Tab 页（添加 active 类）
+  var target = document.getElementById(tabId);
+  if (target) {
+    target.classList.add('active');
+  }
+
+  // 4. 更新底部导航激活态（同步高亮当前 Tab 对应的导航按钮）
+  document.querySelectorAll('.nav-item').forEach(function(el) {
+    el.classList.remove('active');
+    if (el.getAttribute('data-tab') === tabId) {
+      el.classList.add('active');
+    }
+  });
+
+  // 5. 更新全局状态
+  AppState.currentTab = tabId;
+
+  // 6. 结果页特殊处理：根据 hasResult 显示有数据/空状态
+  if (tabId === 'tab-result') {
+    showResultContent();
+  }
+
+  // 7. 寻诗录特殊处理：从后端加载历史记录列表
+  if (tabId === 'tab-history') {
+    loadHistoryList();
+  }
+
+  // 8. 滚动到顶部（Tab 切换后重置滚动位置）
+  window.scrollTo(0, 0);
+}
+
+/**
+ * 从后端加载历史记录列表，渲染到 tab-history
+ * 作用范围：寻诗录页面的数据加载与渲染
+ * 接口：GET /api/history，返回 {ok, items: [{id, image_url, top_poem, match_score, timestamp, author_info, avatar}]}
+ * 渲染逻辑：
+ *   - 空列表：显示"暂无寻诗记录"空状态
+ *   - 有数据：渲染历史记录卡片，含缩略图、诗词标题、作者、匹配度、日期
+ *   - 点击行为：非删除模式→查看详情；删除模式→勾选/取消勾选
+ * @returns {void}
+ */
+function loadHistoryList() {
+  fetch(API_BASE + '/api/history')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) return;  // 业务错误直接返回
+      var list = document.querySelector('#tab-history .history-list');
+      if (!list) return;
+      list.innerHTML = '';  // 清空旧列表
+
+      // 空列表处理：显示空状态提示
+      if (data.items.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding:60px 16px; color:var(--ink-lighter);">' +
+                         '<div style="font-size:48px; margin-bottom:12px;">&#x1F4D6;</div>' +  // 书本图标
+                         '<div>暂无寻诗记录</div>' +
+                         '<div style="font-size:12px; margin-top:8px;">去首页拍一张照片吧</div>' +
+                         '</div>';
+        return;
+      }
+
+      // 遍历历史记录，渲染每条记录卡片
+      data.items.forEach(function(item) {
+        var score = item.match_score || 0;  // 匹配度分数
+        // 分数等级样式：≥85 默认（红）/ ≥70 mid（金）/ <70 low（青）
+        var scoreClass = score >= 85 ? '' : (score >= 70 ? 'mid' : 'low');
+        // 时间戳转中文日期格式（年月日 时:分）
+        var date = new Date(item.timestamp * 1000);  // 后端返回秒级时间戳，需 ×1000 转毫秒
+        var dateStr = date.getFullYear() + '年' + (date.getMonth() + 1) + '月' + date.getDate() + '日 ' +
+                      String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+
+        var div = document.createElement('div');
+        div.className = 'history-item';
+        div.setAttribute('data-id', item.id);  // 记录 ID（用于删除）
+
+        // 点击事件：根据删除模式切换行为
+        div.onclick = function() {
+          if (AppState.deleteMode) {
+            toggleSelectItem(div, item.id);  // 删除模式：勾选/取消勾选
+          } else {
+            openHistoryRecord(item);          // 正常模式：查看记录详情
+          }
+        };
+
+        // 渲染卡片 HTML：复选框 + 缩略图 + 信息区 + 分数环
+        div.innerHTML =
+          '<input type="checkbox" class="delete-checkbox">' +  // 删除模式下的复选框
+          '<div class="history-item-img" style="background-image:url(' + API_BASE + item.image_url + '); background-size:cover; background-position:center;">' +
+            (item.image_url ? '' : '&#x1F319;') +  // 无图时显示月亮 emoji
+          '</div>' +
+          '<div class="history-item-info">' +
+            '<div class="history-item-poem-title">《' + (item.top_poem && item.top_poem.title || '') + '》</div>' +
+            '<div class="history-item-author">' +
+              (item.top_poem && item.top_poem.dynasty || '') + ' · ' +
+              (item.top_poem && item.top_poem.author || '') + ' · 匹配' + score + '%</div>' +
+            '<div class="history-item-date">' + dateStr + '</div>' +
+          '</div>' +
+          '<div class="history-item-right">' +
+            '<div class="score-ring score-ring-sm ' + scoreClass + '">' + score + '%</div>' +  // 小号分数环
+          '</div>';
+        list.appendChild(div);
+      });
+    })
+    .catch(function(err) {
+      console.error('加载历史记录失败:', err);
+    });
+}
+
+/**
+ * 显示结果页内容（有数据/空状态切换）
+ * 作用范围：根据 AppState.hasResult 控制 result-with-data / result-empty 的显隐
+ * @returns {void}
+ */
+function showResultContent() {
+  var hasData = document.getElementById('result-with-data');  // 有数据状态元素
+  var empty = document.getElementById('result-empty');         // 空状态元素
+  if (AppState.hasResult) {
+    hasData.style.display = 'block';  // 显示有数据状态
+    empty.style.display = 'none';     // 隐藏空状态
+  } else {
+    hasData.style.display = 'none';   // 隐藏有数据状态
+    empty.style.display = 'flex';     // 显示空状态（flex 居中布局）
+  }
+}
+
+/**
+ * 打开子页面（push 到栈）
+ * 作用范围：子页面层级管理的核心函数，由各按钮的 onclick 调用
+ * 设计目的：通过状态栈记录子页面打开顺序，支持多层嵌套返回
+ * 业务流程：
+ *   1. 将当前子页面（或来源 Tab）压入 subPageStack
+ *   2. 关闭其他所有子页面
+ *   3. 显示目标子页面（添加 active 类）
+ *   4. 滚动到子页面顶部
+ * 栈记录格式：
+ *   - 从 Tab 进入子页面：'FROM_TAB:tab-home'（记录来源 Tab）
+ *   - 从子页面进入另一个子页面：'sub-poem'（记录上一级子页面 ID）
+ * @param {string} subId - 目标子页面 ID（sub-loading/sub-poem/sub-author/sub-share）
+ * @returns {void}
+ */
+function openSubPage(subId) {
+  var el = document.getElementById(subId);
+  if (!el) return;  // 目标子页面不存在则直接返回
+
+  // 1. 将当前子页面（或来源 Tab）压入栈，用于后续返回
+  var currentSub = document.querySelector('.sub-page.active');
+  if (currentSub) {
+    // 当前在某个子页面，记录该子页面 ID
+    AppState.subPageStack.push(currentSub.id);
+  } else {
+    // 当前在 Tab 层，记录来源 Tab（格式：FROM_TAB:tabId）
+    AppState.subPageStack.push('FROM_TAB:' + AppState.currentTab);
+  }
+
+  // 2. 关闭其他所有子页面（移除 active 类）
+  document.querySelectorAll('.sub-page').forEach(function(p) {
+    p.classList.remove('active');
+  });
+
+  // 3. 显示目标子页面
+  el.classList.add('active');
+
+  // 4. 滚动到子页面顶部（避免继承上一页的滚动位置）
+  el.scrollTop = 0;
+}
+
+/**
+ * 关闭子页面（pop 栈）
+ * 作用范围：子页面返回逻辑的核心函数，由各子页面的返回按钮调用
+ * 设计目的：统一返回入口，根据栈顶记录决定返回到 Tab 还是上一级子页面
+ * 业务流程：
+ *   1. 栈为空：直接关闭所有子页面
+ *   2. 栈顶为 'FROM_TAB:xxx'：关闭所有子页面，切换到对应 Tab
+ *   3. 栈顶为子页面 ID：关闭当前子页面，显示上一级子页面
+ * @returns {void}
+ */
+function closeSubPage() {
+  if (AppState.subPageStack.length === 0) {
+    // 栈为空：没有返回目标，直接关闭所有子页面
+    closeAllSubPages();
+    return;
+  }
+
+  // 弹出栈顶记录（上一级页面标识）
+  var prev = AppState.subPageStack.pop();
+
+  if (prev.startsWith('FROM_TAB:')) {
+    // 上一级是 Tab：关闭所有子页面，切换到对应 Tab
+    closeAllSubPages();
+    var fromTab = prev.replace('FROM_TAB:', '');  // 提取 Tab ID
+    switchTab(fromTab);
+  } else {
+    // 上一级是另一个子页面：关闭当前，显示上一级
+    document.querySelectorAll('.sub-page').forEach(function(p) {
+      p.classList.remove('active');
+    });
+    var prevEl = document.getElementById(prev);
+    if (prevEl) {
+      prevEl.classList.add('active');
+      prevEl.scrollTop = 0;  // 重置滚动位置
+    } else {
+      // 上一级子页面不存在（可能被移除），兜底关闭所有
+      closeAllSubPages();
+    }
+  }
+}
+
+/**
+ * 关闭所有子页面
+ * 作用范围：清空子页面栈并隐藏所有子页面，回到 Tab 层
+ * 使用场景：Tab 切换、识别完成跳转结果页、上传失败重置
+ * @returns {void}
+ */
+function closeAllSubPages() {
+  document.querySelectorAll('.sub-page').forEach(function(p) {
+    p.classList.remove('active');  // 移除 active 类，隐藏子页面
+  });
+  AppState.subPageStack = [];  // 清空子页面栈
+}
+
+/**
+ * 拍照入口：旧版模拟入口（保留兜底，已被 triggerPhotoInput 替代）
+ * 作用范围：兼容旧调用，实际转发到 triggerPhotoInput()
+ * 注意：新代码应直接使用 triggerPhotoInput()
+ * @returns {void}
+ */
+function goTakePhoto() {
+  triggerPhotoInput();  // 转发到新版入口
+}
+
+/**
+ * 识别完成：关闭加载页，跳到结果 Tab
+ * 作用范围：识别流程结束后的跳转函数
+ * 业务流程：标记 hasResult=true → 关闭所有子页面 → 切换到结果 Tab
+ * @returns {void}
+ */
+function loadingFinished() {
+  AppState.hasResult = true;       // 标记已有结果
+  closeAllSubPages();              // 关闭加载页等所有子页面
+  switchTab('tab-result');         // 切换到结果 Tab
+}
+
+/**
+ * 历史记录点击：跳到结果 Tab 并打开诗词详情
+ * 作用范围：寻诗录页面点击历史记录卡片时调用
+ * 业务流程：
+ *   1. 从历史记录恢复 author_info 和 avatar 到全局状态
+ *   2. 如果当前无结果数据，用历史记录构造临时 PoemList
+ *   3. 在 PoemList 中定位对应诗词索引
+ *   4. 直接打开诗词详情子页面（不切换 Tab），栈记录来源为 tab-history
+ * @param {Object} record - 历史记录对象（来自 /api/history 的 item）
+ * @returns {void}
+ */
+function openHistoryRecord(record) {
+  if (!record) return;
+
+  // 1. 从历史记录恢复作者信息和戏曲形象到全局状态（供"了解诗人"使用）
+  if (record.author_info) {
+    AppState.currentAuthorInfo = record.author_info;
+  }
+  if (record.avatar) {
+    AppState.currentAvatar = record.avatar;
+  }
+
+  // 2. 如果当前没有结果数据，但有历史记录的 top_poem，构造临时 PoemList
+  if (!AppState.hasResult) {
+    AppState.lastResult = {
+      image_id: record.id,
+      image_url: record.image_url
+    };
+    // 注意：后端返回字段是 similarity（不是 matchScore），需要映射
+    if (record.top_poem) {
+      var top = record.top_poem;
+      PoemList = [{
+        title: top.title || '',
+        author: top.author || '',
+        dynasty: top.dynasty || '',
+        content: top.content || '',
+        matchScore: top.similarity || top.matchScore || 0,  // 兼容两个字段名
+        tags: top.tags || [],
+        reason: top.reason || '',
+        matched_elements: top.matched_elements || []
+      }].concat(AppState.lastResult.matches || []);
+    }
+  }
+
+  // 3. 在 PoemList 中定位对应诗词（按标题+作者匹配）
+  AppState.currentPoemIndex = 0;  // 默认第一首
+  if (record.top_poem && PoemList.length > 0) {
+    for (var i = 0; i < PoemList.length; i++) {
+      if (PoemList[i].title === record.top_poem.title &&
+          PoemList[i].author === record.top_poem.author) {
+        AppState.currentPoemIndex = i;
+        break;
+      }
+    }
+  }
+
+  // 4. 关键修复：不切换 Tab，直接打开子页面
+  // 子页面栈记录来源为 tab-history，返回时回到寻诗录
+  AppState.subPageStack = ['FROM_TAB:tab-history'];
+  document.querySelectorAll('.sub-page').forEach(function(p) {
+    p.classList.remove('active');
+  });
+  var el = document.getElementById('sub-poem');
+  if (el) {
+    el.classList.add('active');
+    el.scrollTop = 0;
+  }
+  refreshPoemDetail();  // 刷新诗词详情页内容
+}
+
+/**
+ * 上一首：循环跳到上一首（第一首的前一首是最后一首）
+ * 作用范围：诗词详情页的"上一首"导航按钮
+ * 循环逻辑：(当前索引 - 1 + 总数) % 总数，确保首尾相连
+ * @returns {void}
+ */
+function goPrevPoem() {
+  if (PoemList.length === 0) return;  // 列表为空则不操作
+  var total = PoemList.length;
+  // 循环导航：当前-1，若为负数则 +total 回到末尾
+  AppState.currentPoemIndex = (AppState.currentPoemIndex - 1 + total) % total;
+  refreshPoemDetail();  // 刷新详情页显示新诗词
+}
+
+/**
+ * 下一首：循环跳到下一首（最后一首的后一首是第一首）
+ * 作用范围：诗词详情页的"下一首"导航按钮
+ * 循环逻辑：(当前索引 + 1) % 总数，确保首尾相连
+ * @returns {void}
+ */
+function goNextPoem() {
+  if (PoemList.length === 0) return;  // 列表为空则不操作
+  var total = PoemList.length;
+  // 循环导航：当前+1，若超出则 % total 回到开头
+  AppState.currentPoemIndex = (AppState.currentPoemIndex + 1) % total;
+  refreshPoemDetail();  // 刷新详情页显示新诗词
+}
+
+/**
+ * 刷新诗词详情页内容（切换诗词时调用）
+ * 作用范围：sub-poem 子页面的内容渲染，由 goPrevPoem/goNextPoem/openHistoryRecord 调用
+ * 渲染内容：
+ *   1. 顶部标题 + 作者 + 背景图（用户原图）
+ *   2. 匹配度徽章
+ *   3. 完整诗文（按 \n 拆分换行）
+ *   4. 意境赏析（含匹配理由与匹配元素）
+ *   5. "了解诗人"按钮文字与点击事件
+ *   6. 底部上一首/下一首标题
+ *   7. 同步分享卡片内容（标题/正文/作者/照片/Q 版形象/头像）
+ * @returns {void}
+ */
+function refreshPoemDetail() {
+  if (PoemList.length === 0) return;  // 列表为空则不操作
+  var poem = PoemList[AppState.currentPoemIndex];  // 当前诗词对象
+  var total = PoemList.length;
+  // 计算上一首/下一首索引（循环导航）
+  var prevIndex = (AppState.currentPoemIndex - 1 + total) % total;  // 上一首索引
+  var nextIndex = (AppState.currentPoemIndex + 1) % total;          // 下一首索引
+
+  // 1. 更新顶部标题 + 作者
+  document.querySelector('#sub-poem .result-poem-title').textContent = '《' + poem.title + '》';
+  document.querySelector('#sub-poem .result-poem-author').textContent = poem.dynasty + ' · ' + poem.author;
+
+  // 1.1 诗词详情页顶部背景：显示用户原图（与结果页共用 lastResult.image_url）
+  var poemDetailBg = document.querySelector('#sub-poem .poem-detail-bg');
+  if (poemDetailBg && AppState.lastResult && AppState.lastResult.image_url) {
+    poemDetailBg.style.backgroundImage = 'url(' + API_BASE + AppState.lastResult.image_url + ')';
+    poemDetailBg.classList.add('photo-bg');  // 启用照片背景样式
+  }
+
+  // 2. 顶部匹配度徽章（显示当前诗词的匹配度）
+  var poemMatchBadge = document.querySelector('#sub-poem .match-badge');
+  if (poemMatchBadge) {
+    var score = poem.matchScore || 0;
+    poemMatchBadge.innerHTML = '&#x2605; 匹配度 ' + score + '%';
+  }
+
+  // 3. 更新完整诗文（按 \n 拆分换行，每行一个 <p>）
+  var poemBody = document.querySelector('#sub-poem .poem-full-text');
+  poemBody.innerHTML = poem.content.split('\n').map(function(line) {
+    return '<p><span class="poem-line">' + line + '</span></p>';
+  }).join('');
+
+  // 4. 更新意境赏析文字
+  // 优先使用后端返回的 reason（匹配理由）+ matched_elements（匹配元素）
+  // 无 reason 时使用默认赏析文案
+  var appreciationText = document.querySelector('#sub-poem .appreciation-text');
+  if (appreciationText) {
+    if (poem.reason) {
+      // 有匹配理由：显示理由 + 匹配元素
+      appreciationText.innerHTML =
+        '这首诗与您照片中的场景高度契合。<br><br>' +
+        '<strong>匹配理由：</strong>' + poem.reason + '<br><br>' +
+        '<strong>匹配元素：</strong>' + (poem.matched_elements || []).join('、');
+    } else {
+      // 无匹配理由：使用默认赏析文案
+      appreciationText.innerHTML =
+        '这首诗以"' + (poem.tags[0] || '明月') + '"为引，与您照片中的场景高度契合。' +
+        '诗中意境悠远，韵味绵长，值得细细品味。';
+    }
+  }
+
+  // 5. 更新"了解诗人"按钮文字（动态显示诗人姓名）+ 绑定点击事件
+  var authorBtn = document.querySelector('#sub-poem .result-actions .btn-secondary');
+  if (authorBtn) {
+    authorBtn.innerHTML = '&#x1F9D9; 了解诗人' + poem.author + '的生平';
+    authorBtn.onclick = function() {
+      loadAuthorInfo(poem.author);  // 加载作者信息
+      openSubPage('sub-author');    // 打开作者介绍子页面
+    };
+  }
+
+  // 6. 更新底部"上一首 / 下一首"标题（循环导航的预览标题）
+  document.getElementById('prev-poem-title').textContent = PoemList[prevIndex].title;
+  document.getElementById('next-poem-title').textContent = PoemList[nextIndex].title;
+
+  // 7. 同步更新分享卡片中的内容（如果分享页已打开或后续打开）
+  var sharePoem = document.getElementById('shareCardPoemText');
+  if (sharePoem) {
+    // 诗词正文：<br> 换行
+    sharePoem.innerHTML = poem.content.split('\n').join('<br>');
+    document.getElementById('shareCardPoemTitle').textContent = '《' + poem.title + '》';
+    document.getElementById('shareCardPoemMeta').textContent = '— ' + poem.dynasty + ' · ' + poem.author;
+    document.getElementById('shareCardFigureName').textContent = poem.author;
+  }
+
+  // 8. 加载用户原图到分享卡照片层（共享 lastResult.image_url）
+  if (AppState.lastResult && AppState.lastResult.image_url) {
+    var cardPhoto = document.getElementById('shareCardPhotoLayer');
+    if (cardPhoto) {
+      cardPhoto.style.backgroundImage = 'url(' + API_BASE + AppState.lastResult.image_url + ')';
+      cardPhoto.classList.remove('empty');  // 移除空状态类
+    }
+    // 加载 Q 版戏曲形象到分享卡底部
+    var figureImg = document.getElementById('shareCardFigureImg');
+    if (figureImg && AppState.currentAvatar && AppState.currentAvatar.avatar_url) {
+      figureImg.style.backgroundImage = 'url(' + API_BASE + AppState.currentAvatar.avatar_url + ')';
+      figureImg.style.backgroundSize = 'cover';
+      figureImg.style.backgroundPosition = 'center';
+    }
+    // 加载戏曲形象到顶部小头像（Apple/Editorial 风格用）
+    var topAvatar = document.getElementById('shareCardTopAvatar');
+    if (topAvatar && AppState.currentAvatar && AppState.currentAvatar.avatar_url) {
+      topAvatar.style.backgroundImage = 'url(' + API_BASE + AppState.currentAvatar.avatar_url + ')';
+      topAvatar.style.backgroundSize = 'cover';
+      topAvatar.style.backgroundPosition = 'center';
+    }
+  }
+}
+
+/**
+ * TTS 朗读：使用浏览器内置 Web Speech API
+ * 作用范围：诗词详情页的朗读功能，点击播放按钮调用
+ * 技术实现：基于 window.speechSynthesis + SpeechSynthesisUtterance
+ * 朗读内容：标题 + 朝代 + 作者 + 正文
+ * 朗读参数：中文（zh-CN）、语速 0.85（稍慢更有古韵）、音调 1.0、音量 1.0
+ * 状态管理：通过 AppState.isSpeaking 控制播放/停止切换
+ * @returns {void}
+ */
+function toggleSpeakPoem() {
+  // 浏览器兼容性检查：不支持 Web Speech API 时提示用户
+  if (!('speechSynthesis' in window)) {
+    alert('您的浏览器不支持语音朗读功能');
+    return;
+  }
+
+  // 正在朗读 → 停止朗读
+  if (AppState.isSpeaking) {
+    window.speechSynthesis.cancel();  // 停止当前朗读
+    AppState.isSpeaking = false;
+    var btn = document.querySelector('#sub-poem .audio-play-btn');
+    if (btn) btn.innerHTML = '&#x25B6;';  // 恢复播放图标 ▶
+    return;
+  }
+
+  var poem = PoemList[AppState.currentPoemIndex];
+  if (!poem) return;  // 无诗词则不操作
+
+  // 拼接朗读文本：标题 + 朝代 + 作者 + 正文（\n 替换为句号）
+  var text = '《' + poem.title + '》 ' + poem.dynasty + '代 ' + poem.author + '。 ' + poem.content.replace(/\n/g, '。');
+
+  // 创建朗读对象
+  var utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'zh-CN';   // 中文语音
+  utter.rate = 0.85;      // 语速稍慢（0.85x），更有古韵
+  utter.pitch = 1.0;      // 正常音调
+  utter.volume = 1.0;     // 最大音量
+
+  // 朗读结束回调：恢复状态与按钮图标
+  utter.onend = function() {
+    AppState.isSpeaking = false;
+    var btn = document.querySelector('#sub-poem .audio-play-btn');
+    if (btn) btn.innerHTML = '&#x25B6;';  // 恢复播放图标
+  };
+
+  // 朗读错误回调：恢复状态与按钮图标
+  utter.onerror = function() {
+    AppState.isSpeaking = false;
+    var btn = document.querySelector('#sub-poem .audio-play-btn');
+    if (btn) btn.innerHTML = '&#x25B6;';  // 恢复播放图标
+  };
+
+  // 开始朗读
+  window.speechSynthesis.speak(utter);
+  AppState.isSpeaking = true;
+  var btn = document.querySelector('#sub-poem .audio-play-btn');
+  if (btn) btn.innerHTML = '&#x23F8;';  // 切换为暂停图标 ⏸
+}
+
+/**
+ * 加载作者信息到作者介绍子页面
+ * 作用范围：sub-author 子页面的数据加载入口
+ * 业务流程：
+ *   1. 优先使用缓存的 currentAuthorInfo（若姓名匹配）
+ *   2. 缓存不匹配时，先用已有数据快速渲染（防白页）
+ *   3. 异步请求后端 /api/author_info 获取最新数据
+ *   4. 后端返回后重新渲染
+ * @param {string} authorName - 作者姓名（如"李白"）
+ * @returns {void}
+ */
+function loadAuthorInfo(authorName) {
+  var info = AppState.currentAuthorInfo || {};
+
+  // 缓存不匹配：强制先清空旧缓存渲染，再异步请求后端
+  // 修复：之前用旧缓存快速渲染会出现"李白先闪现再变刘禹锡"的错位 bug
+  if (!info.name || info.name !== authorName) {
+    // 先用空 info + 当前 authorName 渲染（确保作者姓名立刻正确）
+    renderAuthorPage({}, authorName);
+    // 异步请求后端获取最新作者信息
+    fetch(API_BASE + '/api/author_info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author_name: authorName })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok && data.author_info) {
+        // 后端有数据：更新缓存并重新渲染
+        AppState.currentAuthorInfo = data.author_info;
+        renderAuthorPage(data.author_info, authorName);
+      } else {
+        // 后端无数据：保持空 info（只显示作者名 + 加载中提示）
+        renderAuthorPage({}, authorName);
+      }
+    })
+    .catch(function() {
+      // 请求失败：保持空 info（不显示旧的错误信息）
+      renderAuthorPage({}, authorName);
+    });
+  } else {
+    // 缓存匹配：直接渲染
+    renderAuthorPage(info, authorName);
+  }
+}
+
+/**
+ * 渲染作者介绍页（拆出来的渲染函数，供 loadAuthorInfo 和回调共用）
+ * 作用范围：sub-author 子页面的 DOM 渲染
+ * 渲染内容：
+ *   1. 顶部头像（戏曲形象或渐变占位）
+ *   2. 作者姓名 + 副标题（朝代 + 字号）
+ *   3. 信息网格（朝代/籍贯/生卒年/身份）
+ *   4. 代表作品列表（不显示匹配度，硬约束）
+ *   5. 创作风格赏析
+ *   6. 检查代表作是否已在寻诗录中，若是则添加"查看"按钮
+ * @param {Object} info - 作者信息对象（含 name/dynasty/alias/birthplace/birth_year/death_year/identity/main_works/writing_style）
+ * @param {string} authorName - 作者姓名（info 为空时兜底显示）
+ * @returns {void}
+ */
+function renderAuthorPage(info, authorName) {
+  var avatar = AppState.currentAvatar || {};
+
+  // 1. 顶部头像：优先用戏曲形象，没有则用渐变背景占位
+  var authorAvatar = document.querySelector('#sub-author .author-avatar');
+  if (authorAvatar) {
+    if (avatar.avatar_url) {
+      authorAvatar.style.backgroundImage = 'url(' + API_BASE + avatar.avatar_url + ')';
+      authorAvatar.style.backgroundSize = 'cover';
+      authorAvatar.style.backgroundPosition = 'center';
+    } else {
+      // 无头像时使用青色渐变占位
+      authorAvatar.style.background = 'linear-gradient(135deg, var(--cyan) 0%, #3D7A8E 100%)';
+    }
+  }
+
+  // 2. 作者姓名与副标题（朝代 + 字号）
+  document.querySelector('#sub-author .author-name').textContent = info.name || authorName;
+  document.querySelector('#sub-author .author-sub').textContent =
+    (info.dynasty || '') + ' · ' + (info.alias || '');
+
+  // 3. 信息网格：4 项基本信息（朝代/籍贯/生卒年/身份）
+  var infoItems = document.querySelectorAll('#sub-author .author-info-item .author-info-value');
+  if (infoItems.length >= 4) {
+    infoItems[0].textContent = (info.dynasty || '') + '代';           // 朝代
+    infoItems[1].textContent = info.birthplace || '未知';              // 籍贯
+    infoItems[2].textContent = (info.birth_year || '') + '年 — ' + (info.death_year || '') + '年';  // 生卒年
+    infoItems[3].textContent = info.identity || '诗人';                // 身份
+  }
+
+  // 4. 代表作品列表（硬约束：不显示匹配度）
+  var worksContainer = document.querySelector('#sub-author .author-works');
+  if (worksContainer) {
+    // 保留标题元素，清空旧作品
+    var worksTitle = worksContainer.querySelector('.author-works-title');
+    worksContainer.innerHTML = '';
+    if (worksTitle) worksContainer.appendChild(worksTitle);  // 重新添加标题
+
+    // 渲染作品列表
+    var works = info.main_works || [];
+    works.forEach(function(work) {
+      // 修复书名号重复 bug：
+      //   之前 AI 返回 "《陋室铭》" 时，渲染代码又在两头包了 "《..."》，变成 "《《陋室铭》》"
+      //   现在先清洗 work（去掉已存在的书名号），渲染时统一加一层，保证只有一对书名号
+      var cleanWork = String(work || '').replace(/[《》]/g, '').trim();
+      if (!cleanWork) return;  // 跳过空作品名
+      // 将清洗后的作品名同步回数组，让下面的"代表作匹配查看"用同样的干净值（标题做精确匹配）
+      works[works.indexOf(work)] = cleanWork;
+      var div = document.createElement('div');
+      div.className = 'work-item';
+      div.innerHTML = '<div class="work-item-title">《' + cleanWork + '》</div>';
+      worksContainer.appendChild(div);
+    });
+
+    // 4.1 检查哪些代表作已在寻诗录中，若是则添加"查看"按钮
+    fetch(API_BASE + '/api/history')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok || !data.items) return;
+        var workItems = worksContainer.querySelectorAll('.work-item');
+        workItems.forEach(function(item, idx) {
+          // 去除书名号，便于与历史记录中的标题匹配
+          var title = (works[idx] || '').replace(/[《》]/g, '');
+          var matched = null;
+          // 在历史记录中查找匹配的诗词
+          for (var h = 0; h < data.items.length; h++) {
+            var hp = data.items[h].top_poem;
+            if (hp && hp.title === title) {
+              matched = data.items[h];
+              break;
+            }
+          }
+          // 若该代表作已在寻诗录中，添加"查看"按钮
+          if (matched) {
+            var btn = document.createElement('button');
+            btn.className = 'btn-view';
+            btn.textContent = '\u67E5\u770B';  // "查看"的 Unicode 转义
+            btn.onclick = function(e) {
+              e.stopPropagation();  // 阻止事件冒泡
+              openHistoryRecord(matched);  // 跳转到历史记录详情
+            };
+            item.appendChild(btn);
+          }
+        });
+      })
+      .catch(function(err) {
+        console.error('加载历史记录失败:', err);
+      });
+  }
+
+  // 5. 创作风格赏析
+  var styleText = document.querySelector('#sub-author .appreciation-text');
+  if (styleText) {
+    styleText.textContent = info.writing_style || '暂无创作风格信息';
+  }
+}
+
+/**
+ * 生成分享卡片（调用后端 /api/generate_card）
+ * 作用范围：sub-share 子页面的"生成卡片"按钮调用
+ * 业务流程：
+ *   1. 检查是否有识别结果（lastResult）
+ *   2. 显示"正在生成"加载提示
+ *   3. POST 请求后端 /api/generate_card，传递图片 ID、诗词信息、戏曲形象、卡片风格
+ *   4. 成功：显示下载链接 + 重新生成按钮
+ *   5. 失败：提示错误 + 恢复原按钮
+ * 接口参数：
+ *   - image_id: 用户原图 ID
+ *   - poem: {title, author, dynasty, content}
+ *   - avatar_filename: 戏曲形象文件名
+ *   - card_style: 卡片风格（style-a ~ style-f）
+ * @returns {void}
+ */
+function generateShareCard() {
+  // 前置检查：必须先拍照识别
+  if (!AppState.lastResult) {
+    alert('请先拍照识别');
+    return;
+  }
+  var poem = PoemList[AppState.currentPoemIndex];
+  if (!poem) return;  // 无诗词则不操作
+
+  // 戏曲形象文件名（默认李白形象）
+  var avatarFilename = (AppState.currentAvatar && AppState.currentAvatar.image_filename) || 'preview_M5_tang_li_bai.jpg';
+
+  // 显示加载提示（替换按钮区域内容）
+  var shareActions = document.querySelector('#sub-share .share-actions');
+  if (shareActions) {
+    shareActions.innerHTML = '<div style="text-align:center; padding:20px; color:var(--ink-light);">正在生成卡片...</div>';
+  }
+
+  // 调用后端接口生成卡片
+  fetch(API_BASE + '/api/generate_card', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image_id: AppState.lastResult.image_id,           // 用户原图 ID
+      poem: {
+        title: poem.title,                               // 诗词标题
+        author: poem.author,                             // 作者
+        dynasty: poem.dynasty,                           // 朝代
+        content: poem.content                            // 诗词正文
+      },
+      avatar_filename: avatarFilename,                  // 戏曲形象文件名
+      card_style: AppState.currentCardStyle || 'style-b'  // 卡片风格（默认 B）
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      // 成功：显示下载链接 + 重新生成按钮
+      var tip = document.querySelector('#sub-share .share-tip');
+      if (tip) {
+        tip.innerHTML = '✅ 卡片已生成！<br>' +
+                        '<a href="' + API_BASE + data.card_url + '" target="_blank" style="color:var(--vermillion);">点击查看大图</a><br>' +
+                        '<a href="' + API_BASE + data.card_url + '" download style="color:var(--gold);">点击下载图片</a>';
+      }
+      if (shareActions) {
+        shareActions.innerHTML =
+          '<a class="btn-primary" href="' + API_BASE + data.card_url + '" download style="text-decoration:none; text-align:center; display:block;">&#x1F4BE; 保存图片</a>' +
+          '<button class="btn-secondary" onclick="generateShareCard()">&#x1F504; 重新生成</button>';
+      }
+    } else {
+      // 业务失败：提示错误 + 恢复原按钮
+      alert('卡片生成失败：' + (data.error || '未知错误'));
+      if (shareActions) {
+        shareActions.innerHTML =
+          '<button class="btn-primary" onclick="generateShareCard()">&#x1F4BE; 生成卡片</button>' +
+          '<button class="btn-secondary">&#x1F517; 分享好友</button>';
+      }
+    }
+  })
+  .catch(function(err) {
+    // 网络错误：提示 + 恢复原按钮
+    alert('卡片生成请求失败：' + err.message);
+    if (shareActions) {
+      shareActions.innerHTML =
+        '<button class="btn-primary" onclick="generateShareCard()">&#x1F4BE; 生成卡片</button>' +
+        '<button class="btn-secondary">&#x1F517; 分享好友</button>';
+    }
+  });
+}
+
+/**
+ * 切换删除模式：显示/隐藏多选复选框
+ * 作用范围：寻诗录页面的批量删除模式切换
+ * 业务流程：
+ *   1. 切换 deleteMode 状态（true ↔ false）
+ *   2. 清空已选列表 selectedForDelete
+ *   3. 为所有历史记录卡片添加/移除 delete-active 类
+ *   4. 重置所有复选框状态
+ *   5. 显示/隐藏删除确认栏
+ *   6. 切换删除按钮图标（垃圾桶 ↔ 关闭）
+ *   7. 更新已选数量显示
+ * @returns {void}
+ */
+function toggleDeleteMode() {
+  AppState.deleteMode = !AppState.deleteMode;  // 切换删除模式
+  AppState.selectedForDelete = [];              // 清空已选列表
+
+  // 为所有历史记录卡片添加/移除 delete-active 类
+  var items = document.querySelectorAll('#tab-history .history-item');
+  items.forEach(function(el) {
+    if (AppState.deleteMode) {
+      el.classList.add('delete-active');    // 进入删除模式：添加 delete-active 类
+      el.classList.remove('selected');      // 清除选中状态
+    } else {
+      el.classList.remove('delete-active', 'selected');  // 退出删除模式：移除所有相关类
+    }
+  });
+
+  // 重置所有复选框为未选中状态
+  var checkboxes = document.querySelectorAll('#tab-history .delete-checkbox');
+  checkboxes.forEach(function(cb) { cb.checked = false; });
+
+  // 切换删除确认栏的显示状态
+  var bar = document.getElementById('delete-confirm-bar');
+  var delBtn = document.getElementById('history-delete-btn');
+  if (bar) {
+    if (AppState.deleteMode) {
+      bar.classList.add('active');           // 显示确认栏
+      delBtn.textContent = '\u2716';         // 切换为关闭图标 ✖
+    } else {
+      bar.classList.remove('active');        // 隐藏确认栏
+      delBtn.textContent = '\uD83D\uDDD1';   // 恢复垃圾桶图标 🗑
+    }
+  }
+  updateDeleteCount();  // 更新已选数量显示
+}
+
+/**
+ * 切换单个条目的选中状态
+ * 作用范围：删除模式下点击历史记录卡片时调用
+ * 业务流程：检查当前条目是否已在已选列表中，是则移除，否则添加
+ * @param {HTMLElement} el - 被点击的历史记录卡片元素
+ * @param {string} id - 该记录的 ID（用于删除请求）
+ * @returns {void}
+ */
+function toggleSelectItem(el, id) {
+  if (!AppState.deleteMode) return;  // 非删除模式不响应
+  var idx = AppState.selectedForDelete.indexOf(id);  // 查找是否已选
+  if (idx >= 0) {
+    // 已选 → 取消选中
+    AppState.selectedForDelete.splice(idx, 1);  // 从已选列表移除
+    el.classList.remove('selected');             // 移除选中样式
+    el.querySelector('.delete-checkbox').checked = false;  // 取消勾选
+  } else {
+    // 未选 → 添加选中
+    AppState.selectedForDelete.push(id);         // 加入已选列表
+    el.classList.add('selected');                // 添加选中样式
+    el.querySelector('.delete-checkbox').checked = true;   // 勾选
+  }
+  updateDeleteCount();  // 更新已选数量显示
+}
+
+/**
+ * 更新已选数量
+ * 作用范围：删除确认栏中的"选中 N 条"文字
+ * @returns {void}
+ */
+function updateDeleteCount() {
+  var countEl = document.getElementById('delete-count');
+  if (countEl) countEl.textContent = AppState.selectedForDelete.length;
+}
+
+/**
+ * 取消删除模式
+ * 作用范围：删除确认栏的"取消"按钮调用
+ * 业务流程：重置 deleteMode + 清空已选列表 + 移除卡片样式 + 重置复选框 + 隐藏确认栏
+ * @returns {void}
+ */
+function cancelDeleteMode() {
+  AppState.deleteMode = false;          // 退出删除模式
+  AppState.selectedForDelete = [];      // 清空已选列表
+  var items = document.querySelectorAll('#tab-history .history-item');
+  items.forEach(function(el) {
+    el.classList.remove('delete-active', 'selected');  // 移除相关类
+  });
+  var checkboxes = document.querySelectorAll('#tab-history .delete-checkbox');
+  checkboxes.forEach(function(cb) { cb.checked = false; });  // 重置复选框
+  var bar = document.getElementById('delete-confirm-bar');
+  if (bar) bar.classList.remove('active');  // 隐藏确认栏
+  var delBtn = document.getElementById('history-delete-btn');
+  if (delBtn) delBtn.textContent = '\uD83D\uDDD1';  // 恢复垃圾桶图标
+}
+
+/**
+ * 确认删除选中的记录
+ * 作用范围：删除确认栏的"确认删除"按钮调用
+ * 业务流程：
+ *   1. 检查是否已选择记录
+ *   2. POST 请求后端 /api/history/delete，传递待删除 ID 列表
+ *   3. 成功：退出删除模式 + 重新加载历史列表
+ *   4. 失败：提示错误
+ * @returns {void}
+ */
+function confirmDelete() {
+  // 前置检查：必须选择至少一条记录
+  if (AppState.selectedForDelete.length === 0) {
+    alert('请先选择要删除的记录');
+    return;
+  }
+
+  // 调用后端删除接口
+  fetch(API_BASE + '/api/history/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: AppState.selectedForDelete })  // 待删除 ID 列表
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      cancelDeleteMode();  // 退出删除模式
+      loadHistoryList();   // 重新加载历史列表
+    } else {
+      alert('删除失败：' + (data.error || '未知错误'));
+    }
+  })
+  .catch(function(err) {
+    alert('删除请求失败：' + err.message);
+  });
+}
+
+/**
+ * 切换分享卡片样式（6 种风格：A~F）
+ * 作用范围：sub-share 子页面的样式切换按钮组
+ * 业务流程：
+ *   1. 移除预览容器的所有旧样式类（style-a ~ style-f）
+ *   2. 添加新样式类
+ *   3. 更新全局状态 currentCardStyle
+ *   4. 更新按钮组激活态
+ * 卡片尺寸（严格按设计提案）：A(3:5) / B(3:4) / C(9:5) / D(1:2) / E(3:4) / F(3:4.5)
+ * @param {string} styleClass - 样式类名（style-a / style-b / style-c / style-d / style-e / style-f）
+ * @param {HTMLElement} btn - 被点击的按钮元素（用于激活态切换）
+ * @returns {void}
+ */
+function switchCardStyle(styleClass, btn) {
+  var preview = document.getElementById('shareCardPreview');
+  if (!preview) return;
+
+  // 1. 移除所有旧样式类
+  preview.classList.remove('style-a', 'style-b', 'style-c', 'style-d', 'style-e', 'style-f');
+  // 2. 添加新样式类
+  preview.classList.add(styleClass);
+
+  // 3. 更新全局状态
+  AppState.currentCardStyle = styleClass;
+
+  // 4. 更新按钮组激活态：移除其他按钮的 active，为当前按钮添加 active
+  var buttons = document.querySelectorAll('.style-btn');
+  buttons.forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+}
+
+// ============================================================
+// ====== 事件监听 ======
+// ============================================================
+
+/**
+ * 页面加载完成后的初始化
+ * 触发时机：DOM 完全解析后（DOMContentLoaded 事件）
+ * 业务流程：
+ *   1. 检查后端是否可用（GET /api/status）
+ *   2. 根据后端模式（demo/真实）打印日志
+ *   3. 显示结果页空状态（hasResult=false）
+ * @returns {void}
+ */
+window.addEventListener('DOMContentLoaded', function() {
+  // 检查后端状态：判断是 Demo 模式还是真实 AI 模式
+  fetch(API_BASE + '/api/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.demo_mode) {
+        console.log('后端运行在 Demo 模式（使用示例数据）');
+      } else {
+        console.log('后端运行在真实模式（调用 AI）');
+      }
+    })
+    .catch(function(err) {
+      console.warn('后端连接失败，请确保已启动：python app.py');
+    });
+
+  // 默认显示空状态结果页（hasResult=false）
+  showResultContent();
+});
+
+/**
+ * 监听浏览器/微信返回键（手机端体验）
+ * 触发时机：用户点击浏览器后退按钮或微信返回键（popstate 事件）
+ * 业务流程：若子页面栈非空，调用 closeSubPage() 返回上一级；否则交由浏览器默认行为
+ * 设计目的：让手机端返回键与页面内返回按钮行为一致
+ * @returns {void}
+ */
+window.addEventListener('popstate', function() {
+  if (AppState.subPageStack.length > 0) {
+    closeSubPage();  // 子页面栈非空：返回上一级子页面
+  }
+  // 栈为空：交由浏览器默认行为（退出页面）
+});
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,2658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚实一体仿真系统 - 流水线控制</title>
+    <script src="auth-guard.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0ea5e9;
+            --primary-dark: #0284c7;
+            --secondary: #f59e0b;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f97316;
+            --bg-dark: #0a0f1a;
+            --bg-panel: #111827;
+            --bg-card: #1e293b;
+            --bg-hover: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #334155;
+            --gradient-1: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+            --gradient-2: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            --gradient-3: linear-gradient(135deg, #22c55e 0%, #0ea5e9 100%);
+            --shadow-glow: 0 0 20px rgba(14, 165, 233, 0.3);
+            --scene-bg: #1a2332;
+            --scene-fog: #1a2332;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: rgba(10, 15, 26, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            height: 60px;
+            flex-shrink: 0;
+        }
+        .logo { display: flex; align-items: center; gap: 0.75rem; }
+        .logo-icon {
+            width: 40px; height: 40px;
+            background: var(--gradient-1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        .logo-text h1 {
+            font-size: 1.25rem; font-weight: 700;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .logo-text p { font-size: 0.7rem; color: var(--text-secondary); }
+        .status-bar { display: flex; gap: 1.5rem; align-items: center; }
+        .status-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: blink 2s ease-in-out infinite;
+        }
+        .status-dot.warning { background: var(--warning); }
+        .status-dot.danger { background: var(--danger); }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(14,165,233,0.4); } 50% { box-shadow: 0 0 0 10px rgba(14,165,233,0); } }
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .viewport-container { flex: 1; position: relative; background: var(--scene-bg); }
+        #canvas-container { width: 100%; height: 100%; }
+        .viewport-overlay {
+            position: absolute; top: 0; left: 0; right: 0;
+            pointer-events: none; z-index: 10; padding: 1rem;
+        }
+        .mode-indicator {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            pointer-events: auto;
+        }
+        .mode-indicator .mode-badge {
+            padding: 0.2rem 0.5rem; border-radius: 4px;
+            font-size: 0.75rem; font-weight: 500;
+        }
+        .mode-badge.virtual { background: rgba(14, 165, 233, 0.2); color: var(--primary); }
+        .mode-badge.hybrid { background: rgba(245, 158, 11, 0.2); color: var(--secondary); }
+        .mode-badge.real { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .bg-brightness-control {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.6rem 0.8rem;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            pointer-events: auto;
+        }
+        .bg-brightness-control label { color: var(--text-secondary); white-space: nowrap; }
+        .bg-brightness-control input[type="range"] {
+            width: 100px;
+            -webkit-appearance: none;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--bg-hover);
+            outline: none;
+        }
+        .bg-brightness-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+        }
+        .control-sidebar {
+            width: 420px;
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        .tabs::-webkit-scrollbar { height: 10px; }
+        .tabs::-webkit-scrollbar-track { background: var(--bg-dark); border-radius: 5px; }
+        .tabs::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 5px; }
+        .tabs::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+        .tab {
+            flex: 1;
+            padding: 0.75rem 0.5rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+            min-width: 60px;
+        }
+        .tab:hover { color: var(--text-primary); background: rgba(51, 65, 85, 0.3); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); background: rgba(14, 165, 233, 0.1); }
+        .panel-content { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; }
+        .panel-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .panel-section h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+        .btn {
+            padding: 0.6rem 1rem; border: none; border-radius: 6px;
+            font-family: inherit; font-size: 0.8rem; font-weight: 500;
+            cursor: pointer; transition: all 0.3s ease;
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+        }
+        .btn-primary { background: var(--gradient-1); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+        .btn-secondary { background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--border); }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: white; }
+        .btn-group { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .btn-group .btn { flex: 1; min-width: 70px; }
+        .joint-control { margin-bottom: 0.75rem; }
+        .joint-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
+        .joint-name { font-size: 0.8rem; color: var(--text-secondary); }
+        .joint-value { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--primary); font-weight: 700; }
+        .joint-slider {
+            width: 100%; -webkit-appearance: none;
+            height: 6px; border-radius: 3px;
+            background: var(--bg-hover);
+            outline: none; cursor: pointer;
+        }
+        .joint-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(14, 165, 233, 0.5);
+        }
+        .joint-range { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.2rem; }
+        .device-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .device-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: var(--bg-dark); border-radius: 6px; font-size: 0.8rem; }
+        .device-name { display: flex; align-items: center; gap: 0.5rem; }
+        .device-status { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }
+        .device-status.online { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .device-status.offline { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .device-status.warning { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .log-container {
+            background: var(--bg-dark); border-radius: 8px;
+            padding: 0.75rem; height: 200px; overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
+        }
+        .log-entry { padding: 0.3rem 0; border-bottom: 1px solid var(--border); display: flex; gap: 0.5rem; }
+        .log-time { color: var(--text-secondary); white-space: nowrap; }
+        .log-level { padding: 0 0.3rem; border-radius: 3px; font-size: 0.7rem; font-weight: 500; white-space: nowrap; }
+        .log-level.info { background: rgba(14, 165, 233, 0.2); color: var(--primary); }
+        .log-level.warn { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .log-level.error { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .log-message { color: var(--text-primary); }
+        .controls-hint {
+            position: absolute; bottom: 1rem; left: 1rem;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);
+            pointer-events: none;
+        }
+        .controls-hint kbd {
+            background: var(--bg-hover); border: 1px solid var(--border);
+            border-radius: 3px; padding: 0.1rem 0.3rem;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+        }
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center; z-index: 200;
+        }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        select {
+            background: var(--bg-dark); border: 1px solid var(--border);
+            border-radius: 6px; padding: 0.5rem;
+            color: var(--text-primary); font-family: inherit;
+            font-size: 0.8rem; width: 100%; outline: none; cursor: pointer;
+        }
+        select:focus { border-color: var(--primary); }
+        input[type="text"], input[type="number"] {
+            background: var(--bg-dark); border: 1px solid var(--border);
+            border-radius: 6px; padding: 0.5rem;
+            color: var(--text-primary); font-family: inherit;
+            font-size: 0.8rem; width: 100%; outline: none;
+        }
+        input[type="text"]:focus, input[type="number"]:focus { border-color: var(--primary); }
+        .checkbox-group { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+        @media (max-width: 1200px) { .control-sidebar { width: 380px; } }
+        @media (max-width: 900px) { .control-sidebar { width: 320px; } }
+        @keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <div class="logo-icon">&#9881;</div>
+            <div class="logo-text">
+                <h1>虚实一体仿真系统 - 流水线控制</h1>
+                <p>职业院校工业机器人及自动化流水线实训平台</p>
+            </div>
+        </div>
+        <nav style="display:flex;gap:0.5rem;">
+            <a href="simulation.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#129302; 机器人仿真</a>
+            <a href="tasks.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128203; 任务</a>
+            <a href="assessment.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128202; 考核</a>
+            <a href="users.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128101; 用户</a>
+            <a href="resources.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128218; 资源</a>
+            <a href="data.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128200; 数据</a>
+            <a href="qa.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128172; 答疑</a>
+            <a href="logs.html" style="padding:0.4rem 0.8rem;color:var(--text-secondary);text-decoration:none;border-radius:6px;font-size:0.8rem;transition:all 0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">&#128221; 日志</a>
+        </nav>
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-dot"></span>
+                <span>API 服务正常</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot"></span>
+                <span>WebSocket 已连接</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot warning" id="sync-status-dot"></span>
+                <span id="sync-status-text">同步引擎: 待机</span>
+            </div>
+            <div class="status-item" style="gap:0.4rem;margin-right:3rem;">
+                <div id="user-avatar" style="width:28px;height:28px;border-radius:50%;background:var(--gradient-1);display:flex;align-items:center;justify-content:center;font-size:0.7rem;cursor:pointer;overflow:hidden;border:2px solid var(--border);" onclick="document.getElementById('avatar-upload').click()" title="点击上传头像">
+                    <span id="avatar-text">&#128100;</span>
+                    <img id="avatar-img" style="width:100%;height:100%;object-fit:cover;display:none;">
+                </div>
+                <input type="file" id="avatar-upload" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
+                <span id="header-username" style="font-weight:500;">管理员</span>
+                <button onclick="doLogout()" style="padding:0.2rem 0.5rem;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);border-radius:4px;color:#ef4444;font-family:inherit;font-size:0.7rem;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.3)'" onmouseout="this.style.background='rgba(239,68,68,0.15)'">注销</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- 3D视口 -->
+        <div class="viewport-container">
+            <div id="loading">
+                <div class="spinner"></div>
+                <p>正在加载3D流水线场景...</p>
+            </div>
+            <div id="canvas-container"></div>
+            
+            <div class="viewport-overlay">
+                <div class="mode-indicator">
+                    <span>当前模式:</span>
+                    <span class="mode-badge virtual" id="current-mode">纯虚拟仿真</span>
+                </div>
+            </div>
+
+            <div class="controls-hint">
+                <kbd>左键</kbd> 旋转 <kbd>右键</kbd> 平移 <kbd>滚轮</kbd> 缩放 <kbd>双击</kbd> 聚焦
+            </div>
+            <!-- 背景亮度调节 -->
+            <div class="bg-brightness-control">
+                <label>&#128161; 背景亮度</label>
+                <input type="range" id="bg-brightness" min="0" max="100" value="0" oninput="updateSceneBrightness(this.value)">
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="control-sidebar">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('pipeline')">&#9881; 流水线</button>
+                <button class="tab" onclick="switchTab('gripper')">&#129295; 平台抓手</button>
+                <button class="tab" onclick="switchTab('devices')">&#127981; 设备</button>
+                <button class="tab" onclick="switchTab('linkage')">&#128260; 联动</button>
+                <button class="tab" onclick="switchTab('logs')">&#128221; 日志</button>
+            </div>
+
+            <div class="panel-content">
+                <!-- 流水线控制面板 -->
+                <div id="panel-pipeline" class="panel-sections">
+                    <div class="panel-section">
+                        <h3>&#127919; 运行模式</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="setMode('virtual')">纯虚拟</button>
+                            <button class="btn btn-secondary" onclick="setMode('hybrid')">虚实联动</button>
+                            <button class="btn btn-secondary" onclick="setMode('real')">全实物</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3>&#128295; 系统控制</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-success" onclick="startAnimation()">&#9654; 启动</button>
+                            <button class="btn btn-secondary" onclick="pauseAnimation()">&#9208; 暂停</button>
+                            <button class="btn btn-danger" onclick="emergencyStop()">&#128680; 急停</button>
+                        </div>
+                        <div class="btn-group" style="margin-top: 0.5rem;">
+                            <button class="btn btn-secondary" onclick="toggleView()">&#128065; 视角</button>
+                            <button class="btn btn-secondary" onclick="resetScene()">&#128260; 复位</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3>&#128722; 传送带控制</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-success" id="conveyor-start-btn" onclick="startConveyor()">&#9654; 启动传送带</button>
+                            <button class="btn btn-danger" id="conveyor-stop-btn" onclick="stopConveyor()">&#9209; 停止传送带</button>
+                        </div>
+                        <div class="joint-control" style="margin-top: 0.75rem;">
+                            <div class="joint-header">
+                                <span class="joint-name">传送带速度</span>
+                                <span class="joint-value" id="conveyor-speed-value">5.0 m/min</span>
+                            </div>
+                            <input type="range" class="joint-slider" min="1" max="10" step="0.5" value="5" oninput="updateConveyorSpeed(this.value)">
+                            <div class="joint-range"><span>1 m/min</span><span>10 m/min</span></div>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3>&#128230; 工件生成控制</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="generateWorkpiece()">&#10133; 生成工件</button>
+                            <button class="btn btn-secondary" onclick="clearWorkpieces()">&#128465; 清除工件</button>
+                        </div>
+                        <div class="checkbox-group" style="margin-top: 0.5rem;">
+                            <input type="checkbox" id="auto-generate" onchange="toggleAutoGenerate(this.checked)">
+                            <label for="auto-generate">自动循环生成工件</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 平台抓手控制面板 -->
+                <div id="panel-gripper" class="panel-sections" style="display: none;">
+                    <div class="panel-section">
+                        <h3>&#129295; 平台抓手控制</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="toggleGripper()">&#129295; 抓手开合</button>
+                            <button class="btn btn-success" onclick="gripWorkpiece()">&#9994; 抓取</button>
+                            <button class="btn btn-secondary" onclick="releaseWorkpiece()">&#9995; 释放</button>
+                        </div>
+                        <div class="btn-group" style="margin-top: 0.5rem;">
+                            <button class="btn btn-danger" id="pump-btn" onclick="toggleVacuumPump()">&#128308; 气泵关闭</button>
+                            <button class="btn btn-success" onclick="autoGripAndTransfer()">&#129302; 自动转移</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3>&#128208; 抓手状态</h3>
+                        <div class="device-list">
+                            <div class="device-item">
+                                <span class="device-name">&#129295; 抓手状态</span>
+                                <span class="device-status online" id="gripper-status">张开</span>
+                            </div>
+                            <div class="device-item">
+                                <span class="device-name">&#128167; 气泵压力</span>
+                                <span class="joint-value" id="pump-pressure-display">0.0 MPa</span>
+                            </div>
+                            <div class="device-item">
+                                <span class="device-name">&#128230; 已抓取工件</span>
+                                <span class="joint-value" id="gripped-workpiece">无</span>
+                            </div>
+                            <div class="device-item">
+                                <span class="device-name">&#128230; 物料箱数量</span>
+                                <span class="joint-value" id="box-count">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel-section">
+                        <h3>&#127919; 自动转移状态</h3>
+                        <div class="device-list">
+                            <div class="device-item">
+                                <span class="device-name">&#9881; 状态机</span>
+                                <span class="device-status warning" id="auto-grip-state">待机</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 设备面板 -->
+                <div id="panel-devices" class="panel-sections" style="display: none;">
+                    <div class="panel-section">
+                        <h3>&#127981; 产线设备状态</h3>
+                        <div class="device-list">
+                            <div class="device-item"><span class="device-name">&#9881; 传送带系统</span><span class="device-status online" id="dev-conveyor">运行中</span></div>
+                            <div class="device-item"><span class="device-name">&#129295; 平台抓手</span><span class="device-status online">在线</span></div>
+                            <div class="device-item"><span class="device-name">&#128167; 气动系统</span><span class="device-status online" id="dev-pump">0.0MPa</span></div>
+                            <div class="device-item"><span class="device-name">&#128230; 物料仓</span><span class="device-status warning" id="dev-material">低料位</span></div>
+                        </div>
+                    </div>
+                    <div class="panel-section">
+                        <h3>&#128200; 实时数据</h3>
+                        <div class="device-list">
+                            <div class="device-item"><span class="device-name">传送带速度</span><span class="joint-value" id="dev-conveyor-speed">5.0 m/min</span></div>
+                            <div class="device-item"><span class="device-name">气源压力</span><span class="joint-value" id="dev-air-pressure">0.0 MPa</span></div>
+                            <div class="device-item"><span class="device-name">环境温度</span><span class="joint-value" id="dev-env-temp">25.3 &#176;C</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 联动面板 -->
+                <div id="panel-linkage" class="panel-sections" style="display: none;">
+                    <div class="panel-section">
+                        <h3>&#127918; 联动模式</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" id="linkage-mode-virtual" onclick="setLinkageMode('virtual')">纯虚拟</button>
+                            <button class="btn btn-secondary" id="linkage-mode-v2r" onclick="setLinkageMode('v2r')">虚控实</button>
+                            <button class="btn btn-secondary" id="linkage-mode-r2v" onclick="setLinkageMode('r2v')">实驱虚</button>
+                            <button class="btn btn-secondary" id="linkage-mode-bidirectional" onclick="setLinkageMode('bidirectional')">双向联动</button>
+                        </div>
+                        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+                            <button class="btn btn-success" onclick="startAllChannels()">&#9654; 一键启动</button>
+                            <button class="btn btn-danger" onclick="emergencyDisconnectAll()">&#128680; 紧急断开</button>
+                        </div>
+                        <div style="margin-top:0.5rem;padding:0.5rem;background:var(--bg-dark);border-radius:6px;font-size:0.75rem;">
+                            <span style="color:var(--text-secondary);">当前模式:</span>
+                            <span id="linkage-mode-display" style="color:var(--primary);font-weight:600;margin-left:0.3rem;">纯虚拟模式</span>
+                            <span style="color:var(--text-secondary);margin-left:0.8rem;">通道状态:</span>
+                            <span id="linkage-channels-status" style="color:var(--warning);margin-left:0.3rem;">未启动</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 日志面板 -->
+                <div id="panel-logs" class="panel-sections" style="display: none;">
+                    <div class="panel-section">
+                        <h3>&#128221; 系统日志</h3>
+                        <div class="log-container" id="log-container">
+                            <div class="log-entry">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level info">INFO</span>
+                                <span class="log-message">流水线控制系统已初始化</span>
+                            </div>
+                        </div>
+                        <div class="btn-group" style="margin-top: 0.5rem;">
+                            <button class="btn btn-secondary" onclick="clearLogs()">&#128465; 清空</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.150.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.150.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        window.THREE = THREE;
+        window.OrbitControls = OrbitControls;
+        console.log('THREE module imported, version:', THREE.REVISION);
+
+        // ==================== 全局变量 ====================
+        let scene, camera, renderer, controls;
+        let conveyor, conveyorRollers = [];
+        let workpieces = [];
+        let isAnimating = false;
+        let conveyorRunning = false;
+        let currentMode = 'virtual';
+        let ws = null;
+        let animationId = null;
+        let autoGenerateWorkpieces = false;
+        let autoGenerateTimer = null;
+
+        // 弹簧-阻尼系统参数
+        const armJointState = {
+            rotation: { current: 0, velocity: 0 },
+            horizontal: { current: 1.0, velocity: 0 },
+            vertical: { current: 1.0, velocity: 0 }
+        };
+        const SPRING_STIFFNESS = 0.15;  // 弹簧刚度
+        const SPRING_DAMPING = 0.75;    // 阻尼系数
+
+        // 滑落中的工件列表
+        const slidingWorkpieces = [];
+        const GRAVITY = -9.8;
+        const SLIDE_DT = 0.016;
+
+        // 传送带加减速
+        let conveyorTargetSpeed = 0; // 目标速度 (0 或 1)
+        let conveyorCurrentSpeed = 0; // 当前速度 (0~1)
+
+        // 传送带皮带材质（全局引用）
+        let conveyorBeltMaterial = null;
+
+        // 平台抓手全局变量
+        let platformFingerL = null;
+        let platformFingerR = null;
+        let platformGripperGroup = null;
+        let gripperTargetOpen = true;
+        let gripperAnimProgress = 1.0;
+        let grippedWorkpiece = null;
+        window.grippedWorkpiece = grippedWorkpiece;
+        let vacuumPumpOn = false;
+        let pumpPressure = 0;
+        let materialBox;
+        let boxContents = [];
+        window.boxContents = boxContents;
+
+        // 自动转移状态机
+        let autoGripState = 'idle';
+        let autoGripFrame = 0;
+        let autoGripTargetWorkpiece = null;
+
+        // 平台抓手位置常量（位于金属台上 z=-0.8）
+        // 平台抓手组的位置在金属台表面 y=0.875
+        const PLATFORM_GRIPPER_HOME_Y = 0.875; // 平台抓手组的基准Y位置（金属台表面）
+        const PLATFORM_GRIPPER_GRIP_X = 3.5;
+        const PLATFORM_GRIPPER_BOX_X = 4.3; // 物料箱在 x=4.3
+        const PLATFORM_GRIPPER_HOME_Z = -0.8;
+
+        // SCARA机械臂参数
+        const ARM_SPINDLE_HEIGHT = 0.5; // 主轴高度
+        const ARM_HORIZONTAL_MIN = 0.3; // 横向杆最小长度
+        const ARM_HORIZONTAL_MAX = 0.8; // 横向杆最大长度
+        const ARM_VERTICAL_MIN = 0.2; // 竖向杆最小长度
+        const ARM_VERTICAL_MAX = 0.7; // 竖向杆最大长度
+        const ARM_ROTATION_HOME = 0; // 主轴初始角度（弧度）
+        const ARM_ROTATION_GRIP = 0; // 抓取时角度（朝向传送带末端）
+        const ARM_ROTATION_BOX = 0; // 放置时角度（物料箱也在x正方向）
+
+        window.PLATFORM_GRIPPER_HOME_Y = PLATFORM_GRIPPER_HOME_Y;
+        window.PLATFORM_GRIPPER_GRIP_X = PLATFORM_GRIPPER_GRIP_X;
+        window.PLATFORM_GRIPPER_BOX_X = PLATFORM_GRIPPER_BOX_X;
+        window.PLATFORM_GRIPPER_HOME_Z = PLATFORM_GRIPPER_HOME_Z;
+        window.ARM_SPINDLE_HEIGHT = ARM_SPINDLE_HEIGHT;
+        window.ARM_HORIZONTAL_MIN = ARM_HORIZONTAL_MIN;
+        window.ARM_HORIZONTAL_MAX = ARM_HORIZONTAL_MAX;
+        window.ARM_VERTICAL_MIN = ARM_VERTICAL_MIN;
+        window.ARM_VERTICAL_MAX = ARM_VERTICAL_MAX;
+        window.ARM_ROTATION_HOME = ARM_ROTATION_HOME;
+        window.ARM_ROTATION_GRIP = ARM_ROTATION_GRIP;
+        window.ARM_ROTATION_BOX = ARM_ROTATION_BOX;
+        window.vacuumPumpOn = vacuumPumpOn;
+        window.pumpPressure = pumpPressure;
+        window.autoGripState = autoGripState;
+        window.autoGripFrame = autoGripFrame;
+        window.autoGripTargetWorkpiece = autoGripTargetWorkpiece;
+        window.workpieces = workpieces;
+
+        // ==================== 初始化场景 ====================
+        window.init = function() {
+            scene = new THREE.Scene();
+            window.scene = scene;
+            scene.background = new THREE.Color(0x1a2332);
+            scene.fog = new THREE.Fog(0x1a2332, 15, 60);
+
+            camera = new THREE.PerspectiveCamera(60,
+                document.querySelector('.viewport-container').clientWidth /
+                document.querySelector('.viewport-container').clientHeight, 0.1, 1000);
+            window.camera = camera;
+            // 调整相机初始位置以更好观察流水线
+            camera.position.set(4, 4, 7);
+            camera.lookAt(2, 1, -0.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+            window.renderer = renderer;
+            renderer.setSize(
+                document.querySelector('.viewport-container').clientWidth,
+                document.querySelector('.viewport-container').clientHeight
+            );
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            window.controls = controls;
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2.1;
+            controls.minDistance = 2;
+            controls.maxDistance = 30;
+            controls.target.set(2, 1, -0.5);
+
+            setupLighting();
+            createEnvironment();
+            createConveyorSystem();
+            createMetalTable();
+            createWorkpieces();
+            createMaterialBox();
+
+            connectWebSocket();
+
+            document.getElementById('loading').style.display = 'none';
+
+            // 背景亮度控制
+            window.updateSceneBrightness = function(brightness) {
+                const b = parseInt(brightness);
+                const base = 26;
+                const val = Math.floor(base + (b / 100) * 40);
+                const colorVal = (val << 16) | (val << 8) | val;
+                scene.background = new THREE.Color(colorVal);
+                scene.fog = new THREE.Fog(colorVal, 15, 60);
+            };
+
+            animate();
+        }
+
+        // ==================== 灯光设置 ====================
+        function setupLighting() {
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.1;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -15;
+            directionalLight.shadow.camera.right = 15;
+            directionalLight.shadow.camera.top = 15;
+            directionalLight.shadow.camera.bottom = -15;
+            directionalLight.shadow.bias = -0.0001;
+            scene.add(directionalLight);
+
+            const fillLight = new THREE.DirectionalLight(0x6080a0, 0.4);
+            fillLight.position.set(-5, 10, -5);
+            scene.add(fillLight);
+
+            const rimLight = new THREE.DirectionalLight(0xffaa44, 0.3);
+            rimLight.position.set(0, 5, -10);
+            scene.add(rimLight);
+
+            const pointLight1 = new THREE.PointLight(0x0ea5e9, 0.6, 15);
+            pointLight1.position.set(-4, 6, -4);
+            scene.add(pointLight1);
+
+            const pointLight2 = new THREE.PointLight(0xf59e0b, 0.4, 10);
+            pointLight2.position.set(4, 4, 4);
+            scene.add(pointLight2);
+
+            // 环境贴图 - 为金属材质提供真实反射
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+            scene.environment = envTexture;
+            pmremGenerator.dispose();
+
+            // 工业吊灯
+            const lampGroup = new THREE.Group();
+            const lampShade = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.5, 0.15, 16, 1, true),
+                new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.6, metalness: 0.7, side: THREE.DoubleSide })
+            );
+            lampShade.position.y = 7.8;
+            lampGroup.add(lampShade);
+            const lampBulb = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xfff5e0 })
+            );
+            lampBulb.position.y = 7.7;
+            lampGroup.add(lampBulb);
+            const lampLight = new THREE.PointLight(0xfff5e0, 1.0, 12);
+            lampLight.position.y = 7.6;
+            lampLight.castShadow = true;
+            lampGroup.add(lampLight);
+            // 吊杆
+            const lampRod = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.01, 0.01, 0.5, 8),
+                new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.3, metalness: 0.8 })
+            );
+            lampRod.position.y = 8.05;
+            lampGroup.add(lampRod);
+            lampGroup.position.set(2, 0, 0);
+            scene.add(lampGroup);
+        }
+
+        // ==================== 创建环境 ====================
+        function createEnvironment() {
+            // 工业地面纹理（混凝土+防滑）
+            const floorCanvas = document.createElement('canvas');
+            floorCanvas.width = 512;
+            floorCanvas.height = 512;
+            const floorCtx = floorCanvas.getContext('2d');
+            // 混凝土底色
+            floorCtx.fillStyle = '#2a2f3a';
+            floorCtx.fillRect(0, 0, 512, 512);
+            // 随机颗粒
+            for (let i = 0; i < 2000; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                const size = Math.random() * 3 + 1;
+                const gray = Math.floor(Math.random() * 30 + 30);
+                floorCtx.fillStyle = `rgb(${gray}, ${gray + 5}, ${gray + 10})`;
+                floorCtx.fillRect(x, y, size, size);
+            }
+            // 网格线（车间地坪分格）
+            floorCtx.strokeStyle = 'rgba(60, 65, 75, 0.5)';
+            floorCtx.lineWidth = 2;
+            for (let i = 0; i <= 512; i += 128) {
+                floorCtx.beginPath();
+                floorCtx.moveTo(i, 0);
+                floorCtx.lineTo(i, 512);
+                floorCtx.stroke();
+                floorCtx.beginPath();
+                floorCtx.moveTo(0, i);
+                floorCtx.lineTo(512, i);
+                floorCtx.stroke();
+            }
+            const floorTexture = new THREE.CanvasTexture(floorCanvas);
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(6, 6);
+
+            const floorGeometry = new THREE.PlaneGeometry(30, 30);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                map: floorTexture,
+                roughness: 0.85,
+                metalness: 0.15,
+                bumpScale: 0.02
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const gridHelper = new THREE.GridHelper(30, 30, 0x334155, 0x1e293b);
+            gridHelper.position.y = 0.01;
+            scene.add(gridHelper);
+
+            const safetyLineGeometry = new THREE.RingGeometry(4.5, 4.6, 64);
+            const safetyLineMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff6600,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.6
+            });
+            const safetyLine = new THREE.Mesh(safetyLineGeometry, safetyLineMaterial);
+            safetyLine.rotation.x = -Math.PI / 2;
+            safetyLine.position.y = 0.02;
+            scene.add(safetyLine);
+
+            const wallGeometry = new THREE.PlaneGeometry(30, 8);
+            const wallMaterial = new THREE.MeshStandardMaterial({
+                color: 0x2d3748,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+
+            const backWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            backWall.position.set(0, 4, -8);
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            const leftWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            leftWall.position.set(-15, 4, 0);
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+
+            // 天花板
+            const ceilingGeo = new THREE.PlaneGeometry(30, 30);
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3e, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide });
+            const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 8;
+            ceiling.receiveShadow = true;
+            scene.add(ceiling);
+
+            // 右墙
+            const rightWall = new THREE.Mesh(wallGeometry, wallMaterial);
+            rightWall.position.set(15, 4, 0);
+            rightWall.rotation.y = -Math.PI / 2;
+            rightWall.receiveShadow = true;
+            scene.add(rightWall);
+
+            // ========== 安全标识 ==========
+            const signMat = (tex) => new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.1 });
+
+            // "安全第一" 红色标识牌 - 后墙
+            const sign1 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.02), signMat(createSignTexture('安全第一', '#cc0000', '#ffffff', 256, 128)));
+            sign1.position.set(0, 5, -7.95);
+            scene.add(sign1);
+
+            // "当心机械伤人" 黄色警示牌 - 传送带旁（向后移动）
+            const sign2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.6, 0.02), signMat(createSignTexture('当心机械伤人', '#eab308', '#1a1a1a', 320, 128)));
+            sign2.position.set(1.5, 2.5, -0.5);
+            scene.add(sign2);
+
+            // "必须戴安全帽" 蓝色指令牌 - 左墙
+            const sign3 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.6, 0.02), signMat(createSignTexture('必须戴安全帽', '#1e40af', '#ffffff', 320, 128)));
+            sign3.position.set(-14.95, 4, 2);
+            sign3.rotation.y = Math.PI / 2;
+            scene.add(sign3);
+
+            // "禁止触摸" 红色禁止牌 - 金属台旁（向后移动）
+            const sign4 = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.02), signMat(createSignTexture('禁止触摸', '#cc0000', '#ffffff', 256, 128)));
+            sign4.position.set(3.5, 2.5, -2.5);
+            scene.add(sign4);
+
+            // "注意防滑" 黄色注意牌 - 地面上
+            const sign5 = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.02), signMat(createSignTexture('注意防滑', '#eab308', '#1a1a1a', 256, 128)));
+            sign5.rotation.x = -Math.PI / 2;
+            sign5.position.set(2, 0.02, 1.5);
+            scene.add(sign5);
+
+            // ========== 附属设施 ==========
+
+            // 电缆桥架 - 沿后墙顶部
+            const trayMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5, metalness: 0.7 });
+            const tray = new THREE.Mesh(new THREE.BoxGeometry(20, 0.05, 0.3), trayMat);
+            tray.position.set(0, 7.5, -7.5);
+            tray.castShadow = true;
+            scene.add(tray);
+            // 桥架支架
+            for (let i = 0; i < 5; i++) {
+                const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.5, 0.03), trayMat);
+                bracket.position.set(-8 + i * 4, 7.25, -7.7);
+                scene.add(bracket);
+            }
+            // 桥架内的电缆
+            const cableColors = [0x222222, 0x0000cc, 0x00cc00, 0xcc0000];
+            cableColors.forEach((color, i) => {
+                const cable = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.012, 0.012, 18, 8),
+                    new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+                );
+                cable.rotation.z = Math.PI / 2;
+                cable.position.set(0, 7.55, -7.5 + (i - 1.5) * 0.05);
+                scene.add(cable);
+            });
+
+            // 气管/液压管路 - 从地面沿金属台腿到抓手
+            const airTubeMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.6 });
+            const airTubePath = [
+                new THREE.Vector3(3.2, 0.1, -1.2),
+                new THREE.Vector3(3.2, 0.5, -1.2),
+                new THREE.Vector3(3.5, 0.9, -1.0),
+                new THREE.Vector3(3.5, 1.2, -0.9)
+            ];
+            const airTubeCurve = new THREE.CatmullRomCurve3(airTubePath);
+            const airTubeGeo = new THREE.TubeGeometry(airTubeCurve, 20, 0.015, 8, false);
+            const airTube = new THREE.Mesh(airTubeGeo, airTubeMat);
+            scene.add(airTube);
+
+            // 工具架 - 在车间角落
+            const toolRackGroup = new THREE.Group();
+            const rackMat = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.5, metalness: 0.6 });
+            // 竖直框架
+            [-0.3, 0.3].forEach(x => {
+                const post = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2, 0.04), rackMat);
+                post.position.set(x, 1, 0);
+                post.castShadow = true;
+                toolRackGroup.add(post);
+            });
+            // 3层横板
+            for (let i = 0; i < 3; i++) {
+                const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.03, 0.25), rackMat);
+                shelf.position.set(0, 0.5 + i * 0.6, 0);
+                shelf.castShadow = true;
+                shelf.receiveShadow = true;
+                toolRackGroup.add(shelf);
+            }
+            // 工具（扳手、螺丝刀等简单形状）
+            const wrenchMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.9 });
+            const wrench = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.25, 0.04), wrenchMat);
+            wrench.position.set(-0.1, 0.65, 0);
+            wrench.rotation.z = 0.2;
+            toolRackGroup.add(wrench);
+            const screwdriver = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.2, 8), wrenchMat);
+            screwdriver.position.set(0.15, 0.65, 0.05);
+            screwdriver.rotation.z = -0.1;
+            toolRackGroup.add(screwdriver);
+            toolRackGroup.position.set(-4, 0, -6);
+            scene.add(toolRackGroup);
+
+            // 安全通道标线 - 黄色虚线
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.7 });
+            for (let i = -12; i < 12; i += 2) {
+                const lineSeg = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.005, 0.06), lineMat);
+                lineSeg.position.set(i, 0.015, 3);
+                scene.add(lineSeg);
+                const lineSeg2 = lineSeg.clone();
+                lineSeg2.position.z = -3;
+                scene.add(lineSeg2);
+            }
+        }
+
+        // ==================== 创建传送带系统 ====================
+        function createConveyorSystem() {
+            conveyor = new THREE.Group();
+            conveyorRollers = [];
+
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0xa8b0bc, roughness: 0.3, metalness: 0.9 });
+            const rollerMat = new THREE.MeshStandardMaterial({ color: 0xbcc4cc, roughness: 0.25, metalness: 0.9 });
+            const legMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4, metalness: 0.7 });
+            const railMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4, metalness: 0.5 });
+            const bearingMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, metalness: 0.4 });
+
+            const L = 5, W = 0.8, H = 0.85;
+
+            // 双槽钢轨道
+            const railL = new THREE.Mesh(new THREE.BoxGeometry(L, 0.08, 0.06), frameMat);
+            railL.position.set(0, H, W/2 - 0.03);
+            railL.castShadow = true;
+            conveyor.add(railL);
+            const railR = new THREE.Mesh(new THREE.BoxGeometry(L, 0.08, 0.06), frameMat);
+            railR.position.set(0, H, -(W/2 - 0.03));
+            railR.castShadow = true;
+            conveyor.add(railR);
+
+            // 6根横向支撑梁
+            for (let i = 0; i < 6; i++) {
+                const beam = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, W - 0.12), frameMat);
+                beam.position.set(-L/2 + 0.4 + i * 0.85, H - 0.02, 0);
+                beam.castShadow = true;
+                conveyor.add(beam);
+            }
+
+            // 18个密集银色滚筒
+            const rollerCount = 18;
+            for (let i = 0; i < rollerCount; i++) {
+                const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, W - 0.14, 12), rollerMat);
+                roller.rotation.x = Math.PI / 2;
+                roller.position.set(-L/2 + 0.15 + i * ((L - 0.3) / (rollerCount - 1)), H + 0.03, 0);
+                roller.castShadow = true;
+                conveyor.add(roller);
+                conveyorRollers.push(roller);
+            }
+
+            // 2个端部驱动滚筒
+            [-(L/2 - 0.05), L/2 - 0.05].forEach(x => {
+                const endRoller = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, W - 0.14, 16), rollerMat);
+                endRoller.rotation.x = Math.PI / 2;
+                endRoller.position.set(x, H + 0.03, 0);
+                endRoller.castShadow = true;
+                conveyor.add(endRoller);
+                conveyorRollers.push(endRoller);
+
+                [-1, 1].forEach(side => {
+                    const cap = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.045, 0.045, 0.015, 16),
+                        bearingMat
+                    );
+                    cap.rotation.x = Math.PI / 2;
+                    cap.position.set(x, H + 0.03, side * (W/2 - 0.07));
+                    conveyor.add(cap);
+                });
+            });
+
+            // 黄色PVC皮带（程序化纹理）
+            const beltCanvas = document.createElement('canvas');
+            beltCanvas.width = 256;
+            beltCanvas.height = 64;
+            const beltCtx = beltCanvas.getContext('2d');
+            // 深灰色底
+            beltCtx.fillStyle = '#2a2a2a';
+            beltCtx.fillRect(0, 0, 256, 64);
+            // 黄色条纹
+            beltCtx.fillStyle = '#facc15';
+            for (let i = 0; i < 8; i++) {
+                beltCtx.fillRect(i * 32 + 2, 0, 28, 64);
+            }
+            const beltTexture = new THREE.CanvasTexture(beltCanvas);
+            beltTexture.wrapS = THREE.RepeatWrapping;
+            beltTexture.wrapT = THREE.RepeatWrapping;
+            beltTexture.repeat.set(4, 1);
+            const beltMat = new THREE.MeshStandardMaterial({ map: beltTexture, roughness: 0.7, metalness: 0.1 });
+            conveyorBeltMaterial = beltMat;
+
+            const belt = new THREE.Mesh(new THREE.BoxGeometry(L, 0.015, W - 0.12), beltMat);
+            belt.position.y = H + 0.055;
+            conveyor.add(belt);
+
+            // 25条横向纹路
+            for (let i = 0; i < 25; i++) {
+                const rib = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.008, 0.005, W - 0.12),
+                    new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.8 })
+                );
+                rib.position.set(-L/2 + 0.1 + i * 0.19, H + 0.065, 0);
+                conveyor.add(rib);
+            }
+
+            // 6组双层支撑腿
+            const legX = [-2, -0.8, 0.4, 1.6, 2.8];
+            legX.forEach(x => {
+                [-1, 1].forEach(side => {
+                    const z = side * (W/2 - 0.05);
+                    const legOuter = new THREE.Mesh(new THREE.BoxGeometry(0.05, H, 0.05), legMat);
+                    legOuter.position.set(x, H/2, z);
+                    legOuter.castShadow = true;
+                    conveyor.add(legOuter);
+                    const legInner = new THREE.Mesh(
+                        new THREE.BoxGeometry(0.035, H - 0.05, 0.035),
+                        new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 })
+                    );
+                    legInner.position.set(x, H/2, z);
+                    conveyor.add(legInner);
+                    const brace = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.35, 0.02), legMat);
+                    brace.position.set(x + 0.15, H * 0.6, z);
+                    brace.rotation.z = side * 0.3;
+                    conveyor.add(brace);
+                    const foot = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.04, 0.05, 0.03, 8),
+                        new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.7 })
+                    );
+                    foot.position.set(x, 0.015, z);
+                    conveyor.add(foot);
+                });
+            });
+
+            // 底部横梁
+            const bottomBeam = new THREE.Mesh(
+                new THREE.BoxGeometry(L, 0.04, W - 0.1),
+                new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.6, metalness: 0.5 })
+            );
+            bottomBeam.position.set(0, 0.15, 0);
+            conveyor.add(bottomBeam);
+
+            // 黄色安全护栏
+            const railHeight = 0.12;
+            [W/2, -W/2].forEach(z => {
+                const topRail = new THREE.Mesh(new THREE.BoxGeometry(L, 0.02, 0.02), railMat);
+                topRail.position.set(0, H + railHeight, z);
+                conveyor.add(topRail);
+                for (let i = 0; i < 10; i++) {
+                    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, railHeight, 8), railMat);
+                    post.position.set(-L/2 + 0.25 + i * 0.5, H + railHeight/2, z);
+                    conveyor.add(post);
+                }
+            });
+
+            // 蓝色驱动电机
+            const motorGroup = new THREE.Group();
+            const motorBody = new THREE.Mesh(
+                new THREE.BoxGeometry(0.2, 0.15, 0.12),
+                new THREE.MeshStandardMaterial({ color: 0x1e40af, roughness: 0.4, metalness: 0.6 })
+            );
+            motorBody.castShadow = true;
+            motorGroup.add(motorBody);
+            const motorShaft = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.015, 0.015, 0.08, 8),
+                new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.8 })
+            );
+            motorShaft.rotation.x = Math.PI / 2;
+            motorShaft.position.set(0, 0, 0.08);
+            motorGroup.add(motorShaft);
+            const coupling = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.02, 0.02, 0.04, 12),
+                new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.8 })
+            );
+            coupling.rotation.x = Math.PI / 2;
+            coupling.position.set(0, 0, 0.12);
+            motorGroup.add(coupling);
+            motorGroup.position.set(L/2 + 0.15, H + 0.05, 0);
+            conveyor.add(motorGroup);
+
+            // 进料端斜面导板
+            const guidePlate = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 0.02, W - 0.1),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.5, metalness: 0.6 })
+            );
+            guidePlate.position.set(-L/2 - 0.15, H + 0.01, 0);
+            guidePlate.rotation.z = -0.15;
+            conveyor.add(guidePlate);
+
+            // 出料端斜面导向板（将工件导向金属台 x=3.5, z=-0.8）
+            const exitGuide = new THREE.Mesh(
+                new THREE.BoxGeometry(0.4, 0.02, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 })
+            );
+            // 传送带末端在 x=1.5+2.5=4.0, 金属台在 x=3.5, z=-0.8
+            // 导向板放在传送带末端，指向金属台
+            exitGuide.position.set(L/2 + 0.2, H + 0.01, -0.3);
+            exitGuide.rotation.z = -0.2;
+            exitGuide.rotation.y = -0.4;
+            conveyor.add(exitGuide);
+
+            conveyor.position.set(1.5, 0, 0);
+            scene.add(conveyor);
+            window.conveyor = conveyor;
+            // 传送带标签已移除
+
+            // 流水线平台固定气动抓取工具
+            createPlatformGripper();
+        }
+
+        // ==================== 创建金属台 ====================
+        function createMetalTable() {
+            const tableGroup = new THREE.Group();
+            // 拉丝金属纹理
+            const metalCanvas = document.createElement('canvas');
+            metalCanvas.width = 256;
+            metalCanvas.height = 256;
+            const metalCtx = metalCanvas.getContext('2d');
+            metalCtx.fillStyle = '#808080';
+            metalCtx.fillRect(0, 0, 256, 256);
+            // 拉丝纹路
+            for (let i = 0; i < 256; i += 2) {
+                const brightness = Math.floor(Math.random() * 20 + 118);
+                metalCtx.strokeStyle = `rgb(${brightness}, ${brightness}, ${brightness})`;
+                metalCtx.lineWidth = 1;
+                metalCtx.beginPath();
+                metalCtx.moveTo(0, i);
+                metalCtx.lineTo(256, i);
+                metalCtx.stroke();
+            }
+            const metalTexture = new THREE.CanvasTexture(metalCanvas);
+            metalTexture.wrapS = THREE.RepeatWrapping;
+            metalTexture.wrapT = THREE.RepeatWrapping;
+            metalTexture.repeat.set(2, 2);
+
+            const tableMat = new THREE.MeshStandardMaterial({ map: metalTexture, roughness: 0.35, metalness: 0.85 });
+            const legMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 });
+
+            // 台面（长 2.0, 宽 1.0）— 加长以容纳物料箱
+            const top = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, 1.0), tableMat);
+            top.position.set(3.5, 0.85, -0.8);
+            top.castShadow = true;
+            top.receiveShadow = true;
+            tableGroup.add(top);
+
+            // 台面防滑纹理已移除
+
+            // 4条腿（加长台面，腿位置相应调整）
+            const legPositions = [[-0.9, -0.4], [0.9, -0.4], [-0.9, 0.4], [0.9, 0.4]];
+            legPositions.forEach(([lx, lz]) => {
+                const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.85, 0.06), legMat);
+                leg.position.set(3.5 + lx, 0.425, -0.8 + lz);
+                leg.castShadow = true;
+                tableGroup.add(leg);
+            });
+
+            scene.add(tableGroup);
+            // 平台标签已移除
+        }
+
+        // ==================== 创建平台抓手（SCARA机械臂） ====================
+        function createPlatformGripper() {
+            platformGripperGroup = new THREE.Group();
+            // 平台抓手放在金属台上（金属台在 x=3.5, z=-0.8, y=0.85）
+            // 组的位置设在金属台表面
+            platformGripperGroup.position.set(PLATFORM_GRIPPER_GRIP_X, 0.875, PLATFORM_GRIPPER_HOME_Z);
+
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0xd0d4dc, roughness: 0.3, metalness: 0.9 });
+            const darkMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.4, metalness: 0.7 });
+            const fingerMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.85 });
+            const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+            const tubeMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.5 });
+
+            // ========== 1. 固定基座 ==========
+            const basePlate = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 0.08, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.5, metalness: 0.8 })
+            );
+            basePlate.position.set(0, 0.04, 0);
+            basePlate.castShadow = true;
+            basePlate.receiveShadow = true;
+            platformGripperGroup.add(basePlate);
+
+            // 底座螺栓
+            for (let bx = -1; bx <= 1; bx += 2) {
+                for (let bz = -1; bz <= 1; bz += 2) {
+                    const bolt = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.012, 0.012, 0.1, 6),
+                        new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.9 })
+                    );
+                    bolt.position.set(bx * 0.1, 0.09, bz * 0.1);
+                    platformGripperGroup.add(bolt);
+                    const boltHead = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.02, 0.02, 0.02, 6),
+                        new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.3, metalness: 0.9 })
+                    );
+                    boltHead.position.set(bx * 0.1, 0.14, bz * 0.1);
+                    platformGripperGroup.add(boltHead);
+                }
+            }
+
+            // ========== 2. 主轴组（旋转关节） ==========
+            const spindleGroup = new THREE.Group();
+            spindleGroup.position.set(0, 0.08, 0); // 基座顶部
+            window.armSpindleGroup = spindleGroup;
+
+            // 主轴圆柱
+            const spindle = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.03, 0.03, ARM_SPINDLE_HEIGHT, 16),
+                frameMat
+            );
+            spindle.position.y = ARM_SPINDLE_HEIGHT / 2;
+            spindle.castShadow = true;
+            spindleGroup.add(spindle);
+
+            // 主轴顶部法兰盘
+            const spindleFlange = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.05, 0.05, 0.02, 16),
+                darkMat
+            );
+            spindleFlange.position.y = ARM_SPINDLE_HEIGHT;
+            spindleGroup.add(spindleFlange);
+
+            // ========== 3. 横向杆组（伸缩关节） ==========
+            const horizontalGroup = new THREE.Group();
+            horizontalGroup.position.set(0, ARM_SPINDLE_HEIGHT, 0); // 主轴顶部
+            window.armHorizontalGroup = horizontalGroup;
+
+            // 横向杆（可伸缩，初始长度 ARM_HORIZONTAL_MIN）
+            // 锚点在主轴处(x=0)，通过 scale.x 伸缩，杆体向+x方向延伸
+            const hBeam = new THREE.Mesh(
+                new THREE.BoxGeometry(ARM_HORIZONTAL_MIN, 0.05, 0.05),
+                frameMat
+            );
+            hBeam.position.set(0, 0, 0);
+            hBeam.geometry.translate(ARM_HORIZONTAL_MIN / 2, 0, 0); // 将几何中心移到右侧
+            hBeam.castShadow = true;
+            horizontalGroup.add(hBeam);
+
+            // 横向杆末端红色标记
+            const hMarker = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, 0.03, 0.06),
+                new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.4, metalness: 0.5 })
+            );
+            hMarker.position.set(ARM_HORIZONTAL_MIN, 0, 0);
+            horizontalGroup.add(hMarker);
+
+            // ========== 4. 竖向杆组（伸缩关节） ==========
+            const verticalGroup = new THREE.Group();
+            verticalGroup.position.set(ARM_HORIZONTAL_MIN, 0, 0); // 横向杆末端
+            window.armVerticalGroup = verticalGroup;
+
+            // 竖向杆（可伸缩，初始长度 ARM_VERTICAL_MIN，向下）
+            // 锚点在横向杆末端(y=0)，通过 scale.y 伸缩，杆体向-y方向延伸
+            const vBeam = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, ARM_VERTICAL_MIN, 0.04),
+                frameMat
+            );
+            vBeam.position.set(0, 0, 0);
+            vBeam.geometry.translate(0, -ARM_VERTICAL_MIN / 2, 0); // 将几何中心移到下方
+            vBeam.castShadow = true;
+            verticalGroup.add(vBeam);
+
+            // ========== 5. 抓手 ==========
+            const gripperTip = new THREE.Group();
+            gripperTip.position.set(0, -ARM_VERTICAL_MIN, 0); // 竖向杆末端
+            window.armGripperTip = gripperTip;
+
+            // 抓手安装板
+            const mountPlate = new THREE.Mesh(
+                new THREE.BoxGeometry(0.12, 0.02, 0.1),
+                darkMat
+            );
+            mountPlate.position.y = 0.01;
+            mountPlate.castShadow = true;
+            gripperTip.add(mountPlate);
+
+            // 抓手主体
+            const gripperBody = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.03, 0.05),
+                darkMat
+            );
+            gripperBody.position.y = 0.0;
+            gripperBody.castShadow = true;
+            gripperTip.add(gripperBody);
+
+            // 导轨滑块
+            const slider = new THREE.Mesh(
+                new THREE.BoxGeometry(0.08, 0.01, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.85 })
+            );
+            slider.position.y = 0.015;
+            gripperTip.add(slider);
+
+            // 左夹爪指
+            platformFingerL = new THREE.Group();
+            const fingerLVert = new THREE.Mesh(
+                new THREE.BoxGeometry(0.015, 0.06, 0.03),
+                fingerMat
+            );
+            fingerLVert.position.y = -0.03;
+            platformFingerL.add(fingerLVert);
+            const fingerLTip = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, 0.015, 0.03),
+                fingerMat
+            );
+            fingerLTip.position.set(0.008, -0.06, 0);
+            platformFingerL.add(fingerLTip);
+            const rubberL = new THREE.Mesh(
+                new THREE.BoxGeometry(0.004, 0.05, 0.028),
+                rubberMat
+            );
+            rubberL.position.set(0.018, -0.035, 0);
+            platformFingerL.add(rubberL);
+            platformFingerL.position.set(-0.03, -0.02, 0);
+            gripperTip.add(platformFingerL);
+
+            // 右夹爪指
+            platformFingerR = new THREE.Group();
+            const fingerRVert = new THREE.Mesh(
+                new THREE.BoxGeometry(0.015, 0.06, 0.03),
+                fingerMat
+            );
+            fingerRVert.position.y = -0.03;
+            platformFingerR.add(fingerRVert);
+            const fingerRTip = new THREE.Mesh(
+                new THREE.BoxGeometry(0.03, 0.015, 0.03),
+                fingerMat
+            );
+            fingerRTip.position.set(-0.008, -0.06, 0);
+            platformFingerR.add(fingerRTip);
+            const rubberR = new THREE.Mesh(
+                new THREE.BoxGeometry(0.004, 0.05, 0.028),
+                rubberMat
+            );
+            rubberR.position.set(-0.018, -0.035, 0);
+            platformFingerR.add(rubberR);
+            platformFingerR.position.set(0.03, -0.02, 0);
+            gripperTip.add(platformFingerR);
+
+            // 蓝色气管
+            const tube1 = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 6), tubeMat);
+            tube1.position.set(-0.04, 0.05, 0.03); tube1.rotation.z = Math.PI / 2;
+            gripperTip.add(tube1);
+            const tube2 = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 6), tubeMat);
+            tube2.position.set(0.04, 0.05, 0.03); tube2.rotation.z = Math.PI / 2;
+            gripperTip.add(tube2);
+
+            // 气泵压力表
+            const gaugeBody = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.03, 0.03, 0.01, 16),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+            );
+            gaugeBody.rotation.x = Math.PI / 2;
+            gaugeBody.position.set(0, ARM_SPINDLE_HEIGHT - 0.1, 0.04);
+            spindleGroup.add(gaugeBody);
+
+            const gaugeNeedle = new THREE.Mesh(
+                new THREE.BoxGeometry(0.002, 0.025, 0.002),
+                new THREE.MeshBasicMaterial({ color: 0xff0000 })
+            );
+            gaugeNeedle.position.set(0, ARM_SPINDLE_HEIGHT - 0.1, 0.05);
+            spindleGroup.add(gaugeNeedle);
+            window.gaugeNeedle = gaugeNeedle;
+
+            // ========== 组装层级结构 ==========
+            verticalGroup.add(gripperTip);
+            horizontalGroup.add(verticalGroup);
+            spindleGroup.add(horizontalGroup);
+            platformGripperGroup.add(spindleGroup);
+
+            scene.add(platformGripperGroup);
+            addLabel(platformGripperGroup, "平台抓手", 1.6);
+
+            window.platformGripperGroup = platformGripperGroup;
+            window.platformFingerL = platformFingerL;
+            window.platformFingerR = platformFingerR;
+
+            // 初始化关节目标值
+            window.armTargetRotation = ARM_ROTATION_HOME;
+            window.armTargetHorizontal = 1.0; // scale.x = 1.0 表示初始长度
+            window.armTargetVertical = 1.0;   // scale.y = 1.0 表示初始长度
+        }
+
+        // ==================== 创建物料箱 ====================
+        function createMaterialBox() {
+            materialBox = new THREE.Group();
+
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0x1e3a5f, roughness: 0.5, metalness: 0.2 });
+            const boxWall = 0.015;
+
+            const bottom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.4), boxMat);
+            bottom.position.y = 0.01; bottom.castShadow = true; bottom.receiveShadow = true;
+            materialBox.add(bottom);
+
+            const wallH = 0.25;
+            const frontWall = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH * 0.5, boxWall), boxMat);
+            frontWall.position.set(0, wallH * 0.25, 0.2); frontWall.castShadow = true;
+            materialBox.add(frontWall);
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(0.5, wallH, boxWall), boxMat);
+            backWall.position.set(0, wallH / 2, -0.2); backWall.castShadow = true;
+            materialBox.add(backWall);
+            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(boxWall, wallH, 0.4), boxMat);
+            leftWall.position.set(-0.25, wallH / 2, 0); leftWall.castShadow = true;
+            materialBox.add(leftWall);
+            const rightWall = new THREE.Mesh(new THREE.BoxGeometry(boxWall, wallH, 0.4), boxMat);
+            rightWall.position.set(0.25, wallH / 2, 0); rightWall.castShadow = true;
+            materialBox.add(rightWall);
+
+            for (let i = 0; i < 3; i++) {
+                const rib = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.5, 0.005, 0.005),
+                    new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.6 })
+                );
+                rib.position.set(0, 0.06 + i * 0.07, 0.197);
+                materialBox.add(rib);
+                const rib2 = rib.clone();
+                rib2.position.z = -0.197;
+                materialBox.add(rib2);
+            }
+
+            [-0.25, 0.25].forEach(x => {
+                const handle = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.04, 0.005, 8, 16, Math.PI),
+                    new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.5, metalness: 0.3 })
+                );
+                handle.position.set(x, 0.18, 0);
+                handle.rotation.z = x > 0 ? 0 : Math.PI;
+                materialBox.add(handle);
+            });
+
+            const labelPlane = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.15, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 })
+            );
+            labelPlane.position.set(0, 0.15, 0.201);
+            materialBox.add(labelPlane);
+
+            // 物料箱放在金属台上，挨着平台抓手（平台抓手在 x=3.5, z=-0.8）
+            materialBox.position.set(4.3, 0.875, -0.8);
+            scene.add(materialBox);
+            window.materialBox = materialBox;
+            addLabel(materialBox, "物料箱", 1.0);
+        }
+
+        // ==================== 创建工件 ====================
+        function createWorkpieces() {
+            const configs = [
+                { type: 'casing',    color: 0xe74c3c, label: '轴承座' },
+                { type: 'flange',    color: 0x27ae60, label: '法兰盘' },
+                { type: 'shaft',     color: 0x2980b9, label: '传动轴' },
+                { type: 'bracket',   color: 0xf39c12, label: 'L型支架' }
+            ];
+
+            configs.forEach((cfg, i) => {
+                const wpGroup = new THREE.Group();
+                const mainMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.35, metalness: 0.7 });
+                const accentMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.8 });
+
+                if (cfg.type === 'casing') {
+                    const base = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.12), mainMat);
+                    base.position.y = 0.03; base.castShadow = true; wpGroup.add(base);
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.10), mainMat);
+                    body.position.y = 0.1; body.castShadow = true; wpGroup.add(body);
+                    const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.14, 16), accentMat);
+                    hole.rotation.x = Math.PI / 2; hole.position.y = 0.1; wpGroup.add(hole);
+                    const arch = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.12, 16, 1, false, 0, Math.PI), mainMat);
+                    arch.rotation.z = Math.PI / 2; arch.rotation.y = Math.PI / 2; arch.position.y = 0.14; arch.castShadow = true; wpGroup.add(arch);
+                } else if (cfg.type === 'flange') {
+                    const disk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.03, 24), mainMat);
+                    disk.castShadow = true; wpGroup.add(disk);
+                    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.006, 8, 24), accentMat);
+                    ring.rotation.x = Math.PI / 2; ring.position.y = 0.015; wpGroup.add(ring);
+                    const centerHole = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.04, 12), accentMat);
+                    centerHole.position.y = 0.015; wpGroup.add(centerHole);
+                    for (let b = 0; b < 4; b++) {
+                        const angle = (b / 4) * Math.PI * 2;
+                        const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.035, 8), accentMat);
+                        bolt.position.set(Math.cos(angle) * 0.04, 0.015, Math.sin(angle) * 0.04);
+                        wpGroup.add(bolt);
+                    }
+                } else if (cfg.type === 'shaft') {
+                    const segments = [{ r: 0.02, h: 0.06 }, { r: 0.035, h: 0.04 }, { r: 0.015, h: 0.05 }, { r: 0.03, h: 0.03 }];
+                    let yOff = 0;
+                    segments.forEach(seg => {
+                        const segMesh = new THREE.Mesh(new THREE.CylinderGeometry(seg.r, seg.r, seg.h, 16), mainMat);
+                        segMesh.position.y = yOff + seg.h / 2; segMesh.castShadow = true; wpGroup.add(segMesh);
+                        if (yOff > 0) {
+                            const ring = new THREE.Mesh(new THREE.TorusGeometry(seg.r, 0.002, 6, 16), accentMat);
+                            ring.rotation.x = Math.PI / 2; ring.position.y = yOff; wpGroup.add(ring);
+                        }
+                        yOff += seg.h;
+                    });
+                    const keyway = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.025, 0.008), accentMat);
+                    keyway.position.set(0.035, 0.07, 0); wpGroup.add(keyway);
+                } else if (cfg.type === 'bracket') {
+                    const vertPlate = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.12, 0.08), mainMat);
+                    vertPlate.position.set(0, 0.06, 0); vertPlate.castShadow = true; wpGroup.add(vertPlate);
+                    const basePlate = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.015, 0.08), mainMat);
+                    basePlate.position.set(0.043, 0.008, 0); basePlate.castShadow = true; wpGroup.add(basePlate);
+                    const gusset = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.012), accentMat);
+                    gusset.position.set(0.02, 0.035, 0); gusset.rotation.z = -Math.PI / 4; wpGroup.add(gusset);
+                    [0.025, -0.025].forEach(z => {
+                        const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.02, 8), accentMat);
+                        hole.position.set(0.07, 0.008, z); wpGroup.add(hole);
+                    });
+                }
+
+                wpGroup.position.set(-1.5 + i * 0.8, 0.855, 0);
+                conveyor.add(wpGroup);
+                workpieces.push({ mesh: wpGroup, color: cfg.color, type: cfg.type, label: cfg.label, gripped: false, originalPos: wpGroup.position.clone() });
+            });
+            window.workpieces = workpieces;
+        }
+
+        // ==================== 添加标签 ====================
+        function addLabel(parent, text, yOffset) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 64;
+
+            context.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            context.fillRect(0, 0, 256, 64);
+            context.strokeStyle = 'rgba(14, 165, 233, 0.5)';
+            context.lineWidth = 2;
+            context.strokeRect(2, 2, 252, 60);
+
+            context.fillStyle = '#f1f5f9';
+            context.font = 'bold 20px "Noto Sans SC", sans-serif';
+            context.textAlign = 'center';
+            context.fillText(text, 128, 38);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.y = yOffset;
+            sprite.scale.set(1.2, 0.3, 1);
+            parent.add(sprite);
+        }
+
+        function createSignTexture(text, bgColor, textColor, w, h) {
+            const canvas = document.createElement('canvas');
+            canvas.width = w || 256;
+            canvas.height = h || 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = bgColor || '#cc0000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // 边框
+            ctx.strokeStyle = textColor || '#ffffff';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+            // 文字
+            ctx.fillStyle = textColor || '#ffffff';
+            ctx.font = 'bold 36px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createNameplate(text, serial) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            // 金属银色背景
+            const gradient = ctx.createLinearGradient(0, 0, 256, 128);
+            gradient.addColorStop(0, '#c0c0c0');
+            gradient.addColorStop(0.5, '#e8e8e8');
+            gradient.addColorStop(1, '#a0a0a0');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 256, 128);
+            // 边框
+            ctx.strokeStyle = '#666666';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(3, 3, 250, 122);
+            // 设备名称
+            ctx.fillStyle = '#1a1a1a';
+            ctx.font = 'bold 28px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, 128, 50);
+            // 编号
+            ctx.font = '16px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#444444';
+            ctx.fillText(serial, 128, 90);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // ==================== 抓取/放置控制 ====================
+        window.toggleGripper = function() {
+            gripperTargetOpen = !gripperTargetOpen;
+            if (gripperTargetOpen) {
+                if (grippedWorkpiece) {
+                    releaseWorkpiece();
+                }
+                addLog('抓手张开', 'info');
+            } else {
+                addLog('抓手闭合', 'info');
+                tryGripWorkpiece();
+            }
+            updateGripperStatusUI();
+        };
+
+        window.gripWorkpiece = function() {
+            gripperTargetOpen = false;
+            addLog('执行抓取动作', 'info');
+            tryGripWorkpiece();
+            updateGripperStatusUI();
+        };
+
+        window.releaseWorkpiece = function() {
+            gripperTargetOpen = true;
+            if (grippedWorkpiece) {
+                doReleaseWorkpiece();
+            }
+            addLog('执行释放动作', 'info');
+            updateGripperStatusUI();
+        };
+
+        function doReleaseWorkpiece() {
+            if (!grippedWorkpiece) return;
+            const wp = grippedWorkpiece;
+
+            if (materialBox && window.armGripperTip) {
+                // 使用抓手末端世界坐标计算释放位置
+                const tipPos = new THREE.Vector3();
+                window.armGripperTip.getWorldPosition(tipPos);
+                const boxPos = new THREE.Vector3();
+                materialBox.getWorldPosition(boxPos);
+                const dx = Math.abs(tipPos.x - boxPos.x);
+                const dz = Math.abs(tipPos.z - boxPos.z);
+
+                // 物料箱在 x=4.3, z=-0.8，检测范围覆盖物料箱区域
+                if (dx < 0.6 && dz < 0.6) {
+                    const worldBoxPos = new THREE.Vector3();
+                    materialBox.getWorldPosition(worldBoxPos);
+                    // 物料箱底部在 worldBoxPos.y + 0.01（底部mesh局部y=0.01）
+                    const boxBottomY = worldBoxPos.y + 0.01;
+                    // 工件底部贴合物料箱底部/已堆叠工件顶部
+                    const stackHeight = boxContents.length * 0.06;
+                    wp.mesh.position.set(
+                        worldBoxPos.x + (Math.random() - 0.5) * 0.25,
+                        boxBottomY + 0.03 + stackHeight,
+                        worldBoxPos.z + (Math.random() - 0.5) * 0.15
+                    );
+                    conveyor.remove(wp.mesh);
+                    scene.add(wp.mesh);
+                    boxContents.push(wp);
+                    addLog(`已将 ${wp.label || '工件'} 放入物料箱 (${boxContents.length})`, 'success');
+                } else {
+                    wp.gripped = false;
+                    addLog(`已释放: ${wp.label || '工件'}`, 'info');
+                }
+            } else {
+                wp.gripped = false;
+                addLog(`已释放: ${wp.label || '工件'}`, 'info');
+            }
+
+            grippedWorkpiece = null;
+            window.grippedWorkpiece = null;
+            updateGripperStatusUI();
+        }
+
+        window.toggleVacuumPump = function() {
+            vacuumPumpOn = !vacuumPumpOn;
+            window.vacuumPumpOn = vacuumPumpOn;
+            const btn = document.getElementById('pump-btn');
+            if (btn) {
+                btn.textContent = vacuumPumpOn ? '&#128994; 气泵开启' : '&#128308; 气泵关闭';
+                btn.className = vacuumPumpOn ? 'btn btn-success' : 'btn btn-danger';
+            }
+            addLog(vacuumPumpOn ? '气泵已开启' : '气泵已关闭', vacuumPumpOn ? 'success' : 'info');
+            updateDeviceStatus();
+        };
+
+        function tryGripWorkpiece() {
+            if (grippedWorkpiece) return;
+            const closest = findWorkpieceAtGripper();
+            if (closest) {
+                closest.gripped = true;
+                grippedWorkpiece = closest;
+                window.grippedWorkpiece = closest;
+                addLog(`已抓取: ${closest.label || '工件'}`, 'success');
+            } else {
+                addLog('抓手附近没有可抓取的工件', 'warning');
+            }
+            updateGripperStatusUI();
+        }
+
+        window.findWorkpieceAtGripper = function() {
+            if (!platformGripperGroup) return null;
+            const basePos = new THREE.Vector3();
+            platformGripperGroup.getWorldPosition(basePos);
+
+            // 检测范围：金属台上（z≈-0.8），距离主轴 0.3~0.8 范围内
+            let closest = null;
+            let closestDist = Infinity;
+            workpieces.forEach(wp => {
+                if (wp.gripped) return;
+                const wpPos = new THREE.Vector3();
+                wp.mesh.getWorldPosition(wpPos);
+                const dx = wpPos.x - basePos.x;
+                const dz = wpPos.z - basePos.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                const dy = Math.abs(wpPos.y - basePos.y);
+                // 工件需要在金属台上（z≈-0.8）且在抓手可达范围内
+                if (dist >= ARM_HORIZONTAL_MIN - 0.1 && dist <= ARM_HORIZONTAL_MAX + 0.1
+                    && dy < 0.5 && Math.abs(wpPos.z - (-0.8)) < 0.5) {
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closest = wp;
+                    }
+                }
+            });
+            return closest;
+        }
+
+        function updateGripperStatusUI() {
+            const statusEl = document.getElementById('gripper-status');
+            if (statusEl) {
+                statusEl.textContent = gripperTargetOpen ? '张开' : '闭合';
+                statusEl.className = 'device-status ' + (gripperTargetOpen ? 'warning' : 'online');
+            }
+            const grippedEl = document.getElementById('gripped-workpiece');
+            if (grippedEl) {
+                grippedEl.textContent = grippedWorkpiece ? (grippedWorkpiece.label || '工件') : '无';
+            }
+            const boxCountEl = document.getElementById('box-count');
+            if (boxCountEl) {
+                boxCountEl.textContent = boxContents.length;
+            }
+        }
+
+        function updateDeviceStatus() {
+            const pumpEl = document.getElementById('dev-pump');
+            if (pumpEl) {
+                pumpEl.textContent = vacuumPumpOn ? '0.6MPa' : '0.0MPa';
+            }
+            const pressureEl = document.getElementById('dev-air-pressure');
+            if (pressureEl) {
+                pressureEl.textContent = vacuumPumpOn ? '0.6 MPa' : '0.0 MPa';
+            }
+            const pumpDisplayEl = document.getElementById('pump-pressure-display');
+            if (pumpDisplayEl) {
+                pumpDisplayEl.textContent = (pumpPressure * 0.6).toFixed(1) + ' MPa';
+            }
+        }
+
+        // ==================== 流水线平台抓取动画（SCARA机械臂） ====================
+        window.updateGripperAnimation = function() {
+            // 气泵压力动态变化
+            if (vacuumPumpOn) {
+                pumpPressure = Math.min(1.0, pumpPressure + 0.02);
+            } else {
+                pumpPressure = Math.max(0.0, pumpPressure - 0.03);
+            }
+            window.pumpPressure = pumpPressure;
+
+            // 抓手开合动画
+            if (platformFingerL && platformFingerR) {
+                const target = gripperTargetOpen ? 1.0 : 0.0;
+                gripperAnimProgress += (target - gripperAnimProgress) * 0.1;
+
+                const openOffset = 0.03;
+                const closeOffset = 0.008;
+                const currentOffset = closeOffset + (openOffset - closeOffset) * gripperAnimProgress;
+
+                platformFingerL.position.x = -currentOffset;
+                platformFingerR.position.x = currentOffset;
+            }
+
+            // 主轴旋转（弹簧-阻尼模型）
+            {
+                const rotState = armJointState.rotation;
+                const rotForce = (window.armTargetRotation - rotState.current) * SPRING_STIFFNESS;
+                const rotDamping = -rotState.velocity * SPRING_DAMPING;
+                rotState.velocity += (rotForce + rotDamping) * 0.016; // dt ≈ 16ms
+                rotState.current += rotState.velocity;
+                if (window.armSpindleGroup) {
+                    window.armSpindleGroup.rotation.y = rotState.current;
+                }
+            }
+
+            // 横向杆伸缩（弹簧-阻尼模型）
+            {
+                const hState = armJointState.horizontal;
+                const hForce = (window.armTargetHorizontal - hState.current) * SPRING_STIFFNESS;
+                const hDamping = -hState.velocity * SPRING_DAMPING;
+                hState.velocity += (hForce + hDamping) * 0.016;
+                hState.current += hState.velocity;
+                if (window.armHorizontalGroup && window.armHorizontalGroup.children[0]) {
+                    const hBeam = window.armHorizontalGroup.children[0];
+                    hBeam.scale.x = hState.current;
+                    // 同步更新红色标记位置（在伸缩后的杆末端）
+                    if (window.armHorizontalGroup.children[1]) {
+                        window.armHorizontalGroup.children[1].position.x = ARM_HORIZONTAL_MIN * hState.current;
+                    }
+                    // 竖向杆跟随横向杆末端
+                    if (window.armVerticalGroup) {
+                        window.armVerticalGroup.position.x = ARM_HORIZONTAL_MIN * hState.current;
+                    }
+                }
+            }
+
+            // 竖向杆伸缩（弹簧-阻尼模型）
+            {
+                const vState = armJointState.vertical;
+                const vForce = (window.armTargetVertical - vState.current) * SPRING_STIFFNESS;
+                const vDamping = -vState.velocity * SPRING_DAMPING;
+                vState.velocity += (vForce + vDamping) * 0.016;
+                vState.current += vState.velocity;
+                if (window.armVerticalGroup && window.armVerticalGroup.children[0]) {
+                    const vBeam = window.armVerticalGroup.children[0];
+                    vBeam.scale.y = vState.current;
+                    // 抓手跟随竖向杆末端（向下延伸）
+                    if (window.armGripperTip) {
+                        window.armGripperTip.position.y = -ARM_VERTICAL_MIN * vState.current;
+                    }
+                }
+            }
+
+            // 工件跟随抓手末端
+            if (grippedWorkpiece && window.armGripperTip) {
+                const tipPos = new THREE.Vector3();
+                window.armGripperTip.getWorldPosition(tipPos);
+                grippedWorkpiece.mesh.position.set(tipPos.x, tipPos.y - 0.08, tipPos.z);
+            }
+
+            // 压力表指针跟随气泵压力
+            if (window.gaugeNeedle && window.gaugeNeedle.parent) {
+                window.gaugeNeedle.rotation.z = -Math.PI / 2 + window.pumpPressure * Math.PI;
+            }
+
+            // 调用自动转移状态机
+            updateAutoGripCycle();
+            updateDeviceStatus();
+        }
+
+        // ==================== 自动转移状态机（SCARA机械臂） ====================
+        window.updateAutoGripCycle = function() {
+            if (window.autoGripState === 'idle') return;
+
+            function easeInOutCubic(t) {
+                return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            }
+            function easeOutBounce(t) {
+                const n1 = 7.5625;
+                const d1 = 2.75;
+                if (t < 1 / d1) return n1 * t * t;
+                else if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+                else if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+                else return n1 * (t -= 2.625 / d1) * t + 0.984375;
+            }
+
+            window.autoGripFrame++;
+
+            const stateEl = document.getElementById('auto-grip-state');
+            if (stateEl) {
+                const stateNames = {
+                    'idle': '待机',
+                    'waiting_for_workpiece': '等待工件',
+                    'approaching': '接近中',
+                    'extending_to_grip': '伸出抓取',
+                    'descending_to_grip': '下降抓取',
+                    'gripping': '夹紧中',
+                    'lifting': '提升中',
+                    'retracting': '收回中',
+                    'extending_to_box': '伸出放置',
+                    'descending_to_place': '下降放置',
+                    'releasing': '释放中',
+                    'lifting_after_place': '提升返回',
+                    'retracting_after_place': '收回返回'
+                };
+                stateEl.textContent = stateNames[window.autoGripState] || window.autoGripState;
+            }
+
+            switch (window.autoGripState) {
+                case 'waiting_for_workpiece':
+                    // 每30帧检查一次是否有工件到达
+                    if (window.autoGripFrame % 30 === 0) {
+                        window.autoGripTargetWorkpiece = window.findWorkpieceAtGripper();
+                        if (window.autoGripTargetWorkpiece) {
+                            window.autoGripState = 'approaching';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 检测到工件，开始抓取', 'info');
+                        }
+                    }
+                    break;
+
+                case 'approaching':
+                    // 等待气泵压力
+                    if (window.pumpPressure > 0.8 && window.autoGripTargetWorkpiece) {
+                        // 工件在金属台上，主轴方向朝x正方向（角度0），无需旋转
+                        window.armTargetRotation = ARM_ROTATION_GRIP;
+                        window.autoGripState = 'extending_to_grip';
+                        window.autoGripFrame = 0;
+                        addLog('自动转移: 伸出横向杆', 'info');
+                    }
+                    break;
+
+                case 'extending_to_grip':
+                    // 横向杆伸出到工件上方
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        // 计算需要的伸出量：工件到基座的距离
+                        const wpPos = new THREE.Vector3();
+                        window.autoGripTargetWorkpiece.mesh.getWorldPosition(wpPos);
+                        const basePos = new THREE.Vector3();
+                        platformGripperGroup.getWorldPosition(basePos);
+                        const dist = Math.sqrt((wpPos.x - basePos.x) ** 2 + (wpPos.z - basePos.z) ** 2);
+                        const targetScale = Math.max(1.0, dist / ARM_HORIZONTAL_MIN);
+                        window.armTargetHorizontal = Math.min(targetScale, ARM_HORIZONTAL_MAX / ARM_HORIZONTAL_MIN);
+                        if (t >= 1) {
+                            window.autoGripState = 'descending_to_grip';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 下降抓取', 'info');
+                        }
+                    }
+                    break;
+
+                case 'descending_to_grip':
+                    // 竖向杆下降 - 限制深度，抓手刚好接触工件表面
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        // 工件在平台表面 y≈0.9，抓手基座在 y=0.875
+                        // 需要下降的距离 = 0.9 - 0.875 + 工件高度(约0.06) + 抓手厚度(约0.02) ≈ 0.1
+                        // 限制最大伸展为初始长度的1.5倍（下降约0.1）
+                        const maxScale = 1.5;
+                        window.armTargetVertical = 1.0 + (maxScale - 1.0) * t;
+                        if (t >= 1) {
+                            window.autoGripState = 'gripping';
+                            window.autoGripFrame = 0;
+                        }
+                    }
+                    break;
+
+                case 'gripping':
+                    gripperTargetOpen = false;
+                    if (gripperAnimProgress < 0.1) {
+                        if (window.autoGripTargetWorkpiece && !window.autoGripTargetWorkpiece.gripped) {
+                            window.autoGripTargetWorkpiece.gripped = true;
+                            grippedWorkpiece = window.autoGripTargetWorkpiece;
+                            window.grippedWorkpiece = window.autoGripTargetWorkpiece;
+                            addLog(`自动转移: 已抓取 ${window.autoGripTargetWorkpiece.label || '工件'}`, 'success');
+                        }
+                        window.autoGripState = 'lifting';
+                        window.autoGripFrame = 0;
+                        addLog('自动转移: 提升', 'info');
+                    }
+                    break;
+
+                case 'lifting':
+                    // 竖向杆提升
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        const minScale = 1.0;
+                        const maxScale = 1.5;
+                        window.armTargetVertical = maxScale - (maxScale - minScale) * t;
+                        if (t >= 1) {
+                            window.autoGripState = 'retracting';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 收回横向杆', 'info');
+                        }
+                    }
+                    break;
+
+                case 'retracting':
+                    // 横向杆收回
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        window.armTargetHorizontal = window.armTargetHorizontal * (1 - t * 0.05);
+                        if (t >= 1) {
+                            window.armTargetHorizontal = 1.0;
+                            window.autoGripState = 'extending_to_box';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 伸出到物料箱', 'info');
+                        }
+                    }
+                    break;
+
+                case 'extending_to_box':
+                    // 横向杆伸出到物料箱上方
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        const boxDist = PLATFORM_GRIPPER_BOX_X - PLATFORM_GRIPPER_GRIP_X; // 0.8
+                        const targetScale = boxDist / ARM_HORIZONTAL_MIN; // ~2.67
+                        window.armTargetHorizontal = 1.0 + (targetScale - 1.0) * t;
+                        if (t >= 1) {
+                            window.autoGripState = 'descending_to_place';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 下降放置', 'info');
+                        }
+                    }
+                    break;
+
+                case 'descending_to_place':
+                    // 竖向杆下降 - 限制深度，刚好放入物料箱
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        // 物料箱表面 y≈0.9，限制最大伸展为1.5倍
+                        const maxScale = 1.5;
+                        window.armTargetVertical = 1.0 + (maxScale - 1.0) * t;
+                        if (t >= 1) {
+                            window.autoGripState = 'releasing';
+                            window.autoGripFrame = 0;
+                        }
+                    }
+                    break;
+
+                case 'releasing':
+                    gripperTargetOpen = true;
+                    if (grippedWorkpiece) {
+                        doReleaseWorkpiece();
+                    }
+                    if (gripperAnimProgress > 0.9) {
+                        window.autoGripState = 'lifting_after_place';
+                        window.autoGripFrame = 0;
+                        addLog('自动转移: 提升返回', 'info');
+                    }
+                    break;
+
+                case 'lifting_after_place':
+                    // 竖向杆提升
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        const minScale = 1.0;
+                        const maxScale = 1.5;
+                        window.armTargetVertical = maxScale - (maxScale - minScale) * t;
+                        if (t >= 1) {
+                            window.autoGripState = 'retracting_after_place';
+                            window.autoGripFrame = 0;
+                            addLog('自动转移: 收回返回', 'info');
+                        }
+                    }
+                    break;
+
+                case 'retracting_after_place':
+                    // 横向杆收回
+                    {
+                        const rawT = Math.min(1, window.autoGripFrame / 60);
+                        const t = easeInOutCubic(rawT);
+                        window.armTargetHorizontal = window.armTargetHorizontal * (1 - t * 0.05);
+                        if (t >= 1) {
+                            window.armTargetHorizontal = 1.0;
+                            // 循环模式：检查下一个工件
+                            window.autoGripTargetWorkpiece = window.findWorkpieceAtGripper();
+                            if (window.autoGripTargetWorkpiece) {
+                                window.autoGripState = 'approaching';
+                                window.autoGripFrame = 0;
+                                addLog('自动转移: 继续抓取下一个工件', 'info');
+                            } else {
+                                window.autoGripState = 'idle';
+                                window.autoGripFrame = 0;
+                                window.autoGripTargetWorkpiece = null;
+                                addLog('自动转移: 完成，等待新工件', 'success');
+                            }
+                        }
+                    }
+                    break;
+            }
+            updateGripperStatusUI();
+        }
+
+        window.autoGripAndTransfer = function() {
+            if (window.autoGripState !== 'idle') {
+                addLog('自动转移正在进行中', 'warning');
+                return;
+            }
+            if (!window.vacuumPumpOn) {
+                addLog('请先开启气泵', 'warning');
+                return;
+            }
+            window.autoGripTargetWorkpiece = window.findWorkpieceAtGripper();
+            if (!window.autoGripTargetWorkpiece) {
+                addLog('抓手位置没有工件，将在工件到达后自动开始', 'info');
+                // 设置等待模式，当工件到达时自动开始
+                window.autoGripState = 'waiting_for_workpiece';
+                window.autoGripFrame = 0;
+                return;
+            }
+            window.autoGripState = 'approaching';
+            window.autoGripFrame = 0;
+            addLog('自动转移: 开始', 'info');
+        };
+
+        function resetGripCycle() {
+            autoGripState = 'idle';
+            autoGripFrame = 0;
+            window.autoGripTargetWorkpiece = null;
+            gripperTargetOpen = true;
+            // 重置所有SCARA机械臂关节到初始位置
+            if (window.armSpindleGroup) {
+                window.armSpindleGroup.rotation.y = ARM_ROTATION_HOME;
+                window.armTargetRotation = ARM_ROTATION_HOME;
+            }
+            if (window.armHorizontalGroup && window.armHorizontalGroup.children[0]) {
+                window.armHorizontalGroup.children[0].scale.x = 1.0;
+                window.armTargetHorizontal = 1.0;
+                // 同步重置红色标记位置
+                if (window.armHorizontalGroup.children[1]) {
+                    window.armHorizontalGroup.children[1].position.x = ARM_HORIZONTAL_MIN;
+                }
+                if (window.armVerticalGroup) {
+                    window.armVerticalGroup.position.x = ARM_HORIZONTAL_MIN;
+                }
+            }
+            if (window.armVerticalGroup && window.armVerticalGroup.children[0]) {
+                window.armVerticalGroup.children[0].scale.y = 1.0;
+                window.armTargetVertical = 1.0;
+                if (window.armGripperTip) {
+                    window.armGripperTip.position.y = -ARM_VERTICAL_MIN;
+                }
+            }
+        }
+
+        // ==================== 传送带控制 ====================
+        window.startConveyor = function() {
+            conveyorRunning = true;
+            conveyorTargetSpeed = 1;
+            isAnimating = true;
+            document.getElementById('dev-conveyor').textContent = '运行中';
+            document.getElementById('dev-conveyor').className = 'device-status online';
+            addLog('传送带启动', 'info');
+        };
+
+        window.stopConveyor = function() {
+            conveyorRunning = false;
+            conveyorTargetSpeed = 0;
+            document.getElementById('dev-conveyor').textContent = '已停止';
+            document.getElementById('dev-conveyor').className = 'device-status offline';
+            addLog('传送带停止', 'info');
+        };
+
+        window.updateConveyorSpeed = function(value) {
+            document.getElementById('conveyor-speed-value').textContent = value + ' m/min';
+            document.getElementById('dev-conveyor-speed').textContent = value + ' m/min';
+            addLog(`传送带速度调整为 ${value} m/min`, 'info');
+        };
+
+        // ==================== 工件生成控制 ====================
+        window.generateWorkpiece = function() {
+            const types = ['casing', 'flange', 'shaft', 'bracket'];
+            const colors = [0xe74c3c, 0x27ae60, 0x2980b9, 0xf39c12];
+            const labels = ['轴承座', '法兰盘', '传动轴', 'L型支架'];
+            const idx = Math.floor(Math.random() * types.length);
+
+            const wpGroup = new THREE.Group();
+            const mainMat = new THREE.MeshStandardMaterial({ color: colors[idx], roughness: 0.35, metalness: 0.7 });
+
+            const base = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.1), mainMat);
+            base.position.y = 0.03; base.castShadow = true; wpGroup.add(base);
+
+            wpGroup.position.set(-2, 0.855, (Math.random() - 0.5) * 0.3);
+            conveyor.add(wpGroup);
+            workpieces.push({ mesh: wpGroup, color: colors[idx], type: types[idx], label: labels[idx], gripped: false, originalPos: wpGroup.position.clone() });
+            addLog(`生成工件: ${labels[idx]}`, 'info');
+        };
+
+        window.clearWorkpieces = function() {
+            workpieces.forEach(wp => {
+                if (!wp.gripped) {
+                    conveyor.remove(wp.mesh);
+                }
+            });
+            workpieces = workpieces.filter(wp => wp.gripped);
+            window.workpieces = workpieces;
+            addLog('已清除未抓取工件', 'info');
+        };
+
+        window.toggleAutoGenerate = function(checked) {
+            autoGenerateWorkpieces = checked;
+            if (checked) {
+                autoGenerateTimer = setInterval(() => {
+                    if (workpieces.filter(wp => !wp.gripped).length < 8) {
+                        generateWorkpiece();
+                    }
+                }, 5000);
+                addLog('自动生成工件已开启', 'info');
+            } else {
+                if (autoGenerateTimer) {
+                    clearInterval(autoGenerateTimer);
+                    autoGenerateTimer = null;
+                }
+                addLog('自动生成工件已关闭', 'info');
+            }
+        };
+
+        // ==================== 传送带动画 ====================
+        function animateConveyor() {
+            // 平滑加减速
+            conveyorCurrentSpeed += (conveyorTargetSpeed - conveyorCurrentSpeed) * 0.03;
+            if (Math.abs(conveyorCurrentSpeed) < 0.001) conveyorCurrentSpeed = 0;
+
+            if (conveyorCurrentSpeed < 0.01) return;
+
+            const speed = conveyorCurrentSpeed;
+
+            conveyorRollers.forEach(roller => {
+                roller.rotation.z += 0.05 * speed;
+            });
+
+            // 皮带滚动效果
+            if (conveyorBeltMaterial) {
+                conveyorBeltMaterial.map.offset.x -= 0.002 * speed;
+            }
+
+            workpieces.forEach(wp => {
+                if (!wp.gripped && !wp.onMetalTable && !wp.sliding) {
+                    if (wp.mesh.position.z === 0 || Math.abs(wp.mesh.position.z) < 0.1) {
+                        wp.mesh.position.x += 0.008 * speed;
+                        if (wp.mesh.position.x > 3.5) {
+                            wp.onMetalTable = true;
+                            // 从conveyor组移除，添加到scene
+                            conveyor.remove(wp.mesh);
+                            scene.add(wp.mesh);
+                            // 设置初始位置（传送带末端）
+                            wp.mesh.position.set(wp.mesh.position.x, 0.855, 0);
+                            // 创建滑落状态
+                            slidingWorkpieces.push({
+                                mesh: wp.mesh,
+                                wp: wp,
+                                vx: 0.02,  // 水平初速度（向前滑动）
+                                vy: 0.05,  // 垂直初速度（微向上）
+                                vz: -0.15, // 向金属台方向滑动的速度
+                                bounces: 0,
+                                settled: false
+                            });
+                            addLog(`工件 ${wp.label} 开始滑落`, 'info');
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==================== WebSocket连接 ====================
+        function connectWebSocket() {
+            ws = new WebSocket('ws://localhost:3001');
+
+            ws.onopen = () => {
+                console.log('WebSocket 已连接');
+                addLog('WebSocket 已连接', 'info');
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    dataPoints: ['*']
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket 已断开');
+                addLog('WebSocket 连接已断开', 'warn');
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket 错误:', error);
+                addLog('WebSocket 错误', 'error');
+            };
+        }
+
+        function handleWebSocketMessage(message) {
+            switch (message.type) {
+                case 'data':
+                    updateDeviceData(message.data);
+                    break;
+                case 'virtualToReal':
+                case 'realToVirtual':
+                    updateSyncStatus(message);
+                    break;
+            }
+        }
+
+        function updateDeviceData(data) {
+            // 处理来自后端的数据更新
+        }
+
+        function updateSyncStatus(message) {
+            const status = document.getElementById('current-mode');
+            if (status) {
+                status.textContent = '同步中';
+                status.className = 'mode-badge hybrid';
+            }
+        }
+
+        // ==================== 主动画循环 ====================
+        window.animate = function() {
+            animationId = requestAnimationFrame(animate);
+            window.animationId = animationId;
+            const delta = 0.016;
+
+            animateConveyor();
+            updateGripperAnimation();
+
+            // 更新滑落中的工件
+            for (let i = slidingWorkpieces.length - 1; i >= 0; i--) {
+                const sw = slidingWorkpieces[i];
+                if (sw.settled) continue;
+
+                // 施加重力
+                sw.vy += GRAVITY * SLIDE_DT;
+
+                // 更新位置
+                sw.mesh.position.x += sw.vx;
+                sw.mesh.position.y += sw.vy;
+                sw.mesh.position.z += sw.vz;
+
+                // 碰到金属台表面 (y=0.9)
+                if (sw.mesh.position.y <= 0.9) {
+                    sw.mesh.position.y = 0.9;
+                    sw.vy = -sw.vy * 0.25; // 弹跳系数
+                    sw.vx *= 0.7; // 摩擦减速
+                    sw.vz *= 0.5;
+                    sw.bounces++;
+
+                    if (sw.bounces >= 3 || Math.abs(sw.vy) < 0.02) {
+                        // 静止 - 直接放入物料箱
+                        sw.settled = true;
+                        if (materialBox) {
+                            const boxPos = new THREE.Vector3();
+                            materialBox.getWorldPosition(boxPos);
+                            // 物料箱底部在 boxPos.y + 0.01
+                            const boxBottomY = boxPos.y + 0.01;
+                            const stackHeight = boxContents.length * 0.06;
+                            sw.mesh.position.set(
+                                boxPos.x + (Math.random() - 0.5) * 0.25,
+                                boxBottomY + 0.03 + stackHeight,
+                                boxPos.z + (Math.random() - 0.5) * 0.15
+                            );
+                            boxContents.push(sw.wp);
+                            addLog(`工件 ${sw.wp.label} 已落入物料箱 (${boxContents.length})`, 'success');
+                        } else {
+                            sw.mesh.position.y = 0.9;
+                            sw.mesh.position.z = -0.8;
+                            addLog(`工件 ${sw.wp.label} 已落到金属台`, 'info');
+                        }
+                        // 添加微小随机旋转
+                        sw.mesh.rotation.y += (Math.random() - 0.5) * 0.3;
+                    }
+                }
+
+                // 移除已静止的
+                if (sw.settled) {
+                    slidingWorkpieces.splice(i, 1);
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ==================== 窗口大小调整 ====================
+        window.addEventListener('resize', () => {
+            const container = document.querySelector('.viewport-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // ==================== 启动 ====================
+        init();
+
+        // ==================== 全局函数 ====================
+        window.setMode = function(mode) {
+            currentMode = mode;
+            const modeNames = {
+                'virtual': '纯虚拟仿真',
+                'hybrid': '虚实联动',
+                'real': '全实物实操'
+            };
+            const modeClasses = {
+                'virtual': 'virtual',
+                'hybrid': 'hybrid',
+                'real': 'real'
+            };
+
+            const indicator = document.getElementById('current-mode');
+            indicator.textContent = modeNames[mode];
+            indicator.className = 'mode-badge ' + modeClasses[mode];
+
+            addLog(`切换到 ${modeNames[mode]} 模式`, 'info');
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'modeChange', mode: mode }));
+            }
+        };
+
+        window.startAnimation = function() {
+            isAnimating = true;
+            conveyorRunning = true;
+            conveyorTargetSpeed = 1;
+            addLog('产线启动', 'info');
+        };
+
+        window.pauseAnimation = function() {
+            isAnimating = false;
+            conveyorRunning = false;
+            conveyorTargetSpeed = 0;
+            addLog('产线暂停', 'warn');
+        };
+
+        window.emergencyStop = function() {
+            isAnimating = false;
+            conveyorRunning = false;
+            conveyorTargetSpeed = 0;
+            resetGripCycle();
+
+            const flash = document.createElement('div');
+            flash.style.cssText = `
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(239, 68, 68, 0.5);
+                pointer-events: none;
+                z-index: 1000;
+                animation: flash 1s ease-out;
+            `;
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 1000);
+
+            addLog('紧急停止！所有设备已停止', 'error');
+            alert('紧急停止已触发！请检查设备状态。');
+        };
+
+        window.resetScene = function() {
+            resetGripCycle();
+            workpieces.forEach(wp => {
+                if (!wp.gripped) {
+                    wp.mesh.position.copy(wp.originalPos);
+                }
+            });
+            addLog('场景已复位', 'info');
+        };
+
+        window.toggleView = function() {
+            const views = [
+                { x: 4, y: 4, z: 7 },
+                { x: 0, y: 8, z: 0 },
+                { x: 8, y: 2, z: 0 },
+                { x: -2, y: 3, z: 5 },
+                { x: 2, y: 1, z: 3 }
+            ];
+
+            const currentView = views[Math.floor(Math.random() * views.length)];
+            camera.position.set(currentView.x, currentView.y, currentView.z);
+            camera.lookAt(2, 1, -0.5);
+            addLog('切换视角', 'info');
+        };
+
+        window.switchTab = function(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`)?.classList.add('active');
+            }
+
+            document.querySelectorAll('.panel-sections').forEach(panel => {
+                panel.style.display = 'none';
+            });
+            const panel = document.getElementById(`panel-${tabName}`);
+            if (panel) panel.style.display = 'block';
+        };
+
+        // 用户信息初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            const userName = localStorage.getItem('userName') || '用户';
+            const userRole = localStorage.getItem('userRole') || 'teacher';
+            document.getElementById('header-username').textContent = userName;
+            const avatar = localStorage.getItem('userAvatar');
+            if (avatar) {
+                const img = document.getElementById('avatar-img');
+                img.src = avatar;
+                img.style.display = 'block';
+                document.getElementById('avatar-text').style.display = 'none';
+            }
+        });
+
+        window.handleAvatarUpload = function(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const dataUrl = e.target.result;
+                localStorage.setItem('userAvatar', dataUrl);
+                const img = document.getElementById('avatar-img');
+                img.src = dataUrl;
+                img.style.display = 'block';
+                document.getElementById('avatar-text').style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        };
+
+        window.doLogout = function() {
+            const user = localStorage.getItem('username') || 'unknown';
+            const role = localStorage.getItem('userRole') || 'unknown';
+            const time = new Date().toISOString();
+            console.log(`[LOGOUT] ${time} | user=${user} | role=${role} | action=logout`);
+            fetch('/api/v1/logs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ level: 'INFO', message: `用户注销: ${user} (${role})`, timestamp: time })
+            }).catch(() => {});
+            localStorage.removeItem('userRole');
+            localStorage.removeItem('username');
+            localStorage.removeItem('userName');
+            localStorage.removeItem('userAvatar');
+            location.href = 'login.html';
+        };
+
+        window.addLog = function(message, level = 'info') {
+            const container = document.getElementById('log-container');
+            if (!container) return;
+
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.setAttribute('data-level', level);
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-level ${level}">${level.toUpperCase()}</span>
+                <span class="log-message">${message}</span>
+            `;
+
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        };
+
+        window.clearLogs = function() {
+            const container = document.getElementById('log-container');
+            if (container) container.innerHTML = '';
+            addLog('日志已清空', 'info');
+        };
+
+        // ==================== 虚实联动模块 ====================
+        let linkageMode = 'virtual';
+        let channelsRunning = false;
+
+        window.setLinkageMode = function(mode) {
+            linkageMode = mode;
+            const modeLabels = {
+                virtual: '纯虚拟模式',
+                v2r: '虚控实模式',
+                r2v: '实驱虚模式',
+                bidirectional: '双向联动模式'
+            };
+            const el = document.getElementById('linkage-mode-display');
+            if (el) el.textContent = modeLabels[mode] || mode;
+
+            ['virtual', 'v2r', 'r2v', 'bidirectional'].forEach(m => {
+                const btn = document.getElementById(`linkage-mode-${m}`);
+                if (btn) {
+                    btn.className = m === mode ? 'btn btn-primary' : 'btn btn-secondary';
+                }
+            });
+
+            addLog(`联动模式切换: ${modeLabels[mode]}`, 'info');
+        };
+
+        window.startAllChannels = function() {
+            channelsRunning = true;
+            const el = document.getElementById('linkage-channels-status');
+            if (el) {
+                el.textContent = '运行中';
+                el.style.color = 'var(--success)';
+            }
+            addLog('所有数据通道已启动', 'info');
+        };
+
+        window.emergencyDisconnectAll = function() {
+            channelsRunning = false;
+            const el = document.getElementById('linkage-channels-status');
+            if (el) {
+                el.textContent = '已停止';
+                el.style.color = 'var(--danger)';
+            }
+            addLog('紧急断开所有通道', 'error');
+        };
+    </script>
+</body>
+</html>
