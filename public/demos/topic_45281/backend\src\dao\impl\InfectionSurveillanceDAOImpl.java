@@ -1,0 +1,20 @@
+package dao.impl;
+import bean.InfectionSurveillance;
+import dao.InfectionSurveillanceDAO;
+import util.JDBCUtil;
+import java.sql.*;
+import java.util.*;
+
+public class InfectionSurveillanceDAOImpl implements InfectionSurveillanceDAO {
+    private <T> List<T> queryList(String sql, java.util.function.Function<ResultSet,T> mapper, Object... params) {
+        List<T> list = new ArrayList<>();
+        try (JDBCUtil.QueryResult qr = JDBCUtil.executeQuery(sql, params)) { ResultSet rs = qr.getResultSet(); while(rs.next()) list.add(mapper.apply(rs)); } catch(Exception e){ e.printStackTrace(); }
+        return list;
+    }
+    @Override public int insert(InfectionSurveillance s){return JDBCUtil.executeInsert("INSERT INTO infection_surveillance(surveillance_no,patient_id,patient_name,medical_record_no,admission_no,dept_id,dept_name,bed_no,infection_type,infection_site,diagnosis_date,pathogen,sample_type,risk_factors,antibiotic_use,reporter_id,reporter_name,report_date,category,severity,status)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",s.getSurveillanceNo(),s.getPatientId(),s.getPatientName(),s.getMedicalRecordNo(),s.getAdmissionNo(),s.getDeptId(),s.getDeptName(),s.getBedNo(),s.getInfectionType(),s.getInfectionSite(),s.getDiagnosisDate(),s.getPathogen(),s.getSampleType(),s.getRiskFactors(),s.getAntibioticUse(),s.getReporterId(),s.getReporterName(),s.getReportDate(),s.getCategory(),s.getSeverity(),s.getStatus());}
+    @Override public int update(InfectionSurveillance s){return JDBCUtil.executeUpdate("UPDATE infection_surveillance SET confirm_doctor_id=?,confirm_doctor_name=?,confirm_date=?,outcome=?,status=?WHERE id=?",s.getConfirmDoctorId(),s.getConfirmDoctorName(),s.getConfirmDate(),s.getOutcome(),s.getStatus(),s.getId());}
+    @Override public InfectionSurveillance findById(int id){List<InfectionSurveillance>l=queryList("SELECT*FROM infection_surveillance WHERE id=?",this::mapIS,id);return l.isEmpty()?null:l.get(0);}
+    @Override public List<InfectionSurveillance> findByDeptId(int deptId){return queryList("SELECT*FROM infection_surveillance WHERE dept_id=?ORDER BY report_date DESC",this::mapIS,deptId);}
+    @Override public List<InfectionSurveillance> findSurveillances(String infectionType,String status,int page,int size){String sql="SELECT*FROM infection_surveillance WHERE 1=1";List<Object>params=new ArrayList<>();if(infectionType!=null&&!infectionType.isEmpty()){sql+=" AND infection_type=?";params.add(infectionType);}if(status!=null&&!status.isEmpty()){sql+=" AND status=?";params.add(status);}sql+=" ORDER BY surveillance_date DESC LIMIT ?,?";params.add((page-1)*size);params.add(size);return queryList(sql,this::mapIS,params.toArray(new Object[0]));}
+    private InfectionSurveillance mapIS(ResultSet rs){try{InfectionSurveillance s=new InfectionSurveillance();s.setId(rs.getInt("id"));s.setSurveillanceNo(rs.getString("surveillance_no"));s.setPatientId(rs.getInt("patient_id"));s.setPatientName(rs.getString("patient_name"));s.setMedicalRecordNo(rs.getString("medical_record_no"));s.setAdmissionNo(rs.getString("admission_no"));s.setDeptId(rs.getInt("dept_id"));s.setDeptName(rs.getString("dept_name"));s.setBedNo(rs.getString("bed_no"));s.setInfectionType(rs.getString("infection_type"));s.setInfectionSite(rs.getString("infection_site"));s.setDiagnosisDate(rs.getDate("diagnosis_date"));s.setPathogen(rs.getString("pathogen"));s.setSampleType(rs.getString("sample_type"));s.setRiskFactors(rs.getString("risk_factors"));s.setAntibioticUse(rs.getString("antibiotic_use"));s.setReporterId(rs.getInt("reporter_id"));s.setReporterName(rs.getString("reporter_name"));s.setReportDate(rs.getDate("report_date"));if(rs.getObject("confirm_doctor_id")!=null)s.setConfirmDoctorId(rs.getInt("confirm_doctor_id"));s.setConfirmDoctorName(rs.getString("confirm_doctor_name"));s.setConfirmDate(rs.getDate("confirm_date"));s.setCategory(rs.getString("category"));s.setSeverity(rs.getString("severity"));s.setOutcome(rs.getString("outcome"));s.setStatus(rs.getString("status"));s.setCreateTime(rs.getTimestamp("create_time"));s.setUpdateTime(rs.getTimestamp("update_time"));return s;}catch(SQLException e){return null;}}
+}

@@ -516,6 +516,65 @@
     radarChart.setOption(getRadarOption(scoreArr));
   };
 
+  // =============================================
+  // Load Case Study (Doubao example)
+  // =============================================
+  window.loadCaseStudy = function() {
+    var caseScores = {
+      wood: 82,
+      fire: 70,
+      earth: 68,
+      metal: 55,
+      water: 42
+    };
+    var caseSubs = {
+      wood: [17, 17, 16, 16, 16],
+      fire: [14, 14, 14, 14, 14],
+      earth: [14, 14, 14, 13, 13],
+      metal: [11, 11, 11, 11, 11],
+      water: [9, 9, 8, 8, 8]
+    };
+    var caseWeights = {
+      wood: 35,
+      fire: 25,
+      earth: 25,
+      metal: 15,
+      water: 50
+    };
+
+    DIMS.forEach(function(dim) {
+      // Set main slider
+      var mainSlider = document.getElementById('score-' + dim);
+      if (mainSlider) mainSlider.value = caseScores[dim];
+
+      // Set sub-indicators
+      if (caseSubs[dim]) {
+        caseSubs[dim].forEach(function(val, i) {
+          var subSlider = document.getElementById('sub-' + dim + '-' + i);
+          var subVal = document.getElementById('sub-' + dim + '-' + i);
+          if (subSlider) subSlider.value = val;
+        });
+      }
+
+      // Set weight
+      var wSlider = document.getElementById('w-' + dim);
+      if (wSlider) wSlider.value = caseWeights[dim];
+    });
+
+    // Switch to preset mode if in custom mode
+    if (currentMode === 'custom') {
+      switchMode('preset');
+    }
+
+    updateScore();
+
+    // Scroll to scoring section
+    var scoringSection = document.getElementById('scoring');
+    if (scoringSection) {
+      scoringSection.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   // Initial render
   updateScore();
 
