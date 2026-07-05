@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地图片去水印工具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .header { text-align: center; margin-bottom: 16px; }
+  .header h1 { font-size: 32px; font-weight: 800; color: #f0f6fc; letter-spacing: -0.5px; }
+  .header p { font-size: 15px; color: #8b949e; margin-top: 4px; }
+  .toolbar {
+    display: flex; gap: 10px; justify-content: center; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .btn {
+    padding: 10px 18px; border: none; border-radius: 6px; font-size: 15px;
+    font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit;
+  }
+  .btn-primary { background: #238636; color: #fff; }
+  .btn-primary:hover { background: #2ea043; }
+  .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .btn-secondary:hover { background: #30363d; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  input[type="file"] { display: none; }
+  .workspace {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    max-width: 1600px; margin: 0 auto;
+  }
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; }
+  .panel-title { font-size: 17px; font-weight: 700; margin-bottom: 10px; color: #f0f6fc; }
+  .canvas-wrapper {
+    position: relative; width: 100%; background: #0d1117; border-radius: 8px;
+    overflow: auto; min-height: 320px; display: flex; align-items: center;
+    justify-content: center; border: 1px dashed #30363d;
+  }
+  canvas { max-width: 100%; max-height: 68vh; display: block; cursor: crosshair; }
+  .status { margin-top: 10px; font-size: 14px; color: #8b949e; min-height: 20px; }
+  .selection-info {
+    margin-top: 10px; font-size: 13px; color: #8b949e;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
+  .selection-tag {
+    display: inline-flex; align-items: center; gap: 4px; background: #da3633;
+    color: #fff; padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+  }
+  .selection-tag .del { cursor: pointer; opacity: 0.8; font-weight: 700; }
+  .selection-tag .del:hover { opacity: 1; }
+  .slider-group {
+    display: flex; align-items: center; gap: 8px; font-size: 14px; color: #c9d1d9;
+    background: #161b22; border: 1px solid #30363d; padding: 8px 14px; border-radius: 6px;
+  }
+  .slider-group input[type="range"] { width: 90px; accent-color: #2ea043; }
+  .tip { text-align: center; color: #484f58; font-size: 14px; padding: 40px 20px; }
+  .progress-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(13,17,23,0.92); display: none; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 9999;
+  }
+  .progress-overlay.active { display: flex; }
+  .progress-bar { width: 320px; height: 6px; background: #30363d; border-radius: 3px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: #2ea043; width: 0%; transition: width 0.2s; }
+  .progress-detail { margin-top: 8px; color: #8b949e; font-size: 12px; }
+  @media (max-width: 960px) {
+    .workspace { grid-template-columns: 1fr; }
+    .header h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-overlay" id="progressOverlay">
+  <div class="progress-bar"><div class="progress-bar-fill" id="progressFill"></div></div>
+  <p style="margin-top:12px;color:#8b949e;font-size:14px;" id="progressText">正在处理...</p>
+  <p class="progress-detail" id="progressDetail"></p>
+</div>
+
+<div class="header">
+  <h1>本地图片去水印工具</h1>
+  <p>纯浏览器端处理，图片不会上传至任何服务器</p>
+</div>
+
+<div class="toolbar">
+  <label class="btn btn-primary">
+    上传图片
+    <input type="file" id="fileInput" accept="image/*">
+  </label>
+  <button class="btn btn-secondary" id="removeBtn" disabled>开始去水印</button>
+  <button class="btn btn-secondary" id="clearBtn" disabled>清空选区</button>
+  <button class="btn btn-secondary" id="downloadBtn" disabled>下载结果</button>
+  <div class="slider-group">
+    <span>取样半径</span>
+    <input type="range" id="radiusSlider" min="3" max="40" value="12">
+    <span id="radiusValue" style="min-width:20px;text-align:center;">12</span>
+  </div>
+  <div class="slider-group">
+    <span>修复强度</span>
+    <input type="range" id="strengthSlider" min="1" max="5" value="3">
+    <span id="strengthValue" style="min-width:20px;text-align:center;">3</span>
+  </div>
+</div>
+
+<div class="workspace">
+  <div class="panel">
+    <div class="panel-title">原图 · 框选水印区域</div>
+    <div class="canvas-wrapper" id="sourceWrapper">
+      <div class="tip" id="sourceTip">点击"上传图片"开始</div>
+      <canvas id="sourceCanvas" style="display:none;"></canvas>
+    </div>
+    <div class="selection-info" id="selectionInfo"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">处理结果</div>
+    <div class="canvas-wrapper" id="resultWrapper">
+      <div class="tip" id="resultTip">处理后将显示在这里</div>
+      <canvas id="resultCanvas" style="display:none;"></canvas>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var $ = function(id) { return document.getElementById(id); };
+  var imgLoaded = false;
+  var selections = [];
+  var isDrawing = false;
+  var startX = 0, startY = 0;
+  var currentRect = null;
+  var originalImage = null;
+
+  var sourceCanvas = $('sourceCanvas');
+  var resultCanvas = $('resultCanvas');
+  var sCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+
+  function getMousePos(canvas, evt) {
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width;
+    var scaleY = canvas.height / rect.height;
+    return {
+      x: (evt.clientX - rect.left) * scaleX,
+      y: (evt.clientY - rect.top) * scaleY
+    };
+  }
+
+  function drawSelections() {
+    if (!imgLoaded || !originalImage) return;
+    sCtx.drawImage(originalImage, 0, 0);
+    sCtx.strokeStyle = '#da3633';
+    sCtx.lineWidth = 2;
+    sCtx.setLineDash([6, 4]);
+    var i;
+    for (i = 0; i < selections.length; i++) {
+      var sel = selections[i];
+      sCtx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+      sCtx.fillStyle = 'rgba(218,54,51,0.15)';
+      sCtx.fillRect(sel.x, sel.y, sel.w, sel.h);
+      sCtx.fillStyle = '#fff';
+      sCtx.font = 'bold 12px sans-serif';
+      sCtx.fillText(String(i + 1), sel.x + 4, sel.y + 14);
+    }
+    if (currentRect) {
+      sCtx.strokeStyle = '#58a6ff';
+      sCtx.strokeRect(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
+      sCtx.fillStyle = 'rgba(88,166,255,0.15)';
+      sCtx.fillRect(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
+    }
+    sCtx.setLineDash([]);
+    updateSelectionInfo();
+  }
+
+  function updateSelectionInfo() {
+    var el = $('selectionInfo');
+    if (selections.length === 0) {
+      el.innerHTML = '<span style="color:#484f58;">未选择区域，在原图上拖拽框选水印</span>';
+      $('removeBtn').disabled = true;
+      $('clearBtn').disabled = true;
+      return;
+    }
+    var html = '<span>已选 ' + selections.length + ' 个区域：</span>';
+    var i;
+    for (i = 0; i < selections.length; i++) {
+      var sel = selections[i];
+      html += '<span class="selection-tag">' + (i + 1) + '号 ' + Math.round(sel.w) + 'x' + Math.round(sel.h);
+      html += ' <span class="del" data-i="' + i + '">x</span></span>';
+    }
+    el.innerHTML = html;
+    $('removeBtn').disabled = false;
+    $('clearBtn').disabled = false;
+    var dels = el.querySelectorAll('.del');
+    for (i = 0; i < dels.length; i++) {
+      (function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var idx = parseInt(btn.getAttribute('data-i'));
+          selections.splice(idx, 1);
+          drawSelections();
+        });
+      })(dels[i]);
+    }
+  }
+
+  sourceCanvas.addEventListener('mousedown', function(e) {
+    if (!imgLoaded) return;
+    isDrawing = true;
+    var pos = getMousePos(sourceCanvas, e);
+    startX = pos.x;
+    startY = pos.y;
+    currentRect = { x: startX, y: startY, w: 0, h: 0 };
+  });
+
+  sourceCanvas.addEventListener('mousemove', function(e) {
+    if (!isDrawing || !imgLoaded) return;
+    var pos = getMousePos(sourceCanvas, e);
+    currentRect = {
+      x: Math.min(startX, pos.x),
+      y: Math.min(startY, pos.y),
+      w: Math.abs(pos.x - startX),
+      h: Math.abs(pos.y - startY)
+    };
+    drawSelections();
+  });
+
+  sourceCanvas.addEventListener('mouseup', function() {
+    if (!isDrawing) return;
+    isDrawing = false;
+    if (currentRect && currentRect.w > 5 && currentRect.h > 5) {
+      selections.push({ x: currentRect.x, y: currentRect.y, w: currentRect.w, h: currentRect.h });
+    }
+    currentRect = null;
+    drawSelections();
+  });
+
+  sourceCanvas.addEventListener('mouseleave', function() {
+    if (isDrawing) {
+      isDrawing = false;
+      currentRect = null;
+      drawSelections();
+    }
+  });
+
+  $('fileInput').addEventListener('change', function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(evt) {
+      var img = new Image();
+      img.onload = function() {
+        originalImage = img;
+        imgLoaded = true;
+        selections = [];
+        sourceCanvas.width = img.width;
+        sourceCanvas.height = img.height;
+        resultCanvas.width = img.width;
+        resultCanvas.height = img.height;
+        sCtx.drawImage(img, 0, 0);
+        sourceCanvas.style.display = 'block';
+        $('sourceTip').style.display = 'none';
+        $('resultTip').style.display = 'none';
+        resultCanvas.style.display = 'none';
+        $('status').textContent = '请框选水印区域';
+        $('downloadBtn').disabled = true;
+        updateSelectionInfo();
+      };
+      img.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  $('clearBtn').addEventListener('click', function() {
+    selections = [];
+    drawSelections();
+  });
+
+  $('radiusSlider').addEventListener('input', function(e) {
+    $('radiusValue').textContent = e.target.value;
+  });
+  $('strengthSlider').addEventListener('input', function(e) {
+    $('strengthValue').textContent = e.target.value;
+  });
+
+  function buildMask(width, height, rects) {
+    var mask = new Uint8Array(width * height);
+    var i;
+    for (i = 0; i < rects.length; i++) {
+      var rect = rects[i];
+      var x1 = Math.max(0, Math.round(rect.x));
+      var y1 = Math.max(0, Math.round(rect.y));
+      var x2 = Math.min(width, Math.round(rect.x + rect.w));
+      var y2 = Math.min(height, Math.round(rect.y + rect.h));
+      var y, x;
+      for (y = y1; y < y2; y++) {
+        for (x = x1; x < x2; x++) {
+          mask[y * width + x] = 1;
+        }
+      }
+    }
+    return mask;
+  }
+
+  // ===== 改进版图像修复算法 =====
+
+  // 阶段0：水印颜色减除预处理
+  function removeWatermarkColor(data, mask, width, height, strength) {
+    var x, y;
+    var searchR = 10 + strength * 3;
+    for (y = 0; y < height; y++) {
+      for (x = 0; x < width; x++) {
+        var idx = y * width + x;
+        if (mask[idx] !== 1) continue;
+
+        // 收集周围非水印像素，估计背景色
+        var rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+        var dy, dx;
+        for (dy = -searchR; dy <= searchR; dy++) {
+          for (dx = -searchR; dx <= searchR; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            var ny = y + dy, nx = x + dx;
+            if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
+            if (mask[ny * width + nx] === 1) continue;
+            var dist = Math.sqrt(dx*dx + dy*dy);
+            var w = 1 / (1 + dist * 0.3);
+            var pidx = (ny * width + nx) * 4;
+            rSum += data[pidx] * w;
+            gSum += data[pidx+1] * w;
+            bSum += data[pidx+2] * w;
+            wSum += w;
+          }
+        }
+
+        if (wSum > 0) {
+          var pidx = idx * 4;
+          var pr = data[pidx], pg = data[pidx+1], pb = data[pidx+2];
+          var estR = rSum / wSum, estG = gSum / wSum, estB = bSum / wSum;
+          var estBright = (estR + estG + estB) / 3;
+          var currBright = (pr + pg + pb) / 3;
+          var diff = currBright - estBright;
+
+          // 白色半透明水印：当前像素明显比估计背景亮
+          if (diff > 8) {
+            var alpha = Math.min(0.85, diff / 180);
+            var invA = Math.max(0.15, 1 - alpha);
+            var blend = strength * 0.18; // 修复强度越高，越偏向估计背景
+            var newR = (pr - 255 * alpha) / invA;
+            var newG = (pg - 255 * alpha) / invA;
+            var newB = (pb - 255 * alpha) / invA;
+            data[pidx] = Math.min(255, Math.max(0, Math.round(pr * (1-blend) + newR * blend)));
+            data[pidx+1] = Math.min(255, Math.max(0, Math.round(pg * (1-blend) + newG * blend)));
+            data[pidx+2] = Math.min(255, Math.max(0, Math.round(pb * (1-blend) + newB * blend)));
+          }
+          // 黑色半透明水印：当前像素明显比估计背景暗
+          else if (diff < -8) {
+            var alpha = Math.min(0.85, -diff / 180);
+            var invA = Math.max(0.15, 1 - alpha);
+            var blend = strength * 0.18;
+            var newR = pr / invA;
+            var newG = pg / invA;
+            var newB = pb / invA;
+            data[pidx] = Math.min(255, Math.max(0, Math.round(pr * (1-blend) + newR * blend)));
+            data[pidx+1] = Math.min(255, Math.max(0, Math.round(pg * (1-blend) + newG * blend)));
+            data[pidx+2] = Math.min(255, Math.max(0, Math.round(pb * (1-blend) + newB * blend)));
+          }
+          // 轻微偏差：直接混合估计背景色
+          else if (Math.abs(diff) > 3) {
+            var blend = strength * 0.12;
+            data[pidx] = Math.round(pr * (1-blend) + estR * blend);
+            data[pidx+1] = Math.round(pg * (1-blend) + estG * blend);
+            data[pidx+2] = Math.round(pb * (1-blend) + estB * blend);
+          }
+        }
+      }
+    }
+  }
+
+  // 局部颜色均匀性（方差越小越均匀，权重越高）
+  function computeUniformity(data, cx, cy, width, height, mask) {
+    var sumR = 0, sumG = 0, sumB = 0, sumR2 = 0, sumG2 = 0, sumB2 = 0, cnt = 0;
+    var dy, dx;
+    for (dy = -1; dy <= 1; dy++) {
+      for (dx = -1; dx <= 1; dx++) {
+        var nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        if (mask[ny * width + nx] === 1) continue;
+        var pidx = (ny * width + nx) * 4;
+        var r = data[pidx], g = data[pidx+1], b = data[pidx+2];
+        sumR += r; sumG += g; sumB += b;
+        sumR2 += r*r; sumG2 += g*g; sumB2 += b*b;
+        cnt++;
+      }
+    }
+    if (cnt < 2) return 1.0;
+    var varR = Math.abs(sumR2/cnt - (sumR/cnt)*(sumR/cnt));
+    var varG = Math.abs(sumG2/cnt - (sumG/cnt)*(sumG/cnt));
+    var varB = Math.abs(sumB2/cnt - (sumB/cnt)*(sumB/cnt));
+    var avgVar = (varR + varG + varB) / 3;
+    return 1.0 / (1.0 + avgVar * 0.003);
+  }
+
+  // 阶段1：结构化边缘填充
+  function edgeFill(data, mask, width, height, radius, strength, onProgress) {
+    var r = Math.max(1, Math.floor(radius));
+    var dirs = [];
+    var dy, dx;
+    for (dy = -r; dy <= r; dy++) {
+      for (dx = -r; dx <= r; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        dirs.push([dy, dx]);
+      }
+    }
+
+    var changed = true;
+    var iter = 0;
+    var maxIter = Math.max(width, height) * (2 + strength);
+    var totalMasked = 0;
+    var mi;
+    for (mi = 0; mi < mask.length; mi++) totalMasked += mask[mi];
+    var filled = 0;
+
+    while (changed && iter < maxIter) {
+      changed = false;
+      iter++;
+
+      var edges = [];
+      var x, y;
+      for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+          var idx = y * width + x;
+          if (mask[idx] !== 1) continue;
+          var di;
+          for (di = 0; di < dirs.length; di++) {
+            var ddy = dirs[di][0], ddx = dirs[di][1];
+            var ny = y + ddy, nx = x + ddx;
+            if (ny >= 0 && ny < height && nx >= 0 && nx < width && mask[ny * width + nx] === 0) {
+              edges.push({ x: x, y: y, idx: idx });
+              break;
+            }
+          }
+        }
+      }
+
+      for (var ei = 0; ei < edges.length; ei++) {
+        var edge = edges[ei];
+        var rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+
+        for (di = 0; di < dirs.length; di++) {
+          ddy = dirs[di][0]; ddx = dirs[di][1];
+          ny = edge.y + ddy; nx = edge.x + ddx;
+          if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
+          var nidx = ny * width + nx;
+          if (mask[nidx] === 0) {
+            var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+            var sigma = r * 0.6;
+            var distWeight = Math.exp(-(dist * dist) / (2 * sigma * sigma));
+
+            var pidx = nidx * 4;
+            var pr = data[pidx], pg = data[pidx + 1], pb = data[pidx + 2];
+
+            // 颜色过滤：排除异常亮/暗像素（水印残留）
+            var brightness = (pr + pg + pb) / 3;
+            var maxC = Math.max(pr, pg, pb);
+            var minC = Math.min(pr, pg, pb);
+            var isWatermarkLike = (brightness > 215 && (maxC - minC) < 25);
+            var colorWeight = isWatermarkLike ? 0.1 : 1.0;
+
+            // 局部均匀性权重
+            var uniformWeight = 1.0;
+            if (di < 20) {
+              uniformWeight = computeUniformity(data, nx, ny, width, height, mask);
+            }
+
+            var w = distWeight * colorWeight * uniformWeight;
+            rSum += pr * w;
+            gSum += pg * w;
+            bSum += pb * w;
+            wSum += w;
+          }
+        }
+
+        if (wSum > 0) {
+          pidx = edge.idx * 4;
+          data[pidx] = Math.round(rSum / wSum);
+          data[pidx + 1] = Math.round(gSum / wSum);
+          data[pidx + 2] = Math.round(bSum / wSum);
+          mask[edge.idx] = 0;
+          filled++;
+          changed = true;
+        }
+      }
+
+      if (onProgress && totalMasked > 0) {
+        onProgress(Math.min(80, Math.round((filled / totalMasked) * 80)));
+      }
+    }
+  }
+
+  // 阶段2：Patch 匹配精修（保持结构）
+  function patchRefine(data, maskRects, width, height) {
+    var mask = buildMask(width, height, maskRects);
+    var x, y;
+
+    for (y = 1; y < height - 1; y++) {
+      for (x = 1; x < width - 1; x++) {
+        var idx = y * width + x;
+        if (mask[idx] !== 0) continue;
+
+        // 只处理修复区域边缘
+        var nearKnown = false;
+        if ((y > 0 && mask[(y-1)*width+x] === 1) ||
+            (y < height-1 && mask[(y+1)*width+x] === 1) ||
+            (x > 0 && mask[y*width+x-1] === 1) ||
+            (x < width-1 && mask[y*width+x+1] === 1)) {
+          nearKnown = true;
+        }
+        if (!nearKnown) continue;
+
+        var pidx = idx * 4;
+        var origR = data[pidx], origG = data[pidx+1], origB = data[pidx+2];
+
+        // 3x3 patch 匹配，6像素搜索范围
+        var bestR = origR, bestG = origG, bestB = origB, bestScore = 999999;
+        var searchSize = 6;
+        var dy, dx;
+
+        for (dy = -searchSize; dy <= searchSize; dy++) {
+          for (dx = -searchSize; dx <= searchSize; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            var ny = y + dy, nx = x + dx;
+            if (ny < 1 || ny >= height-1 || nx < 1 || nx >= width-1) continue;
+            if (mask[ny * width + nx] === 1) continue;
+
+            var score = 0;
+            var fy, fx;
+            for (fy = -1; fy <= 1; fy++) {
+              for (fx = -1; fx <= 1; fx++) {
+                var py = y + fy, px = x + fx;
+                var qy = ny + fy, qx = nx + fx;
+                if (py < 0 || py >= height || px < 0 || px >= width) continue;
+                if (qy < 0 || qy >= height || qx < 0 || qx >= width) continue;
+                if (mask[py * width + px] === 1) continue;
+                if (mask[qy * width + qx] === 1) continue;
+                var pp = (py * width + px) * 4;
+                var qp = (qy * width + qx) * 4;
+                var dr = data[pp] - data[qp];
+                var dg = data[pp+1] - data[qp+1];
+                var db = data[pp+2] - data[qp+2];
+                score += dr*dr + dg*dg + db*db;
+              }
+            }
+
+            if (score < bestScore) {
+              bestScore = score;
+              var qp = (ny * width + nx) * 4;
+              bestR = data[qp]; bestG = data[qp+1]; bestB = data[qp+2];
+            }
+          }
+        }
+
+        data[pidx] = Math.round(origR * 0.25 + bestR * 0.75);
+        data[pidx+1] = Math.round(origG * 0.25 + bestG * 0.75);
+        data[pidx+2] = Math.round(origB * 0.25 + bestB * 0.75);
+      }
+    }
+  }
+
+  // 阶段3：边缘羽化（多轮平滑）
+  function featherEdges(data, maskRects, width, height, rounds) {
+    var mask = buildMask(width, height, maskRects);
+    var round;
+    for (round = 0; round < rounds; round++) {
+      var newData = new Uint8ClampedArray(data);
+      var x, y;
+      for (y = 1; y < height - 1; y++) {
+        for (x = 1; x < width - 1; x++) {
+          var idx = y * width + x;
+          if (mask[idx] !== 0) continue;
+
+          // 只羽化修复区域边缘
+          var nearEdge = false;
+          if ((y > 0 && mask[(y-1)*width+x] === 1) ||
+              (y < height-1 && mask[(y+1)*width+x] === 1) ||
+              (x > 0 && mask[y*width+x-1] === 1) ||
+              (x < width-1 && mask[y*width+x+1] === 1)) {
+            nearEdge = true;
+          }
+          if (!nearEdge) continue;
+
+          var pidx = idx * 4;
+          var rSum = data[pidx], gSum = data[pidx+1], bSum = data[pidx+2], cnt = 1;
+          var dy, dx;
+          for (dy = -1; dy <= 1; dy++) {
+            for (dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              var ny = y + dy, nx = x + dx;
+              if (ny < 0 || ny >= height || nx < 0 || nx >= width) continue;
+              var np = (ny * width + nx) * 4;
+              rSum += data[np]; gSum += data[np+1]; bSum += data[np+2]; cnt++;
+            }
+          }
+          var blend = 0.35;
+          newData[pidx] = Math.round(data[pidx] * (1-blend) + (rSum / cnt) * blend);
+          newData[pidx+1] = Math.round(data[pidx+1] * (1-blend) + (gSum / cnt) * blend);
+          newData[pidx+2] = Math.round(data[pidx+2] * (1-blend) + (bSum / cnt) * blend);
+        }
+      }
+      data.set(newData);
+    }
+  }
+
+  // 主修复函数
+  window._inpaintEdgeFill = function inpaintEdgeFill(srcCanvas, maskRects, radius, strength, onProgress) {
+    var width = srcCanvas.width;
+    var height = srcCanvas.height;
+    var ctx = srcCanvas.getContext('2d', { willReadFrequently: true });
+    var imgData = ctx.getImageData(0, 0, width, height);
+    var data = new Uint8ClampedArray(imgData.data);
+    var mask = buildMask(width, height, maskRects);
+
+    // 阶段0：水印颜色减除
+    if (onProgress) onProgress(5, '去除水印颜色...');
+    removeWatermarkColor(data, mask, width, height, strength);
+
+    // 阶段1：结构化边缘填充
+    if (onProgress) onProgress(10, '填充修复区域...');
+    edgeFill(data, mask, width, height, radius, strength, function(pct) {
+      if (onProgress) onProgress(10 + pct, '填充修复区域...');
+    });
+
+    // 阶段2：Patch 匹配精修
+    if (onProgress) onProgress(85, '精修边缘结构...');
+    patchRefine(data, maskRects, width, height);
+
+    // 阶段3：边缘羽化
+    if (onProgress) onProgress(92, '边缘羽化融合...');
+    featherEdges(data, maskRects, width, height, strength);
+
+    imgData.data.set(data);
+    var canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').putImageData(imgData, 0, 0);
+    return canvas;
+  };
+
+  $('removeBtn').addEventListener('click', function() {
+    if (selections.length === 0) return;
+    $('removeBtn').disabled = true;
+    $('status').textContent = '正在处理...';
+    $('progressOverlay').classList.add('active');
+    $('progressFill').style.width = '0%';
+
+    requestAnimationFrame(function() {
+      setTimeout(function() {
+        try {
+          var radius = parseInt($('radiusSlider').value);
+          var strength = parseInt($('strengthSlider').value);
+          var result = window._inpaintEdgeFill(sourceCanvas, selections, radius, strength, function(pct, detail) {
+            $('progressFill').style.width = pct + '%';
+            $('progressText').textContent = detail || '处理中 ' + pct + '%';
+          });
+
+          resultCanvas.width = result.width;
+          resultCanvas.height = result.height;
+          var rCtx = resultCanvas.getContext('2d');
+          rCtx.drawImage(result, 0, 0);
+          resultCanvas.style.display = 'block';
+          $('resultTip').style.display = 'none';
+          $('status').textContent = '处理完成';
+          $('downloadBtn').disabled = false;
+        } catch (err) {
+          $('status').textContent = '处理出错: ' + (err && err.message ? err.message : String(err));
+        } finally {
+          $('progressOverlay').classList.remove('active');
+          $('removeBtn').disabled = false;
+        }
+      }, 150);
+    });
+  });
+
+  $('downloadBtn').addEventListener('click', function() {
+    var link = document.createElement('a');
+    link.download = 'no_watermark_' + Date.now() + '.png';
+    link.href = resultCanvas.toDataURL('image/png');
+    link.click();
+  });
+
+  $('status').textContent = '就绪，请上传图片';
+
+})();
+</script>
+
+</body>
+</html>

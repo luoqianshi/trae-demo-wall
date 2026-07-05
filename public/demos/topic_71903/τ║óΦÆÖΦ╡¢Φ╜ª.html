@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>红蒙赛车</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a15;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        #gameContainer { position: relative; image-rendering: pixelated; image-rendering: crisp-edges; }
+        #gameCanvas {
+            display: block;
+            background: #1a1a2e;
+            border: 4px solid #00fff5;
+            box-shadow: 0 0 20px rgba(0,255,245,0.5), inset 0 0 20px rgba(0,255,245,0.1);
+        }
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            pointer-events: none;
+        }
+        .screen { display: none; flex-direction: column; align-items: center; text-align: center; pointer-events: auto; }
+        .screen.active { display: flex; }
+        .title {
+            font-size: 48px; color: #00fff5;
+            text-shadow: 0 0 10px #00fff5, 0 0 20px #00fff5, 4px 4px 0 #e94560;
+            margin-bottom: 20px; letter-spacing: 4px;
+            animation: titlePulse 2s ease-in-out infinite;
+        }
+        @keyframes titlePulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+        .subtitle { font-size: 16px; color: #f5a623; margin-bottom: 40px; text-shadow: 0 0 5px #f5a623; }
+        .btn {
+            font-family: 'Courier New', monospace; font-size: 20px; padding: 15px 40px;
+            background: transparent; border: 3px solid #00fff5; color: #00fff5;
+            cursor: pointer; text-transform: uppercase; letter-spacing: 2px; transition: all 0.2s; margin: 10px;
+        }
+        .btn:hover { background: #00fff5; color: #1a1a2e; box-shadow: 0 0 20px #00fff5; transform: scale(1.05); }
+        .instructions { font-size: 14px; color: #888; margin-top: 30px; line-height: 1.8; }
+        .instructions span { color: #00ff88; }
+        .instructions .warn { color: #e94560; }
+        #hud {
+            position: absolute; top: 20px; left: 20px; right: 20px;
+            display: none; justify-content: space-between;
+            font-size: 18px; color: #fff; text-shadow: 2px 2px 0 #000;
+        }
+        #hud.active { display: flex; }
+        .score-display { color: #00fff5; }
+        .speed-display { color: #f5a623; }
+        .battery-display { color: #00ff88; }
+        .game-over-title {
+            font-size: 36px; color: #e94560;
+            text-shadow: 0 0 10px #e94560, 4px 4px 0 #1a1a2e;
+            margin-bottom: 30px;
+        }
+        .game-over-title.wj {
+            color: #f5a623;
+            text-shadow: 0 0 10px #f5a623, 4px 4px 0 #1a1a2e;
+            animation: shake 0.5s ease-in-out;
+        }
+        .game-over-title.dead {
+            color: #4488ff;
+            text-shadow: 0 0 10px #4488ff, 4px 4px 0 #1a1a2e;
+        }
+        @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-10px)} 75%{transform:translateX(10px)} }
+        .final-score { font-size: 24px; color: #fff; margin-bottom: 10px; }
+        .high-score { font-size: 18px; color: #f5a623; margin-bottom: 30px; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        <div id="hud">
+            <div class="score-display">分数: <span id="score">0</span></div>
+            <div class="battery-display">电量: <span id="battery">100</span>%</div>
+            <div class="speed-display">速度: <span id="speed">0</span> km/h</div>
+        </div>
+        <div id="ui">
+            <div id="menuScreen" class="screen active">
+                <div class="title">红蒙赛车</div>
+                <div class="subtitle">车主睡着了！作为智能驾驶车辆！</div>
+                <button class="btn" id="startBtn">开始游戏</button>
+                <div class="instructions">
+                    <span>← →</span> 或 <span>A D</span> 移动<br>
+                    <span>↑ ↓</span> 或 <span>W S</span> 加速/减速<br>
+                    躲避大米汽车，路过充电站补电！<br>
+                    <span class="warn">注意：</span>长时间大幅转向会崴脚！<br>
+                    <span class="warn">注意：</span>电量耗尽也会抛锚！
+                </div>
+            </div>
+            <div id="gameOverScreen" class="screen">
+                <div class="game-over-title" id="gameOverTitle">游戏结束</div>
+                <div class="final-score">最终分数: <span id="finalScore">0</span></div>
+                <div class="high-score">最高分: <span id="highScore">0</span></div>
+                <button class="btn" id="restartBtn">再来一次</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        // ========== 常量 ==========
+        const W = 400, H = 600;
+        const ROAD_LEFT = 50, ROAD_RIGHT = 350, ROAD_W = 300;
+        const LANE_COUNT = 3, LANE_W = ROAD_W / LANE_COUNT;
+        const PW = 42, PH = 60;
+        const EW = 42, EH = 60;
+        const CS_W = 36, CS_H = 50; // 充电站尺寸
+        const OVERSTEER_THRESHOLD = 45;
+        const WARNING_START = 30;
+        const BATTERY_DRAIN = 0.03;  // 每帧耗电量
+        const CHARGE_AMOUNT = 100;   // 充满
+
+        // ========== Canvas ==========
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        // ========== UI ==========
+        const menuScreen = document.getElementById('menuScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const hudEl = document.getElementById('hud');
+        const scoreEl = document.getElementById('score');
+        const speedEl = document.getElementById('speed');
+        const batteryEl = document.getElementById('battery');
+        const finalScoreEl = document.getElementById('finalScore');
+        const highScoreEl = document.getElementById('highScore');
+        const gameOverTitleEl = document.getElementById('gameOverTitle');
+
+        // ========== 状态 ==========
+        const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+        let state = STATE.MENU;
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('highScore')) || 0;
+        let speed = 5;
+        let frame = 0;
+        let roadY = 0;
+        let reason = 'crash'; // 'crash' | 'oversteer' | 'battery'
+        let battery = 100;
+
+        // ========== 星空 ==========
+        let stars = [];
+        function initStars() {
+            stars = [];
+            for (let i = 0; i < 60; i++) {
+                stars.push({
+                    x: Math.random() * W,
+                    y: Math.random() * H,
+                    s: Math.random() * 2 + 1,
+                    sp: Math.random() * 0.5 + 0.2
+                });
+            }
+        }
+
+        // ========== 玩家 ==========
+        let player = { x: W / 2 - PW / 2, y: H - PH - 60, tx: W / 2 - PW / 2 };
+        let steerFrames = 0;
+        let steerDir = 0;
+
+        // ========== 输入 ==========
+        const keys = { left: false, right: false, up: false, down: false };
+
+        // ========== 实体 ==========
+        let enemies = [];
+        let chargers = []; // 充电站
+        let debris = [];
+        let fires = [];
+        let sparks = [];
+        let chargeEffects = []; // 充电特效
+
+        // ========== 颜色工具 ==========
+        function hexToRgb(hex) {
+            const h = hex.replace('#', '');
+            return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+        }
+        function rgbToHex(r,g,b) {
+            return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
+        }
+        function adjustColor(hex, amt) {
+            const [r,g,b] = hexToRgb(hex);
+            return rgbToHex(r+amt, g+amt, b+amt);
+        }
+
+        // ========== 像素绘制 ==========
+        function px(ox, oy, col, x, y, w, h) {
+            ctx.fillStyle = col;
+            ctx.fillRect(ox + x, oy + y, w, h);
+        }
+
+        // ========== 绘制问界M9 ==========
+        function drawM9(x, y) {
+            px(x,y,'#080808', 3,3, 36,55);
+            px(x,y,'#282828', 8,0, 26,2);
+            px(x,y,'#2a2a2a', 6,1, 30,2);
+            px(x,y,'#2c2c2c', 4,2, 34,3);
+            px(x,y,'#252525', 3,4, 36,3);
+            px(x,y,'#2a2a2a', 3,7, 36,46);
+            px(x,y,'#2c2c2c', 4,53, 34,3);
+            px(x,y,'#2a2a2a', 6,56, 30,2);
+            px(x,y,'#282828', 8,58, 26,2);
+            px(x,y,'#1e1e1e', 3,7, 2,46);
+            px(x,y,'#1e1e1e', 37,7, 2,46);
+            px(x,y,'#363636', 5,8, 1,44);
+            px(x,y,'#363636', 36,8, 1,44);
+            px(x,y,'#323232', 6,25, 1,22);
+            px(x,y,'#323232', 35,25, 1,22);
+            px(x,y,'#303030', 7,4, 28,8);
+            px(x,y,'#383838', 12,4, 2,7);
+            px(x,y,'#383838', 28,4, 2,7);
+            px(x,y,'#343434', 19,3, 4,8);
+            px(x,y,'#aaaaaa', 7,3, 28,2);
+            px(x,y,'#dddddd', 8,3, 26,1);
+            px(x,y,'#ffffff', 7,3, 6,2);
+            px(x,y,'#ffffdd', 8,3, 4,1);
+            px(x,y,'#ffffff', 29,3, 6,2);
+            px(x,y,'#ffffdd', 30,3, 4,1);
+            px(x,y,'#ffff99', 15,3, 12,1);
+            px(x,y,'#ffffcc', 8,4, 1,1);
+            px(x,y,'#ffffcc', 10,4, 1,1);
+            px(x,y,'#ffffcc', 31,4, 1,1);
+            px(x,y,'#ffffcc', 33,4, 1,1);
+            px(x,y,'#1a1a1a', 10,5, 22,2);
+            px(x,y,'#222', 11,5, 20,1);
+            px(x,y,'#2a2a2a', 11,6, 20,1);
+            px(x,y,'#cccccc', 5,5, 3,2);
+            px(x,y,'#ffffcc', 6,5, 1,1);
+            px(x,y,'#cccccc', 34,5, 3,2);
+            px(x,y,'#ffffcc', 35,5, 1,1);
+            px(x,y,'#111', 8,11, 26,1);
+            px(x,y,'#111', 7,12, 1,5);
+            px(x,y,'#111', 34,12, 1,5);
+            px(x,y,'#162e45', 8,12, 26,5);
+            px(x,y,'#1a3855', 9,13, 24,3);
+            px(x,y,'#1e4265', 10,14, 22,1);
+            px(x,y,'#2a5a80', 12,13, 8,1);
+            px(x,y,'#3a7aa0', 14,13, 4,1);
+            px(x,y,'#1a1a1a', 7,11, 2,6);
+            px(x,y,'#1a1a1a', 33,11, 2,6);
+            px(x,y,'#162e45', 4,17, 3,5);
+            px(x,y,'#1a3855', 5,18, 1,3);
+            px(x,y,'#162e45', 35,17, 3,5);
+            px(x,y,'#1a3855', 36,18, 1,3);
+            px(x,y,'#111', 4,17, 1,5);
+            px(x,y,'#111', 37,17, 1,5);
+            px(x,y,'#111', 7,16, 28,1);
+            px(x,y,'#142840', 7,17, 28,18);
+            px(x,y,'#183250', 8,18, 26,16);
+            px(x,y,'#1c3a58', 9,19, 24,14);
+            px(x,y,'#102030', 20,17, 2,18);
+            px(x,y,'#224868', 10,20, 8,6);
+            px(x,y,'#2a5878', 12,21, 4,4);
+            px(x,y,'#224868', 24,20, 8,6);
+            px(x,y,'#2a5878', 26,21, 4,4);
+            px(x,y,'#163048', 9,28, 24,5);
+            px(x,y,'#122840', 9,33, 24,2);
+            px(x,y,'#111', 7,22, 1,6);
+            px(x,y,'#111', 34,22, 1,6);
+            px(x,y,'#162e45', 4,28, 3,6);
+            px(x,y,'#1a3855', 5,29, 1,4);
+            px(x,y,'#162e45', 35,28, 3,6);
+            px(x,y,'#1a3855', 36,29, 1,4);
+            px(x,y,'#111', 4,28, 1,6);
+            px(x,y,'#111', 37,28, 1,6);
+            px(x,y,'#222', 7,34, 1,4);
+            px(x,y,'#222', 34,34, 1,4);
+            px(x,y,'#111', 8,38, 26,1);
+            px(x,y,'#162e45', 8,39, 26,5);
+            px(x,y,'#1a3855', 9,40, 24,3);
+            px(x,y,'#2a5a80', 14,40, 6,1);
+            px(x,y,'#111', 7,38, 2,6);
+            px(x,y,'#111', 33,38, 2,6);
+            px(x,y,'#282828', 8,44, 26,6);
+            px(x,y,'#2e2e2e', 10,45, 22,4);
+            px(x,y,'#333', 12,46, 18,1);
+            px(x,y,'#880000', 6,50, 30,2);
+            px(x,y,'#bb1111', 7,50, 28,1);
+            px(x,y,'#dd2222', 8,50, 26,1);
+            px(x,y,'#ee4444', 9,51, 24,1);
+            px(x,y,'#ff6666', 10,50, 4,1);
+            px(x,y,'#ff6666', 28,50, 4,1);
+            px(x,y,'#ff3333', 16,50, 10,1);
+            px(x,y,'#222', 8,52, 26,2);
+            px(x,y,'#333', 10,53, 22,1);
+            px(x,y,'#cc0000', 9,53, 3,1);
+            px(x,y,'#cc0000', 30,53, 3,1);
+            px(x,y,'#222', 2,14, 2,1);
+            px(x,y,'#2a2a2a', 1,15, 2,4);
+            px(x,y,'#333', 1,16, 1,2);
+            px(x,y,'#222', 38,14, 2,1);
+            px(x,y,'#2a2a2a', 39,15, 2,4);
+            px(x,y,'#333', 40,16, 1,2);
+            px(x,y,'#444', 5,24, 1,3);
+            px(x,y,'#555', 5,25, 1,1);
+            px(x,y,'#444', 36,24, 1,3);
+            px(x,y,'#555', 36,25, 1,1);
+            px(x,y,'#1a1a1a', 6,17, 1,28);
+            px(x,y,'#1a1a1a', 35,17, 1,28);
+            px(x,y,'#050505', 1,6, 3,7);
+            px(x,y,'#111', 1,7, 3,5);
+            px(x,y,'#1a1a1a', 2,8, 1,3);
+            px(x,y,'#444', 1,8, 1,1);
+            px(x,y,'#444', 3,8, 1,1);
+            px(x,y,'#444', 1,11, 1,1);
+            px(x,y,'#444', 3,11, 1,1);
+            px(x,y,'#050505', 38,6, 3,7);
+            px(x,y,'#111', 38,7, 3,5);
+            px(x,y,'#1a1a1a', 39,8, 1,3);
+            px(x,y,'#444', 38,8, 1,1);
+            px(x,y,'#444', 40,8, 1,1);
+            px(x,y,'#444', 38,11, 1,1);
+            px(x,y,'#444', 40,11, 1,1);
+            px(x,y,'#050505', 1,40, 3,7);
+            px(x,y,'#111', 1,41, 3,5);
+            px(x,y,'#1a1a1a', 2,42, 1,3);
+            px(x,y,'#444', 1,42, 1,1);
+            px(x,y,'#444', 3,42, 1,1);
+            px(x,y,'#444', 1,45, 1,1);
+            px(x,y,'#444', 3,45, 1,1);
+            px(x,y,'#050505', 38,40, 3,7);
+            px(x,y,'#111', 38,41, 3,5);
+            px(x,y,'#1a1a1a', 39,42, 1,3);
+            px(x,y,'#444', 38,42, 1,1);
+            px(x,y,'#444', 40,42, 1,1);
+            px(x,y,'#444', 38,45, 1,1);
+            px(x,y,'#444', 40,45, 1,1);
+            px(x,y,'#999', 18,4, 6,1);
+            px(x,y,'#bbb', 19,4, 4,1);
+        }
+
+        // ========== 绘制小米汽车 ==========
+        function drawXiaomi(x, y, bodyColor) {
+            const dk = adjustColor(bodyColor, -60);
+            const md = bodyColor;
+            const lt = adjustColor(bodyColor, 30);
+            const hl = adjustColor(bodyColor, 60);
+            const vhl = adjustColor(bodyColor, 80);
+            px(x,y,'#080808', 4,3, 34,55);
+            px(x,y,dk, 10,0, 22,1);
+            px(x,y,dk, 8,1, 26,1);
+            px(x,y,md, 7,2, 28,1);
+            px(x,y,md, 6,3, 30,2);
+            px(x,y,md, 5,4, 32,3);
+            px(x,y,md, 4,6, 34,2);
+            px(x,y,md, 3,8, 36,44);
+            px(x,y,md, 4,52, 34,2);
+            px(x,y,dk, 5,54, 32,2);
+            px(x,y,dk, 7,56, 28,2);
+            px(x,y,dk, 9,58, 24,1);
+            px(x,y,dk, 11,59, 20,1);
+            px(x,y,dk, 3,8, 2,44);
+            px(x,y,dk, 37,8, 2,44);
+            px(x,y,lt, 5,9, 1,42);
+            px(x,y,lt, 36,9, 1,42);
+            px(x,y,adjustColor(bodyColor,-25), 5,28, 1,20);
+            px(x,y,adjustColor(bodyColor,-25), 36,28, 1,20);
+            px(x,y,dk, 4,50, 1,4);
+            px(x,y,dk, 37,50, 1,4);
+            px(x,y,lt, 8,4, 26,5);
+            px(x,y,hl, 10,5, 22,3);
+            px(x,y,adjustColor(bodyColor,20), 13,4, 2,5);
+            px(x,y,adjustColor(bodyColor,20), 27,4, 2,5);
+            px(x,y,adjustColor(bodyColor,15), 19,3, 4,6);
+            px(x,y,adjustColor(bodyColor,25), 20,4, 2,4);
+            px(x,y,'#aaa', 5,4, 8,2);
+            px(x,y,'#ddd', 6,4, 6,1);
+            px(x,y,'#fff', 7,4, 4,1);
+            px(x,y,'#aaa', 29,4, 8,2);
+            px(x,y,'#ddd', 30,4, 6,1);
+            px(x,y,'#fff', 31,4, 4,1);
+            px(x,y,'#ffffaa', 6,5, 5,1);
+            px(x,y,'#ffffaa', 31,5, 5,1);
+            px(x,y,'#ccccff', 7,5, 2,1);
+            px(x,y,'#ccccff', 33,5, 2,1);
+            px(x,y,'#111', 12,6, 18,2);
+            px(x,y,'#1a1a1a', 13,6, 16,1);
+            px(x,y,'#222', 14,7, 14,1);
+            px(x,y,'#2a2a2a', 13,7, 1,1);
+            px(x,y,'#2a2a2a', 16,7, 1,1);
+            px(x,y,'#2a2a2a', 19,7, 1,1);
+            px(x,y,'#2a2a2a', 22,7, 1,1);
+            px(x,y,'#2a2a2a', 25,7, 1,1);
+            px(x,y,'#2a2a2a', 28,7, 1,1);
+            px(x,y,'#222', 4,6, 3,2);
+            px(x,y,'#333', 5,6, 1,1);
+            px(x,y,'#222', 35,6, 3,2);
+            px(x,y,'#333', 36,6, 1,1);
+            px(x,y,'#0e2540', 8,12, 26,1);
+            px(x,y,'#122e4a', 7,13, 28,5);
+            px(x,y,'#163858', 8,14, 26,3);
+            px(x,y,'#1a4268', 10,15, 22,1);
+            px(x,y,'#2a6090', 12,14, 8,1);
+            px(x,y,'#3a80b0', 14,14, 4,1);
+            px(x,y,'#0e0e0e', 6,12, 2,6);
+            px(x,y,'#0e0e0e', 34,12, 2,6);
+            px(x,y,'#122e4a', 4,18, 3,5);
+            px(x,y,'#163858', 5,19, 1,3);
+            px(x,y,'#122e4a', 35,18, 3,5);
+            px(x,y,'#163858', 36,19, 1,3);
+            px(x,y,'#0e0e0e', 4,18, 1,5);
+            px(x,y,'#0e0e0e', 37,18, 1,5);
+            px(x,y,'#0e0e0e', 7,17, 28,1);
+            px(x,y,lt, 7,18, 28,16);
+            px(x,y,hl, 8,19, 26,14);
+            px(x,y,adjustColor(bodyColor,50), 10,20, 22,12);
+            px(x,y,adjustColor(bodyColor,65), 12,22, 18,8);
+            px(x,y,vhl, 14,24, 14,4);
+            px(x,y,'#0e0e0e', 7,24, 1,6);
+            px(x,y,'#0e0e0e', 34,24, 1,6);
+            px(x,y,'#122e4a', 4,30, 3,5);
+            px(x,y,'#163858', 5,31, 1,3);
+            px(x,y,'#122e4a', 35,30, 3,5);
+            px(x,y,'#163858', 36,31, 1,3);
+            px(x,y,'#0e0e0e', 4,30, 1,5);
+            px(x,y,'#0e0e0e', 37,30, 1,5);
+            px(x,y,md, 7,35, 1,3);
+            px(x,y,md, 34,35, 1,3);
+            px(x,y,'#0e2540', 8,38, 26,1);
+            px(x,y,'#122e4a', 8,39, 26,4);
+            px(x,y,'#163858', 9,40, 24,2);
+            px(x,y,'#2a6090', 14,40, 6,1);
+            px(x,y,'#0e0e0e', 7,38, 2,5);
+            px(x,y,'#0e0e0e', 33,38, 2,5);
+            px(x,y,md, 8,43, 26,5);
+            px(x,y,dk, 8,43, 26,1);
+            px(x,y,lt, 10,44, 22,1);
+            px(x,y,adjustColor(bodyColor,10), 12,45, 18,1);
+            px(x,y,'#770000', 6,48, 30,2);
+            px(x,y,'#aa0000', 7,48, 28,1);
+            px(x,y,'#cc1111', 8,48, 26,1);
+            px(x,y,'#dd2222', 9,49, 24,1);
+            px(x,y,'#ff4444', 10,48, 5,1);
+            px(x,y,'#ff4444', 27,48, 5,1);
+            px(x,y,'#ee2222', 17,48, 8,1);
+            px(x,y,dk, 8,50, 26,2);
+            px(x,y,adjustColor(bodyColor,-30), 10,51, 22,1);
+            px(x,y,'#1a1a1a', 14,51, 14,1);
+            px(x,y,'#222', 15,51, 2,1);
+            px(x,y,'#222', 19,51, 2,1);
+            px(x,y,'#222', 23,51, 2,1);
+            px(x,y,md, 2,15, 2,1);
+            px(x,y,md, 1,16, 2,3);
+            px(x,y,dk, 1,17, 1,1);
+            px(x,y,md, 38,15, 2,1);
+            px(x,y,md, 39,16, 2,3);
+            px(x,y,dk, 40,17, 1,1);
+            px(x,y,lt, 5,26, 1,2);
+            px(x,y,hl, 5,26, 1,1);
+            px(x,y,lt, 36,26, 1,2);
+            px(x,y,hl, 36,26, 1,1);
+            px(x,y,adjustColor(bodyColor,-35), 6,18, 1,26);
+            px(x,y,adjustColor(bodyColor,-35), 35,18, 1,26);
+            px(x,y,'#050505', 1,8, 3,7);
+            px(x,y,'#111', 1,9, 3,5);
+            px(x,y,'#1a1a1a', 2,10, 1,3);
+            px(x,y,'#555', 1,9, 1,1);
+            px(x,y,'#555', 3,9, 1,1);
+            px(x,y,'#555', 1,13, 1,1);
+            px(x,y,'#555', 3,13, 1,1);
+            px(x,y,'#777', 2,11, 1,1);
+            px(x,y,'#050505', 38,8, 3,7);
+            px(x,y,'#111', 38,9, 3,5);
+            px(x,y,'#1a1a1a', 39,10, 1,3);
+            px(x,y,'#555', 38,9, 1,1);
+            px(x,y,'#555', 40,9, 1,1);
+            px(x,y,'#555', 38,13, 1,1);
+            px(x,y,'#555', 40,13, 1,1);
+            px(x,y,'#777', 39,11, 1,1);
+            px(x,y,'#050505', 1,42, 3,7);
+            px(x,y,'#111', 1,43, 3,5);
+            px(x,y,'#1a1a1a', 2,44, 1,3);
+            px(x,y,'#555', 1,43, 1,1);
+            px(x,y,'#555', 3,43, 1,1);
+            px(x,y,'#555', 1,47, 1,1);
+            px(x,y,'#555', 3,47, 1,1);
+            px(x,y,'#777', 2,45, 1,1);
+            px(x,y,'#050505', 38,42, 3,7);
+            px(x,y,'#111', 38,43, 3,5);
+            px(x,y,'#1a1a1a', 39,44, 1,3);
+            px(x,y,'#555', 38,43, 1,1);
+            px(x,y,'#555', 40,43, 1,1);
+            px(x,y,'#555', 38,47, 1,1);
+            px(x,y,'#555', 40,47, 1,1);
+            px(x,y,'#777', 39,45, 1,1);
+            px(x,y,'#fff', 18,4, 6,1);
+            px(x,y,'#ddd', 19,4, 4,1);
+        }
+
+        // ========== 绘制充电站 ==========
+        function drawCharger(x, y) {
+            const cw = CS_W, ch = CS_H;
+            // 底座
+            px(x,y,'#1a3a1a', 2,4, cw-4, ch-6);
+            // 外壳
+            px(x,y,'#226622', 3,5, cw-6, ch-8);
+            px(x,y,'#2a8a2a', 4,6, cw-8, ch-10);
+            // 顶部
+            px(x,y,'#33aa33', 4,2, cw-8, 4);
+            px(x,y,'#44cc44', 5,2, cw-10, 2);
+            // 屏幕
+            px(x,y,'#113311', 6,8, cw-12, 16);
+            px(x,y,'#1a4a1a', 7,9, cw-14, 14);
+            // 像素化闪电符号 ⚡
+            const cx = x + 10;
+            const cy = y + 10;
+            // 闪电顶部
+            px(x,y,'#ffff00', cx+4, cy, 2, 1);
+            px(x,y,'#ffff00', cx+3, cy+1, 3, 1);
+            px(x,y,'#ffff00', cx+2, cy+2, 4, 1);
+            // 闪电中部（最宽）
+            px(x,y,'#ffff00', cx+1, cy+3, 5, 1);
+            px(x,y,'#ffff00', cx, cy+4, 6, 1);
+            px(x,y,'#ffff00', cx+1, cy+5, 5, 1);
+            // 闪电下部
+            px(x,y,'#ffff00', cx+2, cy+6, 4, 1);
+            px(x,y,'#ffff00', cx+3, cy+7, 3, 1);
+            // 闪电底部尖角
+            px(x,y,'#ffff00', cx+4, cy+8, 2, 1);
+            px(x,y,'#ffff00', cx+5, cy+9, 2, 1);
+            px(x,y,'#ffff00', cx+6, cy+10, 1, 1);
+            // 闪电高光
+            px(x,y,'#ffffff', cx+2, cy+3, 1, 1);
+            px(x,y,'#ffffff', cx+1, cy+4, 1, 1);
+            // 底部接口
+            px(x,y,'#444', 8, ch-8, cw-16, 4);
+            px(x,y,'#666', 10, ch-7, cw-20, 2);
+            // 闪烁指示灯
+            const blink = Math.sin(frame * 0.2) > 0;
+            if (blink) {
+                px(x,y,'#00ff00', 6, ch-10, 2, 2);
+                px(x,y,'#00ff00', cw-8, ch-10, 2, 2);
+            }
+            // 边框高光
+            px(x,y,'#44cc44', 3,5, 1, ch-8);
+            px(x,y,'#44cc44', cw-4, 5, 1, ch-8);
+        }
+
+        // ========== 绘制道路 ==========
+        function drawRoad() {
+            const isPaused = state === STATE.OVER;
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#fff';
+            for (const s of stars) {
+                if (!isPaused) {
+                    s.y += s.sp * speed * 0.1;
+                    if (s.y > H) { s.y = 0; s.x = Math.random() * W; }
+                }
+                ctx.fillRect(s.x, s.y, s.s, s.s);
+            }
+            ctx.fillStyle = '#12122a';
+            for (let i = 0; i < W; i += 4) {
+                const mh = Math.sin(i * 0.02) * 20 + Math.sin(i * 0.05) * 10 + 30;
+                ctx.fillRect(i, 60 - mh * 0.3, 4, mh * 0.3);
+            }
+            ctx.fillStyle = '#2a2a40';
+            ctx.fillRect(ROAD_LEFT, 0, ROAD_W, H);
+            ctx.fillStyle = '#3a3a50';
+            ctx.fillRect(ROAD_LEFT - 10, 0, 10, H);
+            ctx.fillRect(ROAD_RIGHT, 0, 10, H);
+            if (!isPaused) {
+                roadY = (roadY + speed) % 30;
+            }
+            for (let j = -1; j < H / 30 + 1; j++) {
+                const ly = j * 30 + roadY;
+                ctx.fillStyle = '#f5a623';
+                ctx.fillRect(ROAD_LEFT - 8, ly, 6, 15);
+                ctx.fillRect(ROAD_RIGHT + 2, ly, 6, 15);
+                ctx.fillStyle = '#222';
+                ctx.fillRect(ROAD_LEFT - 8, ly + 15, 6, 15);
+                ctx.fillRect(ROAD_RIGHT + 2, ly + 15, 6, 15);
+            }
+            ctx.fillStyle = '#ffffff';
+            for (let i = 1; i < LANE_COUNT; i++) {
+                const lx = ROAD_LEFT + i * LANE_W;
+                for (let j = -1; j < H / 40 + 1; j++) {
+                    const ly = j * 40 + roadY;
+                    ctx.fillRect(lx - 2, ly, 4, 20);
+                }
+            }
+        }
+
+        // ========== 生成敌方车辆（密集车流） ==========
+        function spawnEnemy() {
+            const lane = Math.floor(Math.random() * LANE_COUNT);
+            const lx = ROAD_LEFT + lane * LANE_W + LANE_W / 2 - EW / 2;
+            const colors = ['#e94560', '#f5a623', '#00ff88', '#aa55ff', '#ff6633'];
+            enemies.push({
+                x: lx, y: -EH,
+                w: EW, h: EH,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                speed: speed * 0.4
+            });
+        }
+
+        // ========== 生成充电站 ==========
+        function spawnCharger() {
+            // 只在左侧或右侧车道生成（lane 0 或 lane 2）
+            const lane = Math.random() < 0.5 ? 0 : 2;
+            const lx = ROAD_LEFT + lane * LANE_W + LANE_W / 2 - CS_W / 2;
+            chargers.push({
+                x: lx, y: -CS_H,
+                w: CS_W, h: CS_H,
+                speed: speed * 0.3
+            });
+        }
+
+        // ========== 碰撞检测 ==========
+        function hitTest(a, b) {
+            return a.x < b.x + b.w && a.x + a.w > b.x &&
+                   a.y < b.y + b.h && a.y + a.h > b.y;
+        }
+
+        // ========== 创建起火爆炸（仅碰撞用） ==========
+        function createFireExplosion(cx, cy) {
+            for (let i = 0; i < 40; i++) {
+                fires.push({
+                    x: cx + (Math.random() - 0.5) * 30,
+                    y: cy + (Math.random() - 0.5) * 30,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: -Math.random() * 5 - 1,
+                    life: 1, size: Math.random() * 8 + 4, type: 'fire'
+                });
+            }
+            for (let i = 0; i < 20; i++) {
+                fires.push({
+                    x: cx + (Math.random() - 0.5) * 40,
+                    y: cy + (Math.random() - 0.5) * 20,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: -Math.random() * 3 - 0.5,
+                    life: 1, size: Math.random() * 10 + 6, type: 'smoke'
+                });
+            }
+            for (let i = 0; i < 25; i++) {
+                debris.push({
+                    x: cx, y: cy,
+                    vx: (Math.random() - 0.5) * 14,
+                    vy: (Math.random() - 0.5) * 14,
+                    life: 1,
+                    color: ['#f5a623','#e94560','#ff6633','#ffcc00'][Math.floor(Math.random()*4)],
+                    size: Math.random() * 5 + 2
+                });
+            }
+            for (let i = 0; i < 15; i++) {
+                sparks.push({
+                    x: cx, y: cy,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: -Math.random() * 6 - 2,
+                    life: 1, size: Math.random() * 3 + 1
+                });
+            }
+        }
+
+        // ========== 创建充电特效 ==========
+        function createChargeEffect(cx, cy) {
+            for (let i = 0; i < 20; i++) {
+                chargeEffects.push({
+                    x: cx + (Math.random() - 0.5) * 40,
+                    y: cy + Math.random() * 30,
+                    vy: -Math.random() * 3 - 1,
+                    life: 1,
+                    size: Math.random() * 4 + 2
+                });
+            }
+        }
+
+        // ========== 创建崴脚特效（不起火，只冒烟） ==========
+        function createOversteerEffect(cx, cy) {
+            for (let i = 0; i < 15; i++) {
+                fires.push({
+                    x: cx + (Math.random() - 0.5) * 30,
+                    y: cy + (Math.random() - 0.5) * 20,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: -Math.random() * 2 - 0.5,
+                    life: 0.8, size: Math.random() * 8 + 4, type: 'smoke'
+                });
+            }
+            for (let i = 0; i < 10; i++) {
+                sparks.push({
+                    x: cx, y: cy,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: -Math.random() * 3 - 1,
+                    life: 0.6, size: Math.random() * 2 + 1
+                });
+            }
+        }
+
+        // ========== 大幅转向检测 ==========
+        function checkOversteer() {
+            let dir = 0;
+            if (keys.left) dir = -1;
+            if (keys.right) dir = 1;
+            if (dir !== 0) {
+                if (dir === steerDir) {
+                    steerFrames++;
+                    if (steerFrames >= OVERSTEER_THRESHOLD) return true;
+                } else {
+                    steerDir = dir;
+                    steerFrames = 1;
+                }
+            } else {
+                steerFrames = 0;
+                steerDir = 0;
+            }
+            return false;
+        }
+
+        // ========== 绘制转向警告条 ==========
+        function drawSteerWarning() {
+            if (steerFrames < WARNING_START || steerDir === 0) return;
+            const ratio = (steerFrames - WARNING_START) / (OVERSTEER_THRESHOLD - WARNING_START);
+            const alpha = 0.3 + ratio * 0.7 * (0.5 + 0.5 * Math.sin(frame * 0.5));
+            const barW = 40, barH = 6;
+            const bx = player.x + PW / 2 - barW / 2;
+            const by = player.y - 14;
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = '#333';
+            ctx.fillRect(bx, by, barW, barH);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = ratio > 0.7 ? '#ff2222' : '#f5a623';
+            ctx.fillRect(bx, by, barW * ratio, barH);
+            if (ratio > 0.5) {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = '#ff4444';
+                ctx.font = '10px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('危险!', player.x + PW / 2, by - 3);
+            }
+            ctx.globalAlpha = 1;
+            ctx.textAlign = 'start';
+        }
+
+        // ========== 绘制电量条 ==========
+        function drawBatteryBar() {
+            const bx = player.x + PW / 2 - 20;
+            const by = player.y + PH + 4;
+            const bw = 40, bh = 5;
+            // 背景
+            ctx.fillStyle = '#333';
+            ctx.fillRect(bx, by, bw, bh);
+            // 电量
+            const ratio = battery / 100;
+            let col;
+            if (ratio > 0.5) col = '#00ff88';
+            else if (ratio > 0.2) col = '#f5a623';
+            else col = '#ff2222';
+            ctx.fillStyle = col;
+            ctx.fillRect(bx, by, bw * ratio, bh);
+            // 低电量闪烁
+            if (ratio <= 0.2 && Math.sin(frame * 0.3) > 0) {
+                ctx.fillStyle = '#ff0000';
+                ctx.font = '10px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('低电量!', player.x + PW / 2, by + 16);
+                ctx.textAlign = 'start';
+            }
+        }
+
+        // ========== 更新 ==========
+        function update() {
+            if (state !== STATE.PLAY) return;
+            frame++;
+
+            speed = Math.min(15, 5 + frame * 0.001);
+
+            // 电量损耗
+            battery -= BATTERY_DRAIN * (speed / 5);
+            if (battery <= 0) {
+                battery = 0;
+                reason = 'battery';
+                endGame();
+                return;
+            }
+
+            // 崴脚检测（不起火）
+            if (checkOversteer()) {
+                reason = 'oversteer';
+                createOversteerEffect(player.x + PW / 2, player.y + PH / 2);
+                endGame();
+                return;
+            }
+
+            // 玩家移动
+            if (keys.left) player.tx -= 6;
+            if (keys.right) player.tx += 6;
+            player.tx = Math.max(ROAD_LEFT + 5, Math.min(ROAD_RIGHT - PW - 5, player.tx));
+            player.x += (player.tx - player.x) * 0.2;
+
+            if (keys.up) speed = Math.min(15, speed + 0.1);
+            if (keys.down) speed = Math.max(2, speed - 0.1);
+
+            // 密集车流：生成间隔更短
+            const rate = Math.max(15, 45 - frame * 0.01);
+            if (frame % Math.floor(rate) === 0) spawnEnemy();
+
+            // 充电站生成（每300-500帧生成一个）
+            if (frame % Math.floor(300 + Math.random() * 200) === 0) spawnCharger();
+
+            const pBox = { x: player.x, y: player.y, w: PW, h: PH };
+
+            // 更新敌方
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+                e.y += speed + e.speed;
+                if (e.y > H) { enemies.splice(i, 1); score += 10; continue; }
+                if (hitTest(pBox, { x: e.x, y: e.y, w: e.w, h: e.h })) {
+                    reason = 'crash';
+                    createFireExplosion(player.x + PW / 2, player.y + PH / 2);
+                    endGame();
+                    return;
+                }
+            }
+
+            // 更新充电站
+            for (let i = chargers.length - 1; i >= 0; i--) {
+                const c = chargers[i];
+                c.y += speed + c.speed;
+                if (c.y > H) { chargers.splice(i, 1); continue; }
+                if (hitTest(pBox, { x: c.x, y: c.y, w: c.w, h: c.h })) {
+                    battery = CHARGE_AMOUNT;
+                    createChargeEffect(player.x + PW / 2, player.y);
+                    playChargeSound();
+                    chargers.splice(i, 1);
+                    score += 50;
+                }
+            }
+
+            // 更新粒子
+            for (let i = debris.length - 1; i >= 0; i--) {
+                const d = debris[i];
+                d.x += d.vx; d.y += d.vy; d.vy += 0.3; d.life -= 0.02;
+                if (d.life <= 0) debris.splice(i, 1);
+            }
+            for (let i = fires.length - 1; i >= 0; i--) {
+                const f = fires[i];
+                f.x += f.vx; f.y += f.vy;
+                if (f.type === 'fire') { f.life -= 0.025; f.size *= 0.98; }
+                else { f.life -= 0.008; f.size *= 1.02; }
+                if (f.life <= 0) fires.splice(i, 1);
+            }
+            for (let i = sparks.length - 1; i >= 0; i--) {
+                const s = sparks[i];
+                s.x += s.vx; s.y += s.vy; s.vy += 0.15; s.life -= 0.04;
+                if (s.life <= 0) sparks.splice(i, 1);
+            }
+            for (let i = chargeEffects.length - 1; i >= 0; i--) {
+                const c = chargeEffects[i];
+                c.y += c.vy; c.life -= 0.03;
+                if (c.life <= 0) chargeEffects.splice(i, 1);
+            }
+
+            score += Math.floor(speed * 0.1);
+            scoreEl.textContent = score;
+            speedEl.textContent = Math.floor(speed * 20);
+            batteryEl.textContent = Math.floor(battery);
+        }
+
+        // ========== 渲染 ==========
+        function render() {
+            drawRoad();
+
+            // 充电站
+            for (const c of chargers) drawCharger(c.x, c.y);
+
+            // 敌方车辆
+            for (const e of enemies) drawXiaomi(e.x, e.y, e.color);
+
+            // 玩家
+            if (state === STATE.PLAY || state === STATE.OVER) {
+                drawM9(player.x, player.y);
+                if (state === STATE.PLAY) drawBatteryBar();
+            }
+
+            drawSteerWarning();
+
+            // 火焰和烟雾
+            for (const f of fires) {
+                ctx.globalAlpha = f.life;
+                if (f.type === 'fire') {
+                    if (f.life > 0.7) ctx.fillStyle = '#ffff00';
+                    else if (f.life > 0.4) ctx.fillStyle = '#ff8800';
+                    else ctx.fillStyle = '#cc2200';
+                } else {
+                    ctx.fillStyle = 'rgba(60,60,60,0.6)';
+                }
+                ctx.fillRect(f.x, f.y, f.size, f.size);
+            }
+            ctx.globalAlpha = 1;
+            // 碎片
+            for (const d of debris) {
+                ctx.globalAlpha = d.life;
+                ctx.fillStyle = d.color;
+                ctx.fillRect(d.x, d.y, d.size, d.size);
+            }
+            ctx.globalAlpha = 1;
+            // 火花
+            for (const s of sparks) {
+                ctx.globalAlpha = s.life;
+                ctx.fillStyle = '#ffffaa';
+                ctx.fillRect(s.x, s.y, s.size, s.size);
+            }
+            ctx.globalAlpha = 1;
+            // 充电特效（绿色上升粒子）
+            for (const c of chargeEffects) {
+                ctx.globalAlpha = c.life;
+                ctx.fillStyle = '#00ff88';
+                ctx.fillRect(c.x, c.y, c.size, c.size);
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // ========== 游戏循环 ==========
+        function loop() {
+            update();
+            render();
+            requestAnimationFrame(loop);
+        }
+
+        // ========== 开始/结束 ==========
+        function startGame() {
+            initAudio();
+            state = STATE.PLAY;
+            score = 0;
+            speed = 5;
+            frame = 0;
+            battery = 100;
+            enemies = []; chargers = []; debris = []; fires = []; sparks = []; chargeEffects = [];
+            reason = 'crash';
+            player.x = W / 2 - PW / 2;
+            player.tx = player.x;
+            steerFrames = 0;
+            steerDir = 0;
+            menuScreen.classList.remove('active');
+            gameOverScreen.classList.remove('active');
+            hudEl.classList.add('active');
+        }
+
+        function endGame() {
+            state = STATE.OVER;
+            hudEl.classList.remove('active');
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('highScore', highScore);
+            }
+            finalScoreEl.textContent = score;
+            highScoreEl.textContent = highScore;
+            gameOverTitleEl.classList.remove('wj', 'dead');
+
+            if (reason === 'oversteer') {
+                gameOverTitleEl.textContent = '崴脚了！';
+                gameOverTitleEl.classList.add('wj');
+                setTimeout(() => playYaoyaoLingxian(), 300);
+            } else if (reason === 'battery') {
+                gameOverTitleEl.textContent = '没电抛锚了！';
+                gameOverTitleEl.classList.add('dead');
+            } else {
+                gameOverTitleEl.textContent = '游戏结束';
+            }
+            setTimeout(() => { gameOverScreen.classList.add('active'); }, 800);
+        }
+
+        // ========== 事件 ==========
+        document.addEventListener('keydown', e => {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = true;
+            if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = true;
+        });
+        document.addEventListener('keyup', e => {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = false;
+            if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = false;
+        });
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+
+        // ========== 音效系统 ==========
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        function playYaoyaoLingxian() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const notes = [
+                { freq: 440, start: 0, dur: 0.15 },
+                { freq: 554, start: 0.15, dur: 0.15 },
+                { freq: 659, start: 0.3, dur: 0.15 },
+                { freq: 880, start: 0.45, dur: 0.3 }
+            ];
+            notes.forEach(note => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.frequency.value = note.freq;
+                osc.type = 'sine';
+                gain.gain.setValueAtTime(0, now + note.start);
+                gain.gain.linearRampToValueAtTime(0.3, now + note.start + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + note.start + note.dur);
+                osc.start(now + note.start);
+                osc.stop(now + note.start + note.dur);
+            });
+        }
+        function playChargeSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const notes = [
+                { freq: 523, start: 0, dur: 0.1 },
+                { freq: 659, start: 0.1, dur: 0.1 },
+                { freq: 784, start: 0.2, dur: 0.15 }
+            ];
+            notes.forEach(note => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.frequency.value = note.freq;
+                osc.type = 'square';
+                gain.gain.setValueAtTime(0, now + note.start);
+                gain.gain.linearRampToValueAtTime(0.15, now + note.start + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + note.start + note.dur);
+                osc.start(now + note.start);
+                osc.stop(now + note.start + note.dur);
+            });
+        }
+
+        // ========== 初始化 ==========
+        initStars();
+        highScoreEl.textContent = highScore;
+        requestAnimationFrame(loop);
+    })();
+    </script>
+</body>
+</html>

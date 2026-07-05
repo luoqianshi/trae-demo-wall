@@ -1,1 +1,0 @@
-import{_ as t,o as a,c as n,a as e}from"./index-BM0PzdZ1.js";const r={};function s(c,o){return a(),n("footer",null,[...o[0]||(o[0]=[e("div",{class:"footer-line"},null,-1),e("p",null,"AI云朵识图科普小游戏 · 学习工作赛道",-1),e("p",{style:{"margin-top":"6px","font-size":"0.8rem"}},"TRAE AI 创造力大赛参赛作品",-1)])])}const p=t(r,[["render",s],["__scopeId","data-v-aaade7a7"]]);export{p as F};
