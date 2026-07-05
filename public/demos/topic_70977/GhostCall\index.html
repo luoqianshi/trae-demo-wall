@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>幽灵会议 GhostCall</title>
+<style>
+:root{--bg:#0a0a0a;--surface:#141414;--border:#2a2a2a;--text:#e0e0e0;--text-dim:#666;--accent:#fff;--danger:#e04040;--success:#40b060;--radius:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ─── 登录界面 ─── */
+#lobby{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:24px}
+#lobby h1{font-size:1.5rem;font-weight:600;letter-spacing:0;color:var(--text)}
+#lobby p{color:var(--text-dim);font-size:.85rem;max-width:300px;text-align:center;line-height:1.6}
+.input-group{display:flex;flex-direction:column;gap:6px;width:min(300px,90vw)}
+.input-group label{font-size:.75rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em}
+.input-group input{padding:10px 14px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text);font-size:.95rem;outline:none;transition:border .2s}
+.input-group input:focus{border-color:var(--text-dim)}
+.btn{padding:10px 24px;border-radius:var(--radius);border:1px solid var(--text-dim);font-size:.9rem;font-weight:500;cursor:pointer;transition:all .2s;background:transparent;color:var(--text)}
+.btn-primary:hover{border-color:var(--text);background:var(--surface)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+.error-msg{color:var(--danger);font-size:.8rem;min-height:18px}
+
+/* ─── 会议界面 ─── */
+#room{display:none;flex-direction:column;height:100%}
+
+/* 顶栏 */
+#topbar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;z-index:10}
+#room-info{display:flex;align-items:center;gap:10px}
+#room-info h2{font-size:.9rem;font-weight:500}
+#peer-count{font-size:.7rem;color:var(--text-dim);background:var(--bg);padding:2px 8px;border-radius:10px}
+#topbar-actions{display:flex;gap:6px}
+.btn-sm{padding:5px 10px;font-size:.75rem;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;transition:all .2s}
+.btn-sm:hover{color:var(--text);border-color:var(--text-dim)}
+.btn-sm.danger{border-color:var(--danger);color:var(--danger)}
+.btn-sm.danger:hover{background:var(--danger);color:#fff}
+
+/* 视频网格 */
+#video-grid{flex:1;display:grid;gap:4px;padding:6px;overflow:hidden;align-content:center;justify-content:center}
+#video-grid.single{grid-template-columns:1fr;max-width:960px;margin:0 auto;width:100%}
+#video-grid.small{grid-template-columns:repeat(2,1fr);gap:6px}
+#video-grid.medium{grid-template-columns:repeat(3,1fr)}
+#video-grid.large{grid-template-columns:repeat(4,1fr)}
+
+.video-card{position:relative;border-radius:var(--radius);overflow:hidden;background:#000;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);transition:border-color .3s}
+.video-card.speaking{border-color:var(--success)}
+.video-card video,.video-card .avatar{width:100%;height:100%;object-fit:cover}
+.avatar{display:flex;align-items:center;justify-content:center;font-size:2rem;font-weight:600;color:var(--text-dim);background:var(--surface)}
+.video-label{position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:4px;font-size:.7rem;pointer-events:none;white-space:nowrap;color:var(--text-dim)}
+.video-label .host-badge{margin-left:4px;color:#f0c040;font-size:.65rem}
+.video-stats{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:4px;font-size:.6rem;color:var(--text-dim)}
+.video-stats .bitrate-up{color:var(--success)}
+.video-stats .bitrate-down{color:var(--text)}
+
+/* 全屏覆盖 */
+.video-card.fullscreen{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:100;border-radius:0;border:none}
+.video-card.fullscreen video,.video-card.fullscreen .avatar{aspect-ratio:auto}
+.fullscreen-close{position:absolute;top:12px;right:12px;z-index:101;background:rgba(0,0,0,.6);color:#fff;border:none;width:36px;height:36px;border-radius:var(--radius);font-size:1rem;cursor:pointer;display:none}
+.video-card.fullscreen ~ .fullscreen-close,.video-card.fullscreen .fullscreen-close{display:flex;align-items:center;justify-content:center}
+
+/* 工具栏 */
+#toolbar{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.tool-btn{width:44px;height:44px;border-radius:var(--radius);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:1.1rem;cursor:pointer;transition:all .2s;position:relative;background:transparent;color:var(--text-dim)}
+.tool-btn:hover{border-color:var(--text-dim);color:var(--text)}
+.tool-btn.active{background:var(--danger);border-color:var(--danger);color:#fff}
+.tool-btn .tooltip{position:absolute;bottom:110%;left:50%;transform:translateX(-50%);background:var(--bg);color:var(--text-dim);padding:3px 8px;border-radius:4px;font-size:.65rem;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s}
+.tool-btn:hover .tooltip{opacity:1}
+
+/* 状态栏 */
+#statusbar{padding:3px 16px;background:var(--bg);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-dim);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.status-dot{width:5px;height:5px;border-radius:50%;display:inline-block;margin-right:5px}
+.status-dot.connected{background:var(--success)}
+.status-dot.disconnected{background:var(--danger)}
+.status-dot.connecting{background:#d29922;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* 密码弹窗 */
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:200}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;width:min(340px,90vw);display:flex;flex-direction:column;gap:14px}
+.modal h3{font-size:1rem;font-weight:500}
+
+/* Toast */
+#toast-container{position:fixed;top:12px;right:12px;z-index:300;display:flex;flex-direction:column;gap:6px}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;font-size:.8rem;animation:slideIn .3s ease;max-width:280px}
+.toast.error{border-color:var(--danger);color:var(--danger)}
+.toast.success{border-color:var(--success);color:var(--success)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* 响应式 */
+@media(max-width:768px){
+  #video-grid.medium{grid-template-columns:repeat(2,1fr)}
+  #video-grid.large{grid-template-columns:repeat(2,1fr)}
+  .tool-btn{width:42px;height:42px;font-size:1rem}
+  #topbar{padding:6px 10px}
+}
+@media(max-width:480px){
+  .video-card{aspect-ratio:4:3}
+  #video-grid{padding:4px;gap:4px}
+  .tool-btn{width:38px;height:38px;font-size:.9rem}
+  #toolbar{gap:8px;padding:8px}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ 登录 ═══ -->
+<div id="lobby">
+  <h1>幽灵会议</h1>
+  <p>零服务器 · 零账号 · 零痕迹<br>P2P 视频通话，加入即消失</p>
+  <div class="input-group">
+    <label>昵称</label>
+    <input id="inp-name" type="text" placeholder="幽灵..." maxlength="20" autocomplete="off">
+  </div>
+  <div class="input-group">
+    <label>房间名</label>
+    <input id="inp-room" type="text" placeholder="输入房间名加入..." maxlength="40" autocomplete="off">
+  </div>
+  <div class="input-group">
+    <label>密码（可选）</label>
+    <input id="inp-pass" type="password" placeholder="留空则无密码" autocomplete="off">
+  </div>
+  <button class="btn btn-primary" id="btn-join" onclick="joinRoom()">进入房间</button>
+  <div class="error-msg" id="join-error"></div>
+</div>
+
+<!-- ═══ 会议 ═══ -->
+<div id="room">
+  <div id="topbar">
+    <div id="room-info">
+      <h2 id="room-name"></h2>
+      <span id="peer-count"></span>
+    </div>
+    <div id="topbar-actions">
+      <button class="btn-sm" onclick="copyInviteLink()">复制链接</button>
+      <button class="btn-sm danger" onclick="leaveRoom()">离开</button>
+    </div>
+  </div>
+  <div id="video-grid"></div>
+  <div id="toolbar">
+    <button class="tool-btn" id="btn-mic" onclick="toggleMic()">
+      🎤<span class="tooltip">麦克风</span>
+    </button>
+    <button class="tool-btn" id="btn-cam" onclick="toggleCam()">
+      📷<span class="tooltip">摄像头</span>
+    </button>
+    <button class="tool-btn" id="btn-screen" onclick="toggleScreen()">
+      🖥️<span class="tooltip">屏幕共享</span>
+    </button>
+    <button class="tool-btn" id="btn-fullscreen" onclick="toggleFullscreen()">
+      ⛶<span class="tooltip">全屏</span>
+    </button>
+    <button class="tool-btn" id="btn-kick" style="display:none" onclick="showKickDialog()">
+      👢<span class="tooltip">踢人</span>
+    </button>
+  </div>
+  <div id="statusbar">
+    <div><span class="status-dot disconnected" id="conn-dot"></span><span id="conn-text">未连接</span></div>
+    <div id="lan-ip" style="font-size:.72rem;color:var(--text-dim)"></div>
+    <div id="stats-text"></div>
+  </div>
+</div>
+
+<!-- ═══ 密码弹窗 ═══ -->
+<div class="modal-overlay" id="modal-password" style="display:none">
+  <div class="modal">
+    <h3>需要密码</h3>
+    <div class="input-group">
+      <label>输入密码</label>
+      <input id="inp-modal-pass" type="password" placeholder="房间密码" autocomplete="off">
+    </div>
+    <div class="error-msg" id="modal-pass-error"></div>
+    <button class="btn btn-primary" onclick="submitModalPassword()">验证</button>
+  </div>
+</div>
+
+<!-- ═══ Toast ═══ -->
+<div id="toast-container"></div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+// 全局状态
+// ═══════════════════════════════════════════════════════════
+const MY_ID = crypto.randomUUID().slice(0, 8);
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  // 默认 TURN — 使用 Metered 免费额度，需替换为真实凭据
+  // 申请地址：https://www.metered.ca/tools/openrelay/
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
+// 从 URL 注入 TURN
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get('turn')) {
+  const [user, pass, urls] = urlParams.get('turn').split('|');
+  ICE_SERVERS.push({ urls: urls || 'turn:relay.metered.ca:80', username: user, credential: pass });
+}
+if (urlParams.get('turnUrl')) {
+  ICE_SERVERS.push({ urls: urlParams.get('turnUrl'), username: urlParams.get('turnUser') || '', credential: urlParams.get('turnPass') || '' });
+}
+
+let ws = null;
+let peers = new Map(); // peerId -> { pc, remoteStream, iceQueue }
+let peerNames = new Map(); // peerId -> displayName
+let localStream = null;
+let screenStream = null;
+let isMicOn = true;
+let isCamOn = true;
+let isScreenSharing = false;
+let originalVideoTrack = null;
+let myRoom = '';
+let myName = '';
+let hostId = '';
+let isHost = false;
+let tunnelUrl = '';
+let currentPassword = ''; // 当前房间密码（重连时复用，避免弹窗输入后丢失）
+let reconnectAttempt = 0;
+let reconnectTimer = null;
+let statsInterval = null;
+let packetLoss = 0;
+// 上一次统计快照，用于计算实时速率（差值 / 时间）
+let lastStatsSnapshot = { time: 0, bytesUp: 0, bytesDown: 0, packetsLost: 0, packetsSent: 0 };
+
+// ═══════════════════════════════════════════════════════════
+// Toast 通知
+// ═══════════════════════════════════════════════════════════
+function toast(msg, type = '', duration = 4000) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ` ${type}` : '');
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+// ═══════════════════════════════════════════════════════════
+// WebSocket 连接（含断线重连 + 指数退避）
+// ═══════════════════════════════════════════════════════════
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}`;
+  setConnStatus('connecting', '连接中...');
+
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    setConnStatus('connected', '已连接');
+    reconnectAttempt = 0;
+    // 重新加入房间（使用保存的密码，避免弹窗输入后重连丢失）
+    if (myRoom) {
+      send({ type: 'join', room: myRoom, displayName: myName, peerId: MY_ID, password: currentPassword });
+    }
+  };
+  ws.onclose = () => {
+    setConnStatus('disconnected', '已断开');
+    scheduleReconnect();
+  };
+  ws.onerror = () => {};
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMessage(msg);
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectAttempt >= 10) {
+    toast('重连失败，请刷新页面', 'error');
+    return;
+  }
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempt) + Math.random() * 500, 30000);
+  reconnectAttempt++;
+  setConnStatus('connecting', `${delay / 1000 | 0}s 后重连 (${reconnectAttempt})`);
+  reconnectTimer = setTimeout(connectWS, delay);
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+function setConnStatus(state, text) {
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-text');
+  dot.className = 'status-dot ' + state;
+  txt.textContent = text;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 消息处理
+// ═══════════════════════════════════════════════════════════
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'join-ok':
+      onJoinOk(msg);
+      break;
+    case 'peer-joined':
+      onPeerJoined(msg.peer);
+      break;
+    case 'peer-left':
+      onPeerLeft(msg.peerId);
+      break;
+    case 'offer':
+      onOffer(msg);
+      break;
+    case 'answer':
+      onAnswer(msg);
+      break;
+    case 'ice-candidate':
+      onIceCandidate(msg);
+      break;
+    case 'tunnel-url':
+      if (msg.url) {
+        tunnelUrl = msg.url;
+        toast(`公网链接已就绪: ${msg.url}`, 'success', 5000);
+      }
+      break;
+    case 'kicked':
+      toast(msg.reason, 'error');
+      leaveRoom();
+      break;
+    case 'host-changed':
+      hostId = msg.hostId;
+      isHost = msg.hostId === MY_ID;
+      document.getElementById('btn-kick').style.display = isHost ? 'flex' : 'none';
+      toast(isHost ? '你已成为主持人' : `主持人已变更为 ${msg.hostId}`);
+      renderGrid();
+      break;
+    case 'error':
+      toast(msg.message, 'error');
+      if (msg.message.includes('密码')) {
+        document.getElementById('modal-password').style.display = 'flex';
+      }
+      document.getElementById('btn-join').disabled = false;
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 加入房间
+// ═══════════════════════════════════════════════════════════
+function joinRoom() {
+  myName = document.getElementById('inp-name').value.trim() || ('幽灵' + MY_ID.slice(0, 4));
+  myRoom = document.getElementById('inp-room').value.trim();
+  if (!myRoom) {
+    document.getElementById('join-error').textContent = '请输入房间名';
+    return;
+  }
+  currentPassword = document.getElementById('inp-pass').value; // 保存密码供重连使用
+  document.getElementById('join-error').textContent = '';
+  document.getElementById('btn-join').disabled = true;
+  connectWS();
+}
+
+function submitModalPassword() {
+  const pass = document.getElementById('inp-modal-pass').value;
+  currentPassword = pass; // 弹窗密码也保存，重连时复用
+  document.getElementById('modal-password').style.display = 'none';
+  send({ type: 'join', room: myRoom, displayName: myName, peerId: MY_ID, password: pass });
+}
+
+function onJoinOk(msg) {
+  document.getElementById('lobby').style.display = 'none';
+  document.getElementById('room').style.display = 'flex';
+  document.getElementById('room-name').textContent = myRoom;
+  hostId = msg.hostId;
+  isHost = MY_ID === hostId;
+  tunnelUrl = msg.tunnelUrl || '';
+  document.getElementById('btn-kick').style.display = isHost ? 'flex' : 'none';
+
+  // 重连场景：清理上一次残留的已失效 RTCPeerConnection，否则 createPeer 会因 has() 跳过
+  if (peers.size > 0) {
+    peers.forEach(({ pc }) => { try { pc.close(); } catch {} });
+    peers.clear();
+    document.querySelectorAll('#video-grid .video-card').forEach(c => {
+      if (c.dataset.id !== MY_ID) c.remove();
+    });
+  }
+
+  // 检测并展示 LAN IP
+  detectLanIp().then(ip => {
+    if (ip) document.getElementById('lan-ip').textContent = `LAN: ${ip}`;
+  });
+
+  // 初始化本地媒体
+  initMedia().then(() => {
+    // 对已存在的 peers 创建连接
+    msg.peers.forEach(p => {
+      peerNames.set(p.id, p.displayName);
+      createPeer(p.id);
+    });
+    renderGrid();
+    startStatsMonitor();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 媒体（无设备降级：视频→纯音频→旁观）
+// ═══════════════════════════════════════════════════════════
+async function initMedia() {
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+  const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: isMobile ? { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: audioConstraints,
+    });
+    isCamOn = true;
+    isMicOn = true;
+  } catch (e1) {
+    console.warn('[media] 视频获取失败，尝试纯音频', e1);
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      isCamOn = false;
+      isMicOn = true;
+      toast('摄像头不可用，已切换纯音频模式');
+    } catch (e2) {
+      console.warn('[media] 音频也获取失败，旁观者模式', e2);
+      localStream = new MediaStream();
+      isCamOn = false;
+      isMicOn = false;
+      toast('麦克风/摄像头均不可用，旁观者模式');
+    }
+  }
+  updateMediaButtons();
+}
+
+function updateMediaButtons() {
+  document.getElementById('btn-mic').classList.toggle('active', !isMicOn);
+  document.getElementById('btn-cam').classList.toggle('active', !isCamOn);
+  document.getElementById('btn-screen').classList.toggle('active', isScreenSharing);
+  // 更新 tooltip
+  document.getElementById('btn-mic').querySelector('.tooltip').textContent = isMicOn ? '麦克风' : '麦克风已关闭';
+  document.getElementById('btn-cam').querySelector('.tooltip').textContent = isCamOn ? '摄像头' : '摄像头已关闭';
+  document.getElementById('btn-screen').querySelector('.tooltip').textContent = isScreenSharing ? '停止共享' : '屏幕共享';
+}
+
+function toggleMic() {
+  if (!localStream) return;
+  isMicOn = !isMicOn;
+  localStream.getAudioTracks().forEach(t => t.enabled = isMicOn);
+  updateMediaButtons();
+  // 仅切换 enabled，不需要 renegotiate
+}
+
+function toggleCam() {
+  if (!localStream) return;
+  isCamOn = !isCamOn;
+  localStream.getVideoTracks().forEach(t => t.enabled = isCamOn);
+  updateMediaButtons();
+  renderGrid();
+  // 仅切换 enabled，不需要 renegotiate
+}
+
+async function toggleScreen() {
+  if (isScreenSharing) {
+    stopScreenShare();
+    return;
+  }
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
+    const screenTrack = screenStream.getVideoTracks()[0];
+    if (!screenTrack) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; toast('未获取到屏幕轨道'); return; }
+    screenTrack.onended = stopScreenShare;
+    originalVideoTrack = localStream?.getVideoTracks()[0] || null;
+    isScreenSharing = true;
+    // 移除旧视频 sender，添加屏幕轨道，触发重协商
+    peers.forEach(({ pc }, peerId) => {
+      if (pc.signalingState !== 'stable') {
+        console.warn(`[toggleScreen] peer ${peerId} 信令状态非 stable (${pc.signalingState})，跳过`);
+        return;
+      }
+      const old = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (old) pc.removeTrack(old);
+      pc.addTrack(screenTrack, localStream || new MediaStream([screenTrack]));
+    });
+    await renegotiateAll();
+    renderGrid();
+    updateMediaButtons();
+    toast('屏幕共享已开始');
+  } catch {
+    toast('屏幕共享被取消');
+  }
+}
+
+function stopScreenShare() {
+  if (screenStream) {
+    screenStream.getTracks().forEach(t => t.stop());
+    screenStream = null;
+  }
+  isScreenSharing = false;
+  // 移除屏幕 sender，恢复摄像头轨道
+  peers.forEach(({ pc }, peerId) => {
+    if (pc.signalingState !== 'stable') {
+      console.warn(`[stopScreenShare] peer ${peerId} 信令状态非 stable (${pc.signalingState})，跳过`);
+      return;
+    }
+    const olds = pc.getSenders().filter(s => s.track && s.track.kind === 'video');
+    olds.forEach(s => pc.removeTrack(s));
+    if (originalVideoTrack && localStream) {
+      pc.addTrack(originalVideoTrack, localStream);
+    }
+  });
+  renegotiateAll();
+  originalVideoTrack = null;
+  renderGrid();
+  updateMediaButtons();
+  toast('屏幕共享已停止');
+}
+
+async function renegotiateAll() {
+  const promises = [];
+  peers.forEach(({ pc }, peerId) => {
+    if (pc.signalingState === 'stable') {
+      promises.push(
+        pc.createOffer()
+          .then(offer => pc.setLocalDescription(offer))
+          .then(() => send({ type: 'offer', room: myRoom, fromId: MY_ID, targetId: peerId, offer: pc.localDescription }))
+          .catch(e => console.error(`[webrtc] renegotiate ${peerId} 失败:`, e))
+      );
+    }
+  });
+  await Promise.allSettled(promises);
+}
+
+// ═══════════════════════════════════════════════════════════
+// WebRTC P2P Mesh
+// ═══════════════════════════════════════════════════════════
+function createPeer(peerId) {
+  if (peers.has(peerId)) return; // 已存在，不重复创建
+
+  const config = { iceServers: ICE_SERVERS };
+  const pc = new RTCPeerConnection(config);
+  const peerData = { pc, remoteStream: new MediaStream(), iceQueue: [] };
+
+  // 立即注册，防止 onOffer 竞态重复创建 PC
+  peers.set(peerId, peerData);
+
+  // 添加本地流
+  if (localStream) {
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  }
+
+  pc.ontrack = (ev) => {
+    (ev.streams[0] ? ev.streams[0].getTracks() : [ev.track]).forEach(t => {
+      if (!peerData.remoteStream.getTrackById(t.id)) {
+        peerData.remoteStream.addTrack(t);
+      }
+    });
+    renderGrid();
+  };
+
+  // ICE 缓冲队列
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate) {
+      send({ type: 'ice-candidate', room: myRoom, fromId: MY_ID, targetId: peerId, candidate: ev.candidate });
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    if (state === 'disconnected' || state === 'failed') {
+      console.log(`[webrtc] 对 ${peerId} 连接状态: ${state}`);
+      if (state === 'failed') {
+        // 尝试重连
+        setTimeout(() => {
+          if (peers.has(peerId) && peers.get(peerId).pc.connectionState === 'failed') {
+            peers.delete(peerId);
+            createPeer(peerId);
+          }
+        }, 3000);
+      }
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    updateStats();
+  };
+
+  // 屏幕共享迟到者支持
+  if (isScreenSharing && screenStream) {
+    const old = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (old) pc.removeTrack(old);
+    const screenTrack = screenStream.getVideoTracks()[0];
+    if (screenTrack) {
+      pc.addTrack(screenTrack, localStream || new MediaStream([screenTrack]));
+    }
+  }
+
+  // SDP glare 避免：字典序较小的 peerId 发起 offer
+  if (MY_ID < peerId) {
+    if (pc.signalingState !== 'stable') {
+      console.warn(`[createPeer] peer ${peerId} 信令状态非 stable (${pc.signalingState})，跳过 offer`);
+      return;
+    }
+    pc.createOffer().then(offer => {
+      return pc.setLocalDescription(offer).then(() => {
+        send({ type: 'offer', room: myRoom, fromId: MY_ID, targetId: peerId, offer });
+      });
+    }).catch(e => console.error('[webrtc] createOffer error', e));
+  }
+  // 否则等待对方发送 offer
+}
+
+function onOffer(msg) {
+  let peerData = peers.get(msg.fromId);
+  if (!peerData) {
+    // 对方先创建的，我需要创建 PC
+    const config = { iceServers: ICE_SERVERS };
+    const pc = new RTCPeerConnection(config);
+    peerData = { pc, remoteStream: new MediaStream(), iceQueue: [] };
+    if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+    pc.ontrack = (ev) => {
+      (ev.streams[0] ? ev.streams[0].getTracks() : [ev.track]).forEach(t => {
+        if (!peerData.remoteStream.getTrackById(t.id)) {
+          peerData.remoteStream.addTrack(t);
+        }
+      });
+      renderGrid();
+    };
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        send({ type: 'ice-candidate', room: myRoom, fromId: MY_ID, targetId: msg.fromId, candidate: ev.candidate });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'failed') {
+        setTimeout(() => {
+          if (peers.has(msg.fromId) && peers.get(msg.fromId).pc.connectionState === 'failed') {
+            peers.delete(msg.fromId);
+            createPeer(msg.fromId);
+          }
+        }, 3000);
+      }
+    };
+    pc.oniceconnectionstatechange = () => updateStats();
+    peers.set(msg.fromId, peerData);
+  }
+
+  // SDP glare：若本地已有 pending offer，先 rollback
+  const pc = peerData.pc;
+  const setRemote = () => pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+  const proceed = pc.signalingState === 'have-local-offer'
+    ? pc.setLocalDescription({ type: 'rollback' }).then(setRemote)
+    : setRemote();
+
+  proceed.then(() => {
+    drainIceQueue(msg.fromId);
+    return peerData.pc.createAnswer();
+  }).then(answer => {
+    return peerData.pc.setLocalDescription(answer);
+  }).then(() => {
+    send({ type: 'answer', room: myRoom, fromId: MY_ID, targetId: msg.fromId, answer: peerData.pc.localDescription });
+  }).catch(e => console.error('[webrtc] handleOffer error', e));
+}
+
+function onAnswer(msg) {
+  const peerData = peers.get(msg.fromId);
+  if (!peerData) return;
+  peerData.pc.setRemoteDescription(new RTCSessionDescription(msg.answer)).then(() => {
+    drainIceQueue(msg.fromId);
+  }).catch(e => console.error('[webrtc] setRemote answer error', e));
+}
+
+function onIceCandidate(msg) {
+  const peerData = peers.get(msg.fromId);
+  if (!peerData) return;
+  const candidate = new RTCIceCandidate(msg.candidate);
+  if (peerData.pc.remoteDescription) {
+    peerData.pc.addIceCandidate(candidate).catch(() => {});
+  } else {
+    peerData.iceQueue.push(candidate);
+  }
+}
+
+function drainIceQueue(peerId) {
+  const peerData = peers.get(peerId);
+  if (!peerData) return;
+  while (peerData.iceQueue.length > 0) {
+    const candidate = peerData.iceQueue.shift();
+    peerData.pc.addIceCandidate(candidate).catch(() => {});
+  }
+}
+
+function onPeerJoined(peer) {
+  peerNames.set(peer.id, peer.displayName);
+  // 如果是对方比我先创建（我已经有了），重新创建连接
+  if (!peers.has(peer.id)) {
+    createPeer(peer.id);
+  }
+  renderGrid();
+  toast(`${peer.displayName} 加入了房间`, 'success');
+}
+
+function onPeerLeft(peerId) {
+  const peerData = peers.get(peerId);
+  if (peerData) {
+    peerData.pc.close();
+    peers.delete(peerId);
+  }
+  peerNames.delete(peerId);
+  renderGrid();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 视频网格渲染
+// ═══════════════════════════════════════════════════════════
+// 防抖: requestAnimationFrame 批量合并同一帧内的多次 renderGrid 调用
+let _renderPending = false;
+function renderGrid() {
+  if (_renderPending) return;
+  _renderPending = true;
+  requestAnimationFrame(() => {
+    _renderPending = false;
+    _renderGridNow();
+  });
+}
+
+function _renderGridNow() {
+  const grid = document.getElementById('video-grid');
+  const totalPeers = 1 + peers.size; // 我 + 远端
+
+  // 设置 grid class
+  grid.className = '';
+  if (totalPeers <= 1) grid.classList.add('single');
+  else if (totalPeers <= 4) grid.classList.add('small');
+  else if (totalPeers <= 6) grid.classList.add('medium');
+  else grid.classList.add('large');
+
+  // Diff：收集当前应有 id 集合
+  const expectedIds = new Set([MY_ID]);
+  peers.forEach((_, peerId) => expectedIds.add(peerId));
+
+  // 删除已不在集合中的卡片
+  grid.querySelectorAll('.video-card').forEach(card => {
+    if (!expectedIds.has(card.dataset.id)) card.remove();
+  });
+
+  // 添加本地视频（如不存在）
+  const localStreamForCard = isScreenSharing && screenStream ? screenStream : localStream;
+  const localCard = grid.querySelector(`[data-id="${MY_ID}"]`);
+  if (!localCard) {
+    grid.appendChild(createVideoCard(MY_ID, myName, true, isHost, localStreamForCard));
+  } else {
+    // 本地视频可能需要从 avatar 重建为 video（initMedia 完成后）
+    const hasLocalTracks = localStreamForCard && localStreamForCard.getTracks().length > 0;
+    const hasLocalVideo = localCard.querySelector('video') !== null;
+    if (hasLocalTracks && !hasLocalVideo) {
+      const newCard = createVideoCard(MY_ID, myName, true, isHost, localStreamForCard);
+      localCard.replaceWith(newCard);
+    } else if (hasLocalVideo) {
+      const video = localCard.querySelector('video');
+      const expectedStream = isScreenSharing && screenStream ? screenStream : localStream;
+      if (video.srcObject !== expectedStream) video.srcObject = expectedStream;
+    }
+  }
+
+  // 添加/更新远端视频
+  peers.forEach((peerData, peerId) => {
+    let card = grid.querySelector(`[data-id="${peerId}"]`);
+    if (!card) {
+      const info = findPeerInfo(peerId);
+      card = createVideoCard(peerId, info?.displayName || peerId, false, false, peerData.remoteStream);
+      grid.appendChild(card);
+    } else {
+      // 检查是否需要从 avatar 重建为 video（或反之）
+      const hasTracks = peerData.remoteStream.getTracks().length > 0;
+      const hasVideo = card.querySelector('video') !== null;
+      if (hasTracks && !hasVideo) {
+        // 从 avatar 重建为 video card
+        const info = findPeerInfo(peerId);
+        const newCard = createVideoCard(peerId, info?.displayName || peerId, false, false, peerData.remoteStream);
+        card.replaceWith(newCard);
+      } else if (!hasTracks && hasVideo) {
+        // 从 video 重建为 avatar card
+        const info = findPeerInfo(peerId);
+        const newCard = createVideoCard(peerId, info?.displayName || peerId, false, false, peerData.remoteStream);
+        card.replaceWith(newCard);
+      } else {
+        // 同类型，只更新流
+        const video = card.querySelector('video');
+        if (video && video.srcObject !== peerData.remoteStream) {
+          video.srcObject = peerData.remoteStream;
+        }
+      }
+    }
+  });
+
+  // 更新人数
+  document.getElementById('peer-count').textContent = `${totalPeers} 人`;
+}
+
+function findPeerInfo(peerId) {
+  return { displayName: peerNames.get(peerId) || peerId };
+}
+
+function createVideoCard(id, name, isLocal, isHostRole, stream) {
+  const card = document.createElement('div');
+  card.className = 'video-card';
+  card.dataset.id = id;
+
+  if (stream && stream.getTracks().length > 0) {
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = isLocal;
+    video.srcObject = stream;
+    // 确保 autoplay 生效
+    video.play().catch(() => {});
+    card.appendChild(video);
+  } else {
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = (name || '?')[0].toUpperCase();
+    card.appendChild(avatar);
+  }
+
+  // 标签
+  const label = document.createElement('div');
+  label.className = 'video-label';
+  label.innerHTML = `${isLocal ? '我' : name}${isHostRole ? '<span class="host-badge">👑 主持人</span>' : ''}`;
+  card.appendChild(label);
+
+  // 双击全屏
+  card.addEventListener('dblclick', () => {
+    document.querySelectorAll('.video-card.fullscreen').forEach(c => c.classList.remove('fullscreen'));
+    card.classList.add('fullscreen');
+    // 避免重复添加关闭按钮
+    if (card.querySelector('.fullscreen-close')) return;
+    // 添加关闭按钮
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'fullscreen-close';
+    closeBtn.textContent = '✕';
+    closeBtn.onclick = (e) => { e.stopPropagation(); card.classList.remove('fullscreen'); closeBtn.remove(); };
+    card.appendChild(closeBtn);
+  });
+
+  // 点击全屏的视频退出全屏
+  card.addEventListener('click', () => {
+    if (card.classList.contains('fullscreen')) {
+      card.classList.remove('fullscreen');
+      const cb = card.querySelector('.fullscreen-close');
+      if (cb) cb.remove();
+    }
+  });
+
+  return card;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 全屏查看
+// ═══════════════════════════════════════════════════════════
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 复制链接（三级优先）
+// ═══════════════════════════════════════════════════════════
+function detectLanIp() {
+  return new Promise(resolve => {
+    // 缓存：已检测过则直接返回
+    if (window._lanIpCache) { resolve(window._lanIpCache); return; }
+    if (window._lanIp) { window._lanIpCache = window._lanIp; resolve(window._lanIp); return; }
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) return;
+        const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+        if (match && !match[1].startsWith('0.') && match[1] !== '127.0.0.1' && match[1] !== '0.0.0.0') {
+          window._lanIp = match[1];
+        }
+      };
+      pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(() => {});
+      setTimeout(() => {
+        pc.close();
+        const ip = window._lanIp || null;
+        if (ip) window._lanIpCache = ip;
+        resolve(ip);
+      }, 2500);
+    } catch { resolve(null); }
+  });
+}
+
+async function copyInviteLink() {
+  // 先尝试通过 API 获取最新 tunnel URL
+  if (!tunnelUrl) {
+    try {
+      const res = await fetch('/api/tunnel-url');
+      const data = await res.json();
+      if (data.tunnelUrl) tunnelUrl = data.tunnelUrl;
+    } catch {}
+  }
+  let base = '';
+  if (tunnelUrl) {
+    base = tunnelUrl.replace(/\/+$/, '');
+  } else if (window._lanIp) {
+    base = `http://${window._lanIp}:${location.port}`;
+  }
+  if (!base) base = location.origin;
+  const link = `${base}/?room=${encodeURIComponent(myRoom)}`;
+  navigator.clipboard.writeText(link).then(() => {
+    toast('邀请链接已复制', 'success');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('邀请链接已复制', 'success');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 主持人踢人
+// ═══════════════════════════════════════════════════════════
+function showKickDialog() {
+  // 过滤已断连的 peer
+  const peerEntries = [...peerNames.entries()].filter(([id]) => id !== MY_ID && peers.has(id));
+  if (peerEntries.length === 0) {
+    toast('房间中没有其他人');
+    return;
+  }
+  // 创建选择弹窗
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;min-width:300px';
+  const title = document.createElement('h3');
+  title.textContent = '选择要踢出的成员';
+  title.style.cssText = 'margin-bottom:16px;font-size:1rem';
+  modal.appendChild(title);
+
+  peerEntries.forEach(([id, name]) => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'display:block;width:100%;padding:10px 16px;margin:6px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:.9rem;text-align:left;transition:all .2s';
+    btn.textContent = `${name} (${id})`;
+    btn.onmouseover = () => { btn.style.borderColor = 'var(--danger)'; btn.style.color = 'var(--danger)'; };
+    btn.onmouseout = () => { btn.style.borderColor = 'var(--border)'; btn.style.color = 'var(--text)'; };
+    btn.onclick = () => {
+      send({ type: 'kick', room: myRoom, targetId: id });
+      toast(`已踢出 ${name}`, 'success');
+      overlay.remove();
+    };
+    modal.appendChild(btn);
+  });
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.style.cssText = 'margin-top:12px;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-size:.85rem;width:100%';
+  cancelBtn.textContent = '取消';
+  cancelBtn.onclick = () => overlay.remove();
+  modal.appendChild(cancelBtn);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 弱网自适应码率
+// ═══════════════════════════════════════════════════════════
+function startStatsMonitor() {
+  // 先清理旧定时器，避免重连后多个 interval 并行
+  if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+  statsInterval = setInterval(updateStats, 3000);
+}
+
+async function updateStats() {
+  let totalBytesUp = 0;       // 累计上行字节
+  let totalBytesDown = 0;     // 累计下行字节
+  let totalPacketsLost = 0;
+  let totalPacketsSent = 0;
+  let peerCount = 0;
+
+  const promises = [];
+  peers.forEach(({ pc }) => {
+    if (pc.connectionState !== 'connected') return;
+    peerCount++;
+    promises.push(pc.getStats(null).then(stats => {
+      let bytesSent = 0, bytesReceived = 0, packetsLost = 0, packetsSent = 0;
+      stats.forEach(report => {
+        if (report.type === 'outbound-rtp' && report.kind === 'video') {
+          bytesSent += report.bytesSent || 0;
+          packetsSent += report.packetsSent || 0;
+        }
+        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+          bytesReceived += report.bytesReceived || 0;
+          packetsLost += report.packetsLost || 0;
+        }
+      });
+      return { bytesSent, bytesReceived, packetsLost, packetsSent };
+    }));
+  });
+
+  const results = await Promise.all(promises);
+  results.forEach(r => {
+    totalBytesUp += r.bytesSent;
+    totalBytesDown += r.bytesReceived;
+    totalPacketsLost += r.packetsLost;
+    totalPacketsSent += r.packetsSent;
+  });
+
+  // 计算实时速率（差值 / 时间），避免把累计字节当 kbps 显示
+  const now = Date.now();
+  let kbpsUp = 0;
+  if (lastStatsSnapshot.time > 0) {
+    const dt = (now - lastStatsSnapshot.time) / 1000; // 秒
+    if (dt > 0) {
+      // 处理 peer 重连导致字节回退到 0 的情况
+      const deltaUp = Math.max(0, totalBytesUp - lastStatsSnapshot.bytesUp);
+      kbpsUp = (deltaUp * 8 / 1000) / dt; // kbps
+    }
+  }
+
+  // 实时丢包率（增量），而非历史平均
+  if (lastStatsSnapshot.time > 0) {
+    const dLost = Math.max(0, totalPacketsLost - lastStatsSnapshot.packetsLost);
+    const dSent = Math.max(0, totalPacketsSent - lastStatsSnapshot.packetsSent);
+    packetLoss = (dLost + dSent) > 0 ? dLost / (dLost + dSent) : 0;
+  }
+
+  lastStatsSnapshot = { time: now, bytesUp: totalBytesUp, bytesDown: totalBytesDown, packetsLost: totalPacketsLost, packetsSent: totalPacketsSent };
+
+  // 动态码率调整
+  adaptBitrate(packetLoss);
+
+  // 简化显示（实时上行速率）
+  document.getElementById('stats-text').textContent = `P2P: ${peerCount} 连接 ↑${kbpsUp.toFixed(0)}kbps`;
+}
+
+function adaptBitrate(loss) {
+  // 丢包 > 10%: 降到 80kbps, > 2%: 降到 200kbps, 否则恢复 500kbps
+  let maxBitrate;
+  if (loss > 0.1) maxBitrate = 80_000;
+  else if (loss > 0.02) maxBitrate = 200_000;
+  else maxBitrate = 500_000;
+
+  peers.forEach(({ pc }) => {
+    pc.getSenders().forEach(sender => {
+      if (sender.track && sender.track.kind === 'video') {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = maxBitrate;
+        sender.setParameters(params).catch((e) => {
+          console.error('[webrtc] setParameters 失败:', e?.message || e);
+        });
+      }
+    });
+  });
+  // 动态码率调整（仅丢包率 > 5% 时打印日志）
+  if (packetLoss > 0.05) console.log(`[adapt] 丢包率 ${(packetLoss * 100).toFixed(1)}%，码率上限 ${maxBitrate / 1000}kbps`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 离开房间
+// ═══════════════════════════════════════════════════════════
+function leaveRoom() {
+  // 发送 leave 消息后延迟关闭 WS，确保消息发送完成
+  if (ws && ws.readyState === 1) {
+    send({ type: 'leave', room: myRoom });
+  }
+
+  // 清理所有 P2P 连接
+  peers.forEach(({ pc }) => pc.close());
+  peers.clear();
+
+  // 关闭 WebSocket（延迟 100ms 确保 leave 消息已发送）
+  const wsToClose = ws;
+  ws = null;
+  if (wsToClose) { setTimeout(() => wsToClose.close(), 100); }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
+
+  // 释放媒体
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+  isScreenSharing = false;
+  myRoom = '';
+  hostId = '';
+  currentPassword = ''; // 清空密码，避免下次进入其它房间复用
+
+  // 回到大厅
+  document.getElementById('room').style.display = 'none';
+  document.getElementById('lobby').style.display = 'flex';
+  document.getElementById('btn-join').disabled = false;
+}
+
+// ═══════════════════════════════════════════════════════════
+// URL 参数自动填充房间名
+// ═══════════════════════════════════════════════════════════
+if (urlParams.has('room')) {
+  document.getElementById('inp-room').value = urlParams.get('room');
+  // 从 URL 参数填充密码（如有）
+  if (urlParams.has('password')) {
+    document.getElementById('inp-pass').value = urlParams.get('password');
+  }
+  // 自动加入房间（使用默认昵称）
+  setTimeout(() => joinRoom(), 300);
+}
+// 键盘快捷键: M=静音, V=摄像头, S=屏幕共享, L=复制链接
+document.addEventListener('keydown', (e) => {
+  // 忽略输入框中的按键
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  switch (e.key.toLowerCase()) {
+    case 'm': toggleMic(); break;
+    case 'v': toggleCam(); break;
+    case 's': toggleScreen(); break;
+    case 'l': copyInviteLink(); break;
+  }
+});
+</script>
+</body>
+</html>

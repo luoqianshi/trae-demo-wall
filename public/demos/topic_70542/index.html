@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>慧眼同源 — 多模态文档去重与版本溯源系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --glass-bg:rgba(255,255,255,0.08);
+  --glass-border:rgba(255,255,255,0.18);
+  --glass-blur:24px;
+  --text-primary:#fff;
+  --text-secondary:rgba(255,255,255,0.7);
+  --text-muted:rgba(255,255,255,0.5);
+  --accent:#7c4dff;
+  --accent-light:#b388ff;
+  --success:#4caf50;
+  --danger:#f44336;
+  --warning:#ffc107;
+}
+html,body{height:100%}
+body{
+  font-family:'Segoe UI','Microsoft YaHei',sans-serif;
+  color:var(--text-primary);
+  min-height:100vh;
+  overflow-x:hidden;
+  position:relative;
+  background:#0a0e27;
+}
+
+/* === 背景图 cover.png === */
+.bg-cover{
+  position:fixed;inset:0;z-index:-3;
+  background-image:url('/cover.png');
+  background-size:cover;background-position:center;
+  opacity:0.35;
+}
+
+/* === 动态弥散光背景 === */
+.bg-lights{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+.bg-lights::before,.bg-lights::after{
+  content:'';position:absolute;border-radius:50%;filter:blur(80px);opacity:0.5;
+}
+.bg-lights::before{
+  width:600px;height:600px;
+  background:radial-gradient(circle,#4a148c 0%,transparent 70%);
+  top:-200px;left:-100px;
+  animation:floatLight1 20s ease-in-out infinite;
+}
+.bg-lights::after{
+  width:700px;height:700px;
+  background:radial-gradient(circle,#0d47a1 0%,transparent 70%);
+  bottom:-300px;right:-200px;
+  animation:floatLight2 25s ease-in-out infinite;
+}
+@keyframes floatLight1{
+  0%,100%{transform:translate(0,0) scale(1)}
+  33%{transform:translate(200px,150px) scale(1.2)}
+  66%{transform:translate(-100px,300px) scale(0.9)}
+}
+@keyframes floatLight2{
+  0%,100%{transform:translate(0,0) scale(1)}
+  33%{transform:translate(-200px,-100px) scale(1.1)}
+  66%{transform:translate(150px,-200px) scale(0.95)}
+}
+
+/* === 噪点纹理叠加 === */
+.noise-overlay{
+  position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.04;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* === Parallax 背景层（滚动速度为前景50%） === */
+.parallax-bg{
+  position:fixed;inset:0;z-index:-3;pointer-events:none;
+  transform:translateY(0);will-change:transform;
+}
+.parallax-bg .bg-cover-inner{
+  position:absolute;inset:0;
+  background-image:url('/cover.png');
+  background-size:cover;background-position:center;
+  opacity:0.3;
+}
+
+.container{max-width:960px;margin:0 auto;padding:20px;position:relative;z-index:1}
+
+/* === Header === */
+.header{
+  text-align:center;padding:30px;margin-bottom:20px;
+  background:linear-gradient(135deg,rgba(124,77,255,0.15),rgba(13,71,161,0.15));
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);border-radius:16px;
+}
+.header h1{font-size:26px;margin-bottom:6px;background:linear-gradient(90deg,#b388ff,#7c4dff,#536dfe);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.header p{font-size:13px;color:var(--text-secondary)}
+
+/* === Status Bar === */
+.status-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px;margin-bottom:16px;flex-wrap:wrap;gap:10px;
+  background:var(--glass-bg);backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);border-radius:12px;
+}
+.status-info{display:flex;gap:20px;flex-wrap:wrap;font-size:14px}
+.status-info span{display:flex;align-items:center;gap:4px}
+.status-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* === Buttons === */
+.btn{
+  padding:10px 20px;border:none;border-radius:10px;font-size:14px;cursor:pointer;
+  transition:all .2s;font-weight:500;color:#fff;
+  background:rgba(255,255,255,0.1);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,0.15);
+}
+.btn:hover:not(:disabled){transform:translateY(-1px);background:rgba(255,255,255,0.18)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:linear-gradient(135deg,#7c4dff,#536dfe);border:none}
+.btn-primary:hover:not(:disabled){box-shadow:0 4px 16px rgba(124,77,255,0.5)}
+.btn-info{background:linear-gradient(135deg,#00bcd4,#0288d1);border:none}
+.btn-success{background:linear-gradient(135deg,#4caf50,#2e7d32);border:none}
+.btn-danger{background:linear-gradient(135deg,#f44336,#c62828);border:none}
+.btn-warning{background:linear-gradient(135deg,#ffa726,#f57c00);border:none;color:#fff}
+.btn-sm{padding:6px 12px;font-size:12px}
+
+/* === Scene Mode Selector === */
+.scene-selector{display:flex;gap:8px;align-items:center;margin-top:12px}
+.scene-selector label{font-size:13px;color:var(--text-secondary);margin-right:4px}
+.scene-option{padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);transition:all .2s;color:var(--text-secondary)}
+.scene-option:hover{border-color:var(--accent-light);color:#fff}
+.scene-option.active{background:linear-gradient(135deg,#7c4dff,#536dfe);color:#fff;border-color:transparent}
+
+/* === Cards === */
+.card{
+  padding:20px;margin-bottom:16px;
+  background:var(--glass-bg);backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);border-radius:14px;
+}
+.card h3{font-size:15px;margin-bottom:12px;color:var(--text-primary)}
+
+/* === Upload Zone === */
+.upload-zone{
+  border:2px dashed rgba(255,255,255,0.25);border-radius:10px;
+  padding:28px;text-align:center;cursor:pointer;transition:all .2s;position:relative;
+  background:rgba(255,255,255,0.03);
+}
+.upload-zone:hover{border-color:var(--accent-light);background:rgba(124,77,255,0.08)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.upload-zone .icon{font-size:36px;margin-bottom:8px}
+.upload-zone .hint{font-size:13px;color:var(--text-secondary)}
+.file-list{margin-top:10px;font-size:13px;color:var(--text-secondary)}
+
+/* === Result === */
+.result-pass,.result-fail{
+  padding:20px;text-align:center;margin-bottom:16px;border-radius:12px;
+  backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));
+}
+.result-pass{background:rgba(76,175,80,0.15);border:2px solid var(--success)}
+.result-fail{background:rgba(244,67,54,0.15);border:2px solid var(--danger)}
+.result-pass h2{color:#a5d6a7;font-size:20px}
+.result-fail h2{color:#ef9a9a;font-size:20px}
+.result-pass p,.result-fail p{font-size:14px;margin-top:4px;color:var(--text-secondary)}
+
+/* === Table === */
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+th{background:rgba(124,77,255,0.3);color:#fff;padding:10px 8px;text-align:center;font-weight:500}
+td{padding:8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.08);color:var(--text-secondary)}
+tr.row-fail{background:rgba(244,67,54,0.08)}
+tr.row-fail td{color:#ef9a9a}
+
+/* === Skeleton Loading === */
+.skeleton-card{padding:20px;margin-bottom:16px;border-radius:14px;background:var(--glass-bg);border:1px solid var(--glass-border)}
+.skeleton-line{height:16px;border-radius:6px;margin:10px 0;background:linear-gradient(90deg,rgba(255,255,255,0.05) 0%,rgba(255,255,255,0.15) 50%,rgba(255,255,255,0.05) 100%);background-size:200% 100%;animation:shimmer 1.5s infinite}
+.skeleton-line.short{width:40%}
+.skeleton-line.medium{width:70%}
+.skeleton-img{height:200px;border-radius:10px;margin:12px 0;background:linear-gradient(90deg,rgba(255,255,255,0.05) 0%,rgba(255,255,255,0.12) 50%,rgba(255,255,255,0.05) 100%);background-size:200% 100%;animation:shimmer 1.5s infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* === Login === */
+.login-card{
+  padding:40px;max-width:420px;margin:60px auto;
+  background:var(--glass-bg);backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);border-radius:20px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.3);
+}
+.login-card h2{margin-bottom:8px;text-align:center;background:linear-gradient(90deg,#b388ff,#7c4dff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.login-card .subtitle{color:var(--text-secondary);font-size:13px;text-align:center;margin-bottom:20px}
+.login-card input{
+  width:100%;padding:12px 16px;
+  background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+  border-radius:10px;font-size:15px;color:#fff;outline:none;transition:all .2s;
+}
+.login-card input:focus{border-color:var(--accent-light);background:rgba(255,255,255,0.12)}
+.login-card input::placeholder{color:var(--text-muted)}
+.error-msg{color:#ef9a9a;font-size:13px;margin-top:4px;min-height:18px;text-align:center}
+.demo-section{margin-top:20px;border-top:1px solid rgba(255,255,255,0.1);padding-top:16px}
+.demo-section p{font-size:12px;color:var(--text-muted);margin-bottom:10px;text-align:center}
+.demo-buttons{display:flex;gap:8px}
+.demo-buttons .btn{flex:1}
+
+/* === History Panel === */
+.history-panel{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);z-index:1000;display:flex;align-items:center;justify-content:center}
+.history-modal{
+  padding:24px;max-width:800px;width:95%;max-height:85vh;overflow-y:auto;
+  background:rgba(20,20,40,0.85);backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);border-radius:16px;
+}
+.history-modal h2{margin-bottom:16px;font-size:18px}
+.user-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.user-tab{padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);transition:all .2s;color:var(--text-secondary)}
+.user-tab:hover{border-color:var(--accent-light)}
+.user-tab.active{background:linear-gradient(135deg,#7c4dff,#536dfe);color:#fff;border-color:transparent}
+.img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.img-card{border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;position:relative;transition:transform .15s}
+.img-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.3)}
+.img-card img{width:100%;height:140px;object-fit:cover;display:block}
+.img-card .img-info{padding:8px;font-size:12px;color:var(--text-secondary)}
+.img-card .img-actions{position:absolute;top:6px;right:6px}
+.img-card .del-btn{background:rgba(244,67,54,0.85);color:#fff;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center}
+.close-btn{float:right;background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-secondary);line-height:1}
+.close-btn:hover{color:#fff}
+
+/* === Visualization === */
+.vis-toggle{display:inline-flex;align-items:center;gap:6px;margin:8px 0;padding:8px 16px;background:rgba(255,193,7,0.15);border:1px solid var(--warning);border-radius:8px;cursor:pointer;font-size:13px;color:#ffe082;transition:all .2s}
+.vis-toggle:hover{background:rgba(255,193,7,0.25)}
+.vis-content{margin-top:10px;overflow:hidden;transition:max-height .3s ease}
+.vis-content.collapsed{max-height:0;overflow:hidden}
+.vis-content.expanded{max-height:2000px}
+.vis-content img{width:100%;border-radius:8px;border:1px solid rgba(255,255,255,0.1)}
+.vis-stats{display:flex;gap:16px;font-size:13px;color:var(--text-secondary);margin-top:8px;flex-wrap:wrap}
+.vis-stats b{color:#fff}
+.scene-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.scene-tag.text{background:rgba(33,150,243,0.2);color:#90caf9}
+.scene-tag.complex{background:rgba(255,152,0,0.2);color:#ffcc80}
+
+/* === About Page === */
+.about-page{display:none;padding:20px;max-width:900px;margin:0 auto}
+.about-page.active{display:block}
+.about-section{margin-bottom:24px}
+.about-section h2{font-size:22px;margin-bottom:12px;color:var(--accent-light)}
+.about-section h3{font-size:16px;margin:12px 0 8px;color:#fff}
+.about-section p{font-size:14px;line-height:1.7;color:var(--text-secondary);margin-bottom:8px}
+.about-section ul{margin-left:20px;color:var(--text-secondary);font-size:14px;line-height:1.8}
+.compare-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+.compare-table th{background:rgba(124,77,255,0.3);padding:12px;text-align:left}
+.compare-table td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.08)}
+.compare-table tr:hover{background:rgba(255,255,255,0.03)}
+.tech-badge{display:inline-block;padding:4px 12px;margin:4px;border-radius:20px;font-size:12px;background:rgba(124,77,255,0.2);border:1px solid rgba(124,77,255,0.4);color:#b388ff}
+.about-header-card{
+  padding:28px;margin-bottom:20px;text-align:center;
+  background:linear-gradient(135deg,rgba(124,77,255,0.2),rgba(13,71,161,0.2));
+  border:1px solid var(--glass-border);border-radius:16px;
+}
+.about-header-card .track{font-size:13px;color:var(--accent-light);margin-bottom:6px;letter-spacing:1px}
+.about-header-card h1{font-size:28px;margin-bottom:8px;background:linear-gradient(90deg,#b388ff,#7c4dff,#536dfe);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.about-header-card .tagline{font-size:14px;color:var(--text-secondary)}
+
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<!-- 背景层 -->
+<div class="parallax-bg" id="parallaxBg"><div class="bg-cover-inner"></div></div>
+<div class="bg-lights"></div>
+<div class="noise-overlay"></div>
+
+<!-- ========== 主应用视图 ========== -->
+<div id="appView" class="container">
+  <!-- 登录页 -->
+  <div id="loginView">
+    <div class="login-card">
+      <div style="font-size:48px;margin-bottom:8px;text-align:center">🔍</div>
+      <h2>慧眼同源</h2>
+      <p class="subtitle">多模态文档去重与版本溯源系统</p>
+      <input type="text" id="usernameInput" placeholder="请输入用户名" maxlength="50">
+      <div id="loginError" class="error-msg"></div>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="doLogin()">确认登录</button>
+      <div class="demo-section">
+        <p>无需登录，一键体验示例场景</p>
+        <div class="demo-buttons">
+          <button class="btn btn-warning" onclick="runDemo('text')">📄 文本场景</button>
+          <button class="btn btn-warning" onclick="runDemo('complex')">🏞️ 复杂场景</button>
+        </div>
+      </div>
+      <div style="margin-top:16px;text-align:center">
+        <button class="btn btn-sm" style="background:transparent;border:1px solid rgba(255,255,255,0.2)" onclick="showAbout()">ℹ️ 关于本项目</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="mainView" class="hidden">
+    <div class="header">
+      <h1>🔍 慧眼同源</h1>
+      <p>多模态文档去重与版本溯源系统 · DINOv2 reg4 + BGE + PaddleOCR</p>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-info">
+        <span>👤 用户: <b id="dispUser">-</b></span>
+        <span>📁 历史图片: <b id="dispCount">0</b> 张</span>
+      </div>
+      <div class="status-actions">
+        <button class="btn btn-warning btn-sm" onclick="runDemo('text')">📄 文本示例</button>
+        <button class="btn btn-warning btn-sm" onclick="runDemo('complex')">🏞️ 复杂示例</button>
+        <button class="btn btn-success btn-sm" onclick="openHistory()">📁 历史图片</button>
+        <button class="btn btn-info btn-sm" onclick="switchUser()">🔄 更换用户</button>
+        <button class="btn btn-sm" style="background:transparent;border:1px solid rgba(255,255,255,0.2)" onclick="showAbout()">ℹ️ 关于</button>
+      </div>
+    </div>
+
+    <!-- 上传区域（示例场景时隐藏） -->
+    <div id="uploadSection" class="card">
+      <h3>📷 上传待检测图片</h3>
+      <div class="upload-zone" id="queryZone">
+        <input type="file" accept="image/*" id="queryInput" onchange="onQueryChange()">
+        <div class="icon">🖼️</div>
+        <div class="hint">点击选择待检测图片（仅支持单张）</div>
+      </div>
+      <div id="queryFileList" class="file-list"></div>
+
+      <!-- 场景选择 -->
+      <div class="scene-selector">
+        <label>场景模式：</label>
+        <div class="scene-option active" data-mode="auto" onclick="selectSceneMode('auto')">默认</div>
+        <div class="scene-option" data-mode="text" onclick="selectSceneMode('text')">文本</div>
+        <div class="scene-option" data-mode="complex" onclick="selectSceneMode('complex')">复杂</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin:20px 0">
+      <button class="btn btn-primary" style="padding:12px 40px;font-size:16px" id="detectBtn" onclick="doDetect()">🚀 开始检测</button>
+    </div>
+
+    <div id="resultArea"></div>
+  </div>
+</div>
+
+<!-- ========== 关于本项目页面 ========== -->
+<div id="aboutView" class="about-page container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h1 style="background:linear-gradient(90deg,#b388ff,#7c4dff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">ℹ️ 关于慧眼同源</h1>
+    <button class="btn btn-sm" onclick="hideAbout()">← 返回</button>
+  </div>
+
+  <!-- 报名信息头 -->
+  <div class="about-header-card">
+    <div class="track">报名赛道：学习工作赛道</div>
+    <h1>慧眼同源</h1>
+    <div class="tagline">多模态文档去重与版本溯源系统</div>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">1. Demo 简介</h2>
+    <p><strong style="color:#fff">是什么：</strong>一个基于 Web 浏览器访问的多模态文档去重与版本溯源系统，用户上传图片即可自动检测是否与历史库中的图片为同一场景或同一文档。</p>
+    <p><strong style="color:#fff">面向谁：</strong>企业法务审核人员、财务报销审核岗、知识库运营人员、高校教师与教务人员、自媒体创作者、个人云盘用户。</p>
+    <p><strong style="color:#fff">主要功能：</strong></p>
+    <ul>
+      <li>📄 <strong>文本场景检测</strong>：合同、证书等文档通过 OCR + BGE 语义匹配，穿透措辞差异识别同源文档</li>
+      <li>🏞️ <strong>复杂场景检测</strong>：实景照片通过 DINOv2 视觉特征匹配，识别不同角度拍摄的同一场景</li>
+      <li>📊 <strong>可视化证据</strong>：检测结果附带 patch 匹配连线 / OCR 文本对比，提供可解释的判定依据</li>
+    </ul>
+    <p style="margin-top:10px"><strong style="color:#fff">🏆 本项目全程由 TRAE AI 制作</strong></p>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">2. Demo 创作思路</h2>
+
+    <h3>💡 灵感来源</h3>
+    <p>最初做多角度场景一致性检测时发现，DINOv2 的视觉特征匹配能力天然能识别"同一张纸不同角度拍的照片"，BGE 的语义匹配能穿透表述差异找到内容本质。这两个能力组合起来，恰好是文档去重场景一直缺失的那块拼图——从视觉和语义两个维度理解文档的"同源性"。</p>
+
+    <h3>🎯 想解决的问题</h3>
+    <p>法务审核合同时，同一份合同被不同部门换了个标题重新提交审批，审核人靠肉眼和记忆根本发现不了；财务报销时，同一张发票手机拍一次、扫描仪扫一次，两次都能通过系统；学生作业抄袭只需改几个字就能绕过传统查重。这些"同源不同形"的重复问题，传统查重工具完全失效。</p>
+
+    <h3>🤔 为什么做这个方向</h3>
+    <p>现有查重工具只比对文字是否一样，换几个词就查不出来，更别说识别不同角度拍的同一张纸。我们判断，文档去重需要从"字面比对"升级到"语义+视觉"的多模态理解。DINOv2 reg4 的 register tokens 消除了 CLS token 中的 artifact，特征质量更高；BGE-small-zh 针对中文语义优化。两者结合，恰好能覆盖"换皮文档"和"多角度同场景"两大查重盲区。这是传统工具做不到的突破性解法。</p>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">核心技术栈</h2>
+    <div>
+      <span class="tech-badge">DINOv2 ViT-Small/14 reg4</span>
+      <span class="tech-badge">BGE-small-zh-v1.5</span>
+      <span class="tech-badge">PaddleOCR 2.9.1</span>
+      <span class="tech-badge">Qdrant 向量数据库</span>
+      <span class="tech-badge">FastAPI</span>
+      <span class="tech-badge">PyTorch</span>
+      <span class="tech-badge">TRAE AI</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">技术原理</h2>
+
+    <h3>📄 文本场景检测</h3>
+    <p>使用 PaddleOCR 提取图片中的文字内容，再通过 BGE-small-zh 中文语义模型编码为 512 维向量，计算余弦相似度。当相似度 ≥ 0.85 时判定为同一场景。</p>
+    <p>这种方式能穿透"换皮文档"——即使措辞微调，语义本质不变，仍能被识别为同源。</p>
+
+    <h3>🏞️ 复杂场景检测</h3>
+    <p>使用 DINOv2 ViT-Small/14 reg4 模型提取图片的全局视觉特征（384 维 CLS token），计算余弦相似度。当相似度 ≥ 0.5 时判定为同一场景。</p>
+    <p>DINOv2 的 reg4 版本通过 register tokens 消除了 CLS token 中的 artifact，特征质量更高，能更准确地识别不同角度拍摄的同一场景。</p>
+
+    <h3>🔀 场景自动分类</h3>
+    <p>系统通过 4 个加权信号自动判断图片类型：文本面积占比（0.15）、背景白度（0.50）、颜色方差倒数（0.25）、文本行密度（0.10）。综合得分 ≥ 0.45 判为文本场景，否则为复杂场景。用户也可手动指定场景模式以跳过分类步骤。</p>
+
+    <h3>⚡ Qdrant 向量检索</h3>
+    <p>历史图片特征预存储到 Qdrant 向量数据库，使用 HNSW 算法实现近似最近邻（ANN）搜索，将 O(N) 暴力比对优化为 O(log N)，配合内存缓存实现毫秒级候选筛选。</p>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">与传统查重工具对比</h2>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>能力维度</th>
+          <th>传统哈希查重</th>
+          <th>文本查重（知网/Turnitin）</th>
+          <th>慧眼同源</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>不同角度同场景识别</td>
+          <td style="color:#ef9a9a">✗ 完全失效</td>
+          <td style="color:#ef9a9a">✗ 不支持图片</td>
+          <td style="color:#a5d6a7">✓ DINOv2 视觉特征</td>
+        </tr>
+        <tr>
+          <td>换皮文档识别</td>
+          <td style="color:#ef9a9a">✗ 完全失效</td>
+          <td style="color:#ffd54f">△ 需文字完全匹配</td>
+          <td style="color:#a5d6a7">✓ BGE 语义穿透</td>
+        </tr>
+        <tr>
+          <td>多语言支持</td>
+          <td style="color:#ef9a9a">✗ 不支持</td>
+          <td style="color:#ffd54f">△ 有限</td>
+          <td style="color:#a5d6a7">✓ 中文优化</td>
+        </tr>
+        <tr>
+          <td>图片+文字混合</td>
+          <td style="color:#ef9a9a">✗ 不支持</td>
+          <td style="color:#ef9a9a">✗ 仅文字</td>
+          <td style="color:#a5d6a7">✓ 多模态融合</td>
+        </tr>
+        <tr>
+          <td>印章/签名识别</td>
+          <td style="color:#ef9a9a">✗ 不支持</td>
+          <td style="color:#ef9a9a">✗ 不支持</td>
+          <td style="color:#a5d6a7">✓ 视觉特征捕获</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">应用场景</h2>
+    <ul>
+      <li><strong>法务审批</strong>：上传合同自动检测是否已有相同/相似合同在审或已归档</li>
+      <li><strong>财务报销</strong>：拍照上传票据自动识别是否重复报销</li>
+      <li><strong>知识库维护</strong>：批量扫描发现重复或高度相似条目并建议合并</li>
+      <li><strong>学生作业查重</strong>：上传学生作业识别是否抄袭已提交版本</li>
+      <li><strong>创作者素材管理</strong>：识别图库中不同角度拍摄的同一场景</li>
+      <li><strong>个人云盘整理</strong>：批量扫描自动识别并合并重复文档/照片</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2 style="color:var(--accent-light);margin-bottom:12px">TRAE AI 在项目中的运用</h2>
+    <p>本项目从架构设计、代码编写到部署调试，全程由 TRAE AI 辅助完成：</p>
+    <ul>
+      <li>使用 TRAE 搭建 FastAPI + HTML 前后端分离架构</li>
+      <li>使用 TRAE 实现 DINOv2 reg4 / BGE / PaddleOCR 三模型集成</li>
+      <li>使用 TRAE 编写 Qdrant 向量数据库预存储与 ANN 检索逻辑</li>
+      <li>使用 TRAE 实现场景分类器（4 信号加权判定）</li>
+      <li>使用 TRAE 调试 DINOv2 patch 级别匹配可视化</li>
+      <li>使用 TRAE 优化性能：内存缓存、早停策略、OCR 结果复用</li>
+      <li>使用 TRAE 完成本地代码到 Hugging Face Spaces 的 CPU 部署适配</li>
+      <li>使用 TRAE 实现玻璃拟态前端界面设计</li>
+    </ul>
+  </div>
+
+  <div style="text-align:center;margin:24px 0">
+    <button class="btn btn-primary" onclick="hideAbout()">← 返回系统</button>
+  </div>
+</div>
+
+<!-- ========== 历史图片面板 ========== -->
+<div id="historyPanel" class="history-panel hidden">
+  <div class="history-modal">
+    <button class="close-btn" onclick="closeHistory()">&times;</button>
+    <h2>📁 历史图片管理</h2>
+    <div id="userTabs" class="user-tabs"></div>
+    <div id="historyContent"></div>
+  </div>
+</div>
+
+<!-- ========== Loading Overlay（骨架屏） ========== -->
+<div id="loadingOverlay" class="hidden" style="position:fixed;inset:0;background:rgba(10,14,39,0.7);backdrop-filter:blur(10px);z-index:999;display:flex;align-items:center;justify-content:center">
+  <div style="max-width:600px;width:90%;padding:20px">
+    <div class="skeleton-card">
+      <div class="skeleton-line medium"></div>
+      <div class="skeleton-line short"></div>
+      <div class="skeleton-img"></div>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line medium"></div>
+      <div class="skeleton-img"></div>
+      <div class="skeleton-line short"></div>
+    </div>
+    <p id="loadingText" style="text-align:center;color:var(--text-secondary);margin-top:12px;font-size:14px">正在分析中...</p>
+  </div>
+</div>
+
+<script>
+let currentUser = '';
+let historyUsers = [];
+let selectedSceneMode = 'auto';
+let isDemoMode = false;
+
+document.getElementById('usernameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// === Parallax Scrolling ===
+window.addEventListener('scroll', () => {
+  const scrolled = window.pageYOffset;
+  document.getElementById('parallaxBg').style.transform = `translateY(${scrolled * 0.5}px)`;
+});
+
+// === Scene Mode Selector ===
+function selectSceneMode(mode) {
+  selectedSceneMode = mode;
+  document.querySelectorAll('.scene-option').forEach(el => el.classList.remove('active'));
+  document.querySelector(`.scene-option[data-mode="${mode}"]`).classList.add('active');
+}
+
+// === About Page ===
+function showAbout() {
+  document.getElementById('appView').classList.add('hidden');
+  document.getElementById('aboutView').classList.add('active');
+}
+function hideAbout() {
+  document.getElementById('aboutView').classList.remove('active');
+  document.getElementById('appView').classList.remove('hidden');
+}
+
+// === Login ===
+async function doLogin() {
+  const name = document.getElementById('usernameInput').value.trim();
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  if (!name) { errEl.textContent = '用户名不能为空'; return; }
+  try {
+    const fd = new FormData();
+    fd.append('username', name);
+    const res = await fetch('/api/login', { method: 'POST', body: fd });
+    if (!res.ok) { const d = await res.json(); errEl.textContent = d.detail || '登录失败'; return; }
+    const data = await res.json();
+    currentUser = data.username;
+    isDemoMode = false;
+    showMain(data);
+  } catch (e) { errEl.textContent = '网络错误: ' + e.message; }
+}
+
+function showMain(data) {
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('mainView').classList.remove('hidden');
+  document.getElementById('uploadSection').classList.remove('hidden');
+  document.getElementById('dispUser').textContent = data.username;
+  document.getElementById('dispCount').textContent = data.history_count;
+  isDemoMode = false;
+}
+
+function switchUser() {
+  document.getElementById('mainView').classList.add('hidden');
+  document.getElementById('loginView').classList.remove('hidden');
+  document.getElementById('usernameInput').value = '';
+  document.getElementById('resultArea').innerHTML = '';
+  document.getElementById('uploadSection').classList.remove('hidden');
+}
+
+// === Upload ===
+function onQueryChange() {
+  const input = document.getElementById('queryInput');
+  const list = document.getElementById('queryFileList');
+  list.innerHTML = '';
+  if (input.files.length > 1) {
+    alert('仅支持上传单张图片，已自动选择第一张');
+    const file = input.files[0];
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+  }
+  if (input.files.length === 1) {
+    const f = input.files[0];
+    list.innerHTML = `<div>📎 ${f.name} (${(f.size/1024).toFixed(1)} KB)</div>`;
+  }
+}
+
+// === Detect ===
+async function doDetect() {
+  const input = document.getElementById('queryInput');
+  if (!input.files.length) { alert('请先选择待检测图片'); return; }
+
+  document.getElementById('detectBtn').disabled = true;
+  showLoading('正在检测中...');
+
+  const resultArea = document.getElementById('resultArea');
+  resultArea.innerHTML = '';
+
+  try {
+    const fd = new FormData();
+    fd.append('username', currentUser);
+    fd.append('scene_mode', selectedSceneMode);
+    fd.append('files', input.files[0]);
+    const res = await fetch('/api/detect', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    renderResult(data);
+  } catch (e) {
+    alert('网络错误: ' + e.message);
+  } finally {
+    document.getElementById('detectBtn').disabled = false;
+    hideLoading();
+  }
+}
+
+function renderResult(data) {
+  const resultArea = document.getElementById('resultArea');
+  const isPass = data.result === 'pass';
+  let html = '';
+
+  if (isPass) {
+    if (data.reason === 'first_upload') {
+      html += `<div class="result-pass"><h2>✅ 首次上传</h2><p>历史库为空，已自动存入，无需比对</p></div>`;
+    } else {
+      html += `<div class="result-pass"><h2>✅ 检测通过</h2><p>未发现重复场景</p></div>`;
+    }
+  } else {
+    html += `<div class="result-fail"><h2>❌ 检测未通过</h2><p>发现同一场景的重复图片，已自动删除</p></div>`;
+  }
+
+  if (data.evaluation_logs && data.evaluation_logs.length) {
+    html += `<div class="card"><h3>📊 比对详情</h3><table><thead><tr><th>查询图</th><th>历史图</th><th>场景</th><th>相似度</th><th>结果</th></tr></thead><tbody>`;
+    for (const log of data.evaluation_logs) {
+      const cls = log.is_same_scene ? 'row-fail' : '';
+      const sceneTag = log.scene_type === 'text' ? '<span class="scene-tag text">文本</span>' : '<span class="scene-tag complex">复杂</span>';
+      const sim = log.similarity_score !== undefined ? (log.similarity_score * 100).toFixed(1) + '%' :
+                  (log.dinov2_similarity !== undefined ? (log.dinov2_similarity * 100).toFixed(1) + '%' :
+                  (log.text_similarity !== undefined ? (log.text_similarity * 100).toFixed(1) + '%' : '-'));
+      const result = log.is_same_scene ? '❌ 同场景' : '✅ 不同';
+      html += `<tr class="${cls}"><td>${log.query_image||'-'}</td><td>${log.history_image||'-'}</td><td>${sceneTag}</td><td>${sim}</td><td>${result}</td></tr>`;
+    }
+    html += `</tbody></table></div>`;
+  }
+
+  // 可视化（点击展开）
+  if (data.visualizations && data.visualizations.length) {
+    for (const vis of data.visualizations) {
+      const visType = vis.scene_type === 'text' ? '文本场景' : '复杂场景';
+      html += `<div class="card"><h3>🖼️ 可视化证据（${visType}）</h3>`;
+      html += `<div class="vis-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('expanded')"><span>▶</span> 点击查看/收起</div>`;
+      html += `<div class="vis-content collapsed">`;
+      html += `<img src="${vis.image_base64}">`;
+      if (vis.scene_type === 'complex') {
+        html += `<div class="vis-stats"><span>DINOv2 相似度: <b>${(vis.dinov2_similarity*100).toFixed(1)}%</b></span><span>Patch 匹配数: <b>${vis.patch_match_count}</b></span><span>平均相似度: <b>${(vis.avg_patch_similarity*100).toFixed(1)}%</b></span></div>`;
+      } else {
+        html += `<div class="vis-stats"><span>BGE 语义相似度: <b>${(vis.text_similarity*100).toFixed(1)}%</b></span><span>共同关键词: <b>${vis.common_keyword_count}</b> 个</span></div>`;
+      }
+      html += `</div></div>`;
+    }
+  }
+
+  // 上传区域始终可见，用户可随时重新选择图片上传
+  resultArea.innerHTML = html;
+}
+
+// === Demo ===
+async function runDemo(sceneType) {
+  showLoading('正在运行示例场景...');
+  isDemoMode = true;
+  const resultArea = document.getElementById('resultArea');
+  if (resultArea) resultArea.innerHTML = '';
+
+  try {
+    const fd = new FormData();
+    fd.append('scene_type', sceneType);
+    const res = await fetch('/api/demo', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { alert('示例检测失败: ' + data.error); hideLoading(); return; }
+    renderDemoResult(data);
+  } catch (e) {
+    alert('网络错误: ' + e.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderDemoResult(data) {
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('mainView').classList.remove('hidden');
+  // 示例模式下隐藏上传区域
+  document.getElementById('uploadSection').classList.add('hidden');
+  document.getElementById('dispUser').textContent = '示例演示';
+  document.getElementById('dispCount').textContent = '0';
+
+  const resultArea = document.getElementById('resultArea');
+  const isSame = data.is_same_scene;
+  const sceneLabel = data.scene_type === 'text' ? '文本场景' : '复杂场景';
+  const simPercent = (data.similarity * 100).toFixed(1);
+
+  let html = `<div class="card"><h3>🎯 示例场景检测结果（${sceneLabel}）</h3>`;
+  html += `<div class="${isSame ? 'result-pass' : 'result-fail'}" style="margin:12px 0">`;
+  html += `<h2>${isSame ? '✅ 同一场景' : '❌ 不同场景'}</h2>`;
+  html += `<p>相似度: ${simPercent}% | 场景类型: ${sceneLabel}</p></div>`;
+
+  // 不显示原图，直接展示可视化
+  if (data.visualizations && data.visualizations.length) {
+    for (const vis of data.visualizations) {
+      const visType = vis.scene_type === 'text' ? '文本场景' : '复杂场景';
+      html += `<div class="vis-toggle" onclick="this.nextElementSibling.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('expanded')"><span>▶</span> 🖼️ 点击查看可视化证据（${visType}）</div>`;
+      html += `<div class="vis-content collapsed">`;
+      html += `<img src="${vis.image_base64}">`;
+      if (vis.scene_type === 'complex') {
+        html += `<div class="vis-stats"><span>DINOv2 相似度: <b>${(vis.dinov2_similarity*100).toFixed(1)}%</b></span><span>Patch 匹配数: <b>${vis.patch_match_count}</b></span><span>平均相似度: <b>${(vis.avg_patch_similarity*100).toFixed(1)}%</b></span></div>`;
+      } else {
+        html += `<div class="vis-stats"><span>BGE 语义相似度: <b>${(vis.text_similarity*100).toFixed(1)}%</b></span><span>共同关键词: <b>${vis.common_keyword_count}</b> 个</span>`;
+        if (vis.common_keywords && vis.common_keywords.length) {
+          html += `<div style="margin-top:4px;font-size:12px;color:var(--text-muted)">关键词: ${vis.common_keywords.join('、')}</div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  html += `<div style="margin-top:16px;text-align:center;font-size:12px;color:var(--text-muted)">这是示例演示结果。如需检测您自己的图片，请先登录。</div>`;
+  html += `</div>`;
+
+  resultArea.innerHTML = html;
+}
+
+// === History ===
+async function openHistory() {
+  try {
+    const res = await fetch('/api/all_users');
+    historyUsers = await res.json();
+    if (!historyUsers.length) { alert('暂无历史用户'); return; }
+    document.getElementById('historyPanel').classList.remove('hidden');
+    renderUserTabs(historyUsers[0]);
+  } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+function closeHistory() {
+  document.getElementById('historyPanel').classList.add('hidden');
+}
+
+function renderUserTabs(activeUser) {
+  const tabs = document.getElementById('userTabs');
+  tabs.innerHTML = historyUsers.map(u =>
+    `<div class="user-tab ${u===activeUser?'active':''}" onclick="loadUserHistory('${u}')">${u}</div>`
+  ).join('');
+  loadUserHistory(activeUser);
+}
+
+async function loadUserHistory(username) {
+  document.querySelectorAll('.user-tab').forEach(t => t.classList.remove('active'));
+  event && event.target && event.target.classList.add('active');
+  const content = document.getElementById('historyContent');
+  content.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">加载中...</p>';
+  try {
+    const res = await fetch(`/api/history?username=${encodeURIComponent(username)}`);
+    const data = await res.json();
+    if (!data.images.length) {
+      content.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">暂无图片</p>';
+      return;
+    }
+    content.innerHTML = `<div class="img-grid">${data.images.map(img => `
+      <div class="img-card">
+        <img src="/api/image/${username}/${img}" onerror="this.style.display='none'">
+        <div class="img-info">${img}</div>
+        <div class="img-actions">
+          <button class="del-btn" onclick="deleteImage('${username}','${img}')">🗑</button>
+        </div>
+      </div>`).join('')}</div>`;
+  } catch (e) {
+    content.innerHTML = `<p style="color:#ef9a9a">加载失败: ${e.message}</p>`;
+  }
+}
+
+async function deleteImage(username, filename) {
+  if (!confirm(`确认删除 ${filename}？`)) return;
+  try {
+    const fd = new FormData();
+    fd.append('username', username);
+    fd.append('filename', filename);
+    const res = await fetch('/api/delete_image', { method: 'POST', body: fd });
+    if (res.ok) {
+      loadUserHistory(username);
+      if (username === currentUser) {
+        const countEl = document.getElementById('dispCount');
+        countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
+      }
+    } else {
+      alert('删除失败');
+    }
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
+// === Loading ===
+function showLoading(text) {
+  document.getElementById('loadingText').textContent = text || '正在分析中...';
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+document.getElementById('historyPanel').addEventListener('click', function(e) {
+  if (e.target === this) closeHistory();
+});
+</script>
+</body>
+</html>

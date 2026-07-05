@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交通事故预警系统 - 视频分析</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0f23; color: #fff; overflow-x: hidden; }
+        
+        .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 25px; text-align: center; border-bottom: 1px solid #333; }
+        .header h1 { font-size: 28px; font-weight: 600; margin-bottom: 5px; }
+        .header .subtitle { color: #888; font-size: 14px; }
+        
+        .main-container { display: flex; flex-wrap: wrap; height: calc(100vh - 100px); }
+        
+        .video-section { flex: 1; min-width: 600px; padding: 20px; display: flex; flex-direction: column; }
+        .video-container { flex: 1; background: #000; border-radius: 12px; overflow: hidden; position: relative; min-height: 400px; }
+        .video-container video { width: 100%; height: 100%; object-fit: contain; }
+        .video-container canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .video-overlay { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; z-index: 20; }
+        .video-status { background: rgba(0,0,0,0.8); padding: 8px 15px; border-radius: 6px; font-size: 12px; }
+        .video-status.running { color: #2ed573; }
+        .video-status.stopped { color: #ff4757; }
+        .video-status.processing { color: #00d9ff; }
+        
+        .video-controls { margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .upload-area { position: relative; overflow: hidden; }
+        .upload-btn { padding: 12px 25px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #00d9ff; color: #000; transition: all 0.3s; }
+        .upload-btn:hover { background: #00b8cc; transform: translateY(-2px); }
+        #file-input { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .video-controls button { padding: 12px 25px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.3s; }
+        .btn-play { background: #2ed573; color: #000; }
+        .btn-play:hover { background: #1ed06e; transform: translateY(-2px); }
+        .btn-pause { background: #ffa502; color: #000; }
+        .btn-pause:hover { background: #ff9500; transform: translateY(-2px); }
+        .btn-stop { background: #ff4757; color: #fff; }
+        .btn-stop:hover { background: #cc3945; transform: translateY(-2px); }
+        .btn-analyze { background: linear-gradient(90deg, #00d9ff, #2ed573); color: #000; }
+        .btn-analyze:hover { transform: translateY(-2px); }
+        
+        .progress-bar { width: 100%; height: 8px; background: #2d2d44; border-radius: 4px; margin-top: 15px; overflow: hidden; display: none; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #00d9ff, #2ed573); width: 0%; transition: width 0.3s; }
+        
+        .sidebar { width: 420px; background: #1a1a2e; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        
+        .panel { padding: 20px; border-bottom: 1px solid #333; }
+        .panel-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; color: #00d9ff; display: flex; align-items: center; gap: 8px; }
+        
+        .stats-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+        .stat-item { background: #2d2d44; padding: 15px; border-radius: 8px; transition: all 0.3s; }
+        .stat-item:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0,217,255,0.1); }
+        .stat-label { color: #888; font-size: 12px; }
+        .stat-value { font-size: 28px; font-weight: 700; margin-top: 5px; }
+        .stat-value.critical { color: #ff4757; }
+        .stat-value.warning { color: #ffa502; }
+        .stat-value.normal { color: #2ed573; }
+        .stat-value.info { color: #00d9ff; }
+        
+        .alarm-list { flex: 1; overflow-y: auto; padding: 20px; }
+        .alarm-item { background: #2d2d44; margin-bottom: 12px; padding: 15px; border-radius: 8px; border-left: 4px solid; transition: all 0.3s; }
+        .alarm-item:hover { transform: translateX(5px); }
+        .alarm-item.critical { border-left-color: #ff4757; }
+        .alarm-item.warning { border-left-color: #ffa502; }
+        .alarm-header { display: flex; justify-content: space-between; align-items: center; }
+        .alarm-level { font-weight: 700; font-size: 14px; padding: 3px 8px; border-radius: 3px; }
+        .alarm-level.critical { background: rgba(255,71,87,0.2); color: #ff4757; }
+        .alarm-level.warning { background: rgba(255,165,2,0.2); color: #ffa502; }
+        .alarm-time { color: #888; font-size: 12px; }
+        .alarm-type { margin-top: 8px; font-size: 14px; }
+        .alarm-meta { margin-top: 8px; display: flex; gap: 15px; color: #888; font-size: 12px; }
+        
+        .config-panel { padding: 20px; }
+        .config-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+        .config-item label { font-size: 14px; }
+        .toggle-switch { position: relative; width: 60px; height: 30px; background: #333; border-radius: 15px; cursor: pointer; transition: all 0.3s; }
+        .toggle-switch.active { background: #00d9ff; }
+        .toggle-switch::after { content: ''; position: absolute; width: 24px; height: 24px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: left 0.3s; }
+        .toggle-switch.active::after { left: 33px; }
+        .config-item select { padding: 8px 12px; border: 1px solid #333; border-radius: 6px; background: #2d2d44; color: #fff; }
+        
+        .status-indicator { display: flex; align-items: center; gap: 10px; margin-top: 15px; padding: 12px; background: #2d2d44; border-radius: 8px; }
+        .status-dot { width: 14px; height: 14px; border-radius: 50%; }
+        .status-dot.running { background: #2ed573; animation: pulse 1.5s infinite; }
+        .status-dot.stopped { background: #666; }
+        .status-dot.processing { background: #00d9ff; animation: pulse 1s infinite; }
+        
+        .chart-container { height: 160px; position: relative; background: #2d2d44; border-radius: 8px; padding: 10px; margin-top: 15px; }
+        .chart-bar { position: absolute; bottom: 10px; width: 12px; border-radius: 4px 4px 0 0; transition: height 0.5s ease-out; }
+        .chart-bar.warning { background: #ffa502; }
+        .chart-bar.critical { background: #ff4757; }
+        .chart-bar.normal { background: #2ed573; }
+        
+        .channel-info { display: flex; gap: 15px; margin-top: 15px; }
+        .channel-box { flex: 1; padding: 12px; border-radius: 8px; text-align: center; }
+        .channel-box.fast { background: rgba(255,165,2,0.1); border: 1px solid rgba(255,165,2,0.3); }
+        .channel-box.slow { background: rgba(0,217,255,0.1); border: 1px solid rgba(0,217,255,0.3); }
+        .channel-title { font-size: 12px; color: #888; margin-bottom: 5px; }
+        .channel-status { font-size: 16px; font-weight: 600; }
+        .channel-status.active { color: #2ed573; }
+        .channel-status.alarm { color: #ff4757; }
+        .channel-status.inactive { color: #666; }
+        
+        .decision-panel { background: linear-gradient(135deg, #1a1a2e 0%, #0d1117 100%); padding: 15px; border-radius: 8px; margin-top: 15px; }
+        .decision-title { font-size: 12px; color: #888; margin-bottom: 10px; }
+        .decision-result { display: flex; align-items: center; gap: 10px; }
+        .decision-icon { font-size: 24px; }
+        .decision-text { font-size: 16px; font-weight: 600; }
+        .decision-text.level-0 { color: #2ed573; }
+        .decision-text.level-1 { color: #ffa502; }
+        .decision-text.level-2 { color: #ff4757; }
+        
+        .timeline { margin-top: 15px; padding: 10px; background: #2d2d44; border-radius: 8px; }
+        .timeline-bar { height: 6px; background: #333; border-radius: 3px; position: relative; cursor: pointer; }
+        .timeline-progress { height: 100%; background: linear-gradient(90deg, #00d9ff, #2ed573); border-radius: 3px; width: 0%; }
+        .timeline-markers { position: absolute; top: -8px; left: 0; right: 0; height: 16px; }
+        .timeline-marker { position: absolute; width: 8px; height: 8px; border-radius: 50%; top: 4px; transform: translateX(-50%); }
+        .timeline-marker.warning { background: #ffa502; }
+        .timeline-marker.critical { background: #ff4757; }
+        
+        @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(46,213,115,0.4); } 50% { opacity: 0.8; box-shadow: 0 0 0 8px rgba(46,213,115,0); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚦 交通事故预警系统</h1>
+        <div class="subtitle">视频导入分析 · YOLO + CLIP 快慢通道融合决策</div>
+    </div>
+    
+    <div class="main-container">
+        <div class="video-section">
+            <div class="video-container">
+                <video id="input-video" muted></video>
+                <canvas id="detection-canvas"></canvas>
+                <div class="video-overlay">
+                    <div class="video-status stopped" id="video-status">请上传视频</div>
+                    <div class="video-status" style="color: #00d9ff;">YOLO + CLIP 融合决策</div>
+                </div>
+            </div>
+            
+            <div class="video-controls">
+                <div class="upload-area">
+                    <button class="upload-btn">📁 导入视频</button>
+                    <input type="file" id="file-input" accept="video/*">
+                </div>
+                <button class="btn-play" onclick="togglePlay()" disabled>▶️ 播放</button>
+                <button class="btn-stop" onclick="stopVideo()" disabled>⏹️ 停止</button>
+                <button class="btn-analyze" onclick="startAnalysis()">🔍 开始分析</button>
+                <span id="video-info" style="color: #888; font-size: 12px;"></span>
+            </div>
+            
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            
+            <div class="timeline">
+                <div class="timeline-bar" id="timeline-bar">
+                    <div class="timeline-progress" id="timeline-progress"></div>
+                    <div class="timeline-markers" id="timeline-markers"></div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #888;">
+                    <span id="current-time">00:00</span>
+                    <span id="duration">00:00</span>
+                </div>
+            </div>
+            
+            <div class="status-indicator">
+                <div class="status-dot stopped" id="status-dot"></div>
+                <span id="status-text">等待视频导入</span>
+            </div>
+            
+            <div class="decision-panel">
+                <div class="decision-title">融合决策结果</div>
+                <div class="decision-result">
+                    <span class="decision-icon" id="decision-icon">📋</span>
+                    <span class="decision-text level-0" id="decision-text">等待分析</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="sidebar">
+            <div class="panel">
+                <div class="panel-title">📊 实时统计</div>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">处理帧数</div>
+                        <div class="stat-value normal" id="stat-frames">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">平均耗时</div>
+                        <div class="stat-value info" id="stat-time">0ms</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">警告次数</div>
+                        <div class="stat-value warning" id="stat-warning">0</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">严重预警</div>
+                        <div class="stat-value critical" id="stat-critical">0</div>
+                    </div>
+                </div>
+                <div class="chart-container" id="chart-container"></div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">⚡ 通道状态</div>
+                <div class="channel-info">
+                    <div class="channel-box fast">
+                        <div class="channel-title">快通道 (YOLO)</div>
+                        <div class="channel-status inactive" id="fast-status">未启动</div>
+                        <div style="font-size: 10px; color: #888; margin-top: 5px;">每帧执行</div>
+                    </div>
+                    <div class="channel-box slow">
+                        <div class="channel-title">慢通道 (CLIP)</div>
+                        <div class="channel-status inactive" id="slow-status">未启动</div>
+                        <div style="font-size: 10px; color: #888; margin-top: 5px;">每5帧执行</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel alarm-list">
+                <div class="panel-title">🔔 报警记录</div>
+                <div id="alarm-list">
+                    <div style="text-align: center; color: #666; padding: 30px;">
+                        <div style="font-size: 32px; margin-bottom: 10px;">�</div>
+                        <div>请导入视频并开始分析</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel config-panel">
+                <div class="panel-title">⚙️ 系统配置</div>
+                <div class="config-item">
+                    <label>报警推送</label>
+                    <div class="toggle-switch active" id="toggle-alarm" onclick="toggleAlarm()"></div>
+                </div>
+                <div class="config-item">
+                    <label>报警阈值</label>
+                    <select id="alarm-threshold" onchange="updateThreshold()">
+                        <option value="1">警告及以上</option>
+                        <option value="2">仅严重</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>使用CLIP</label>
+                    <div class="toggle-switch active" id="toggle-clip" onclick="toggleClip()"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const video = document.getElementById('input-video');
+        const canvas = document.getElementById('detection-canvas');
+        const ctx = canvas.getContext('2d');
+        const fileInput = document.getElementById('file-input');
+        
+        let isPlaying = false;
+        let isAnalyzing = false;
+        let animationId = null;
+        let stats = {
+            total_frames: 0,
+            warning_count: 0,
+            critical_count: 0,
+            average_time: 0.0
+        };
+        
+        let alarmHistory = [];
+        let alarmPushEnabled = true;
+        let alarmThreshold = 1;
+        let useClip = true;
+        
+        let fastChannelWarning = 0;
+        let slowChannelWarning = 0;
+        let arbitrationCount = 0;
+        let arbitrationInterval = 5;
+        
+        let detectedObjects = [];
+        let chartData = [];
+        
+        fileInput.addEventListener('change', handleFileUpload);
+        
+        function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const url = URL.createObjectURL(file);
+            video.src = url;
+            
+            video.onloadedmetadata = function() {
+                document.getElementById('video-info').innerText = `${file.name} · ${video.videoWidth}×${video.videoHeight} · ${formatTime(video.duration)}`;
+                document.getElementById('duration').innerText = formatTime(video.duration);
+                document.querySelector('.btn-play').disabled = false;
+                document.querySelector('.btn-stop').disabled = false;
+                updateStatus('ready');
+                
+                resizeCanvas();
+                drawEmptyScreen();
+            };
+        }
+        
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        function drawEmptyScreen() {
+            ctx.fillStyle = '#0a0a0f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#333';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('等待视频播放...', canvas.width / 2, canvas.height / 2);
+        }
+        
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        function togglePlay() {
+            if (isPlaying) {
+                video.pause();
+                isPlaying = false;
+                document.querySelector('.btn-play').innerText = '▶️ 播放';
+                document.querySelector('.btn-play').className = 'btn-play';
+            } else {
+                video.play();
+                isPlaying = true;
+                document.querySelector('.btn-play').innerText = '⏸️ 暂停';
+                document.querySelector('.btn-play').className = 'btn-pause';
+                updateStatus('playing');
+                
+                if (!isAnalyzing) {
+                    processFrame();
+                }
+            }
+        }
+        
+        function stopVideo() {
+            video.pause();
+            video.currentTime = 0;
+            isPlaying = false;
+            isAnalyzing = false;
+            document.querySelector('.btn-play').innerText = '▶️ 播放';
+            document.querySelector('.btn-play').className = 'btn-play';
+            updateStatus('ready');
+            drawEmptyScreen();
+        }
+        
+        function startAnalysis() {
+            if (!video.src) {
+                alert('请先导入视频！');
+                return;
+            }
+            
+            isAnalyzing = true;
+            stats = { total_frames: 0, warning_count: 0, critical_count: 0, average_time: 0.0 };
+            alarmHistory = [];
+            chartData = [];
+            detectedObjects = [];
+            arbitrationCount = 0;
+            
+            document.getElementById('progress-bar').style.display = 'block';
+            document.getElementById('progress-fill').style.width = '0%';
+            
+            renderAlarms();
+            updateStatsDisplay();
+            
+            if (!isPlaying) {
+                togglePlay();
+            }
+        }
+        
+        function processFrame() {
+            if (!isPlaying) return;
+            
+            const startTime = performance.now();
+            
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            simulateDetection();
+            calculateWarnings();
+            
+            const decision = makeDecision();
+            drawWarningOverlay(decision.level);
+            drawDetectionBoxes();
+            
+            if (isAnalyzing) {
+                addAlarm(decision.level, decision.riskType);
+                updateDecisionPanel(decision.level, decision.riskType);
+                
+                const processingTime = (performance.now() - startTime) / 1000;
+                updateStats(decision.level, processingTime);
+                
+                const progress = (video.currentTime / video.duration) * 100;
+                document.getElementById('progress-fill').style.width = progress + '%';
+            }
+            
+            document.getElementById('current-time').innerText = formatTime(video.currentTime);
+            document.getElementById('timeline-progress').style.width = (video.currentTime / video.duration * 100) + '%';
+            
+            video.addEventListener('timeupdate', function updateTime() {
+                document.getElementById('current-time').innerText = formatTime(video.currentTime);
+                document.getElementById('timeline-progress').style.width = (video.currentTime / video.duration * 100) + '%';
+                video.removeEventListener('timeupdate', updateTime);
+            });
+            
+            animationId = requestAnimationFrame(processFrame);
+        }
+        
+        function simulateDetection() {
+            detectedObjects = [];
+            
+            const frameWidth = canvas.width;
+            const frameHeight = canvas.height;
+            
+            if (Math.random() < 0.3) {
+                const types = ['car', 'person', 'motorcycle', 'bicycle'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                
+                detectedObjects.push({
+                    x: Math.random() * (frameWidth - 100),
+                    y: frameHeight * 0.3 + Math.random() * (frameHeight * 0.5),
+                    w: type === 'car' ? 60 + Math.random() * 40 : (type === 'person' ? 30 : 40),
+                    h: type === 'car' ? 40 + Math.random() * 20 : (type === 'person' ? 70 : 35),
+                    type: type,
+                    confidence: 0.7 + Math.random() * 0.25,
+                    trackId: Math.floor(Math.random() * 100),
+                    ttc: Math.random() * 10 + 1
+                });
+            }
+            
+            if (Math.random() < 0.15) {
+                detectedObjects.push({
+                    x: Math.random() * (frameWidth - 100),
+                    y: frameHeight * 0.5 + Math.random() * (frameHeight * 0.3),
+                    w: 30,
+                    h: 70,
+                    type: 'person',
+                    confidence: 0.8 + Math.random() * 0.15,
+                    trackId: Math.floor(Math.random() * 100),
+                    ttc: Math.random() * 5 + 0.5
+                });
+            }
+        }
+        
+        function drawDetectionBoxes() {
+            detectedObjects.forEach(obj => {
+                const color = obj.type === 'person' ? '#ffa502' : '#00d9ff';
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+                
+                ctx.fillStyle = color;
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText(`${obj.type} ${(obj.confidence * 100).toFixed(0)}%`, obj.x, obj.y - 5);
+                ctx.fillText(`TTC: ${obj.ttc.toFixed(1)}s`, obj.x, obj.y + obj.h + 15);
+            });
+        }
+        
+        function calculateWarnings() {
+            fastChannelWarning = 0;
+            slowChannelWarning = 0;
+            
+            detectedObjects.forEach(obj => {
+                if (obj.ttc < 2.0) {
+                    fastChannelWarning = Math.max(fastChannelWarning, 2);
+                } else if (obj.ttc < 5.0) {
+                    fastChannelWarning = Math.max(fastChannelWarning, 1);
+                }
+            });
+            
+            arbitrationCount++;
+            if (arbitrationCount % arbitrationInterval === 0 && useClip && detectedObjects.length > 0) {
+                if (Math.random() < 0.4) {
+                    slowChannelWarning = Math.random() > 0.5 ? 2 : 1;
+                }
+            }
+        }
+        
+        function makeDecision() {
+            let level = 0;
+            let riskType = "normal";
+            
+            if (fastChannelWarning >= 2 && slowChannelWarning >= 2) {
+                level = 2;
+                riskType = "confirmed: collision_imminent";
+            } else if (fastChannelWarning >= 1 || slowChannelWarning >= 1) {
+                level = 1;
+                if (fastChannelWarning >= 1) {
+                    riskType = "fast_channel: ttc_warning";
+                } else {
+                    riskType = "slow_channel: clip_risk";
+                }
+            }
+            
+            return { level, riskType };
+        }
+        
+        function drawWarningOverlay(level) {
+            if (level >= 2) {
+                ctx.strokeStyle = '#ff4757';
+                ctx.lineWidth = 6;
+                ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+                
+                ctx.fillStyle = 'rgba(255,71,87,0.2)';
+                ctx.fillRect(10, 10, canvas.width - 20, canvas.height - 20);
+                
+                ctx.fillStyle = '#ff4757';
+                ctx.font = 'bold 36px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🚨 严重预警', canvas.width / 2, 60);
+            } else if (level >= 1) {
+                ctx.strokeStyle = '#ffa502';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(15, 15, canvas.width - 30, canvas.height - 30);
+                
+                ctx.fillStyle = 'rgba(255,165,2,0.15)';
+                ctx.fillRect(15, 15, canvas.width - 30, canvas.height - 30);
+                
+                ctx.fillStyle = '#ffa502';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('⚠️ 风险提醒', canvas.width / 2, 50);
+            }
+        }
+        
+        function updateStats(level, processingTime) {
+            stats.total_frames++;
+            stats.average_time = (stats.average_time * (stats.total_frames - 1) + processingTime) / stats.total_frames;
+            
+            if (level >= 2) {
+                stats.critical_count++;
+            } else if (level >= 1) {
+                stats.warning_count++;
+            }
+            
+            updateStatsDisplay();
+            updateChart();
+        }
+        
+        function updateStatsDisplay() {
+            document.getElementById('stat-frames').innerText = stats.total_frames;
+            document.getElementById('stat-time').innerText = (stats.average_time * 1000).toFixed(1) + 'ms';
+            document.getElementById('stat-warning').innerText = stats.warning_count;
+            document.getElementById('stat-critical').innerText = stats.critical_count;
+        }
+        
+        function updateChart() {
+            chartData.push({ warning: stats.warning_count, critical: stats.critical_count });
+            if (chartData.length > 20) {
+                chartData.shift();
+            }
+            
+            const container = document.getElementById('chart-container');
+            while (container.firstChild) {
+                container.removeChild(container.firstChild);
+            }
+            
+            const maxVal = Math.max(...chartData.map(d => d.warning + d.critical), 1);
+            
+            chartData.forEach((data, i) => {
+                const bar = document.createElement('div');
+                const height = Math.min(100, ((data.warning + data.critical) / maxVal) * 100);
+                bar.className = 'chart-bar ' + (data.critical > 0 ? 'critical' : data.warning > 0 ? 'warning' : 'normal');
+                bar.style.height = height + '%';
+                bar.style.left = (i * 4.8) + '%';
+                container.appendChild(bar);
+            });
+        }
+        
+        function addAlarm(level, riskType) {
+            if (!alarmPushEnabled || level < alarmThreshold) return;
+            
+            const alarm = {
+                timestamp: formatTime(video.currentTime),
+                level: level,
+                level_text: level >= 2 ? '严重' : '警告',
+                risk_type: riskType,
+                ttc: (Math.random() * 3 + 0.5).toFixed(2),
+                clip_sim: (Math.random() * 0.3 + 0.7).toFixed(4)
+            };
+            
+            alarmHistory.unshift(alarm);
+            if (alarmHistory.length > 50) {
+                alarmHistory.pop();
+            }
+            
+            renderAlarms();
+            updateTimelineMarkers();
+            
+            if (level >= 2) {
+                playAlarmSound();
+            }
+        }
+        
+        function renderAlarms() {
+            const list = document.getElementById('alarm-list');
+            
+            if (alarmHistory.length === 0) {
+                list.innerHTML = `
+                    <div style="text-align: center; color: #666; padding: 30px;">
+                        <div style="font-size: 32px; margin-bottom: 10px;">�</div>
+                        <div>分析中...等待预警</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            list.innerHTML = alarmHistory.map(alarm => `
+                <div class="alarm-item ${alarm.level >= 2 ? 'critical' : 'warning'}">
+                    <div class="alarm-header">
+                        <span class="alarm-level ${alarm.level >= 2 ? 'critical' : 'warning'}">${alarm.level_text}</span>
+                        <span class="alarm-time">${alarm.timestamp}</span>
+                    </div>
+                    <div class="alarm-type">${alarm.risk_type}</div>
+                    <div class="alarm-meta">
+                        <span>TTC: ${alarm.ttc}s</span>
+                        <span>CLIP: ${(parseFloat(alarm.clip_sim) * 100).toFixed(1)}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function updateTimelineMarkers() {
+            const markers = document.getElementById('timeline-markers');
+            markers.innerHTML = '';
+            
+            alarmHistory.forEach(alarm => {
+                const time = video.duration > 0 ? (video.currentTime / video.duration) * 100 : 0;
+                const marker = document.createElement('div');
+                marker.className = 'timeline-marker ' + (alarm.level >= 2 ? 'critical' : 'warning');
+                marker.style.left = time + '%';
+                markers.appendChild(marker);
+            });
+        }
+        
+        function playAlarmSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.value = 800;
+                oscillator.type = 'sine';
+                
+                gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + 0.5);
+            } catch (e) {
+                console.log('Audio play failed:', e);
+            }
+        }
+        
+        function updateDecisionPanel(level, riskType) {
+            const icon = document.getElementById('decision-icon');
+            const text = document.getElementById('decision-text');
+            
+            text.className = 'decision-text level-' + level;
+            
+            if (level >= 2) {
+                icon.innerText = '🚨';
+                text.innerText = '最高警告 - 双通道确认';
+            } else if (level >= 1) {
+                icon.innerText = '⚠️';
+                text.innerText = '风险提醒 - 单通道报警';
+            } else {
+                icon.innerText = '✅';
+                text.innerText = '正常行驶';
+            }
+            
+            document.getElementById('fast-status').innerText = fastChannelWarning >= 1 ? '报警' : '运行中';
+            document.getElementById('fast-status').className = 'channel-status ' + (fastChannelWarning >= 1 ? 'alarm' : 'active');
+            document.getElementById('slow-status').innerText = slowChannelWarning >= 1 ? '报警' : '运行中';
+            document.getElementById('slow-status').className = 'channel-status ' + (slowChannelWarning >= 1 ? 'alarm' : 'active');
+        }
+        
+        function updateStatus(status) {
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            const videoStatus = document.getElementById('video-status');
+            
+            if (status === 'playing') {
+                dot.className = 'status-dot running';
+                text.innerText = '播放中';
+                videoStatus.className = 'video-status running';
+                videoStatus.innerText = '播放中';
+            } else if (status === 'processing') {
+                dot.className = 'status-dot processing';
+                text.innerText = '分析中...';
+                videoStatus.className = 'video-status processing';
+                videoStatus.innerText = '分析中...';
+            } else if (status === 'ready') {
+                dot.className = 'status-dot running';
+                text.innerText = '准备就绪';
+                videoStatus.className = 'video-status running';
+                videoStatus.innerText = '准备就绪';
+            } else {
+                dot.className = 'status-dot stopped';
+                text.innerText = '已停止';
+                videoStatus.className = 'video-status stopped';
+                videoStatus.innerText = '已停止';
+            }
+        }
+        
+        function toggleAlarm() {
+            const toggle = document.getElementById('toggle-alarm');
+            alarmPushEnabled = !toggle.classList.contains('active');
+            toggle.classList.toggle('active');
+        }
+        
+        function updateThreshold() {
+            alarmThreshold = parseInt(document.getElementById('alarm-threshold').value);
+        }
+        
+        function toggleClip() {
+            const toggle = document.getElementById('toggle-clip');
+            useClip = !toggle.classList.contains('active');
+            toggle.classList.toggle('active');
+        }
+        
+        document.getElementById('timeline-bar').addEventListener('click', function(e) {
+            const rect = this.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            video.currentTime = percent * video.duration;
+        });
+        
+        video.addEventListener('ended', function() {
+            isPlaying = false;
+            isAnalyzing = false;
+            document.querySelector('.btn-play').innerText = '▶️ 播放';
+            document.querySelector('.btn-play').className = 'btn-play';
+            updateStatus('ready');
+        });
+        
+        drawEmptyScreen();
+    </script>
+</body>
+</html>

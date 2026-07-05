@@ -1,0 +1,4607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirChords — 空气吉他手势音乐工作站</title>
+  
+  <!-- MediaPipe CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+  
+  <!-- Tone.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --glass: rgba(255, 255, 255, 0.6);
+      --glass-border: rgba(255, 255, 255, 0.8);
+      --blur: 20px;
+      --saturate: 180%;
+      --radius: 24px;
+      --left-color: rgba(255, 107, 107, 0.15);
+      --right-color: rgba(78, 205, 196, 0.15);
+      --accent: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+      --font: -apple-system, 'SF Pro Display', system-ui, sans-serif;
+      --left-hue: 0;
+      --right-hue: 175;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .mobile-warning {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      z-index: 1000;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .mobile-warning h1 {
+      color: #FF6B6B;
+      margin-bottom: 20px;
+      font-size: 24px;
+    }
+
+    .mobile-warning p {
+      color: #666;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 768px) {
+      .mobile-warning {
+        display: flex;
+      }
+      #app {
+        display: none;
+      }
+    }
+
+    #camera-video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .btn-record-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      background: rgba(255, 107, 107, 0.1);
+      border: 2px solid #FF6B6B;
+      border-radius: 30px;
+      color: #FF6B6B;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .btn-record-main:hover {
+      background: rgba(255, 107, 107, 0.2);
+      transform: scale(1.05);
+    }
+
+    .btn-record-main.recording {
+      background: #FF6B6B;
+      color: white;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    .btn-record-main.recording .record-icon {
+      animation: blink 0.5s ease-in-out infinite;
+    }
+
+    .record-icon {
+      font-size: 16px;
+    }
+
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.8s;
+      overflow: hidden;
+    }
+
+    #splash-screen.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .splash-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+
+    .splash-gradient-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 20% 50%, rgba(255, 107, 107, 0.3) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(78, 205, 196, 0.3) 0%, transparent 50%),
+        radial-gradient(circle at 60% 80%, rgba(156, 39, 176, 0.2) 0%, transparent 50%);
+      animation: gradientShift 8s ease-in-out infinite;
+    }
+
+    @keyframes gradientShift {
+      0%, 100% {
+        transform: scale(1) rotate(0deg);
+      }
+      50% {
+        transform: scale(1.2) rotate(5deg);
+      }
+    }
+
+    .splash-glass-card {
+      position: relative;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(30px) saturate(200%);
+      -webkit-backdrop-filter: blur(30px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 32px;
+      padding: 60px 80px;
+      box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      text-align: center;
+      overflow: hidden;
+      animation: float 6s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0px);
+      }
+      50% {
+        transform: translateY(-20px);
+      }
+    }
+
+    .splash-glass-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(
+        45deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.15) 50%,
+        transparent 70%
+      );
+      transform: rotate(45deg) translateY(-100%);
+      animation: shimmer 4s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      0% {
+        transform: rotate(45deg) translateY(-100%);
+      }
+      100% {
+        transform: rotate(45deg) translateY(100%);
+      }
+    }
+
+    .splash-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      filter: drop-shadow(0 0 20px rgba(255, 107, 107, 0.5));
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 20px rgba(255, 107, 107, 0.5));
+      }
+      50% {
+        transform: scale(1.1);
+        filter: drop-shadow(0 0 40px rgba(78, 205, 196, 0.8));
+      }
+    }
+
+    .splash-title {
+      font-size: 48px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 10px;
+      letter-spacing: 2px;
+    }
+
+    .splash-subtitle {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 40px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+
+    .splash-hint {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      animation: fadeInOut 2s ease-in-out infinite;
+    }
+
+    @keyframes fadeInOut {
+      0%, 100% {
+        opacity: 0.3;
+      }
+      50% {
+        opacity: 0.8;
+      }
+    }
+
+    .splash-particles {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 50%;
+      animation: particleFloat 8s linear infinite;
+    }
+
+    @keyframes particleFloat {
+      0% {
+        transform: translateY(100vh) scale(0);
+        opacity: 0;
+      }
+      10% {
+        opacity: 1;
+        transform: translateY(80vh) scale(1);
+      }
+      90% {
+        opacity: 1;
+        transform: translateY(10vh) scale(1);
+      }
+      100% {
+        transform: translateY(-10vh) scale(0);
+        opacity: 0;
+      }
+    }
+
+    #camera-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 20;
+    }
+
+    .glass-card {
+      background: var(--glass);
+      backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .glass-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: linear-gradient(
+        45deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.3) 50%,
+        transparent 70%
+      );
+      transform: rotate(45deg) translateY(-100%);
+      transition: transform 0.6s ease;
+      pointer-events: none;
+    }
+
+    .glass-card:hover::before {
+      transform: rotate(45deg) translateY(0%);
+    }
+
+    .glass-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+    }
+
+    .navbar {
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--glass);
+      backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .navbar h1 {
+      font-size: 20px;
+      background: var(--accent);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .nav-btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.9);
+      transform: translateY(-1px);
+    }
+
+    .nav-btn.active {
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      color: white;
+    }
+
+    .main-content {
+      flex: 1;
+      display: flex;
+      padding: 15px;
+      gap: 15px;
+      overflow: hidden;
+    }
+
+    .left-panel {
+      width: 220px;
+      background: var(--left-color);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      border: 1px solid rgba(255, 107, 107, 0.2);
+    }
+
+    .right-panel {
+      width: 220px;
+      background: var(--right-color);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      border: 1px solid rgba(78, 205, 196, 0.2);
+    }
+
+    .panel-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      text-align: center;
+      padding-bottom: 10px;
+      border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .current-display {
+      text-align: center;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 16px;
+      transition: all 0.3s ease;
+    }
+
+    .current-display.active {
+      animation: pulse-glow 1.5s ease-in-out infinite;
+    }
+
+    .current-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 5px;
+    }
+
+    .current-value {
+      font-size: 28px;
+      font-weight: 700;
+      background: var(--accent);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .gesture-table {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+    }
+
+    .gesture-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 12px;
+      transition: all 0.2s ease;
+    }
+
+    .gesture-item:hover {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .gesture-item.active {
+      background: rgba(255, 107, 107, 0.2);
+      border: 1px solid rgba(255, 107, 107, 0.4);
+    }
+
+    .right-panel .gesture-item.active {
+      background: rgba(78, 205, 196, 0.2);
+      border: 1px solid rgba(78, 205, 196, 0.4);
+    }
+
+    .panel-controls {
+      margin-top: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 12px;
+    }
+
+    .control-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .pitch-controls-large {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .pitch-btn-large {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #FF6B6B, #FF8E8E);
+      color: white;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .pitch-btn-large:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+    }
+
+    #pitch-display-large {
+      min-width: 50px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: #FF6B6B;
+    }
+
+    .duration-selector {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .duration-btn-small {
+      padding: 6px 10px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.6);
+      color: #333;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .duration-btn-small:hover {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .duration-btn-small.active {
+      background: linear-gradient(135deg, #4ECDC4, #6EE7DF);
+      color: white;
+    }
+
+    .gesture-emoji {
+      font-size: 18px;
+    }
+
+    .gesture-name {
+      font-size: 14px;
+      color: #333;
+    }
+
+    .center-panel {
+      flex: 1;
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.3);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--shadow);
+    }
+
+    .camera-placeholder {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #999;
+      font-size: 14px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .camera-placeholder i {
+      font-size: 64px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+    }
+
+
+
+    .center-panel canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 20;
+    }
+
+    .chord-name-overlay {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 15px 30px;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 30px;
+      color: white;
+      font-size: 24px;
+      font-weight: 700;
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .chord-name-overlay.visible {
+      opacity: 1;
+    }
+
+    .chord-progress-bar {
+      width: 60px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .chord-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.1s linear;
+    }
+
+    .chord-progressions {
+      height: 80px;
+      margin: 0 15px 15px;
+      padding: 15px;
+      background: var(--glass);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius);
+      border: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .chord-progressions::-webkit-scrollbar {
+      display: none;
+    }
+
+    .progression-card {
+      flex-shrink: 0;
+      padding: 10px 20px;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border: 2px solid transparent;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .progression-card:hover {
+      background: rgba(255, 255, 255, 0.8);
+      transform: translateY(-2px);
+    }
+
+    .progression-card.active {
+      border-color: #FF6B6B;
+      background: linear-gradient(135deg, rgba(255, 107, 107, 0.1), rgba(78, 205, 196, 0.1));
+      animation: active-pulse 2s ease-in-out infinite;
+    }
+
+    .looper-section {
+      height: 80px;
+      margin: 0 15px 15px;
+      padding: 15px;
+      background: var(--glass);
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+      border-radius: var(--radius);
+      border: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      gap: 30px;
+    }
+
+    .looper-track {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 15px;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 16px;
+    }
+
+    .track-number {
+      font-weight: 600;
+      color: #333;
+      min-width: 30px;
+    }
+
+    .track-controls {
+      display: flex;
+      gap: 5px;
+    }
+
+    .track-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .track-btn:hover {
+      transform: scale(1.1);
+    }
+
+    .track-btn.record {
+      color: #FF6B6B;
+    }
+
+    .track-btn.record.recording {
+      background: #FF6B6B;
+      color: white;
+      animation: record-pulse 1s ease-in-out infinite;
+    }
+
+    .track-btn.play {
+      color: #4ECDC4;
+    }
+
+    .track-btn.play.playing {
+      background: #4ECDC4;
+      color: white;
+    }
+
+    .track-btn.delete {
+      color: #999;
+    }
+
+    .track-btn.delete:hover {
+      color: #FF4757;
+    }
+
+    .track-duration {
+      font-size: 12px;
+      color: #666;
+      min-width: 50px;
+    }
+
+    .footer {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--glass);
+      backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--saturate));
+      border-top: 1px solid var(--glass-border);
+      flex-wrap: nowrap;
+    }
+
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .footer-center {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .footer-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-camera {
+      padding: 10px 25px;
+      border: none;
+      border-radius: 25px;
+      background: var(--accent);
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-camera:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+    }
+
+    .btn-camera.active {
+      background: linear-gradient(135deg, #4ECDC4, #FF6B6B);
+      animation: camera-pulse 2s ease-in-out infinite;
+    }
+
+    .select-instrument {
+      padding: 8px 15px;
+      border: none;
+      border-radius: 15px;
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .slider-label {
+      font-size: 12px;
+      color: #666;
+      min-width: 40px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100px;
+      height: 4px;
+      background: rgba(0, 0, 0, 0.1);
+      border-radius: 2px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .pitch-controls {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .pitch-btn {
+      width: 30px;
+      height: 30px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+
+    .pitch-btn:hover {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    #pitch-display {
+      min-width: 40px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .delay-controls {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .delay-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.7);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .delay-btn:hover {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .delay-btn.active {
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      color: white;
+    }
+
+    .tutorial-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      z-index: 100;
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .tutorial-overlay.show {
+      display: flex;
+    }
+
+    .tutorial-modal {
+      background: var(--glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 500px;
+      max-width: 90%;
+      text-align: center;
+      position: relative;
+      animation: modal-appear 0.3s ease;
+    }
+
+    .tutorial-progress {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 0, 0, 0.1);
+      border-radius: var(--radius) var(--radius) 0 0;
+      overflow: hidden;
+    }
+
+    .tutorial-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .tutorial-step {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 20px;
+    }
+
+    .tutorial-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    .tutorial-content {
+      font-size: 16px;
+      color: #555;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .tutorial-emoji {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+
+    .tutorial-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+    }
+
+    .tutorial-btn {
+      padding: 12px 30px;
+      border: none;
+      border-radius: 25px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .tutorial-btn.next {
+      background: var(--accent);
+      color: white;
+    }
+
+    .tutorial-btn.next:hover {
+      transform: translateY(-2px);
+    }
+
+    .tutorial-btn.skip {
+      background: rgba(255, 255, 255, 0.8);
+      color: #666;
+    }
+
+    .tutorial-btn.skip:hover {
+      background: rgba(255, 255, 255, 1);
+    }
+
+    .tutorial-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .recording-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #FF4757;
+      border-radius: 50%;
+      animation: blink 1s ease-in-out infinite;
+      margin-right: 5px;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% {
+        box-shadow: 0 0 10px rgba(255, 107, 107, 0.3);
+      }
+      50% {
+        box-shadow: 0 0 25px rgba(255, 107, 107, 0.6);
+      }
+    }
+
+    @keyframes active-pulse {
+      0%, 100% {
+        box-shadow: 0 0 5px rgba(255, 107, 107, 0.5);
+      }
+      50% {
+        box-shadow: 0 0 15px rgba(255, 107, 107, 0.8);
+      }
+    }
+
+    @keyframes record-pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.6;
+      }
+    }
+
+    @keyframes camera-pulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4);
+      }
+      70% {
+        box-shadow: 0 0 0 10px rgba(255, 107, 107, 0);
+      }
+    }
+
+    @keyframes modal-appear {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @keyframes blink {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    #looper-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 20, 30, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #looper-modal.open {
+      display: flex;
+    }
+
+    #drum-panel-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 20, 30, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #drum-panel-modal.open {
+      display: flex;
+    }
+
+    /* 听音模态窗口 */
+    #listening-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(10px);
+      display: none;
+      flex-direction: column;
+      z-index: 1000;
+    }
+
+    #listening-modal.open {
+      display: flex;
+    }
+
+    .listening-header {
+      height: 60px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .listening-header h2 {
+      color: #fff;
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .listening-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .listening-pitch-display {
+      text-align: center;
+      padding: 30px 20px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      margin-bottom: 20px;
+    }
+
+    .listening-note {
+      font-size: 72px;
+      font-weight: 700;
+      color: #4ECDC4;
+      margin-bottom: 10px;
+    }
+
+    .listening-jianpu {
+      font-size: 48px;
+      font-weight: 700;
+      color: #FF6B6B;
+      margin-bottom: 10px;
+    }
+
+    .listening-octave {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .listening-frequency {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 5px;
+    }
+
+    .listening-volume-bar {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      margin-top: 15px;
+      overflow: hidden;
+    }
+
+    .listening-volume-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4ECDC4, #FF6B6B);
+      border-radius: 4px;
+      transition: width 0.05s;
+    }
+
+    .listening-score-section {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .listening-score-title {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 14px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .listening-score-display {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 60px;
+      align-content: flex-start;
+    }
+
+    .jianpu-note {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 40px;
+      height: 40px;
+      padding: 4px 8px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      transition: all 0.2s;
+    }
+
+    .jianpu-note.low {
+      color: #FF6B6B;
+    }
+
+    .jianpu-note.high {
+      color: #4ECDC4;
+    }
+
+    .jianpu-note.rest {
+      background: rgba(255, 255, 255, 0.05);
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    .listening-controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+    }
+
+    .listening-btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .listening-btn.record {
+      background: linear-gradient(135deg, #FF6B6B, #FF8E8E);
+      color: white;
+    }
+
+    .listening-btn.record.active {
+      animation: record-pulse 1s infinite;
+    }
+
+    .listening-btn.play {
+      background: linear-gradient(135deg, #4ECDC4, #6EE7DF);
+      color: white;
+    }
+
+    .listening-btn.clear {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+    }
+
+    .listening-btn:hover {
+      transform: scale(1.05);
+    }
+
+    @keyframes record-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .drum-panel-header {
+      height: 60px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .drum-panel-header h2 {
+      color: #fff;
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .drum-panel-content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .drum-section {
+      margin-bottom: 30px;
+    }
+
+    .drum-section h3,
+    .chord-section h3 {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 16px;
+      margin-bottom: 15px;
+    }
+
+    .drum-slider-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .drum-slider {
+      flex: 1;
+      height: 6px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      outline: none;
+    }
+
+    .drum-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .drum-slider-label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+      width: 40px;
+    }
+
+    .drum-bpm-value {
+      color: #4ECDC4;
+      font-size: 24px;
+      font-weight: bold;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .drum-patterns-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }
+
+    .drum-pattern-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding: 15px;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-align: left;
+    }
+
+    .drum-pattern-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .drum-pattern-btn.active {
+      background: linear-gradient(135deg, rgba(255, 107, 107, 0.3), rgba(78, 205, 196, 0.3));
+      border-color: #4ECDC4;
+    }
+
+    .pattern-name {
+      display: block;
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .pattern-desc {
+      display: block;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .drum-preview {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 15px;
+    }
+
+    .drum-preview-track {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 10px;
+    }
+
+    .drum-preview-track:last-child {
+      margin-bottom: 0;
+    }
+
+    .track-label {
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+      width: 50px;
+    }
+
+    .drum-grid {
+      flex: 1;
+      display: flex;
+      gap: 5px;
+    }
+
+    .drum-grid-cell {
+      flex: 1;
+      height: 30px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      transition: background 0.3s ease;
+    }
+
+    .drum-grid-cell.active {
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+    }
+
+    .drum-panel-footer {
+      padding: 15px 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: center;
+    }
+
+    .drum-footer-btn {
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      border: none;
+      color: #fff;
+      padding: 12px 40px;
+      border-radius: 25px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .drum-footer-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 20px rgba(78, 205, 196, 0.4);
+    }
+
+    #chord-editor-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 20, 30, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #chord-editor-modal.open {
+      display: flex;
+    }
+
+    .chord-editor-header {
+      height: 60px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .chord-editor-header h2 {
+      color: #fff;
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .chord-editor-content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .chord-instrument-buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .chord-instrument-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 10px 20px;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 14px;
+    }
+
+    .chord-instrument-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .chord-instrument-btn.active {
+      background: linear-gradient(135deg, rgba(255, 107, 107, 0.3), rgba(78, 205, 196, 0.3));
+      border-color: #4ECDC4;
+    }
+
+    .chord-library {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+
+    .chord-group {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 15px;
+    }
+
+    .chord-group-title {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 12px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .chord-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 8px 15px;
+      color: #fff;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 14px;
+      margin: 3px;
+    }
+
+    .chord-btn:hover {
+      background: rgba(78, 205, 196, 0.3);
+      border-color: #4ECDC4;
+    }
+
+    .chord-sequence-controls {
+      display: flex;
+      gap: 30px;
+      margin-bottom: 15px;
+      flex-wrap: wrap;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .control-group label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 12px;
+    }
+
+    .chord-duration-selector {
+      display: flex;
+      gap: 5px;
+    }
+
+    .duration-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      padding: 5px 15px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .duration-btn.active {
+      background: #4ECDC4;
+      border-color: #4ECDC4;
+    }
+
+    .chord-bars-input {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      padding: 5px 10px;
+      color: #fff;
+      width: 60px;
+    }
+
+    .chord-sequence {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 15px;
+      min-height: 80px;
+    }
+
+    .chord-sequence-empty {
+      color: rgba(255, 255, 255, 0.3);
+      text-align: center;
+      padding: 20px;
+    }
+
+    .chord-sequence-item {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(78, 205, 196, 0.2);
+      border: 1px solid rgba(78, 205, 196, 0.4);
+      border-radius: 8px;
+      padding: 8px 15px;
+      margin: 5px;
+      color: #fff;
+    }
+
+    .chord-sequence-item .chord-name {
+      font-weight: bold;
+    }
+
+    .chord-sequence-item .chord-duration {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 12px;
+      margin-left: 8px;
+    }
+
+    .chord-sequence-item .chord-remove {
+      background: rgba(255, 107, 107, 0.5);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      margin-left: 8px;
+      font-size: 12px;
+    }
+
+    .chord-editor-footer {
+      padding: 15px 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .chord-footer-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 10px 30px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+
+    .chord-footer-btn:hover {
+      background: rgba(78, 205, 196, 0.3);
+      border-color: #4ECDC4;
+    }
+
+    .looper-header {
+      height: 60px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .looper-header h2 {
+      color: white;
+      font-size: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .looper-close-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: white;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .looper-close-btn:hover {
+      background: rgba(255, 107, 107, 0.3);
+    }
+
+    .modal-close-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: white;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .modal-close-btn:hover {
+      background: rgba(255, 107, 107, 0.3);
+    }
+
+    .looper-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow: hidden;
+    }
+
+    .looper-tracks-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+      padding-right: 10px;
+    }
+
+    .looper-track-item {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.2s ease;
+    }
+
+    .looper-track-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .looper-track-item.active-recording {
+      border-color: rgba(255, 107, 107, 0.5);
+      background: rgba(255, 107, 107, 0.1);
+    }
+
+    .looper-track-item.active-playing {
+      border-color: rgba(78, 205, 196, 0.5);
+      background: rgba(78, 205, 196, 0.1);
+    }
+
+    .looper-track-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .looper-track-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .looper-track-number {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #FF6B6B, #4ECDC4);
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .looper-track-name {
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .looper-track-duration {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 12px;
+    }
+
+    .looper-track-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .looper-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .looper-btn.record {
+      background: rgba(255, 107, 107, 0.2);
+      color: #FF6B6B;
+    }
+
+    .looper-btn.record:hover {
+      background: rgba(255, 107, 107, 0.4);
+    }
+
+    .looper-btn.record.recording {
+      background: #FF6B6B;
+      color: white;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    .looper-btn.play {
+      background: rgba(78, 205, 196, 0.2);
+      color: #4ECDC4;
+    }
+
+    .looper-btn.play:hover {
+      background: rgba(78, 205, 196, 0.4);
+    }
+
+    .looper-btn.play.playing {
+      background: #4ECDC4;
+      color: white;
+    }
+
+    .looper-btn.delete {
+      background: rgba(150, 150, 150, 0.2);
+      color: #969696;
+    }
+
+    .looper-btn.delete:hover {
+      background: rgba(255, 59, 48, 0.4);
+      color: #FF3B30;
+    }
+
+    .looper-visualizer {
+      height: 60px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .looper-visualizer:hover {
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    .looper-grid {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.03) 0px,
+        rgba(255, 255, 255, 0.03) 1px,
+        transparent 1px,
+        transparent 40px
+      );
+      pointer-events: none;
+    }
+
+    .looper-playhead {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2px;
+      height: 100%;
+      background: linear-gradient(180deg, #FF6B6B, #4ECDC4);
+      box-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+      transition: left 0.05s linear;
+      z-index: 10;
+    }
+
+    .looper-chord-block {
+      position: absolute;
+      top: 5px;
+      bottom: 5px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    .looper-chord-block:hover {
+      transform: scaleY(1.1);
+    }
+
+    .looper-chord-block.C { background: linear-gradient(135deg, #FF6B6B, #FF8E53); }
+    .looper-chord-block.D { background: linear-gradient(135deg, #FF8E53, #FFD93D); }
+    .looper-chord-block.E { background: linear-gradient(135deg, #6BCB77, #4ECDC4); }
+    .looper-chord-block.F { background: linear-gradient(135deg, #4ECDC4, #45B7D1); }
+    .looper-chord-block.G { background: linear-gradient(135deg, #9B59B6, #8E44AD); }
+    .looper-chord-block.A { background: linear-gradient(135deg, #3498DB, #2980B9); }
+    .looper-chord-block.B { background: linear-gradient(135deg, #E74C3C, #C0392B); }
+
+    .looper-footer {
+      height: 60px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .looper-footer-btn {
+      padding: 10px 24px;
+      border-radius: 20px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .looper-footer-btn.all-play {
+      background: linear-gradient(135deg, #4ECDC4, #45B7D1);
+      color: white;
+    }
+
+    .looper-footer-btn.all-play:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(78, 205, 196, 0.4);
+    }
+
+    .looper-footer-btn.all-stop {
+      background: rgba(255, 107, 107, 0.2);
+      color: #FF6B6B;
+    }
+
+    .looper-footer-btn.all-stop:hover {
+      background: rgba(255, 107, 107, 0.4);
+    }
+
+    .looper-footer-btn.all-clear {
+      background: rgba(150, 150, 150, 0.2);
+      color: #969696;
+    }
+
+    .looper-footer-btn.all-clear:hover {
+      background: rgba(255, 59, 48, 0.4);
+      color: #FF3B30;
+    }
+  </style>
+</head>
+<body>
+  <div id="splash-screen">
+    <div class="splash-bg"></div>
+    <div class="splash-gradient-overlay"></div>
+    <div class="splash-particles" id="splash-particles"></div>
+    <div class="splash-glass-card">
+      <div class="splash-icon">🎸</div>
+      <div class="splash-title">AirChords</div>
+      <div class="splash-subtitle">空气吉他</div>
+      <div class="splash-hint">点击任意位置开始</div>
+    </div>
+  </div>
+  
+  <div class="mobile-warning">
+    <h1>📱 请使用电脑访问</h1>
+    <p>本应用需要摄像头和手势识别功能，请使用台式机或笔记本电脑打开</p>
+  </div>
+
+  <div id="app">
+    <nav class="navbar">
+      <h1>🎸 AirChords 空气吉他</h1>
+      <div class="nav-buttons">
+        <button class="nav-btn" id="btn-camera-nav" onclick="toggleCamera()">📷 摄像头</button>
+        <button class="nav-btn" onclick="showTutorial()">📖 教程</button>
+        <button class="nav-btn" id="btn-listening" onclick="toggleListening()">🎙️ 听音</button>
+        <button class="nav-btn" id="btn-accompaniment" onclick="toggleAccompaniment()">🔁 伴奏</button>
+        <button class="nav-btn" id="btn-looper" onclick="toggleLooper()">🎛️ Loop</button>
+        <button class="nav-btn" id="btn-drum" onclick="toggleDrumPanel()">🥁 鼓点</button>
+        <button class="nav-btn" id="btn-chord-editor" onclick="toggleChordEditor()">🎵 和弦</button>
+      </div>
+    </nav>
+
+    <div class="main-content">
+      <div class="left-panel">
+        <div class="panel-title">左手 · 根音</div>
+        <div class="current-display" id="left-root">
+          <div class="current-label">当前根音</div>
+          <div class="current-value">--</div>
+        </div>
+        <div class="gesture-table" id="left-gestures">
+          <div class="gesture-item" data-gesture="fist">
+            <span class="gesture-emoji">✊</span>
+            <span class="gesture-name">静音</span>
+          </div>
+          <div class="gesture-item" data-gesture="index">
+            <span class="gesture-emoji">☝️</span>
+            <span class="gesture-name">C</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+middle">
+            <span class="gesture-emoji">✌️</span>
+            <span class="gesture-name">D</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+middle+ring">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">E (3指)</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+middle+ring+pinky">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">F (4指)</span>
+          </div>
+          <div class="gesture-item" data-gesture="all">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">G (5指)</span>
+          </div>
+          <div class="gesture-item" data-gesture="thumb+index">
+            <span class="gesture-emoji">🤞</span>
+            <span class="gesture-name">A (手枪)</span>
+          </div>
+          <div class="gesture-item" data-gesture="thumb+index+pinky">
+            <span class="gesture-emoji">🤘</span>
+            <span class="gesture-name">B (摇滚)</span>
+          </div>
+        </div>
+        <div class="panel-controls">
+          <div class="control-label">🎼 移调</div>
+          <div class="pitch-controls-large">
+            <button class="pitch-btn-large" onclick="changePitch(-1)">−</button>
+            <span id="pitch-display-large">原调</span>
+            <button class="pitch-btn-large" onclick="changePitch(1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="center-panel">
+        <div class="camera-placeholder" id="camera-placeholder">
+          <i>📷</i>
+          <div>点击下方「启动摄像头」按钮开始</div>
+        </div>
+        <video id="camera-video" autoplay playsinline muted></video>
+        <canvas id="camera-canvas"></canvas>
+        <div class="chord-name-overlay" id="chord-name-overlay">
+          <span id="current-chord">--</span>
+          <div class="chord-progress-bar">
+            <div class="chord-progress-fill" id="chord-progress-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="panel-title">右手 · 和弦属性</div>
+        <div class="current-display" id="right-quality">
+          <div class="current-label">当前属性</div>
+          <div class="current-value">--</div>
+        </div>
+        <div class="gesture-table" id="right-gestures">
+          <div class="gesture-item" data-gesture="fist">
+            <span class="gesture-emoji">✊</span>
+            <span class="gesture-name">大三 Major</span>
+          </div>
+          <div class="gesture-item" data-gesture="index">
+            <span class="gesture-emoji">☝️</span>
+            <span class="gesture-name">小三 minor</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+middle">
+            <span class="gesture-emoji">✌️</span>
+            <span class="gesture-name">属七 dom7</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+pinky">
+            <span class="gesture-emoji">🤙</span>
+            <span class="gesture-name">大七 maj7</span>
+          </div>
+          <div class="gesture-item" data-gesture="middle+ring+pinky">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">挂四 sus4</span>
+          </div>
+          <div class="gesture-item" data-gesture="index+middle+ring">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">挂二 sus2</span>
+          </div>
+          <div class="gesture-item" data-gesture="all">
+            <span class="gesture-emoji">🖐️</span>
+            <span class="gesture-name">加九 add9</span>
+          </div>
+        </div>
+        <div class="panel-controls">
+          <div class="control-label">⏱️ 和弦时长</div>
+          <div class="duration-selector">
+            <button class="duration-btn-small" data-duration="0.1" onclick="setSustainDuration(0.1, this)">0.1s</button>
+            <button class="duration-btn-small" data-duration="0.5" onclick="setSustainDuration(0.5, this)">0.5s</button>
+            <button class="duration-btn-small active" data-duration="1" onclick="setSustainDuration(1, this)">1s</button>
+            <button class="duration-btn-small" data-duration="2" onclick="setSustainDuration(2, this)">2s</button>
+            <button class="duration-btn-small" data-duration="3" onclick="setSustainDuration(3, this)">3s</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chord-progressions" id="chord-progression">
+      <div class="progression-card" data-name="流行经典" data-chords="C,G,Am,F" data-beats="4,4,4,4">流行经典 I-V-vi-IV</div>
+      <div class="progression-card" data-name="卡农" data-chords="C,G,Am,Em,F,C,F,G" data-beats="2,2,2,2,2,2,2,2">卡农进行</div>
+      <div class="progression-card" data-name="蓝调" data-chords="C7,F7,C7,G7,F7,C7,G7" data-beats="4,2,2,4,2,2,4">蓝调 12-bar</div>
+      <div class="progression-card" data-name="爵士" data-chords="Dm7,G7,Cmaj7,Cmaj7" data-beats="4,4,4,4">爵士 ii-V-I</div>
+      <div class="progression-card" data-name="50年代" data-chords="C,Am,F,G" data-beats="4,4,4,4">50年代 Doo-Wop</div>
+      <div class="progression-card" data-name="安达卢西亚" data-chords="Am,G,F,E" data-beats="4,4,4,4">安达卢西亚</div>
+      <div class="progression-card" data-name="Pachelbel" data-chords="C,G,Am,Em,F,C,F,G" data-beats="2,2,2,2,2,2,2,2">Pachelbel</div>
+    </div>
+
+    <div class="looper-section" id="looper-tracks">
+      <div class="looper-track" id="looper-track-1">
+        <span class="track-number">Track 1</span>
+        <div class="track-controls">
+          <button class="track-btn record" onclick="toggleRecording(1)">●</button>
+          <button class="track-btn play" onclick="togglePlayback(1)">▶</button>
+          <button class="track-btn delete" onclick="clearTrack(1)">✕</button>
+        </div>
+        <span class="track-duration" id="track-1-duration">00:00</span>
+      </div>
+      <div class="looper-track" id="looper-track-2">
+        <span class="track-number">Track 2</span>
+        <div class="track-controls">
+          <button class="track-btn record" onclick="toggleRecording(2)">●</button>
+          <button class="track-btn play" onclick="togglePlayback(2)">▶</button>
+          <button class="track-btn delete" onclick="clearTrack(2)">✕</button>
+        </div>
+        <span class="track-duration" id="track-2-duration">00:00</span>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="footer-left">
+        <button class="btn-camera" id="btn-camera" onclick="toggleCamera()">▶ 启动摄像头</button>
+        <select class="select-instrument" id="select-instrument" onchange="changeInstrument()">
+          <option value="piano">🎹 钢琴</option>
+          <option value="guitar">🎸 吉他</option>
+          <option value="synth">🎛️ 电子琴</option>
+          <option value="strings">🎻 弦乐</option>
+        </select>
+      </div>
+      <div class="footer-center">
+        <button class="btn-record-main" id="btn-record-main" onclick="toggleMainRecording()" style="margin-right:15px;">
+          <span class="record-icon">●</span>
+          <span class="record-text">录制 Track 1</span>
+        </button>
+        <div class="slider-container">
+          <span class="slider-label">音量</span>
+          <input type="range" id="slider-volume" min="0" max="100" value="70" oninput="changeVolume()">
+        </div>
+        <div class="slider-container">
+          <span class="slider-label">BPM</span>
+          <input type="range" id="slider-bpm" min="60" max="180" value="100" oninput="changeBPM()">
+        </div>
+        <div class="slider-container">
+          <span class="slider-label">渐弱</span>
+          <input type="range" id="slider-sustain" min="100" max="3000" value="1000" step="100" oninput="changeSustain()">
+          <span id="sustain-display" style="font-size:12px;color:#666;width:45px;">1.0s</span>
+        </div>
+      </div>
+      <div class="footer-right">
+        <div class="pitch-controls">
+          <button class="pitch-btn" onclick="changePitch(-1)">♭</button>
+          <span id="pitch-display">原调</span>
+          <button class="pitch-btn" onclick="changePitch(1)">♯</button>
+        </div>
+        <div class="delay-controls">
+          <button class="delay-btn" id="btn-delay" onclick="toggleDelay()">🔄 延迟</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="listening-modal">
+      <div class="listening-header">
+        <h2>🎙️ 听音辨调</h2>
+        <button class="modal-close-btn" onclick="closeListeningModal()">✕</button>
+      </div>
+      <div class="listening-content">
+        <div class="listening-pitch-display">
+          <div class="listening-note" id="listening-note">--</div>
+          <div class="listening-jianpu" id="listening-jianpu">-</div>
+          <div class="listening-octave" id="listening-octave">等待检测...</div>
+          <div class="listening-frequency" id="listening-frequency">0 Hz</div>
+          <div class="listening-volume-bar">
+            <div class="listening-volume-fill" id="listening-volume-fill" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="listening-score-section">
+          <div class="listening-score-title">
+            <span>📝 简谱记录</span>
+            <span id="listening-note-count">0 个音符</span>
+          </div>
+          <div class="listening-score-display" id="listening-score-display">
+            <div style="color: rgba(255,255,255,0.4);">点击「开始录制」记录旋律</div>
+          </div>
+        </div>
+        <div class="listening-controls">
+          <button class="listening-btn record" id="btn-listening-record" onclick="toggleListeningRecord()">🔴 开始录制</button>
+          <button class="listening-btn play" id="btn-listening-play" onclick="playListeningMelody()">▶ 播放旋律</button>
+          <button class="listening-btn clear" onclick="clearListeningMelody()">🗑️ 清除</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="looper-modal">
+      <div class="looper-header">
+        <h2>🎛️ Looper 录音台</h2>
+        <button class="looper-close-btn" onclick="toggleLooper()">✕</button>
+      </div>
+      <div class="looper-main">
+        <div class="looper-tracks-container" id="looper-modal-tracks">
+          <div class="looper-track-item" id="looper-modal-track-1">
+            <div class="looper-track-header">
+              <div class="looper-track-info">
+                <span class="looper-track-number">1</span>
+                <span class="looper-track-name">Track 1</span>
+                <span class="looper-track-duration" id="looper-modal-track-1-duration">00:00</span>
+              </div>
+              <div class="looper-track-controls">
+                <button class="looper-btn record" onclick="toggleRecording(1)">●</button>
+                <button class="looper-btn play" onclick="togglePlayback(1)">▶</button>
+                <button class="looper-btn delete" onclick="clearTrack(1)">✕</button>
+              </div>
+            </div>
+            <div class="looper-visualizer" id="looper-visualizer-1" onclick="seekTrack(1, event)">
+              <div class="looper-grid"></div>
+              <div class="looper-playhead" id="looper-playhead-1"></div>
+              <div class="looper-chords-container" id="looper-chords-1"></div>
+            </div>
+          </div>
+          <div class="looper-track-item" id="looper-modal-track-2">
+            <div class="looper-track-header">
+              <div class="looper-track-info">
+                <span class="looper-track-number">2</span>
+                <span class="looper-track-name">Track 2</span>
+                <span class="looper-track-duration" id="looper-modal-track-2-duration">00:00</span>
+              </div>
+              <div class="looper-track-controls">
+                <button class="looper-btn record" onclick="toggleRecording(2)">●</button>
+                <button class="looper-btn play" onclick="togglePlayback(2)">▶</button>
+                <button class="looper-btn delete" onclick="clearTrack(2)">✕</button>
+              </div>
+            </div>
+            <div class="looper-visualizer" id="looper-visualizer-2" onclick="seekTrack(2, event)">
+              <div class="looper-grid"></div>
+              <div class="looper-playhead" id="looper-playhead-2"></div>
+              <div class="looper-chords-container" id="looper-chords-2"></div>
+            </div>
+          </div>
+          <div class="looper-track-item" id="looper-modal-track-3">
+            <div class="looper-track-header">
+              <div class="looper-track-info">
+                <span class="looper-track-number">3</span>
+                <span class="looper-track-name">Track 3</span>
+                <span class="looper-track-duration" id="looper-modal-track-3-duration">00:00</span>
+              </div>
+              <div class="looper-track-controls">
+                <button class="looper-btn record" onclick="toggleRecording(3)">●</button>
+                <button class="looper-btn play" onclick="togglePlayback(3)">▶</button>
+                <button class="looper-btn delete" onclick="clearTrack(3)">✕</button>
+              </div>
+            </div>
+            <div class="looper-visualizer" id="looper-visualizer-3" onclick="seekTrack(3, event)">
+              <div class="looper-grid"></div>
+              <div class="looper-playhead" id="looper-playhead-3"></div>
+              <div class="looper-chords-container" id="looper-chords-3"></div>
+            </div>
+          </div>
+          <div class="looper-track-item" id="looper-modal-track-4">
+            <div class="looper-track-header">
+              <div class="looper-track-info">
+                <span class="looper-track-number">4</span>
+                <span class="looper-track-name">Track 4</span>
+                <span class="looper-track-duration" id="looper-modal-track-4-duration">00:00</span>
+              </div>
+              <div class="looper-track-controls">
+                <button class="looper-btn record" onclick="toggleRecording(4)">●</button>
+                <button class="looper-btn play" onclick="togglePlayback(4)">▶</button>
+                <button class="looper-btn delete" onclick="clearTrack(4)">✕</button>
+              </div>
+            </div>
+            <div class="looper-visualizer" id="looper-visualizer-4" onclick="seekTrack(4, event)">
+              <div class="looper-grid"></div>
+              <div class="looper-playhead" id="looper-playhead-4"></div>
+              <div class="looper-chords-container" id="looper-chords-4"></div>
+            </div>
+          </div>
+          <div class="looper-track-item" id="looper-modal-track-5">
+            <div class="looper-track-header">
+              <div class="looper-track-info">
+                <span class="looper-track-number">5</span>
+                <span class="looper-track-name">Track 5</span>
+                <span class="looper-track-duration" id="looper-modal-track-5-duration">00:00</span>
+              </div>
+              <div class="looper-track-controls">
+                <button class="looper-btn record" onclick="toggleRecording(5)">●</button>
+                <button class="looper-btn play" onclick="togglePlayback(5)">▶</button>
+                <button class="looper-btn delete" onclick="clearTrack(5)">✕</button>
+              </div>
+            </div>
+            <div class="looper-visualizer" id="looper-visualizer-5" onclick="seekTrack(5, event)">
+              <div class="looper-grid"></div>
+              <div class="looper-playhead" id="looper-playhead-5"></div>
+              <div class="looper-chords-container" id="looper-chords-5"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="looper-footer">
+        <button class="looper-footer-btn all-play" onclick="playAllTracks()">▶ 全部播放</button>
+        <button class="looper-footer-btn all-stop" onclick="stopAllTracks()">⏹️ 全部停止</button>
+        <button class="looper-footer-btn all-clear" onclick="clearAllTracks()">🗑️ 清空所有</button>
+      </div>
+    </div>
+
+    <div id="drum-panel-modal">
+      <div class="drum-panel-header">
+        <h2>🥁 节拍与鼓点</h2>
+        <button class="modal-close-btn" onclick="closeDrumPanel()">✕</button>
+      </div>
+      <div class="drum-panel-content">
+        <div class="drum-section">
+          <h3>速度 (BPM)</h3>
+          <div class="drum-slider-container">
+            <span class="drum-slider-label">60</span>
+            <input type="range" id="drum-bpm-slider" min="60" max="180" value="100" class="drum-slider" oninput="updateBPM(this.value)">
+            <span class="drum-slider-label">180</span>
+            <span class="drum-bpm-value" id="drum-bpm-value">100</span>
+          </div>
+        </div>
+        <div class="drum-section">
+          <h3>节奏型</h3>
+          <div class="drum-patterns-grid">
+            <button class="drum-pattern-btn active" onclick="selectDrumPattern('rock')" data-pattern="rock">
+              <span class="pattern-name">摇滚</span>
+              <span class="pattern-desc">经典4/4</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('pop')" data-pattern="pop">
+              <span class="pattern-name">流行</span>
+              <span class="pattern-desc">现代节奏</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('funk')" data-pattern="funk">
+              <span class="pattern-name">放克</span>
+              <span class="pattern-desc">强节奏</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('jazz')" data-pattern="jazz">
+              <span class="pattern-name">爵士</span>
+              <span class="pattern-desc">摇摆</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('reggae')" data-pattern="reggae">
+              <span class="pattern-name">雷鬼</span>
+              <span class="pattern-desc">One Drop</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('disco')" data-pattern="disco">
+              <span class="pattern-name">迪斯科</span>
+              <span class="pattern-desc">经典</span>
+            </button>
+            <button class="drum-pattern-btn" onclick="selectDrumPattern('hiphop')" data-pattern="hiphop">
+              <span class="pattern-name">嘻哈</span>
+              <span class="pattern-desc">Boom Bap</span>
+            </button>
+          </div>
+        </div>
+        <div class="drum-section">
+          <h3>当前节奏预览</h3>
+          <div class="drum-preview">
+            <div class="drum-preview-track">
+              <span class="track-label">底鼓</span>
+              <div class="drum-grid" id="preview-kick"></div>
+            </div>
+            <div class="drum-preview-track">
+              <span class="track-label">军鼓</span>
+              <div class="drum-grid" id="preview-snare"></div>
+            </div>
+            <div class="drum-preview-track">
+              <span class="track-label">踩镲</span>
+              <div class="drum-grid" id="preview-hihat"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="drum-panel-footer">
+        <button class="drum-footer-btn" onclick="toggleAccompaniment()">
+          <span id="drum-accompaniment-text">开启伴奏</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="chord-editor-modal">
+      <div class="chord-editor-header">
+        <h2>🎵 和弦编辑器</h2>
+        <button class="modal-close-btn" onclick="closeChordEditor()">✕</button>
+      </div>
+      <div class="chord-editor-content">
+        <div class="chord-section">
+          <h3>音色选择</h3>
+          <div class="chord-instrument-buttons">
+            <button class="chord-instrument-btn active" onclick="selectChordInstrument('piano')" data-instrument="piano">🎹 钢琴</button>
+            <button class="chord-instrument-btn" onclick="selectChordInstrument('guitar')" data-instrument="guitar">🎸 吉他</button>
+            <button class="chord-instrument-btn" onclick="selectChordInstrument('synth')" data-instrument="synth">🎛️ 电子琴</button>
+            <button class="chord-instrument-btn" onclick="selectChordInstrument('strings')" data-instrument="strings">🎻 弦乐</button>
+          </div>
+        </div>
+        <div class="chord-section">
+          <h3>和弦库</h3>
+          <div class="chord-library">
+            <div class="chord-group">
+              <div class="chord-group-title">大三和弦</div>
+              <button class="chord-btn" onclick="addChord('C', 'major')">C</button>
+              <button class="chord-btn" onclick="addChord('D', 'major')">D</button>
+              <button class="chord-btn" onclick="addChord('E', 'major')">E</button>
+              <button class="chord-btn" onclick="addChord('F', 'major')">F</button>
+              <button class="chord-btn" onclick="addChord('G', 'major')">G</button>
+              <button class="chord-btn" onclick="addChord('A', 'major')">A</button>
+              <button class="chord-btn" onclick="addChord('B', 'major')">B</button>
+            </div>
+            <div class="chord-group">
+              <div class="chord-group-title">小三和弦</div>
+              <button class="chord-btn" onclick="addChord('C', 'minor')">Cm</button>
+              <button class="chord-btn" onclick="addChord('D', 'minor')">Dm</button>
+              <button class="chord-btn" onclick="addChord('E', 'minor')">Em</button>
+              <button class="chord-btn" onclick="addChord('F', 'minor')">Fm</button>
+              <button class="chord-btn" onclick="addChord('G', 'minor')">Gm</button>
+              <button class="chord-btn" onclick="addChord('A', 'minor')">Am</button>
+              <button class="chord-btn" onclick="addChord('B', 'minor')">Bm</button>
+            </div>
+            <div class="chord-group">
+              <div class="chord-group-title">七和弦</div>
+              <button class="chord-btn" onclick="addChord('C', 'dom7')">C7</button>
+              <button class="chord-btn" onclick="addChord('D', 'dom7')">D7</button>
+              <button class="chord-btn" onclick="addChord('E', 'dom7')">E7</button>
+              <button class="chord-btn" onclick="addChord('F', 'dom7')">F7</button>
+              <button class="chord-btn" onclick="addChord('G', 'dom7')">G7</button>
+              <button class="chord-btn" onclick="addChord('A', 'dom7')">A7</button>
+              <button class="chord-btn" onclick="addChord('B', 'dom7')">B7</button>
+            </div>
+            <div class="chord-group">
+              <div class="chord-group-title">大七和弦</div>
+              <button class="chord-btn" onclick="addChord('C', 'maj7')">Cmaj7</button>
+              <button class="chord-btn" onclick="addChord('D', 'maj7')">Dmaj7</button>
+              <button class="chord-btn" onclick="addChord('E', 'maj7')">Emaj7</button>
+              <button class="chord-btn" onclick="addChord('F', 'maj7')">Fmaj7</button>
+              <button class="chord-btn" onclick="addChord('G', 'maj7')">Gmaj7</button>
+              <button class="chord-btn" onclick="addChord('A', 'maj7')">Amaj7</button>
+              <button class="chord-btn" onclick="addChord('B', 'maj7')">Bmaj7</button>
+            </div>
+            <div class="chord-group">
+              <div class="chord-group-title">其他和弦</div>
+              <button class="chord-btn" onclick="addChord('C', 'sus4')">Csus4</button>
+              <button class="chord-btn" onclick="addChord('C', 'sus2')">Csus2</button>
+              <button class="chord-btn" onclick="addChord('C', 'add9')">Cadd9</button>
+              <button class="chord-btn" onclick="addChord('D', 'sus4')">Dsus4</button>
+              <button class="chord-btn" onclick="addChord('D', 'sus2')">Dsus2</button>
+              <button class="chord-btn" onclick="addChord('D', 'add9')">Dadd9</button>
+              <button class="chord-btn" onclick="addChord('G', 'sus4')">Gsus4</button>
+              <button class="chord-btn" onclick="addChord('G', 'sus2')">Gsus2</button>
+              <button class="chord-btn" onclick="addChord('G', 'add9')">Gadd9</button>
+            </div>
+          </div>
+        </div>
+        <div class="chord-section">
+          <h3>和弦序列</h3>
+          <div class="chord-sequence-controls">
+            <div class="control-group">
+              <label>和弦持续时间</label>
+              <div class="chord-duration-selector">
+                <button class="duration-btn" onclick="setChordDuration(1, event)">1拍</button>
+                <button class="duration-btn active" onclick="setChordDuration(2, event)">2拍</button>
+                <button class="duration-btn" onclick="setChordDuration(4, event)">4拍</button>
+              </div>
+            </div>
+            <div class="control-group">
+              <label>小节数</label>
+              <input type="number" id="chord-bars" value="1" min="1" max="8" onchange="updateBars()" class="chord-bars-input">
+            </div>
+          </div>
+          <div class="chord-sequence" id="chord-sequence">
+            <div class="chord-sequence-empty">点击上方和弦添加到序列</div>
+          </div>
+        </div>
+      </div>
+      <div class="chord-editor-footer">
+        <button class="chord-footer-btn" onclick="clearChordSequence()">🗑️ 清空序列</button>
+        <button class="chord-footer-btn" onclick="playChordSequence()">▶ 播放序列</button>
+        <button class="chord-footer-btn" onclick="stopChordSequence()">⏹️ 停止播放</button>
+      </div>
+    </div>
+
+    <div class="tutorial-overlay" id="tutorial-overlay">
+      <div class="tutorial-modal">
+        <div class="tutorial-progress">
+          <div class="tutorial-progress-fill" id="tutorial-progress"></div>
+        </div>
+        <div class="tutorial-step" id="tutorial-step">步骤 1/6</div>
+        <div class="tutorial-title" id="tutorial-title">欢迎来到 AirChords</div>
+        <div class="tutorial-emoji" id="tutorial-emoji">🎸</div>
+        <div class="tutorial-content" id="tutorial-content">使用手势控制音乐，无需任何乐器！</div>
+        <div class="tutorial-buttons">
+          <button class="tutorial-btn skip" onclick="closeTutorial()">跳过</button>
+          <button class="tutorial-btn next" id="tutorial-next" onclick="nextTutorial()">下一步</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let hands = null;
+    let camera = null;
+    let canvas = null;
+    let ctx = null;
+    let isCameraOn = false;
+    let isAudioStarted = false;
+    let isAccompanimentOn = false;
+    let isListeningOn = false;
+    let isLooperOn = false;
+    
+    let currentRoot = '';
+    let currentQuality = '';
+    let currentChord = '';
+    let lastGestureTime = 0;
+    let noHandTimer = null;
+    let sending = false;
+    
+    let gestureHistory = [];
+    const STABILITY_FRAMES = 3;
+    
+    let pitchShift = 0;
+    let currentInstrument = 'piano';
+    let currentVolume = 0.7;
+    let sustainDuration = 1000;
+    let releaseTimeout = null;
+    
+    let synth = null;
+    let delay = null;
+    let reverb = null;
+    let masterGain = null;
+    let drumKit = null;
+    let bassSynth = null;
+    let currentDrumPattern = 'rock';
+    
+    const DRUM_PATTERNS = {
+      rock: {
+        name: '摇滚',
+        kick: [1, 0, 0, 0, 1, 0, 0, 0],
+        snare: [0, 0, 1, 0, 0, 0, 1, 0],
+        hihat: [1, 1, 1, 1, 1, 1, 1, 1],
+        description: '经典4/4摇滚节奏'
+      },
+      pop: {
+        name: '流行',
+        kick: [1, 0, 0, 1, 1, 0, 0, 0],
+        snare: [0, 0, 1, 0, 0, 0, 1, 0],
+        hihat: [1, 0, 1, 0, 1, 0, 1, 0],
+        description: '现代流行节奏'
+      },
+      funk: {
+        name: '放克',
+        kick: [1, 0, 1, 0, 1, 0, 0, 1],
+        snare: [0, 1, 0, 1, 0, 1, 0, 0],
+        hihat: [1, 1, 1, 1, 1, 1, 1, 1],
+        description: '强节奏放克'
+      },
+      jazz: {
+        name: '爵士',
+        kick: [1, 0, 0, 0, 1, 0, 0, 0],
+        snare: [0, 0, 0, 0, 0, 0, 1, 0],
+        hihat: [1, 0, 1, 0, 1, 0, 1, 0],
+        description: '摇摆爵士节奏'
+      },
+      reggae: {
+        name: '雷鬼',
+        kick: [1, 0, 0, 0, 0, 0, 1, 0],
+        snare: [0, 0, 1, 0, 0, 0, 0, 0],
+        hihat: [1, 1, 0, 1, 1, 1, 0, 1],
+        description: 'One Drop 雷鬼'
+      },
+      disco: {
+        name: '迪斯科',
+        kick: [1, 0, 0, 0, 1, 0, 0, 0],
+        snare: [0, 0, 1, 0, 0, 0, 1, 0],
+        hihat: [1, 1, 1, 1, 1, 1, 1, 1],
+        description: '经典迪斯科'
+      },
+      hiphop: {
+        name: '嘻哈',
+        kick: [1, 0, 0, 0, 0, 1, 0, 0],
+        snare: [0, 0, 1, 0, 0, 0, 1, 0],
+        hihat: [1, 0, 1, 0, 1, 0, 1, 0],
+        description: 'Boom Bap 风格'
+      }
+    };
+    
+    let chordProgression = null;
+    let progressionIndex = 0;
+    let progressionTimer = null;
+    
+    let looperTracks = [
+      { id: 1, events: [], isRecording: false, isPlaying: false, startTime: 0, loopDuration: 0, playbackTimeouts: [], playheadInterval: null, audioBlob: null, audioUrl: null, audioBuffer: null, mediaRecorder: null, audioChunks: [], audioSource: null },
+      { id: 2, events: [], isRecording: false, isPlaying: false, startTime: 0, loopDuration: 0, playbackTimeouts: [], playheadInterval: null, audioBlob: null, audioUrl: null, audioBuffer: null, mediaRecorder: null, audioChunks: [], audioSource: null },
+      { id: 3, events: [], isRecording: false, isPlaying: false, startTime: 0, loopDuration: 0, playbackTimeouts: [], playheadInterval: null, audioBlob: null, audioUrl: null, audioBuffer: null, mediaRecorder: null, audioChunks: [], audioSource: null },
+      { id: 4, events: [], isRecording: false, isPlaying: false, startTime: 0, loopDuration: 0, playbackTimeouts: [], playheadInterval: null, audioBlob: null, audioUrl: null, audioBuffer: null, mediaRecorder: null, audioChunks: [], audioSource: null },
+      { id: 5, events: [], isRecording: false, isPlaying: false, startTime: 0, loopDuration: 0, playbackTimeouts: [], playheadInterval: null, audioBlob: null, audioUrl: null, audioBuffer: null, mediaRecorder: null, audioChunks: [], audioSource: null }
+    ];
+    
+    let currentRecordingTrack = 1;
+    let microphoneStream = null;
+    let audioContext = null;
+    let recorderDestination = null;
+    
+    let tutorialStep = 0;
+    let tutorialCRecognized = false;
+    let tutorialQualityCount = 0;
+    let lastTutorialQuality = '';
+    let tutorialAdvancing = false;
+    
+    function initSplashScreen() {
+      const splashScreen = document.getElementById('splash-screen');
+      const particlesContainer = document.getElementById('splash-particles');
+      
+      for (let i = 0; i < 20; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = Math.random() * 100 + '%';
+        particle.style.animationDelay = Math.random() * 8 + 's';
+        particle.style.animationDuration = (6 + Math.random() * 4) + 's';
+        particlesContainer.appendChild(particle);
+      }
+      
+      splashScreen.addEventListener('click', () => {
+        splashScreen.classList.add('hidden');
+      });
+    }
+    
+    initSplashScreen();
+    
+    const CHORD_MAP = {
+      'C': ['C4', 'E4', 'G4'],
+      'D': ['D4', 'F#4', 'A4'],
+      'E': ['E4', 'G#4', 'B4'],
+      'F': ['F4', 'A4', 'C5'],
+      'G': ['G4', 'B4', 'D5'],
+      'A': ['A3', 'C4', 'E4'],
+      'B': ['B3', 'D4', 'F#4']
+    };
+    
+    const INSTRUMENT_PRESETS = {
+      piano: { oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.2, sustain: 0.6, release: 0.35 } },
+      guitar: { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.005, decay: 0.3, sustain: 0.4, release: 0.5 } },
+      synth: { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.001, decay: 0.1, sustain: 0.7, release: 0.25 } },
+      strings: { oscillator: { type: 'sine' }, envelope: { attack: 0.005, decay: 0.1, sustain: 0.8, release: 0.4 } }
+    };
+    
+    const PROGRESSIONS = {
+      '流行经典': { chords: ['C', 'G', 'Am', 'F'], beats: [4, 4, 4, 4] },
+      '卡农': { chords: ['C', 'G', 'Am', 'Em', 'F', 'C', 'F', 'G'], beats: [2, 2, 2, 2, 2, 2, 2, 2] },
+      '蓝调': { chords: ['C7', 'F7', 'C7', 'G7', 'F7', 'C7', 'G7'], beats: [4, 2, 2, 4, 2, 2, 4] },
+      '爵士': { chords: ['Dm7', 'G7', 'Cmaj7', 'Cmaj7'], beats: [4, 4, 4, 4] },
+      '50年代': { chords: ['C', 'Am', 'F', 'G'], beats: [4, 4, 4, 4] },
+      '安达卢西亚': { chords: ['Am', 'G', 'F', 'E'], beats: [4, 4, 4, 4] },
+      'Pachelbel': { chords: ['C', 'G', 'Am', 'Em', 'F', 'C', 'F', 'G'], beats: [2, 2, 2, 2, 2, 2, 2, 2] }
+    };
+
+    async function initAudio() {
+      if (isAudioStarted) return;
+      
+      // 低延迟模式：交互式音频上下文，减小缓冲区延迟
+      Tone.context.latencyHint = 'interactive';
+      Tone.context.lookAhead = 0.01;
+      
+      await Tone.start();
+      isAudioStarted = true;
+      
+      audioContext = Tone.context;
+      
+      masterGain = new Tone.Gain(currentVolume).toDestination();
+      
+      recorderDestination = Tone.context.createMediaStreamDestination();
+      masterGain.connect(new Tone.Gain(1).connect(recorderDestination));
+      
+      // 主合成器直连主增益，保证最低延迟（干声）
+      synth = new Tone.PolySynth(Tone.Synth, INSTRUMENT_PRESETS[currentInstrument]);
+      synth.connect(masterGain);
+      
+      // 效果器作为并联湿声，小比例混入，避免延迟和拖沓
+      reverb = new Tone.Reverb({ decay: 1.0, preDelay: 0.01, wet: 0.25 });
+      await reverb.ready;
+      reverb.connect(masterGain);
+      
+      delay = new Tone.FeedbackDelay({ delayTime: '32n', feedback: 0.1, wet: 0.2 });
+      delay.connect(reverb);
+      
+      // 湿声并联：同一合成器也接到效果器链
+      synth.connect(delay);
+      
+      drumKit = {
+        kick: new Tone.MembraneSynth({
+          pitchDecay: 0.05,
+          octaves: 2,
+          oscillator: { type: 'sine' },
+          envelope: { attack: 0.001, decay: 0.3, sustain: 0.01, release: 1 }
+        }).connect(masterGain),
+        snare: new Tone.NoiseSynth({
+          noise: { type: 'white' },
+          envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+        }).connect(masterGain),
+        hihat: new Tone.MetalSynth({
+          frequency: 200,
+          envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
+          harmonicity: 5.1,
+          modulationIndex: 32,
+          resonance: 4000,
+          octaves: 1.5
+        }).connect(masterGain)
+      };
+      
+      bassSynth = new Tone.MonoSynth({
+        oscillator: { type: 'square' },
+        envelope: { attack: 0.01, decay: 0.3, sustain: 0.3, release: 0.2 }
+      }).connect(masterGain);
+    }
+
+    function initCamera() {
+      if (isCameraOn) return;
+      
+      canvas = document.getElementById('camera-canvas');
+      ctx = canvas.getContext('2d');
+      
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+      });
+      
+      hands.setOptions({
+        selfieMode: true,
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      
+      hands.onResults(onResults);
+      
+      camera = new Camera(document.getElementById('camera-video'), {
+        onFrame: async () => {
+          if (!sending) {
+            sending = true;
+            await hands.send({ image: document.getElementById('camera-video') });
+            sending = false;
+          }
+        },
+        width: 640,
+        height: 480
+      });
+      
+      camera.start();
+      isCameraOn = true;
+      document.getElementById('btn-camera').textContent = '⏹️ 停止摄像头';
+      document.getElementById('btn-camera').classList.add('active');
+      document.getElementById('btn-camera-nav').textContent = '📷 摄像头';
+      document.getElementById('btn-camera-nav').classList.add('active');
+      document.getElementById('camera-placeholder').style.display = 'none';
+      
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+    }
+
+    function stopCamera() {
+      if (!isCameraOn) return;
+      
+      camera.stop();
+      isCameraOn = false;
+      document.getElementById('btn-camera').textContent = '▶ 启动摄像头';
+      document.getElementById('btn-camera').classList.remove('active');
+      document.getElementById('btn-camera-nav').textContent = '📷 摄像头';
+      document.getElementById('btn-camera-nav').classList.remove('active');
+      document.getElementById('camera-placeholder').style.display = 'flex';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      window.removeEventListener('resize', resizeCanvas);
+    }
+
+    async function toggleCamera() {
+      if (!isAudioStarted) {
+        try { await initAudio(); } catch(e) { console.error('Audio init failed:', e); }
+      }
+      
+      if (isCameraOn) {
+        stopCamera();
+      } else {
+        initCamera();
+      }
+    }
+
+    function resizeCanvas() {
+      const panel = document.querySelector('.center-panel');
+      canvas.width = panel.clientWidth;
+      canvas.height = panel.clientHeight;
+    }
+
+    function onResults(results) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // 不在 canvas 上画摄像头背景，由 video 元素显示
+      // canvas 只负责画骨架和调试信息（透明背景）
+      
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        clearTimeout(noHandTimer);
+        noHandTimer = setTimeout(() => {
+          fadeOutChord();
+          updateUI('', '');
+        }, sustainDuration);
+        
+        let leftHand = null;
+        let rightHand = null;
+        
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+          const landmarks = results.multiHandLandmarks[i];
+          const handedness = results.multiHandedness[i].label;
+          
+          // selfieMode 下 Left = 人的左手
+          if (handedness === 'Left') {
+            leftHand = landmarks;
+          } else {
+            rightHand = landmarks;
+          }
+          
+          const color = handedness === 'Left' ? '#FF6B6B' : '#4ECDC4';
+          drawHand(landmarks, color);
+        }
+        
+        // 单手时默认为左手
+        if (!leftHand && !rightHand && results.multiHandLandmarks.length === 1) {
+          leftHand = results.multiHandLandmarks[0];
+        }
+        
+        const root = leftHand ? recognizeRoot(leftHand) : '';
+        const quality = rightHand ? recognizeQuality(rightHand) : 'major';
+        
+        // 画调试信息
+        drawDebugInfo(leftHand, rightHand);
+        
+        processGesture(root, quality);
+        
+        checkTutorial(root, quality);
+      } else {
+        // 没检测到手
+        drawDebugInfo(null, null);
+      }
+    }
+
+    function drawDebugInfo(leftHand, rightHand) {
+      // 调试信息放在左下角，小字号半透明，避免遮挡主画面
+      ctx.font = '10px monospace';
+      ctx.textBaseline = 'bottom';
+      ctx.textAlign = 'left';
+      
+      const padding = 6;
+      const lineHeight = 14;
+      let y = canvas.height - padding;
+      
+      if (rightHand) {
+        const t = isThumbExtended(rightHand);
+        const i = isFingerExtended(rightHand, 1);
+        const m = isFingerExtended(rightHand, 2);
+        const r = isFingerExtended(rightHand, 3);
+        const p = isFingerExtended(rightHand, 4);
+        const q = recognizeQuality(rightHand);
+        const qNames = {major:'大三',minor:'小三',dom7:'属七',maj7:'大七',sus4:'挂四',sus2:'挂二',add9:'加九'};
+        const txt = `R: T${t?1:0} I${i?1:0} M${m?1:0} R${r?1:0} P${p?1:0} = ${qNames[q] || '--'}`;
+        const w = ctx.measureText(txt).width + 10;
+        ctx.fillStyle = 'rgba(78, 205, 196, 0.45)';
+        ctx.fillRect(padding, y - lineHeight, w, lineHeight);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, padding + 5, y - 2);
+        y -= lineHeight + 3;
+      }
+      
+      if (leftHand) {
+        const t = isThumbExtended(leftHand);
+        const i = isFingerExtended(leftHand, 1);
+        const m = isFingerExtended(leftHand, 2);
+        const r = isFingerExtended(leftHand, 3);
+        const p = isFingerExtended(leftHand, 4);
+        const chord = recognizeRoot(leftHand);
+        const txt = `L: T${t?1:0} I${i?1:0} M${m?1:0} R${r?1:0} P${p?1:0} = ${chord || '--'}`;
+        const w = ctx.measureText(txt).width + 10;
+        ctx.fillStyle = 'rgba(255, 107, 107, 0.45)';
+        ctx.fillRect(padding, y - lineHeight, w, lineHeight);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, padding + 5, y - 2);
+      }
+    }
+
+    function drawHand(landmarks, color) {
+      const connections = [
+        [0, 1], [1, 2], [2, 3], [3, 4],
+        [0, 5], [5, 6], [6, 7], [7, 8],
+        [0, 9], [9, 10], [10, 11], [11, 12],
+        [0, 13], [13, 14], [14, 15], [15, 16],
+        [0, 17], [17, 18], [18, 19], [19, 20],
+        [5, 9], [9, 13], [13, 17]
+      ];
+      
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      connections.forEach(([start, end]) => {
+        ctx.beginPath();
+        // selfieMode 下坐标已经是镜像的，canvas 不需要再镜像
+        ctx.moveTo(landmarks[start].x * canvas.width, landmarks[start].y * canvas.height);
+        ctx.lineTo(landmarks[end].x * canvas.width, landmarks[end].y * canvas.height);
+        ctx.stroke();
+      });
+      
+      landmarks.forEach((lm, idx) => {
+        const x = lm.x * canvas.width;
+        const y = lm.y * canvas.height;
+        if (idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20) {
+          ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI);
+          ctx.fillStyle = color + '55'; ctx.fill();
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
+          ctx.fillStyle = color; ctx.fill();
+        } else {
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI);
+          ctx.fillStyle = '#fff'; ctx.fill();
+        }
+      });
+    }
+
+    function getDistance(p1, p2) {
+      return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    }
+
+    function isFingerExtended(landmarks, fingerIndex) {
+      const tip = landmarks[fingerIndex * 4 + 4];
+      const pip = landmarks[fingerIndex * 4 + 2];
+      const wrist = landmarks[0];
+      return getDistance(tip, wrist) > getDistance(pip, wrist) * 1.1;
+    }
+
+    function isThumbExtended(landmarks) {
+      const wrist = landmarks[0];
+      const thumbTip = landmarks[4];
+      const thumbMp = landmarks[2];
+      const indexMcp = landmarks[5];
+      const pinkyMcp = landmarks[17];
+      
+      // 方法1：拇指尖离手腕比拇指掌指关节离手腕远 1.2 倍
+      const m1 = getDistance(thumbTip, wrist) > getDistance(thumbMp, wrist) * 1.2;
+      
+      // 方法2：拇指尖离食指掌指关节的距离 > 手掌宽度的 55%
+      const handSize = getDistance(wrist, indexMcp);
+      const m2 = getDistance(thumbTip, indexMcp) > handSize * 0.55;
+      
+      // 方法3：拇指尖离小指掌指关节比拇指掌指关节离小指掌指关节远 1.1 倍
+      const m3 = getDistance(thumbTip, pinkyMcp) > getDistance(thumbMp, pinkyMcp) * 1.1;
+      
+      return (m1 ? 1 : 0) + (m2 ? 1 : 0) + (m3 ? 1 : 0) >= 2;
+    }
+
+    function recognizeRoot(landmarks) {
+      const index = isFingerExtended(landmarks, 1);
+      const middle = isFingerExtended(landmarks, 2);
+      const ring = isFingerExtended(landmarks, 3);
+      const pinky = isFingerExtended(landmarks, 4);
+      const thumb = isThumbExtended(landmarks);
+      
+      let extendedCount = 0;
+      if (thumb) extendedCount++;
+      if (index) extendedCount++;
+      if (middle) extendedCount++;
+      if (ring) extendedCount++;
+      if (pinky) extendedCount++;
+      
+      if (extendedCount === 0) return '';
+      if (extendedCount === 1 && index && !thumb) return 'C';
+      if (extendedCount === 2 && index && middle && !thumb) return 'D';
+      if (extendedCount === 3 && index && middle && ring && !thumb) return 'E';
+      if (extendedCount === 4 && index && middle && ring && pinky && !thumb) return 'F';
+      if (extendedCount === 5) return 'G';
+      if (thumb && index && !middle && !ring && !pinky) return 'A';
+      if (thumb && index && pinky && !middle && !ring) return 'B';
+      
+      return '';
+    }
+
+    function recognizeQuality(landmarks) {
+      const index = isFingerExtended(landmarks, 1);
+      const middle = isFingerExtended(landmarks, 2);
+      const ring = isFingerExtended(landmarks, 3);
+      const pinky = isFingerExtended(landmarks, 4);
+      const thumb = isThumbExtended(landmarks);
+      
+      // 握拳 → 大三
+      if (!index && !middle && !ring && !pinky) return 'major';
+      // 食指 → 小三
+      if (index && !middle && !ring && !pinky) return 'minor';
+      // 食指+中指 → 属七
+      if (index && middle && !ring && !pinky) return 'dom7';
+      // 食指+小指 → 大七
+      if (index && !middle && !ring && pinky) return 'maj7';
+      // 中+无名+小指 → 挂四
+      if (!index && middle && ring && pinky) return 'sus4';
+      // 食+中+无名指 → 挂二
+      if (index && middle && ring && !pinky) return 'sus2';
+      // 五指全张 → 加九
+      if (thumb && index && middle && ring && pinky) return 'add9';
+      
+      return 'major';
+    }
+
+    function processGesture(root, quality) {
+      gestureHistory.push({ root, quality });
+      if (gestureHistory.length > STABILITY_FRAMES) {
+        gestureHistory.shift();
+      }
+      
+      const counts = {};
+      gestureHistory.forEach(g => {
+        const key = `${g.root}|${g.quality}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      
+      let stableRoot = '';
+      let stableQuality = '';
+      let maxCount = 0;
+      for (const [key, count] of Object.entries(counts)) {
+        if (count > maxCount) {
+          maxCount = count;
+          [stableRoot, stableQuality] = key.split('|');
+        }
+      }
+      
+      if (maxCount < STABILITY_FRAMES) return;
+      
+      const now = Date.now();
+      if (now - lastGestureTime < 200) return;
+      
+      let effectiveRoot = stableRoot;
+      let effectiveQuality = stableQuality;
+      
+      const newChord = effectiveRoot ? `${effectiveRoot}${effectiveQuality}` : '';
+      
+      if (newChord !== currentChord) {
+        lastGestureTime = now;
+        
+        currentRoot = effectiveRoot;
+        currentQuality = effectiveQuality;
+        currentChord = newChord;
+        
+        updateUI(effectiveRoot, effectiveQuality);
+        
+        if (effectiveRoot) {
+          playChord(effectiveRoot, effectiveQuality);
+          
+          if (isAccompanimentOn && bassSynth) {
+            const bassNote = CHORD_MAP[stableRoot][0].replace(/\d/, '2');
+            bassSynth.triggerAttackRelease(shiftNote(bassNote), '1n');
+          }
+        } else {
+          fadeOutChord();
+        }
+        
+        looperTracks.forEach(track => {
+          if (track.isRecording) {
+            track.events.push({ chord: stableRoot, quality: stableQuality, time: Tone.now() - track.startTime });
+          }
+        });
+      }
+    }
+
+    function updateUI(root, quality) {
+      const rootDisplay = document.getElementById('left-root');
+      const qualityDisplay = document.getElementById('right-quality');
+      const chordOverlay = document.getElementById('chord-name-overlay');
+      const chordText = document.getElementById('current-chord');
+      
+      rootDisplay.querySelector('.current-value').textContent = root || '--';
+      qualityDisplay.querySelector('.current-value').textContent = getQualityName(quality) || '--';
+      
+      if (root) {
+        rootDisplay.classList.add('active');
+        qualityDisplay.classList.add('active');
+        chordOverlay.classList.add('visible');
+        // A/B 默认小三但只显示根音名，不加 m 后缀
+        if ((root === 'A' || root === 'B') && quality === 'minor') {
+          chordText.textContent = root;
+        } else {
+          chordText.textContent = `${root}${getQualitySuffix(quality)}`;
+        }
+      } else {
+        rootDisplay.classList.remove('active');
+        qualityDisplay.classList.remove('active');
+        chordOverlay.classList.remove('visible');
+        chordText.textContent = '--';
+      }
+      
+      document.querySelectorAll('#left-gestures .gesture-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      document.querySelectorAll('#right-gestures .gesture-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      
+      const rootGestureMap = {
+        'C': 'index', 'D': 'index+middle', 'E': 'index+middle+ring',
+        'F': 'index+middle+ring+pinky', 'G': 'all',
+        'A': 'thumb+index', 'B': 'thumb+index+pinky'
+      };
+      const qualityGestureMap = {
+        'major': 'fist', 'minor': 'index', 'dom7': 'index+middle',
+        'maj7': 'index+pinky', 'sus4': 'middle+ring+pinky',
+        'sus2': 'index+middle+ring', 'add9': 'all'
+      };
+      
+      if (root) {
+        const leftGesture = rootGestureMap[root];
+        if (leftGesture) {
+          const leftItem = document.querySelector(`#left-gestures .gesture-item[data-gesture="${leftGesture}"]`);
+          if (leftItem) leftItem.classList.add('active');
+        }
+      }
+      if (quality) {
+        const rightGesture = qualityGestureMap[quality];
+        if (rightGesture) {
+          const rightItem = document.querySelector(`#right-gestures .gesture-item[data-gesture="${rightGesture}"]`);
+          if (rightItem) rightItem.classList.add('active');
+        }
+      }
+    }
+
+    function getQualityName(quality) {
+      const names = {
+        'major': 'Major',
+        'minor': 'minor',
+        'dom7': 'dom7',
+        'maj7': 'maj7',
+        'sus4': 'sus4',
+        'sus2': 'sus2',
+        'add9': 'add9'
+      };
+      return names[quality] || quality;
+    }
+
+    function getQualitySuffix(quality) {
+      const suffixes = {
+        'major': '',
+        'minor': 'm',
+        'dom7': '7',
+        'maj7': 'maj7',
+        'sus4': 'sus4',
+        'sus2': 'sus2',
+        'add9': 'add9'
+      };
+      return suffixes[quality] || '';
+    }
+
+    function addSemitones(note, semitones) {
+      const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const flatToSharp = { 'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#' };
+      const match = note.match(/^([A-G][#b]?)(\d+)$/);
+      if (!match) return note;
+      let noteName = match[1];
+      if (flatToSharp[noteName]) noteName = flatToSharp[noteName];
+      let octave = parseInt(match[2]);
+      
+      let index = notes.indexOf(noteName);
+      if (index === -1) return note;
+      
+      const total = index + semitones;
+      const newIndex = ((total % 12) + 12) % 12;
+      const octaveOffset = Math.floor(total / 12);
+      
+      return notes[newIndex] + (octave + octaveOffset);
+    }
+
+    function shiftNote(note) {
+      return addSemitones(note, pitchShift);
+    }
+
+    function getChordNotes(root, quality) {
+      let notes = [...CHORD_MAP[root]];
+      
+      if (quality === 'minor') {
+        notes[1] = addSemitones(notes[0], -1);
+      } else if (quality === 'dom7') {
+        notes.push(addSemitones(notes[0], 10));
+      } else if (quality === 'maj7') {
+        notes.push(addSemitones(notes[0], 11));
+      } else if (quality === 'sus4') {
+        notes[1] = addSemitones(notes[0], 5);
+      } else if (quality === 'sus2') {
+        notes[1] = addSemitones(notes[0], 2);
+      } else if (quality === 'add9') {
+        notes.push(addSemitones(notes[0], 14));
+      }
+      
+      return notes.map(n => shiftNote(n));
+    }
+
+    let lastPlayedNotes = [];
+    
+    function playChord(root, quality) {
+      if (!synth || !root) return;
+      
+      if (releaseTimeout) {
+        clearTimeout(releaseTimeout);
+        releaseTimeout = null;
+      }
+      
+      if (lastPlayedNotes.length > 0) {
+        try { synth.triggerRelease(lastPlayedNotes, Tone.now()); }
+        catch (e) { /* 忽略 */ }
+      }
+      
+      const notes = getChordNotes(root, quality);
+      lastPlayedNotes = [...notes];
+      
+      synth.triggerAttack(notes, Tone.now(), 0.6);
+    }
+
+    function stopChord() {
+      if (synth && lastPlayedNotes.length > 0) {
+        try { synth.triggerRelease(lastPlayedNotes, Tone.now()); }
+        catch (e) { /* 忽略 */ }
+        lastPlayedNotes = [];
+      }
+    }
+
+    function fadeOutChord() {
+      if (!synth) return;
+      
+      if (releaseTimeout) {
+        clearTimeout(releaseTimeout);
+        releaseTimeout = null;
+      }
+      
+      if (lastPlayedNotes.length > 0) {
+        if (sustainDuration > 0) {
+          const releaseTime = sustainDuration / 1000;
+          try { synth.triggerRelease(lastPlayedNotes, Tone.now() + releaseTime); }
+          catch (e) { /* 忽略 */ }
+        } else {
+          try { synth.triggerRelease(lastPlayedNotes, Tone.now()); }
+          catch (e) { /* 忽略 */ }
+        }
+        lastPlayedNotes = [];
+      }
+    }
+
+    function changeSustain() {
+      sustainDuration = parseInt(document.getElementById('slider-sustain').value);
+      document.getElementById('sustain-display').textContent = (sustainDuration / 1000).toFixed(1) + 's';
+    }
+
+    function changeInstrument() {
+      const instrument = document.getElementById('select-instrument').value;
+      currentInstrument = instrument;
+      
+      if (synth) {
+        // 切换前先释放当前音符
+        if (lastPlayedNotes.length > 0) {
+          try { synth.triggerRelease(lastPlayedNotes, Tone.now()); }
+          catch (e) { /* 忽略 */ }
+        }
+        synth.set(INSTRUMENT_PRESETS[instrument]);
+      }
+    }
+
+    let isDelayOn = true;
+
+    function toggleDelay() {
+      isDelayOn = !isDelayOn;
+      const btn = document.getElementById('btn-delay');
+      
+      if (isDelayOn && delay) {
+        delay.wet.value = 0.2;
+        btn.classList.add('active');
+      } else if (delay) {
+        delay.wet.value = 0;
+        btn.classList.remove('active');
+      }
+    }
+
+    function changeVolume() {
+      const volume = document.getElementById('slider-volume').value / 100;
+      currentVolume = volume;
+      
+      if (masterGain) {
+        masterGain.gain.value = volume;
+      }
+    }
+
+    function changeBPM() {
+      const bpm = document.getElementById('slider-bpm').value;
+      Tone.Transport.bpm.value = bpm;
+      const drumBpmValue = document.getElementById('drum-bpm-value');
+      if (drumBpmValue) drumBpmValue.textContent = bpm;
+      const drumBpmSlider = document.getElementById('drum-bpm-slider');
+      if (drumBpmSlider) drumBpmSlider.value = bpm;
+    }
+
+    function changePitch(delta) {
+      pitchShift = Math.max(-12, Math.min(12, pitchShift + delta));
+      
+      const display = document.getElementById('pitch-display');
+      const displayLarge = document.getElementById('pitch-display-large');
+      let text;
+      if (pitchShift === 0) {
+        text = '原调';
+      } else if (pitchShift > 0) {
+        text = `+${pitchShift}`;
+      } else {
+        text = `${pitchShift}`;
+      }
+      if (display) display.textContent = text;
+      if (displayLarge) displayLarge.textContent = text;
+    }
+
+    function setSustainDuration(seconds, btn) {
+      sustainDuration = seconds * 1000;
+      
+      document.querySelectorAll('.duration-btn-small').forEach(b => {
+        b.classList.remove('active');
+      });
+      btn.classList.add('active');
+      
+      const slider = document.getElementById('slider-sustain');
+      const sustainDisplay = document.getElementById('sustain-display');
+      if (slider) slider.value = sustainDuration;
+      if (sustainDisplay) sustainDisplay.textContent = seconds.toFixed(1) + 's';
+    }
+
+    async function toggleAccompaniment() {
+      if (!isAudioStarted) {
+        try { await initAudio(); } catch(e) { console.error('Audio init failed:', e); }
+      }
+      
+      isAccompanimentOn = !isAccompanimentOn;
+      const btn = document.getElementById('btn-accompaniment');
+      const drumText = document.getElementById('drum-accompaniment-text');
+      
+      if (isAccompanimentOn) {
+        btn.classList.add('active');
+        startAccompaniment();
+        if (drumText) drumText.textContent = '关闭伴奏';
+      } else {
+        btn.classList.remove('active');
+        stopAccompaniment();
+        if (drumText) drumText.textContent = '开启伴奏';
+      }
+    }
+
+    function startAccompaniment() {
+      Tone.Transport.start();
+      
+      Tone.Transport.scheduleRepeat((time) => {
+        const bars = parseInt(Tone.Transport.position.split(':')[0]);
+        const beats = parseInt(Tone.Transport.position.split(':')[1]);
+        const sixteenth = (beats * 2) % 8;
+        
+        const pattern = DRUM_PATTERNS[currentDrumPattern];
+        
+        if (pattern.kick[sixteenth]) {
+          drumKit.kick.triggerAttackRelease('C1', '8n', time);
+        }
+        
+        if (pattern.snare[sixteenth]) {
+          drumKit.snare.triggerAttackRelease('8n', time);
+        }
+        
+        if (pattern.hihat[sixteenth]) {
+          drumKit.hihat.triggerAttackRelease('16n', time);
+        }
+        
+        if (beats === 0 && currentRoot && bassSynth) {
+          const bassNote = CHORD_MAP[currentRoot][0].replace(/\d/, '2');
+          bassSynth.triggerAttackRelease(shiftNote(bassNote), '1n', time);
+        }
+      }, '16n');
+    }
+
+    function stopAccompaniment() {
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      
+      if (bassSynth) {
+        bassSynth.triggerRelease();
+      }
+    }
+
+    function toggleListening() {
+      isListeningOn = !isListeningOn;
+      const btn = document.getElementById('btn-listening');
+      const modal = document.getElementById('listening-modal');
+      
+      if (isListeningOn) {
+        btn.classList.add('active');
+        modal.classList.add('open');
+        startPitchDetection();
+      } else {
+        btn.classList.remove('active');
+        modal.classList.remove('open');
+        stopPitchDetection();
+      }
+    }
+
+    function closeListeningModal() {
+      const modal = document.getElementById('listening-modal');
+      modal.classList.remove('open');
+      isListeningOn = false;
+      document.getElementById('btn-listening').classList.remove('active');
+      stopPitchDetection();
+    }
+
+    // 音高检测相关变量
+    let listeningAnalyser = null;
+    let listeningStream = null;
+    let pitchDetectionInterval = null;
+    let isRecordingMelody = false;
+    let melodyNotes = [];
+    let lastDetectedNote = null;
+    let lastNoteTime = 0;
+
+    // 音高检测函数
+    async function startPitchDetection() {
+      try {
+        if (!isAudioStarted) {
+          await initAudio();
+        }
+        
+        listeningStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = Tone.context.createMediaStreamSource(listeningStream);
+        listeningAnalyser = Tone.context.createAnalyser();
+        listeningAnalyser.fftSize = 2048;
+        listeningAnalyser.smoothingTimeConstant = 0.8;
+        source.connect(listeningAnalyser);
+        
+        pitchDetectionInterval = setInterval(detectPitch, 50);
+      } catch (err) {
+        console.error('麦克风启动失败:', err);
+        alert('无法访问麦克风，请检查权限设置');
+        closeListeningModal();
+      }
+    }
+
+    function stopPitchDetection() {
+      if (pitchDetectionInterval) {
+        clearInterval(pitchDetectionInterval);
+        pitchDetectionInterval = null;
+      }
+      if (listeningStream) {
+        listeningStream.getTracks().forEach(track => track.stop());
+        listeningStream = null;
+      }
+      if (listeningAnalyser) {
+        listeningAnalyser.disconnect();
+        listeningAnalyser = null;
+      }
+      if (isRecordingMelody) {
+        isRecordingMelody = false;
+        const btn = document.getElementById('btn-listening-record');
+        if (btn) {
+          btn.classList.remove('active');
+          btn.textContent = '🔴 开始录制';
+        }
+      }
+    }
+
+    // 频率转音名和简谱
+    function frequencyToNote(freq) {
+      if (freq < 20 || freq > 5000) return null;
+      
+      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const jianpuMap = { 'C': '1', 'D': '2', 'E': '3', 'F': '4', 'G': '5', 'A': '6', 'B': '7' };
+      
+      const A4 = 440;
+      const halfSteps = Math.round(12 * Math.log2(freq / A4));
+      const noteIndex = (halfSteps + 9 + 120) % 12;
+      const octave = Math.floor((halfSteps + 9) / 12) + 4;
+      
+      const noteName = noteNames[noteIndex];
+      const baseNote = noteName.replace('#', '');
+      const isSharp = noteName.includes('#');
+      
+      let jianpu = jianpuMap[baseNote] || '-';
+      if (isSharp) {
+        jianpu = jianpu + '♯';
+      }
+      
+      const octaveDiff = octave - 4;
+      let octaveText = '';
+      if (octaveDiff < 0) {
+        octaveText = `低${Math.abs(octaveDiff)}度`;
+      } else if (octaveDiff > 0) {
+        octaveText = `高${octaveDiff}度`;
+      } else {
+        octaveText = '中音';
+      }
+      
+      return {
+        note: noteName,
+        jianpu: jianpu,
+        octave: octave,
+        octaveText: octaveText,
+        octaveDiff: octaveDiff,
+        frequency: freq
+      };
+    }
+
+    // 自相关算法检测音高
+    function detectPitch() {
+      if (!listeningAnalyser) return;
+      
+      const bufferLength = listeningAnalyser.fftSize;
+      const buffer = new Float32Array(bufferLength);
+      listeningAnalyser.getFloatTimeDomainData(buffer);
+      
+      // 计算音量
+      let volume = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        volume += buffer[i] * buffer[i];
+      }
+      volume = Math.sqrt(volume / bufferLength);
+      const volumePercent = Math.min(100, volume * 500);
+      document.getElementById('listening-volume-fill').style.width = volumePercent + '%';
+      
+      // 音量太小则不检测
+      if (volume < 0.008) {
+        document.getElementById('listening-note').textContent = '--';
+        document.getElementById('listening-jianpu').textContent = '-';
+        document.getElementById('listening-octave').textContent = '等待检测...';
+        document.getElementById('listening-frequency').textContent = '0 Hz';
+        return;
+      }
+      
+      // 使用 YIN 算法的简化版
+      const sampleRate = Tone.context.sampleRate;
+      const SIZE = bufferLength;
+      const yinBuffer = new Array(Math.floor(SIZE / 2)).fill(0);
+      
+      for (let tau = 0; tau < yinBuffer.length; tau++) {
+        let diff = 0;
+        for (let i = 0; i < yinBuffer.length; i++) {
+          const delta = buffer[i] - buffer[i + tau];
+          diff += delta * delta;
+        }
+        yinBuffer[tau] = diff;
+      }
+      
+      let yinSum = 0;
+      yinBuffer[0] = 1;
+      for (let tau = 1; tau < yinBuffer.length; tau++) {
+        yinSum += yinBuffer[tau];
+        yinBuffer[tau] *= tau / yinSum;
+      }
+      
+      let minTau = -1;
+      let minVal = 1;
+      for (let tau = Math.floor(SIZE * 0.02); tau < Math.floor(SIZE * 0.5); tau++) {
+        if (yinBuffer[tau] < 0.15 && yinBuffer[tau] < minVal) {
+          minVal = yinBuffer[tau];
+          minTau = tau;
+        }
+      }
+      
+      if (minTau === -1) {
+        return;
+      }
+      
+      // 二次插值提高精度
+      let interpTau = minTau;
+      if (minTau > 0 && minTau < yinBuffer.length - 1) {
+        const x0 = yinBuffer[minTau - 1];
+        const x1 = yinBuffer[minTau];
+        const x2 = yinBuffer[minTau + 1];
+        const peak = 0.5 * (x0 - x2) / (x0 - 2 * x1 + x2);
+        interpTau = minTau + peak;
+      }
+      
+      const frequency = sampleRate / interpTau;
+      const noteInfo = frequencyToNote(frequency);
+      
+      if (noteInfo) {
+        document.getElementById('listening-note').textContent = noteInfo.note;
+        document.getElementById('listening-jianpu').textContent = noteInfo.jianpu;
+        document.getElementById('listening-octave').textContent = noteInfo.octaveText;
+        document.getElementById('listening-frequency').textContent = Math.round(frequency) + ' Hz';
+        
+        // 录制时记录音符
+        if (isRecordingMelody && noteInfo.jianpu !== lastDetectedNote) {
+          const now = Date.now();
+          if (now - lastNoteTime > 200) {
+            melodyNotes.push({
+              jianpu: noteInfo.jianpu,
+              note: noteInfo.note,
+              octaveDiff: noteInfo.octaveDiff,
+              frequency: noteInfo.frequency,
+              time: now
+            });
+            lastDetectedNote = noteInfo.jianpu;
+            lastNoteTime = now;
+            updateMelodyDisplay();
+          }
+        }
+      }
+    }
+
+    function toggleListeningRecord() {
+      isRecordingMelody = !isRecordingMelody;
+      const btn = document.getElementById('btn-listening-record');
+      
+      if (isRecordingMelody) {
+        btn.classList.add('active');
+        btn.textContent = '⏹️ 停止录制';
+        melodyNotes = [];
+        lastDetectedNote = null;
+        lastNoteTime = 0;
+        updateMelodyDisplay();
+      } else {
+        btn.classList.remove('active');
+        btn.textContent = '🔴 开始录制';
+      }
+    }
+
+    function updateMelodyDisplay() {
+      const container = document.getElementById('listening-score-display');
+      const countDisplay = document.getElementById('listening-note-count');
+      
+      countDisplay.textContent = melodyNotes.length + ' 个音符';
+      
+      if (melodyNotes.length === 0) {
+        container.innerHTML = '<div style="color: rgba(255,255,255,0.4);">点击「开始录制」记录旋律</div>';
+        return;
+      }
+      
+      container.innerHTML = melodyNotes.map(note => {
+        let className = 'jianpu-note';
+        if (note.octaveDiff < 0) className += ' low';
+        if (note.octaveDiff > 0) className += ' high';
+        return `<div class="${className}">${note.jianpu}</div>`;
+      }).join('');
+    }
+
+    function clearListeningMelody() {
+      melodyNotes = [];
+      lastDetectedNote = null;
+      lastNoteTime = 0;
+      updateMelodyDisplay();
+    }
+
+    function playListeningMelody() {
+      if (melodyNotes.length === 0) {
+        alert('没有记录的旋律，请先录制');
+        return;
+      }
+      
+      if (!isAudioStarted) {
+        initAudio();
+      }
+      
+      let delay = 0;
+      const noteDuration = 0.3;
+      
+      melodyNotes.forEach((note, index) => {
+        const time = delay;
+        delay += noteDuration;
+        
+        const noteWithOctave = addSemitones(note.note, note.octaveDiff * 12);
+        synth.triggerAttackRelease(noteWithOctave, noteDuration, Tone.now() + time);
+      });
+    }
+
+    function toggleLooper() {
+      isLooperOn = !isLooperOn;
+      const btn = document.getElementById('btn-looper');
+      const looperModal = document.getElementById('looper-modal');
+      
+      if (isLooperOn) {
+        btn.classList.add('active');
+        looperModal.classList.add('open');
+      } else {
+        btn.classList.remove('active');
+        looperModal.classList.remove('open');
+      }
+    }
+
+    function toggleDrumPanel() {
+      const drumModal = document.getElementById('drum-panel-modal');
+      drumModal.classList.toggle('open');
+      updateDrumPreview();
+    }
+
+    let chordSequence = [];
+    let chordDuration = 2;
+    let chordInstrument = 'piano';
+    let isPlayingChordSequence = false;
+    let chordSequenceTimer = null;
+
+    function toggleChordEditor() {
+      const modal = document.getElementById('chord-editor-modal');
+      modal.classList.toggle('open');
+    }
+
+    function closeChordEditor() {
+      document.getElementById('chord-editor-modal').classList.remove('open');
+    }
+
+    function selectChordInstrument(instrument) {
+      chordInstrument = instrument;
+      
+      document.querySelectorAll('.chord-instrument-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      document.querySelector(`.chord-instrument-btn[data-instrument="${instrument}"]`).classList.add('active');
+      
+      document.getElementById('select-instrument').value = instrument;
+      changeInstrument();
+    }
+
+    function addChord(root, quality) {
+      chordSequence.push({ root, quality, duration: chordDuration });
+      updateChordSequenceDisplay();
+    }
+
+    function removeChord(index) {
+      chordSequence.splice(index, 1);
+      updateChordSequenceDisplay();
+    }
+
+    function setChordDuration(duration, event) {
+      chordDuration = duration;
+      
+      document.querySelectorAll('.duration-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      event.target.classList.add('active');
+    }
+
+    let chordBars = 1;
+
+    function updateBars() {
+      const input = document.getElementById('chord-bars');
+      chordBars = parseInt(input.value) || 1;
+    }
+
+    function updateChordSequenceDisplay() {
+      const container = document.getElementById('chord-sequence');
+      
+      if (chordSequence.length === 0) {
+        container.innerHTML = '<div class="chord-sequence-empty">点击上方和弦添加到序列</div>';
+        return;
+      }
+      
+      container.innerHTML = '';
+      chordSequence.forEach((item, index) => {
+        const el = document.createElement('div');
+        el.className = 'chord-sequence-item';
+        
+        const qualitySuffix = getQualitySuffix(item.quality);
+        const displayName = item.root + qualitySuffix;
+        
+        el.innerHTML = `
+          <span class="chord-name">${displayName}</span>
+          <span class="chord-duration">${item.duration}拍</span>
+          <button class="chord-remove" onclick="removeChord(${index})">✕</button>
+        `;
+        container.appendChild(el);
+      });
+    }
+
+    function clearChordSequence() {
+      chordSequence = [];
+      updateChordSequenceDisplay();
+    }
+
+    async function playChordSequence() {
+      if (chordSequence.length === 0) return;
+      
+      if (!isAudioStarted) {
+        try { await initAudio(); } catch(e) { console.error('Audio init failed:', e); }
+      }
+      
+      isPlayingChordSequence = true;
+      let index = 0;
+      
+      function playNextChord() {
+        if (!isPlayingChordSequence) return;
+        
+        if (index >= chordSequence.length) {
+          index = 0;
+        }
+        
+        const item = chordSequence[index];
+        
+        playChord(item.root, item.quality);
+        updateUI(item.root, item.quality);
+        
+        index++;
+        
+        const durationMs = (item.duration * 60000) / Tone.Transport.bpm.value;
+        chordSequenceTimer = setTimeout(playNextChord, durationMs);
+      }
+      
+      playNextChord();
+    }
+
+    function stopChordSequence() {
+      isPlayingChordSequence = false;
+      if (chordSequenceTimer) {
+        clearTimeout(chordSequenceTimer);
+        chordSequenceTimer = null;
+      }
+      fadeOutChord();
+    }
+
+    function closeDrumPanel() {
+      document.getElementById('drum-panel-modal').classList.remove('open');
+    }
+
+    function updateBPM(value) {
+      Tone.Transport.bpm.value = parseInt(value);
+      document.getElementById('drum-bpm-value').textContent = value;
+      document.getElementById('slider-bpm').value = value;
+    }
+
+    function selectDrumPattern(patternId) {
+      currentDrumPattern = patternId;
+      
+      document.querySelectorAll('.drum-pattern-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      document.querySelector(`.drum-pattern-btn[data-pattern="${patternId}"]`).classList.add('active');
+      
+      updateDrumPreview();
+    }
+
+    function updateDrumPreview() {
+      const pattern = DRUM_PATTERNS[currentDrumPattern];
+      
+      ['kick', 'snare', 'hihat'].forEach(part => {
+        const grid = document.getElementById(`preview-${part}`);
+        grid.innerHTML = '';
+        
+        pattern[part].forEach((active, index) => {
+          const cell = document.createElement('div');
+          cell.className = `drum-grid-cell${active ? ' active' : ''}`;
+          cell.dataset.index = index;
+          grid.appendChild(cell);
+        });
+      });
+    }
+
+    document.querySelectorAll('.progression-card').forEach(card => {
+      card.addEventListener('click', function() {
+        const name = this.dataset.name;
+        
+        if (chordProgression === name) {
+          stopProgression();
+        } else {
+          startProgression(name);
+        }
+      });
+    });
+
+    function startProgression(name) {
+      stopProgression();
+      
+      chordProgression = name;
+      progressionIndex = 0;
+      
+      document.querySelectorAll('.progression-card').forEach(card => {
+        card.classList.remove('active');
+        if (card.dataset.name === name) {
+          card.classList.add('active');
+        }
+      });
+      
+      playProgressionChord();
+    }
+
+    function stopProgression() {
+      if (progressionTimer) {
+        clearTimeout(progressionTimer);
+        progressionTimer = null;
+      }
+      chordProgression = null;
+      progressionIndex = 0;
+      
+      document.querySelectorAll('.progression-card').forEach(card => {
+        card.classList.remove('active');
+      });
+    }
+
+    async function toggleMainRecording() {
+      const track = looperTracks[currentRecordingTrack - 1];
+      const btn = document.getElementById('btn-record-main');
+      
+      if (track.isRecording) {
+        stopMainRecording();
+      } else {
+        await startMainRecording();
+      }
+    }
+
+    async function startMainRecording() {
+      const track = looperTracks[currentRecordingTrack - 1];
+      const btn = document.getElementById('btn-record-main');
+      
+      try {
+        if (!isAudioStarted) {
+          await initAudio();
+        }
+        
+        if (!microphoneStream) {
+          microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const micSource = audioContext.createMediaStreamSource(microphoneStream);
+          window.micGainNode = audioContext.createGain();
+          window.micGainNode.gain.value = 0.3;
+          micSource.connect(window.micGainNode);
+          window.micGainNode.isConnectedToRecorder = false;
+        }
+        
+        track.isRecording = true;
+        track.startTime = Tone.now();
+        track.events = [];
+        track.audioChunks = [];
+        
+        if (!window.micGainNode.isConnectedToRecorder) {
+          window.micGainNode.connect(recorderDestination);
+          window.micGainNode.isConnectedToRecorder = true;
+        }
+        
+        btn.classList.add('recording');
+        btn.querySelector('.record-text').textContent = `录制中 Track ${currentRecordingTrack}...`;
+        
+        track.mediaRecorder = new MediaRecorder(recorderDestination.stream, { mimeType: 'audio/webm;codecs=opus' });
+        
+        track.mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            track.audioChunks.push(e.data);
+          }
+        };
+        
+        track.mediaRecorder.onstop = () => {
+          window.micGainNode.disconnect(recorderDestination);
+          if (track.audioChunks.length > 0) {
+            track.audioBlob = new Blob(track.audioChunks, { type: 'audio/webm' });
+            track.audioUrl = URL.createObjectURL(track.audioBlob);
+            
+            audioContext.decodeAudioData(track.audioBlob.arrayBuffer(), (audioBuffer) => {
+              track.audioBuffer = audioBuffer;
+              track.loopDuration = audioBuffer.duration;
+            }).catch(err => {
+              console.error('音频解码失败:', err);
+            });
+          }
+        };
+        
+        track.mediaRecorder.start(50);
+        
+      } catch (err) {
+        console.error('录制失败:', err);
+        if (err.name === 'NotAllowedError') {
+          alert('无法访问麦克风，请在浏览器设置中允许麦克风权限');
+        } else {
+          alert('录制启动失败: ' + err.message);
+        }
+        track.isRecording = false;
+        btn.classList.remove('recording');
+        btn.querySelector('.record-text').textContent = `录制 Track ${currentRecordingTrack}`;
+      }
+    }
+
+    function stopMainRecording() {
+      const track = looperTracks[currentRecordingTrack - 1];
+      const btn = document.getElementById('btn-record-main');
+      
+      track.isRecording = false;
+      track.loopDuration = Tone.now() - track.startTime;
+      
+      if (track.mediaRecorder && track.mediaRecorder.state === 'recording') {
+        track.mediaRecorder.stop();
+      }
+      
+      btn.classList.remove('recording');
+      
+      updateTrackDuration(currentRecordingTrack, track.loopDuration);
+      updateLooperVisualizer(currentRecordingTrack);
+      
+      currentRecordingTrack++;
+      if (currentRecordingTrack > 5) {
+        currentRecordingTrack = 1;
+      }
+      
+      btn.querySelector('.record-text').textContent = `录制 Track ${currentRecordingTrack}`;
+    }
+
+    function playProgressionChord() {
+      if (!chordProgression) return;
+      
+      const progression = PROGRESSIONS[chordProgression];
+      const chordName = progression.chords[progressionIndex];
+      const beats = progression.beats[progressionIndex];
+      
+      const parsed = parseChordName(chordName);
+      playChord(parsed.root, parsed.quality);
+      updateUI(parsed.root, parsed.quality);
+      
+      const duration = (beats * 60) / Tone.Transport.bpm.value * 1000;
+      
+      progressionIndex = (progressionIndex + 1) % progression.chords.length;
+      progressionTimer = setTimeout(playProgressionChord, duration);
+    }
+
+    function parseChordName(chord) {
+      let root = chord.charAt(0);
+      let quality = 'major';
+      
+      const rest = chord.slice(1);
+      
+      if (rest.startsWith('m')) {
+        quality = 'minor';
+      } else if (rest.startsWith('maj7')) {
+        quality = 'maj7';
+      } else if (rest.startsWith('7')) {
+        quality = 'dom7';
+      } else if (rest.startsWith('sus4')) {
+        quality = 'sus4';
+      } else if (rest.startsWith('sus2')) {
+        quality = 'sus2';
+      } else if (rest.startsWith('add9')) {
+        quality = 'add9';
+      }
+      
+      return { root, quality };
+    }
+
+    function toggleRecording(trackId) {
+      const track = looperTracks[trackId - 1];
+      const oldBtn = document.querySelector(`#looper-track-${trackId} .track-btn.record`);
+      const modalBtn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.record`);
+      const modalItem = document.getElementById(`looper-modal-track-${trackId}`);
+      
+      if (track.isRecording) {
+        track.isRecording = false;
+        track.loopDuration = Tone.now() - track.startTime;
+        
+        if (oldBtn) oldBtn.classList.remove('recording');
+        if (modalBtn) modalBtn.classList.remove('recording');
+        if (modalItem) modalItem.classList.remove('active-recording');
+        
+        updateTrackDuration(trackId, track.loopDuration);
+        updateLooperVisualizer(trackId);
+      } else {
+        track.isRecording = true;
+        track.isPlaying = false;
+        track.startTime = Tone.now();
+        track.events = [];
+        
+        if (oldBtn) oldBtn.classList.add('recording');
+        if (modalBtn) modalBtn.classList.add('recording');
+        if (modalItem) modalItem.classList.add('active-recording');
+        
+        const oldPlayBtn = document.querySelector(`#looper-track-${trackId} .track-btn.play`);
+        const modalPlayBtn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.play`);
+        if (oldPlayBtn) oldPlayBtn.classList.remove('playing');
+        if (modalPlayBtn) modalPlayBtn.classList.remove('playing');
+        
+        clearPlayback(trackId);
+        updateLooperVisualizer(trackId);
+      }
+    }
+
+    function clearPlayback(trackId) {
+      const track = looperTracks[trackId - 1];
+      track.playbackTimeouts.forEach(timeout => clearTimeout(timeout));
+      track.playbackTimeouts = [];
+      if (track.playheadInterval) {
+        clearInterval(track.playheadInterval);
+        track.playheadInterval = null;
+      }
+      if (track.audioSource) {
+        try {
+          track.audioSource.stop();
+        } catch (e) {}
+        track.audioSource = null;
+      }
+      track.isPlaying = false;
+      
+      const oldPlayBtn = document.querySelector(`#looper-track-${trackId} .track-btn.play`);
+      const modalPlayBtn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.play`);
+      const modalItem = document.getElementById(`looper-modal-track-${trackId}`);
+      
+      if (oldPlayBtn) oldPlayBtn.classList.remove('playing');
+      if (modalPlayBtn) modalPlayBtn.classList.remove('playing');
+      if (modalItem) modalItem.classList.remove('active-playing');
+      
+      const playhead = document.getElementById(`looper-playhead-${trackId}`);
+      if (playhead) playhead.style.left = '0%';
+    }
+
+    function togglePlayback(trackId) {
+      const track = looperTracks[trackId - 1];
+      const oldBtn = document.querySelector(`#looper-track-${trackId} .track-btn.play`);
+      const modalBtn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.play`);
+      const modalItem = document.getElementById(`looper-modal-track-${trackId}`);
+      
+      if (track.isPlaying) {
+        clearPlayback(trackId);
+      } else if (track.events.length > 0 || track.audioBuffer) {
+        track.isPlaying = true;
+        
+        if (oldBtn) oldBtn.classList.add('playing');
+        if (modalBtn) modalBtn.classList.add('playing');
+        if (modalItem) modalItem.classList.add('active-playing');
+        
+        playTrack(trackId);
+        startPlayheadAnimation(trackId);
+      }
+    }
+
+    function playTrack(trackId) {
+      const track = looperTracks[trackId - 1];
+      
+      if (track.audioBuffer) {
+        track.audioSource = Tone.context.createBufferSource();
+        track.audioSource.buffer = track.audioBuffer;
+        track.audioSource.connect(masterGain);
+        track.audioSource.loop = true;
+        track.audioSource.start(0);
+      }
+      
+      track.events.forEach(event => {
+        const timeout = setTimeout(() => {
+          if (track.isPlaying && event.chord) {
+            playChord(event.chord, event.quality);
+            updateUI(event.chord, event.quality);
+          }
+        }, (event.time * 1000));
+        
+        track.playbackTimeouts.push(timeout);
+      });
+      
+      const loopTimeout = setTimeout(() => {
+        if (track.isPlaying) {
+          playTrack(trackId);
+        }
+      }, track.loopDuration * 1000);
+      
+      track.playbackTimeouts.push(loopTimeout);
+    }
+
+    function startPlayheadAnimation(trackId) {
+      const track = looperTracks[trackId - 1];
+      const playhead = document.getElementById(`looper-playhead-${trackId}`);
+      
+      if (!playhead || !track.isPlaying) return;
+      
+      const startTime = Date.now();
+      track.playheadInterval = setInterval(() => {
+        if (!track.isPlaying) return;
+        
+        const elapsed = (Date.now() - startTime) % (track.loopDuration * 1000);
+        const percentage = (elapsed / (track.loopDuration * 1000)) * 100;
+        playhead.style.left = percentage + '%';
+      }, 50);
+    }
+
+    function clearTrack(trackId) {
+      const track = looperTracks[trackId - 1];
+      clearPlayback(trackId);
+      track.events = [];
+      track.loopDuration = 0;
+      
+      const oldRecordBtn = document.querySelector(`#looper-track-${trackId} .track-btn.record`);
+      const modalRecordBtn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.record`);
+      
+      if (oldRecordBtn) oldRecordBtn.classList.remove('recording');
+      if (modalRecordBtn) modalRecordBtn.classList.remove('recording');
+      
+      updateTrackDuration(trackId, 0);
+      updateLooperVisualizer(trackId);
+    }
+
+    function updateTrackDuration(trackId, duration) {
+      const seconds = Math.floor(duration);
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      const timeStr = `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+      
+      const oldDisplay = document.getElementById(`track-${trackId}-duration`);
+      const modalDisplay = document.getElementById(`looper-modal-track-${trackId}-duration`);
+      
+      if (oldDisplay) oldDisplay.textContent = timeStr;
+      if (modalDisplay) modalDisplay.textContent = timeStr;
+    }
+
+    function updateLooperVisualizer(trackId) {
+      const track = looperTracks[trackId - 1];
+      const container = document.getElementById(`looper-chords-${trackId}`);
+      
+      if (!container) return;
+      
+      container.innerHTML = '';
+      
+      if (track.events.length === 0 || track.loopDuration === 0) return;
+      
+      for (let i = 0; i < track.events.length; i++) {
+        const event = track.events[i];
+        const nextEvent = track.events[i + 1];
+        
+        if (!event.chord) continue;
+        
+        const startX = (event.time / track.loopDuration) * 100;
+        const endTime = nextEvent ? nextEvent.time : track.loopDuration;
+        const width = ((endTime - event.time) / track.loopDuration) * 100;
+        
+        const chordBlock = document.createElement('div');
+        chordBlock.className = `looper-chord-block ${event.chord}`;
+        chordBlock.style.left = startX + '%';
+        chordBlock.style.width = Math.max(width, 3) + '%';
+        chordBlock.textContent = event.chord + getQualitySuffix(event.quality);
+        
+        container.appendChild(chordBlock);
+      }
+    }
+
+    function playAllTracks() {
+      looperTracks.forEach((track, index) => {
+        if (track.events.length > 0 && !track.isPlaying) {
+          togglePlayback(index + 1);
+        }
+      });
+    }
+
+    function stopAllTracks() {
+      looperTracks.forEach((_, index) => {
+        clearPlayback(index + 1);
+      });
+    }
+
+    function seekTrack(trackId, event) {
+      const track = looperTracks[trackId - 1];
+      const visualizer = document.getElementById(`looper-visualizer-${trackId}`);
+      const rect = visualizer.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const percentage = clickX / rect.width;
+      
+      const seekTime = percentage * track.loopDuration;
+      
+      if (track.isPlaying) {
+        clearPlayback(trackId);
+        track.isPlaying = true;
+        track.playbackStartTime = Tone.now() - seekTime;
+        
+        if (track.audioBuffer) {
+          track.audioSource = audioContext.createBufferSource();
+          track.audioSource.buffer = track.audioBuffer;
+          track.audioSource.connect(masterGain);
+          track.audioSource.loop = true;
+          track.audioSource.start(0, seekTime);
+        }
+        
+        const btn = document.querySelector(`#looper-modal-track-${trackId} .looper-btn.play`);
+        if (btn) btn.classList.add('playing');
+        
+        track.events.forEach(event => {
+          if (event.time >= seekTime) {
+            const timeout = setTimeout(() => {
+              if (track.isPlaying && event.chord) {
+                playChord(event.chord, event.quality);
+                updateUI(event.chord, event.quality);
+              }
+            }, (event.time - seekTime) * 1000);
+            track.playbackTimeouts.push(timeout);
+          }
+        });
+        
+        const loopTimeout = setTimeout(() => {
+          if (track.isPlaying) {
+            playTrack(trackId);
+          }
+        }, (track.loopDuration - seekTime) * 1000);
+        track.playbackTimeouts.push(loopTimeout);
+        
+        startPlayheadAnimation(trackId);
+      }
+      
+      const playhead = document.getElementById(`looper-playhead-${trackId}`);
+      if (playhead) playhead.style.left = percentage * 100 + '%';
+    }
+
+    function clearAllTracks() {
+      looperTracks.forEach((_, index) => {
+        clearTrack(index + 1);
+      });
+    }
+
+    function showTutorial() {
+      document.getElementById('tutorial-overlay').classList.add('show');
+      tutorialStep = 0;
+      tutorialCRecognized = false;
+      tutorialQualityCount = 0;
+      lastTutorialQuality = '';
+      tutorialAdvancing = false;
+      updateTutorial();
+    }
+
+    function closeTutorial() {
+      document.getElementById('tutorial-overlay').classList.remove('show');
+    }
+
+    function nextTutorial() {
+      if (tutorialStep < 5) {
+        tutorialStep++;
+        updateTutorial();
+      } else {
+        closeTutorial();
+      }
+    }
+
+    function updateTutorial() {
+      const steps = [
+        {
+          step: '步骤 1/6',
+          title: '欢迎来到 AirChords',
+          emoji: '🎸',
+          content: '使用手势控制音乐，无需任何乐器！点击「下一步」开始学习。',
+          autoAdvance: false
+        },
+        {
+          step: '步骤 2/6',
+          title: '左手 · 根音',
+          emoji: '✋',
+          content: '举起左手，伸出食指 → 识别到 C 音后自动进入下一步',
+          autoAdvance: true
+        },
+        {
+          step: '步骤 3/6',
+          title: '右手 · 和弦属性',
+          emoji: '🤚',
+          content: '举起右手，尝试切换不同手势 → 识别到2种属性后自动进入下一步',
+          autoAdvance: true
+        },
+        {
+          step: '步骤 4/6',
+          title: '双手配合',
+          emoji: '🎵',
+          content: '左手控制根音，右手控制和弦属性，一起演奏美妙的和弦！',
+          autoAdvance: false
+        },
+        {
+          step: '步骤 5/6',
+          title: '和弦进行库',
+          emoji: '📚',
+          content: '点击下方预置的和弦进行，自动循环播放经典音乐片段。',
+          autoAdvance: false
+        },
+        {
+          step: '步骤 6/6',
+          title: 'Looper 录音',
+          emoji: '🔄',
+          content: '录制你的演奏并循环回放，支持多轨道叠加！点击「完成」开始演奏吧！',
+          autoAdvance: false
+        }
+      ];
+      
+      const current = steps[tutorialStep];
+      
+      document.getElementById('tutorial-step').textContent = current.step;
+      document.getElementById('tutorial-title').textContent = current.title;
+      document.getElementById('tutorial-emoji').textContent = current.emoji;
+      document.getElementById('tutorial-content').textContent = current.content;
+      document.getElementById('tutorial-progress').style.width = `${((tutorialStep + 1) / 6) * 100}%`;
+      
+      const nextBtn = document.getElementById('tutorial-next');
+      if (current.autoAdvance) {
+        nextBtn.disabled = true;
+        nextBtn.textContent = '等待识别...';
+      } else {
+        nextBtn.disabled = false;
+        nextBtn.textContent = tutorialStep === 5 ? '完成' : '下一步';
+      }
+    }
+
+    function checkTutorial(root, quality) {
+      if (!document.getElementById('tutorial-overlay').classList.contains('show')) return;
+      if (tutorialAdvancing) return;
+      
+      if (tutorialStep === 1 && root === 'C') {
+        tutorialCRecognized = true;
+        tutorialAdvancing = true;
+        setTimeout(() => { tutorialAdvancing = false; nextTutorial(); }, 500);
+      }
+      
+      if (tutorialStep === 2 && quality && quality !== lastTutorialQuality) {
+        tutorialQualityCount++;
+        lastTutorialQuality = quality;
+        if (tutorialQualityCount >= 2) {
+          tutorialAdvancing = true;
+          setTimeout(() => { tutorialAdvancing = false; nextTutorial(); }, 500);
+        }
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      
+      switch(e.code) {
+        case 'Space':
+          e.preventDefault();
+          toggleCamera();
+          break;
+        case 'Digit1':
+          document.getElementById('select-instrument').value = 'piano';
+          changeInstrument();
+          break;
+        case 'Digit2':
+          document.getElementById('select-instrument').value = 'guitar';
+          changeInstrument();
+          break;
+        case 'Digit3':
+          document.getElementById('select-instrument').value = 'synth';
+          changeInstrument();
+          break;
+        case 'Digit4':
+          document.getElementById('select-instrument').value = 'strings';
+          changeInstrument();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          const volSlider = document.getElementById('slider-volume');
+          volSlider.value = Math.min(100, parseInt(volSlider.value) + 5);
+          changeVolume();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          const volSlider2 = document.getElementById('slider-volume');
+          volSlider2.value = Math.max(0, parseInt(volSlider2.value) - 5);
+          changeVolume();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          changePitch(-1);
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          changePitch(1);
+          break;
+        case 'KeyL':
+          toggleLooper();
+          break;
+        case 'KeyT':
+          showTutorial();
+          break;
+        case 'KeyA':
+          toggleAccompaniment();
+          break;
+        case 'KeyM':
+          toggleListening();
+          break;
+        case 'Escape':
+          closeTutorial();
+          break;
+      }
+    });
+  </script>
+</body>
+</html>

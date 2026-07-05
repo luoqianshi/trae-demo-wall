@@ -1,0 +1,237 @@
+﻿ 0x000000;
+      mesh.material.emissive.setHex(original);
+      mesh.material.emissiveIntensity = mesh.userData.originalEmissiveIntensity || 0;
+    }
+    const card = document.querySelector(`.room-card[data-room="${roomId}"]`);
+    if (card) card.classList.toggle('highlighted', on);
+  }
+};
+
+/* =========================================================
+ * 定时任务管理
+ * 支持两种：
+ *   - "once"：N 分钟后执行一次
+ *   - "daily"：每天 HH:MM 执行
+ * tasks = [{ id, mode, minutes|hour, minute, deviceId, action } ]
+ * =======================================================*/
+let scheduledTasks = [];
+let taskTickTimer = null;
+const STORAGE_KEY = 'smartHome.tasks';
+
+function saveTasks() {
+  const data = scheduledTasks.map(t => ({
+    mode: t.mode, minutes: t.minutes, hour: t.hour, minute: t.minute,
+    action: t.action, deviceId: t.deviceId, _fired: false
+  }));
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+}
+function loadTasks() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch(e) { return []; }
+}
+function addTask(task) {
+  task.id = 't' + Date.now() + Math.floor(Math.random() * 1000);
+  task._fired = false;
+  if (task.mode === 'once') {
+    task._fireAt = Date.now() + (task.minutes || 1) * 60 * 1000;
+  }
+  scheduledTasks.push(task);
+  saveTasks();
+  startTaskTimer();
+  renderSchedule();
+}
+function removeTask(id) {
+  scheduledTasks = scheduledTasks.filter(t => t.id !== id);
+  saveTasks();
+  renderSchedule();
+}
+function startTaskTimer() {
+  if (taskTickTimer) return;
+  taskTickTimer = setInterval(() => {
+    taskTick();
+    renderSchedule();   // 每 15 秒刷新一下倒计时文本
+  }, 15 * 1000);
+}
+function taskTick() {
+  const now = new Date();
+  const nowTs = Date.now();
+  scheduledTasks.forEach(t => {
+    if (t.mode === 'once') {
+      if (!t._fired && nowTs >= (t._fireAt) {
+        executeTask(t);
+        t._fired = true;
+        saveTasks();
+        renderSchedule();
+      }
+    } else if (t.mode === 'daily') {
+      const key = now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate();
+      if (t._firedOn !== key && now.getHours() === t.hour && now.getMinutes() === t.minute) {
+        executeTask(t);
+        t._firedOn = key;
+        saveTasks();
+        renderSchedule();
+      }
+    }
+  });
+  // 清理已经执行完的 once 任务（保留在列表中让用户看到"已执行"）
+}
+function executeTask(task) {
+  const { deviceId: id, action } = task;
+  if (id === '__scene__') {
+    if (window.audio && window.audio.speak) {
+      try { window.audio.speak('定时任务：切换到' + (scenePresets[action]?.name || action)); } catch(e){}
+    }
+    applyScene(action, true);
+    return;
+  }
+  if (!deviceState[id]) return;
+  const st = deviceState[id];
+  const shouldOn = (action === 'on');
+  if (st.on !== shouldOn) toggleDevice(id, shouldOn, true);
+  if (window.audio && window.audio.speak) {
+    try { window.audio.speak('定时任务已执行：' + st.label); } catch(e){}
+  }
+}
+
+/* =========================================================
+ * 渲染定时任务区块
+ * =======================================================*/
+function renderSchedule() {
+  const block = document.getElementById('schedule-block');
+  if (!block) return;
+  block.innerHTML = '';
+  const h = document.createElement('h2');
+  h.textContent = '⏰ 定时任务';
+  block.appendChild(h);
+
+  // 添加表单
+  const form = document.createElement('div');
+  form.className = 'task-add';
+  form.innerHTML = `
+    <select id="task-mode">
+      <option value="once">N 分钟后</option>
+      <option value="daily">每天</option>
+    </select>
+    <input type="number" id="task-minutes" placeholder="分钟" min="1" min="1" style="width:60px" />
+    <input type="time" id="task-time" style="display:none" />
+    →
+    <select id="task-target">
+      <option value="scene-home">切换到：回家</option>
+      <option value="scene-sleep">切换到：睡眠</option>
+      <option value="scene-movie">切换到：电影</option>
+      <option value="scene-away">切换到：离家</option>
+    </select>
+    <select id="task-action">
+      <option value="on">打开</option>
+      <option value="off">关闭</option>
+    </select>
+    <button id="task-add-btn">+ 添加</button>
+  `;
+  block.appendChild(form);
+
+  // mode 切换时显示对应输入
+  const modeSel = form.querySelector('#task-mode');
+  const minutesInput = form.querySelector('#task-minutes');
+  const timeInput = form.querySelector('#task-time');
+  const targetSel = form.querySelector('#task-target');
+  modeSel.addEventListener('change', () => {
+    if (modeSel.value === 'once') {
+      minutesInput.style.display = '';
+      timeInput.style.display = 'none';
+    } else {
+      minutesInput.style.display = 'none';
+      timeInput.style.display = '';
+    }
+  });
+
+  // 目标下拉：添加所有设备
+  Object.keys(deviceState).forEach(fullId => {
+    const st = deviceState[fullId];
+    if (st.type === 'alarm') return;
+    const opt = document.createElement('option');
+    opt.value = 'device-' + fullId;
+    opt.textContent = st.label;
+    targetSel.appendChild(opt);
+  });
+
+  form.querySelector('#task-add-btn').onclick = () => {
+    const mode = modeSel.value;
+    const target = targetSel.value;
+    const action = form.querySelector('#task-action').value;
+    if (mode === 'once') {
+      const mins = parseInt(minutesInput.value);
+      if (!mins || mins < 1) { alert('请输入分钟数'); return; }
+      if (target.startsWith('scene-')) {
+        addTask({ mode, minutes: mins, action: target.substring(6), deviceId: '__scene__' });
+      } else {
+        addTask({ mode, minutes: mins, action: action, deviceId: target.substring(7) });
+      }
+    } else {
+      const [h, m] = timeInput.value.split(':').map(x => parseInt(x));
+      if (isNaN(h) || isNaN(m)) { alert('请选择时间'); return; }
+      if (target.startsWith('scene-')) {
+        addTask({ mode, hour: h, minute: m, action: target.substring(6), deviceId: '__scene__' });
+      } else {
+        addTask({ mode, hour: h, minute: m, action: action, deviceId: target.substring(7) });
+      }
+    }
+  };
+
+  // 任务列表
+  const list = document.createElement('div');
+  list.className = 'task-list';
+  if (scheduledTasks.length === 0) {
+    list.innerHTML = '<div class="task-empty">暂无定时任务。添加上方设置吧～</div>';
+  } else {
+    scheduledTasks.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'task-row';
+      let whenText, whatText;
+      if (t.mode === 'once') {
+        const remain = Math.max(0, Math.ceil(((t._fireAt - Date.now()) / 60000));
+        whenText = t._fired ? '已执行' : `${remain} 分钟后`;
+      } else {
+        whenText = `每天 ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
+      }
+      if (t.deviceId === '__scene__') {
+        whatText = `切换到 "${scenePresets[t.action]?.name || t.action}" 模式`;
+      } else {
+        const st = deviceState[t.deviceId];
+        whatText = `${st ? st.label : t.deviceId} → ${t.action === 'on' ? '打开' : '关闭'}`;
+      }
+      row.innerHTML = `<span class="when">${whenText}</span> → <span class="what">${whatText}</span>`;
+      if (t._fired) {
+        const done = document.createElement('span');
+        done.style.color = '#7a8ba0';
+        done.textContent = ' ✓';
+        row.appendChild(done);
+      }
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '×';
+      del.onclick = () => removeTask(t.id);
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+  block.appendChild(list);
+}
+
+/* =========================================================
+ * 右侧面板 UI 生成（重构为房间卡片 + 悬浮高亮 + 房间尺寸
+ * =======================================================*/
+const panelRoot = document.getElementById('rooms');
+function renderPanel() {
+  panelRoot.innerHTML = '';
+  ROOMS.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'room-card';
+    card.dataset.room = r.id;
+    const sizeText = `${r.width.toFixed(1)}m × ${r.depth.toFixed(1)}m · ${(r.width * r.depth).toFixed(1)}㎡`;
+    card.innerHTML = `<h2>${r.name}<span class="room-size">${sizeText}</span></h2>`;
+
+    // 悬浮卡片 → 3D 
