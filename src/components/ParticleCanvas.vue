@@ -13,7 +13,7 @@ let mouse = { x: -1000, y: -1000 }
 const PARTICLE_COUNT = 80
 const CONNECTION_DISTANCE = 150
 const MOUSE_RADIUS = 200
-const ACCENT = { r: 34, g: 197, b: 94 }
+const ACCENT = { r: 16, g: 185, b: 129 }
 
 function init(canvas) {
   const ctx = canvas.getContext('2d')
