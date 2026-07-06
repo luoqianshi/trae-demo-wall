@@ -2,8 +2,9 @@
   <section id="projects" class="py-20">
     <div class="max-w-trae-container mx-auto px-8">
       <div class="flex items-baseline gap-4 mb-12">
-        <h2 class="text-4xl font-bold text-trae-text">
-          作品<span class="bg-gradient-to-br from-trae-accent to-[#4ade80] bg-clip-text text-transparent">展示</span>
+        <div class="w-1 h-10 rounded-full bg-gradient-to-b from-trae-accent-glow to-trae-accent-deep"></div>
+        <h2 class="text-4xl font-bold text-trae-text" style="font-family: var(--font-display);">
+          作品<span class="bg-gradient-to-br from-trae-accent-glow to-trae-accent-deep bg-clip-text text-transparent">展示</span>
         </h2>
         <span class="ml-auto font-mono text-sm text-trae-text-muted">
           {{ store.projectCount }} 个作品
