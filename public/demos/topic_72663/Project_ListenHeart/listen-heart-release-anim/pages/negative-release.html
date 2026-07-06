@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>听心 - 消极情绪释放</title>
+    <link rel="stylesheet" href="../shared.css">
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body>
+  <div class="phone-frame" id="phoneFrame">
+
+    <!-- Header -->
+    <div class="app-header">
+      <div class="app-logo font-title">听心</div>
+      <div class="emotion-tag">
+        <span class="emotion-dot"></span>
+        <span>消极</span>
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="prompt-text font-body" id="promptText">
+      选择一种方式处理你的坏情绪
+    </div>
+
+    <!-- Paper Stage -->
+    <div class="paper-stage" id="paperStage">
+      <!-- Letter Paper -->
+      <div class="letter-paper" id="letterPaper">
+        <div class="letter-text font-body" id="letterText"></div>
+      </div>
+
+      <!-- Crumpled ball (hidden initially) -->
+      <div class="crumpled-ball" id="crumpledBall">
+        <div class="crumpled-ball__inner"></div>
+        <div class="crumpled-ball__wrinkles"></div>
+        <div class="crumpled-ball__wrinkles2"></div>
+      </div>
+
+      <!-- Scrap group container (hidden initially) -->
+      <div class="scrap-group" id="scrapGroup"></div>
+
+      <!-- Trash Can -->
+      <div class="trash-can" id="trashCan">
+        <div class="trash-lid" id="trashLid"></div>
+        <div class="trash-handle"></div>
+        <div class="trash-body"></div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-area" id="actionArea">
+      <button class="btn btn-crumple" id="btnCrumple" onclick="startCrumple()">揉一团</button>
+      <button class="btn btn-tear" id="btnTear" onclick="startTear()">撕碎!</button>
+    </div>
+
+    <!-- Completion Overlay -->
+    <div class="completion-overlay" id="completionOverlay">
+      <div class="completion-text">坏情绪已清空<br>你可以重新开始了</div>
+      <div class="completion-sub font-caption">每一次释放，都是新的开始</div>
+      <div class="action-buttons">
+        <button class="action-btn action-btn-secondary font-body" id="replayBtn">再看一次</button>
+        <button class="action-btn action-btn-primary font-body" id="completeBtn">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---- State ----
+    // idle | crumpling | crumpled-draggable | tearing | torn-draggable | complete
+    let state = 'idle';
+    let scrapOffsets = []; // {el, offX, offY} relative to group center
+    let dragActive = false;
+    let dragPointerId = null;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    const paperStage = document.getElementById('paperStage');
+    const letterPaper = document.getElementById('letterPaper');
+    const crumpledBall = document.getElementById('crumpledBall');
+    const scrapGroup = document.getElementById('scrapGroup');
+    const trashCan = document.getElementById('trashCan');
+    const actionArea = document.getElementById('actionArea');
+    const promptText = document.getElementById('promptText');
+    const completionOverlay = document.getElementById('completionOverlay');
+    const replayBtn = document.getElementById('replayBtn');
+    const completeBtn = document.getElementById('completeBtn');
+
+    // ---- Path A: Crumple ----
+    function startCrumple() {
+      if (state !== 'idle') return;
+      state = 'crumpling';
+      actionArea.style.opacity = '0';
+      actionArea.style.pointerEvents = 'none';
+      promptText.textContent = '把它揉成一团...';
+
+      // Start multi-stage crumple animation
+      letterPaper.classList.add('crumple-stage1');
+
+      setTimeout(() => {
+        letterPaper.classList.remove('crumple-stage1');
+        letterPaper.classList.add('crumple-stage2');
+      }, 400);
+
+      setTimeout(() => {
+        letterPaper.classList.remove('crumple-stage2');
+        letterPaper.classList.add('crumple-stage3');
+      }, 800);
+
+      setTimeout(() => {
+        letterPaper.classList.remove('crumple-stage3');
+        letterPaper.classList.add('crumple-stage4');
+      }, 1200);
+
+      setTimeout(() => {
+        // Hide paper, show crumpled ball
+        letterPaper.style.display = 'none';
+        crumpledBall.style.display = 'flex';
+        crumpledBall.classList.add('crumpled-ball-settle');
+
+        state = 'crumpled-draggable';
+        trashCan.classList.add('prominent');
+        promptText.textContent = '把它扔进垃圾桶';
+
+        // Enable drag on crumpled ball
+        setupCrumpledBallDrag();
+      }, 1500);
+    }
+
+    // ---- Path B: Tear ----
+    function startTear() {
+      if (state !== 'idle') return;
+      state = 'tearing';
+      actionArea.style.opacity = '0';
+      actionArea.style.pointerEvents = 'none';
+      promptText.textContent = '撕碎它!';
+
+      // Shake then tear
+      letterPaper.classList.add('tear-shake');
+
+      setTimeout(() => {
+        letterPaper.classList.remove('tear-shake');
+        letterPaper.classList.add('tearing');
+      }, 300);
+
+      setTimeout(() => {
+        letterPaper.style.display = 'none';
+        generateScrapGroup();
+        state = 'torn-draggable';
+        trashCan.classList.add('prominent');
+        promptText.textContent = '把碎片扔进垃圾桶';
+
+        // Enable group drag
+        setupScrapGroupDrag();
+      }, 900);
+    }
+
+    // ---- Generate Scrap Group ----
+    function generateScrapGroup() {
+      const centerX = paperStage.clientWidth / 2;
+      const centerY = paperStage.clientHeight / 2 - 30;
+
+      scrapGroup.style.left = centerX + 'px';
+      scrapGroup.style.top = centerY + 'px';
+      scrapGroup.style.display = 'block';
+
+      const scrapConfigs = [
+        { w: 68, h: 45, clip: 'polygon(10% 0%, 100% 5%, 95% 100%, 0% 90%)', ox: -40, oy: -35, rot: -12 },
+        { w: 55, h: 50, clip: 'polygon(5% 8%, 95% 0%, 100% 92%, 0% 100%)', ox: 30, oy: -40, rot: 18 },
+        { w: 72, h: 38, clip: 'polygon(0% 5%, 100% 0%, 90% 100%, 10% 95%)', ox: -55, oy: 20, rot: -6 },
+        { w: 50, h: 46, clip: 'polygon(8% 0%, 100% 10%, 92% 100%, 0% 85%)', ox: 50, oy: 30, rot: 22 },
+        { w: 60, h: 38, clip: 'polygon(0% 10%, 92% 0%, 100% 88%, 5% 100%)', ox: -20, oy: -55, rot: -20 },
+        { w: 52, h: 50, clip: 'polygon(12% 0%, 100% 8%, 88% 100%, 0% 92%)', ox: 35, oy: 45, rot: 10 },
+        { w: 65, h: 35, clip: 'polygon(0% 0%, 100% 12%, 85% 100%, 8% 88%)', ox: -48, oy: -15, rot: 28 },
+        { w: 45, h: 55, clip: 'polygon(6% 5%, 95% 0%, 100% 95%, 0% 100%)', ox: 55, oy: -10, rot: -15 },
+        { w: 58, h: 40, clip: 'polygon(0% 8%, 100% 0%, 90% 100%, 5% 92%)', ox: -10, oy: -65, rot: 6 },
+        { w: 44, h: 48, clip: 'polygon(10% 0%, 100% 10%, 100% 100%, 0% 90%)', ox: 65, oy: 8, rot: -25 },
+      ];
+
+      scrapConfigs.forEach((cfg, i) => {
+        const scrap = document.createElement('div');
+        scrap.className = 'scrap appearing';
+        scrap.dataset.index = i;
+
+        scrap.style.width = cfg.w + 'px';
+        scrap.style.height = cfg.h + 'px';
+        scrap.style.clipPath = cfg.clip;
+
+        // Position relative to group center (0,0 = group anchor)
+        scrap.style.left = cfg.ox + 'px';
+        scrap.style.top = cfg.oy + 'px';
+
+        scrap.style.setProperty('--scrap-rot', cfg.rot + 'deg');
+
+        if (i % 3 === 0) {
+          scrap.style.background = 'linear-gradient(135deg, var(--color-surface) 60%, rgba(155,142,196,0.06) 100%)';
+        } else if (i % 3 === 1) {
+          scrap.style.background = 'linear-gradient(225deg, var(--color-surface) 50%, rgba(155,142,196,0.04) 100%)';
+        }
+
+        scrapGroup.appendChild(scrap);
+        scrapOffsets.push({ el: scrap, homeOffX: cfg.ox, homeOffY: cfg.oy });
+
+        setTimeout(() => {
+          scrap.classList.remove('appearing');
+          scrap.classList.add('floating');
+        }, 500);
+      });
+    }
+
+    // ---- Crumpled Ball Drag ----
+    function setupCrumpledBallDrag() {
+      crumpledBall.addEventListener('pointerdown', onBallPointerDown);
+    }
+
+    function onBallPointerDown(e) {
+      if (state !== 'crumpled-draggable') return;
+      e.preventDefault();
+      crumpledBall.setPointerCapture(e.pointerId);
+
+      const rect = crumpledBall.getBoundingClientRect();
+      const stageRect = paperStage.getBoundingClientRect();
+      dragOffsetX = e.clientX - rect.left;
+      dragOffsetY = e.clientY - rect.top;
+      dragActive = true;
+
+      crumpledBall.classList.add('being-dragged');
+
+      crumpledBall.addEventListener('pointermove', onBallPointerMove);
+      crumpledBall.addEventListener('pointerup', onBallPointerUp);
+      crumpledBall.addEventListener('pointercancel', onBallPointerUp);
+    }
+
+    function onBallPointerMove(e) {
+      if (!dragActive) return;
+      const stageRect = paperStage.getBoundingClientRect();
+      const x = e.clientX - stageRect.left - dragOffsetX;
+      const y = e.clientY - stageRect.top - dragOffsetY;
+      crumpledBall.style.left = x + 'px';
+      crumpledBall.style.top = y + 'px';
+
+      checkTrashProximity(e.clientX, e.clientY);
+    }
+
+    function onBallPointerUp(e) {
+      if (!dragActive) return;
+      crumpledBall.removeEventListener('pointermove', onBallPointerMove);
+      crumpledBall.removeEventListener('pointerup', onBallPointerUp);
+      crumpledBall.removeEventListener('pointercancel', onBallPointerUp);
+
+      crumpledBall.classList.remove('being-dragged');
+
+      if (isOverTrash(e.clientX, e.clientY)) {
+        discardToTrash(crumpledBall);
+      } else {
+        snapBallBack();
+      }
+
+      dragActive = false;
+      trashCan.classList.remove('active', 'glowing');
+    }
+
+    function snapBallBack() {
+      // Animate ball back to center
+      const stageRect = paperStage.getBoundingClientRect();
+      const cx = stageRect.width / 2 - 35; // center minus half ball size
+      const cy = stageRect.height / 2 - 35;
+      crumpledBall.style.transition = 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), top 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      crumpledBall.style.left = cx + 'px';
+      crumpledBall.style.top = cy + 'px';
+      setTimeout(() => {
+        crumpledBall.style.transition = '';
+      }, 400);
+    }
+
+    function discardToTrash(el) {
+      trashCan.classList.add('active');
+      el.classList.add('discarding');
+
+      setTimeout(() => {
+        showCompletion();
+      }, 600);
+    }
+
+    // ---- Scrap Group Drag ----
+    function setupScrapGroupDrag() {
+      scrapGroup.addEventListener('pointerdown', onGroupPointerDown);
+    }
+
+    function onGroupPointerDown(e) {
+      if (state !== 'torn-draggable') return;
+      e.preventDefault();
+      scrapGroup.setPointerCapture(e.pointerId);
+
+      const stageRect = paperStage.getBoundingClientRect();
+      const groupLeft = parseFloat(scrapGroup.style.left) || 0;
+      const groupTop = parseFloat(scrapGroup.style.top) || 0;
+
+      dragOffsetX = e.clientX - stageRect.left - groupLeft;
+      dragOffsetY = e.clientY - stageRect.top - groupTop;
+      dragActive = true;
+
+      scrapGroup.classList.add('group-dragging');
+
+      // Stop individual floating animations
+      scrapOffsets.forEach(s => {
+        s.el.classList.remove('floating');
+        s.el.style.animation = 'none';
+      });
+
+      scrapGroup.addEventListener('pointermove', onGroupPointerMove);
+      scrapGroup.addEventListener('pointerup', onGroupPointerUp);
+      scrapGroup.addEventListener('pointercancel', onGroupPointerUp);
+    }
+
+    function onGroupPointerMove(e) {
+      if (!dragActive) return;
+      const stageRect = paperStage.getBoundingClientRect();
+      const x = e.clientX - stageRect.left - dragOffsetX;
+      const y = e.clientY - stageRect.top - dragOffsetY;
+      scrapGroup.style.left = x + 'px';
+      scrapGroup.style.top = y + 'px';
+
+      checkTrashProximity(e.clientX, e.clientY);
+    }
+
+    function onGroupPointerUp(e) {
+      if (!dragActive) return;
+      scrapGroup.removeEventListener('pointermove', onGroupPointerMove);
+      scrapGroup.removeEventListener('pointerup', onGroupPointerUp);
+      scrapGroup.removeEventListener('pointercancel', onGroupPointerUp);
+
+      scrapGroup.classList.remove('group-dragging');
+
+      if (isOverTrash(e.clientX, e.clientY)) {
+        discardGroupToTrash();
+      } else {
+        snapGroupBack();
+      }
+
+      dragActive = false;
+      trashCan.classList.remove('active', 'glowing');
+    }
+
+    function discardGroupToTrash() {
+      trashCan.classList.add('active');
+      scrapOffsets.forEach((s, i) => {
+        setTimeout(() => {
+          s.el.classList.add('dissolving');
+        }, i * 30);
+      });
+
+      setTimeout(() => {
+        showCompletion();
+      }, 600);
+    }
+
+    function snapGroupBack() {
+      // Animate group back to center
+      const stageRect = paperStage.getBoundingClientRect();
+      const cx = stageRect.width / 2;
+      const cy = stageRect.height / 2 - 30;
+
+      scrapGroup.style.transition = 'left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), top 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      scrapGroup.style.left = cx + 'px';
+      scrapGroup.style.top = cy + 'px';
+
+      setTimeout(() => {
+        scrapGroup.style.transition = '';
+        // Restart float animations
+        scrapOffsets.forEach(s => {
+          s.el.style.animation = '';
+          s.el.classList.add('floating');
+        });
+      }, 400);
+    }
+
+    // ---- Trash Proximity ----
+    function checkTrashProximity(cx, cy) {
+      const trashRect = trashCan.getBoundingClientRect();
+      const trashCX = trashRect.left + trashRect.width / 2;
+      const trashCY = trashRect.top + trashRect.height / 2;
+      const dist = Math.hypot(cx - trashCX, cy - trashCY);
+
+      if (dist < 80) {
+        trashCan.classList.add('active', 'glowing');
+      } else {
+        trashCan.classList.remove('active');
+        trashCan.classList.remove('glowing');
+      }
+    }
+
+    function isOverTrash(cx, cy) {
+      const trashRect = trashCan.getBoundingClientRect();
+      const trashCX = trashRect.left + trashRect.width / 2;
+      const trashCY = trashRect.top + trashRect.height / 2;
+      const dist = Math.hypot(cx - trashCX, cy - trashCY);
+      return dist < 65;
+    }
+
+    // ---- Completion ----
+    function showCompletion() {
+      state = 'complete';
+      trashCan.classList.remove('prominent', 'active', 'glowing');
+
+      setTimeout(() => {
+        completionOverlay.classList.add('show');
+        spawnSparkles();
+      }, 300);
+    }
+
+    function spawnSparkles() {
+      const overlay = completionOverlay;
+      const count = 24;
+      for (let i = 0; i < count; i++) {
+        const s = document.createElement('div');
+        s.className = 'sparkle';
+        const size = 4 + Math.random() * 8;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 60 + Math.random() * 120;
+        const sx = Math.cos(angle) * dist;
+        const sy = Math.sin(angle) * dist - 40;
+        const delay = Math.random() * 0.8;
+        const dur = 0.8 + Math.random() * 0.6;
+
+        s.style.setProperty('--size', size + 'px');
+        s.style.setProperty('--sx', sx + 'px');
+        s.style.setProperty('--sy', sy + 'px');
+        s.style.setProperty('--delay', delay + 's');
+        s.style.setProperty('--dur', dur + 's');
+        s.style.left = '50%';
+        s.style.top = '45%';
+        s.style.marginLeft = -size / 2 + 'px';
+        s.style.marginTop = -size / 2 + 'px';
+
+        if (i % 3 === 0) {
+          s.style.background = 'rgba(155,142,196,0.7)';
+        } else if (i % 3 === 1) {
+          s.style.background = 'rgba(200,190,220,0.5)';
+        } else {
+          s.style.background = 'rgba(155,142,196,0.3)';
+          s.style.width = (size * 0.6) + 'px';
+          s.style.height = (size * 0.6) + 'px';
+        }
+
+        overlay.appendChild(s);
+      }
+    }
+
+    // ---- Reset ----
+    function resetAll() {
+      state = 'idle';
+
+      // Remove scraps
+      scrapGroup.innerHTML = '';
+      scrapGroup.style.display = 'none';
+      scrapGroup.style.left = '';
+      scrapGroup.style.top = '';
+      scrapGroup.style.transition = '';
+      scrapGroup.classList.remove('group-dragging');
+      scrapOffsets = [];
+
+      // Remove sparkles
+      completionOverlay.querySelectorAll('.sparkle').forEach(s => s.remove());
+
+      // Hide completion
+      completionOverlay.classList.remove('show');
+
+      // Reset paper
+      letterPaper.style.display = '';
+      letterPaper.classList.remove('crumple-stage1', 'crumple-stage2', 'crumple-stage3', 'crumple-stage4', 'tearing', 'tear-shake');
+      letterPaper.style.transform = '';
+
+      // Reset crumpled ball
+      crumpledBall.style.display = 'none';
+      crumpledBall.classList.remove('crumpled-ball-settle', 'being-dragged', 'discarding');
+      // Re-init ball position
+      const stageRect = paperStage.getBoundingClientRect();
+      crumpledBall.style.left = (stageRect.width / 2 - 35) + 'px';
+      crumpledBall.style.top = (stageRect.height / 2 + 60) + 'px';
+
+      // Reset trash
+      trashCan.classList.remove('prominent', 'active', 'glowing');
+
+      // Reset UI
+      actionArea.style.opacity = '1';
+      actionArea.style.pointerEvents = 'auto';
+      promptText.textContent = '选择一种方式处理你的坏情绪';
+    }
+
+    // ---- Init crumpled ball position ----
+    (function initBallPosition() {
+      const stageRect = paperStage.getBoundingClientRect();
+      crumpledBall.style.left = (stageRect.width / 2 - 35) + 'px';
+      crumpledBall.style.top = (stageRect.height / 2 + 60) + 'px';
+    })();
+
+    // ---- URL Parameters ----
+    function getUrlParam(name) {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get(name);
+    }
+
+    const recordId = getUrlParam('id');
+    const content = getUrlParam('content');
+    const autoplay = getUrlParam('autoplay');
+    const letterText = document.getElementById('letterText');
+
+    if (content) {
+      letterText.textContent = content;
+    } else {
+      letterText.textContent = '好烦啊，为什么每次都是我做错？明明已经努力了还是被报告。真的好累好累，不想再装了。';
+    }
+
+    // ---- Notify Parent ----
+    function notifyParentComplete() {
+      if (window.parent && window.parent.postMessage) {
+        window.parent.postMessage({ type: 'releaseComplete', id: recordId }, '*');
+      }
+    }
+
+    replayBtn.addEventListener('click', resetAll);
+    completeBtn.addEventListener('click', notifyParentComplete);
+
+    // Check if in iframe
+    if (window.self !== window.top) {
+      document.body.classList.add('in-iframe');
+    }
+
+    // 自动播放提示：来自"完成记录"或"重新释放"时高亮按钮引导用户选择
+    if (autoplay === '1') {
+      promptText.textContent = '选择一种方式，重新释放你的情绪';
+      btnCrumple.classList.add('pulse-hint');
+      btnTear.classList.add('pulse-hint');
+      // 用户选择后移除提示
+      btnCrumple.addEventListener('click', function removeHint() {
+        btnCrumple.classList.remove('pulse-hint');
+        btnTear.classList.remove('pulse-hint');
+        btnCrumple.removeEventListener('click', removeHint);
+      });
+      btnTear.addEventListener('click', function removeHint() {
+        btnCrumple.classList.remove('pulse-hint');
+        btnTear.classList.remove('pulse-hint');
+        btnTear.removeEventListener('click', removeHint);
+      });
+    }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #e8e4df;
+      font-family: var(--font-family);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    body.in-iframe {
+      display: block;
+      min-height: 100%;
+      background: transparent;
+    }
+
+    /* ---- Phone Frame ---- */
+    .phone-frame {
+      width: 375px;
+      height: 812px;
+      max-height: 96vh;
+      background: linear-gradient(165deg, var(--color-bg) 0%, var(--color-bg-purple) 100%);
+      border-radius: 40px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 2px rgba(0,0,0,0.05);
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.in-iframe .phone-frame {
+      width: 100%;
+      height: 100vh;
+      max-height: none;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    /* ---- Header ---- */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 56px 24px 12px;
+    }
+    .app-logo {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--emotion-negative);
+      letter-spacing: -0.02em;
+    }
+    .emotion-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--emotion-negative);
+      background: var(--emotion-negative-bg);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+    .emotion-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emotion-negative);
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      text-align: center;
+      padding: 8px 32px 0;
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ---- Paper Stage ---- */
+    .paper-stage {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      padding: 16px 32px;
+      overflow: hidden;
+    }
+
+    .letter-paper {
+      width: 260px;
+      min-height: 180px;
+      background: var(--color-surface);
+      border-radius: 6px;
+      padding: 20px;
+      position: relative;
+      box-shadow:
+        0 2px 8px rgba(0,0,0,0.06),
+        0 8px 24px rgba(0,0,0,0.04);
+      transition: box-shadow 0.4s ease;
+      cursor: default;
+      z-index: 2;
+    }
+    .letter-paper::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 23px,
+          rgba(155,142,196,0.08) 23px,
+          rgba(155,142,196,0.08) 24px
+        );
+      border-radius: 6px;
+      pointer-events: none;
+    }
+    .letter-paper::after {
+      content: '';
+      position: absolute;
+      top: 8px;
+      left: 18px;
+      width: 3px;
+      height: calc(100% - 16px);
+      background: rgba(155,142,196,0.12);
+      border-radius: 2px;
+    }
+    .letter-text {
+      position: relative;
+      z-index: 1;
+      font-size: 13.5px;
+      line-height: 24px;
+      color: var(--color-text-primary);
+      padding-left: 14px;
+    }
+
+    /* ---- Crumple Animation Stages ---- */
+    @keyframes crumpleStage1 {
+      /* Corners curl inward */
+      0%   { border-radius: 6px; transform: scale(1) rotate(0deg); }
+      30%  { transform: scale(0.96) rotate(1.5deg); }
+      100% { border-radius: 20% 30% 25% 35%; transform: scale(0.92) rotate(2deg); }
+    }
+    .letter-paper.crumple-stage1 {
+      animation: crumpleStage1 0.4s ease-in forwards;
+    }
+
+    @keyframes crumpleStage2 {
+      /* Compress and round */
+      0%   { border-radius: 20% 30% 25% 35%; transform: scale(0.92) rotate(2deg); }
+      40%  { transform: scale(0.72) rotate(4deg); }
+      100% { border-radius: 40% 60% 50% 45% / 55% 40% 60% 50%; transform: scale(0.6) rotate(5deg); }
+    }
+    .letter-paper.crumple-stage2 {
+      animation: crumpleStage2 0.4s ease-in forwards;
+      box-shadow:
+        0 6px 20px rgba(0,0,0,0.12),
+        0 2px 8px rgba(0,0,0,0.08),
+        inset 0 -2px 10px rgba(0,0,0,0.05);
+    }
+
+    @keyframes crumpleStage3 {
+      /* Final ball shape with texture emerging */
+      0%   { border-radius: 40% 60% 50% 45% / 55% 40% 60% 50%; transform: scale(0.6) rotate(5deg); }
+      50%  { border-radius: 38% 62% 52% 48% / 58% 38% 62% 42%; transform: scale(0.55) rotate(8deg); }
+      100% { border-radius: 35% 65% 55% 45% / 60% 35% 65% 40%; transform: scale(0.58) rotate(6deg); }
+    }
+    .letter-paper.crumple-stage3 {
+      animation: crumpleStage3 0.4s ease-in forwards;
+      box-shadow:
+        0 6px 20px rgba(0,0,0,0.15),
+        0 2px 6px rgba(0,0,0,0.1),
+        inset 0 -3px 8px rgba(0,0,0,0.08),
+        inset 0 2px 4px rgba(0,0,0,0.04);
+    }
+
+    @keyframes crumpleStage4 {
+      /* Subtle squeeze/bounce settle */
+      0%   { transform: scale(0.58) rotate(6deg); }
+      30%  { transform: scale(0.54) rotate(7deg); }
+      60%  { transform: scale(0.6) rotate(5.5deg); }
+      80%  { transform: scale(0.57) rotate(6.2deg); }
+      100% { transform: scale(0.58) rotate(6deg); }
+    }
+    .letter-paper.crumple-stage4 {
+      animation: crumpleStage4 0.3s ease-in-out forwards;
+    }
+
+    /* ---- Tear animations ---- */
+    @keyframes tearShake {
+      0%, 100% { transform: translateX(0) rotate(0deg); }
+      10% { transform: translateX(-3px) rotate(-0.5deg); }
+      20% { transform: translateX(3px) rotate(0.5deg); }
+      30% { transform: translateX(-4px) rotate(-0.8deg); }
+      40% { transform: translateX(4px) rotate(0.8deg); }
+      50% { transform: translateX(-3px) rotate(-0.5deg); }
+      60% { transform: translateX(3px) rotate(0.5deg); }
+      70% { transform: translateX(-2px) rotate(-0.3deg); }
+      80% { transform: translateX(2px) rotate(0.3deg); }
+      90% { transform: translateX(-1px) rotate(-0.2deg); }
+    }
+    .letter-paper.tear-shake {
+      animation: tearShake 0.3s ease-in-out;
+    }
+
+    @keyframes tearShatter {
+      0%   { opacity: 1; transform: scale(1) rotate(0deg); }
+      20%  { opacity: 1; transform: scale(1.02) rotate(0.5deg); }
+      50%  { opacity: 0.7; transform: scale(1.05) rotate(-1deg); }
+      100% { opacity: 0; transform: scale(0.85) rotate(2deg); }
+    }
+    .letter-paper.tearing {
+      animation: tearShatter 0.6s ease-in forwards;
+    }
+
+    /* ---- Crumpled Ball ---- */
+    .crumpled-ball {
+      display: none;
+      width: 70px;
+      height: 70px;
+      position: absolute;
+      left: 50%;
+      top: calc(50% + 60px);
+      transform: translateX(-50%);
+      z-index: 10;
+      cursor: grab;
+      touch-action: none;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .crumpled-ball__inner {
+      width: 70px;
+      height: 70px;
+      position: relative;
+      background:
+        linear-gradient(145deg, #f0ede8 0%, #e8e4de 30%, #f5f2ed 50%, #eae6e0 70%, #f0ede8 100%);
+      border-radius: 35% 65% 55% 45% / 60% 35% 65% 40%;
+      box-shadow:
+        0 6px 20px rgba(0,0,0,0.15),
+        0 2px 6px rgba(0,0,0,0.1),
+        inset 0 -3px 8px rgba(0,0,0,0.08),
+        inset 0 2px 4px rgba(0,0,0,0.04),
+        inset -2px 0 6px rgba(0,0,0,0.03);
+    }
+
+    /* Wrinkle texture layer 1: horizontal/diagonal lines */
+    .crumpled-ball__wrinkles {
+      position: absolute;
+      top: 0; left: 0; width: 70px; height: 70px;
+      border-radius: 35% 65% 55% 45% / 60% 35% 65% 40%;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          32deg,
+          transparent,
+          transparent 5px,
+          rgba(0,0,0,0.04) 5px,
+          rgba(0,0,0,0.04) 6px
+        ),
+        repeating-linear-gradient(
+          -25deg,
+          transparent,
+          transparent 7px,
+          rgba(0,0,0,0.03) 7px,
+          rgba(0,0,0,0.03) 8px
+        ),
+        repeating-linear-gradient(
+          70deg,
+          transparent,
+          transparent 4px,
+          rgba(0,0,0,0.025) 4px,
+          rgba(0,0,0,0.025) 4.5px
+        );
+      overflow: hidden;
+    }
+
+    /* Wrinkle texture layer 2: curved/organic lines */
+    .crumpled-ball__wrinkles2 {
+      position: absolute;
+      top: 0; left: 0; width: 70px; height: 70px;
+      border-radius: 35% 65% 55% 45% / 60% 35% 65% 40%;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          110deg,
+          transparent,
+          transparent 6px,
+          rgba(0,0,0,0.035) 6px,
+          rgba(0,0,0,0.035) 6.5px
+        ),
+        repeating-linear-gradient(
+          -60deg,
+          transparent,
+          transparent 8px,
+          rgba(0,0,0,0.025) 8px,
+          rgba(0,0,0,0.025) 8.8px
+        ),
+        repeating-linear-gradient(
+          5deg,
+          transparent,
+          transparent 3px,
+          rgba(0,0,0,0.03) 3px,
+          rgba(0,0,0,0.03) 3.5px
+        );
+      overflow: hidden;
+    }
+
+    @keyframes crumpledBallSettle {
+      0%   { opacity: 0; transform: scale(0.5); }
+      60%  { opacity: 1; transform: scale(1.08); }
+      80%  { transform: scale(0.95); }
+      100% { transform: scale(1); }
+    }
+    .crumpled-ball.crumpled-ball-settle {
+      animation: crumpledBallSettle 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    .crumpled-ball.being-dragged {
+      cursor: grabbing;
+      z-index: 100;
+      filter: drop-shadow(0 8px 20px rgba(0,0,0,0.2));
+    }
+
+    @keyframes discardCrumpled {
+      0%   { opacity: 1; transform: scale(1); }
+      50%  { opacity: 0.7; transform: scale(0.4) rotate(20deg); }
+      100% { opacity: 0; transform: scale(0) rotate(45deg); }
+    }
+    .crumpled-ball.discarding {
+      animation: discardCrumpled 0.5s ease-in forwards;
+      pointer-events: none;
+    }
+
+    /* ---- Scrap Group ---- */
+    .scrap-group {
+      display: none;
+      position: absolute;
+      z-index: 10;
+      touch-action: none;
+      cursor: grab;
+      width: 180px;
+      height: 180px;
+      margin-left: -90px;
+      margin-top: -90px;
+    }
+    .scrap-group.group-dragging {
+      cursor: grabbing;
+      z-index: 100;
+      filter: drop-shadow(0 6px 16px rgba(0,0,0,0.18));
+    }
+
+    .scrap {
+      position: absolute;
+      background: var(--color-surface);
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      pointer-events: none;
+      transition: box-shadow 0.2s;
+    }
+
+    @keyframes scrapAppear {
+      0%   { opacity: 0; transform: scale(0.3) rotate(0deg); }
+      60%  { opacity: 1; }
+      100% { opacity: 1; transform: scale(1) rotate(var(--scrap-rot)); }
+    }
+    .scrap.appearing {
+      animation: scrapAppear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    @keyframes scrapFloat {
+      0%, 100% { transform: rotate(var(--scrap-rot)) translate(0, 0); }
+      25%  { transform: rotate(calc(var(--scrap-rot) + 2deg)) translate(1.5px, -2px); }
+      75%  { transform: rotate(calc(var(--scrap-rot) - 1.5deg)) translate(-1px, 1.5px); }
+    }
+    .scrap.floating {
+      animation: scrapFloat 3s ease-in-out infinite;
+      opacity: 1;
+    }
+
+    @keyframes groupWobble {
+      0%, 100% { transform: rotate(0deg); }
+      25%  { transform: rotate(0.8deg); }
+      75%  { transform: rotate(-0.8deg); }
+    }
+    .scrap-group.group-dragging {
+      animation: groupWobble 0.6s ease-in-out infinite;
+    }
+
+    @keyframes scrapDissolve {
+      0%   { opacity: 1; transform: scale(1) rotate(var(--scrap-rot)); }
+      50%  { opacity: 0.5; transform: scale(0.4) rotate(calc(var(--scrap-rot) + 180deg)); }
+      100% { opacity: 0; transform: scale(0) rotate(calc(var(--scrap-rot) + 360deg)); }
+    }
+    .scrap.dissolving {
+      animation: scrapDissolve 0.5s ease-in forwards;
+      pointer-events: none;
+    }
+
+    /* ---- Trash Can ---- */
+    .trash-can {
+      position: absolute;
+      bottom: 160px;
+      right: 28px;
+      width: 56px;
+      height: 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      cursor: default;
+      z-index: 5;
+      opacity: 0.3;
+      transition: opacity 0.4s, transform 0.3s;
+    }
+    .trash-can.prominent {
+      opacity: 1;
+    }
+    .trash-can.active {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+    .trash-lid {
+      position: absolute;
+      top: 0;
+      width: 52px;
+      height: 10px;
+      border-radius: 4px 4px 2px 2px;
+      background: var(--color-text-muted);
+      transform-origin: bottom center;
+      transition: transform 0.3s;
+    }
+    .trash-can.active .trash-lid {
+      transform: rotate(-30deg) translateY(-2px);
+    }
+    .trash-body {
+      width: 44px;
+      height: 48px;
+      margin-top: 2px;
+      border-radius: 4px 4px 8px 8px;
+      background: var(--color-text-muted);
+      position: relative;
+    }
+    .trash-body::before {
+      content: '';
+      position: absolute;
+      top: 8px; left: 4px; right: 4px;
+      height: 1.5px;
+      background: rgba(255,255,255,0.3);
+      box-shadow: 0 6px 0 rgba(255,255,255,0.3), 0 12px 0 rgba(255,255,255,0.3);
+    }
+    .trash-handle {
+      position: absolute;
+      top: -4px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 20px;
+      height: 6px;
+      border: 2px solid var(--color-text-muted);
+      border-bottom: none;
+      border-radius: 10px 10px 0 0;
+    }
+
+    @keyframes trashGlow {
+      0%, 100% { filter: drop-shadow(0 0 8px var(--emotion-negative-glow)); }
+      50%  { filter: drop-shadow(0 0 20px var(--emotion-negative-glow)) drop-shadow(0 0 32px var(--emotion-negative-glow)); }
+    }
+    .trash-can.glowing .trash-lid,
+    .trash-can.glowing .trash-body,
+    .trash-can.glowing .trash-handle {
+      animation: trashGlow 1s ease-in-out infinite;
+    }
+
+    /* ---- Action Buttons ---- */
+    .action-area {
+      padding: 0 32px 40px;
+      display: flex;
+      gap: 12px;
+      position: relative;
+      z-index: 50;
+      transition: opacity 0.3s;
+    }
+    .btn {
+      flex: 1;
+      padding: 14px 20px;
+      border: none;
+      border-radius: var(--radius-lg);
+      font-family: var(--font-family);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.3s;
+      outline: none;
+    }
+    .btn:active {
+      transform: scale(0.96);
+    }
+    .btn-crumple {
+      background: var(--color-surface);
+      color: var(--emotion-negative);
+      border: 1.5px solid rgba(155,142,196,0.25);
+      box-shadow: 0 2px 8px rgba(155,142,196,0.08);
+    }
+    .btn-crumple:hover {
+      box-shadow: 0 4px 16px rgba(155,142,196,0.15);
+    }
+    .btn-tear {
+      background: var(--emotion-negative);
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(155,142,196,0.3);
+    }
+    .btn-tear:hover {
+      box-shadow: 0 6px 24px rgba(155,142,196,0.4);
+      transform: translateY(-1px);
+    }
+    .btn-tear:active {
+      transform: scale(0.96) translateY(0);
+    }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* 自动播放时的按钮脉冲提示 */
+    @keyframes pulseHint {
+      0%, 100% { transform: scale(1); box-shadow: 0 2px 8px rgba(155,142,196,0.15); }
+      50% { transform: scale(1.05); box-shadow: 0 4px 20px rgba(155,142,196,0.4); }
+    }
+    .btn.pulse-hint {
+      animation: pulseHint 1.5s ease-in-out infinite;
+    }
+
+    /* ---- Completion overlay ---- */
+    .completion-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(243, 240, 248, 0.95);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease;
+      z-index: 200;
+      border-radius: 40px;
+    }
+    .completion-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .completion-text {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--emotion-negative);
+      text-align: center;
+      line-height: 1.7;
+      padding: 0 40px;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.5s 0.3s, transform 0.5s 0.3s;
+    }
+    .completion-overlay.show .completion-text {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .completion-sub {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      margin-top: 8px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.5s 0.5s, transform 0.5s 0.5s;
+    }
+    .completion-overlay.show .completion-sub {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .action-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 28px;
+      padding: 0 24px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.5s 0.7s, transform 0.5s 0.7s;
+    }
+    .completion-overlay.show .action-buttons {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .action-btn {
+      padding: 12px 24px;
+      border-radius: var(--radius-full);
+      font-family: var(--font-family);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: all 0.3s ease;
+    }
+    .action-btn-secondary {
+      border: 1px solid rgba(155, 142, 196, 0.3);
+      background: rgba(155, 142, 196, 0.08);
+      color: var(--emotion-negative);
+    }
+    .action-btn-secondary:hover {
+      background: rgba(155, 142, 196, 0.15);
+    }
+    .action-btn-primary {
+      border: none;
+      background: linear-gradient(135deg, var(--emotion-negative) 0%, #7a6aab 100%);
+      color: #fff;
+      box-shadow: 0 4px 16px var(--emotion-negative-glow);
+    }
+    .action-btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px var(--emotion-negative-glow);
+    }
+
+    /* ---- Sparkle particles ---- */
+    @keyframes sparkleRise {
+      0%   { opacity: 0; transform: translate(0, 0) scale(0); }
+      20%  { opacity: 1; }
+      100% { opacity: 0; transform: translate(var(--sx), var(--sy)) scale(1); }
+    }
+    .sparkle {
+      position: absolute;
+      width: var(--size);
+      height: var(--size);
+      border-radius: 50%;
+      background: var(--emotion-negative);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 210;
+      animation: sparkleRise var(--dur) ease-out forwards;
+      animation-delay: var(--delay);
+    }
+  </style>
+</body>
+</html>

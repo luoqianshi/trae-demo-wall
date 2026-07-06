@@ -1,0 +1,4259 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LifeGame · 生命游戏</title>
+<script>
+// 启动前尽早设置 data-theme 属性，作为视觉兜底：
+//   - 主题颜色变量现在由 applyTheme() 通过 setProperty 注入（在 loadSave 中调用），
+//     此处无法访问 THEMES 数据，故仅设置 data-theme 属性。
+//   - 该属性让 [data-theme="xxx"] 主题特化 CSS 规则（按钮、logo、像素条等）在
+//     applyTheme 运行前即可命中；颜色变量则由 :root 默认（与 pixel 主题相同）兜底。
+//   - applyTheme 运行后会再次设置 data-theme 属性（覆盖此处），保持一致。
+(function() {
+  try {
+    var save = JSON.parse(localStorage.getItem('lifegame.save.v1') || '{}');
+    var valid = ['pixel','neon','cosmic','academic','pixel2','mono'];
+    var theme = (save.theme && valid.indexOf(save.theme) >= 0) ? save.theme : 'pixel';
+    document.documentElement.setAttribute('data-theme', theme);
+    if (save.lang) document.documentElement.setAttribute('data-lang', save.lang);
+  } catch(e) {
+    document.documentElement.setAttribute('data-theme', 'pixel');
+  }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+/* ============ 主题变量 ============ */
+/* :root 默认变量（与复古像素主题相同）。
+   注意：主题切换不再依赖 [data-theme="xxx"] CSS 选择器块，
+   而是由 JS 中的 applyTheme() 通过 setProperty 动态注入到 <html> 的 inline style。
+   保留 :root 默认仅作为初始兜底，避免在 applyTheme 运行前页面变白。 */
+:root {
+  --bg: #0d0d12;
+  --bg-soft: #15151d;
+  --bg-card: #1a1a24;
+  --border: #2a2a3a;
+  --text: #e4e4e7;
+  --text-dim: #9ca3af;
+  --accent: #4ade80;
+  --accent-2: #22c55e;
+  --magenta: #f472b6;
+  --cyan: #22d3ee;
+  --amber: #fbbf24;
+  --danger: #ef4444;
+  --cell: #4ade80;
+  --cell-b: #f472b6;
+  --cell-glow: rgba(74,222,128,0.4);
+  --grid-line: rgba(74,222,128,0.08);
+  --target: rgba(244,114,182,0.25);
+  --target-border: #f472b6;
+  --font-mono: 'JetBrains Mono', 'Courier New', Consolas, monospace;
+  --font-sans: var(--font-mono), -apple-system, sans-serif;
+  /* 圆润中文 sans-serif，用于次级/小按钮文字 */
+  --font-display: 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* 首页主按钮字体：Space Grotesk（高辨识度几何 sans-serif，英文/数字）+ Noto Sans SC（清晰中文 sans-serif） */
+  --font-game: 'Space Grotesk', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --radius: 6px;
+  --shadow: 0 0 0 1px var(--border), 0 4px 20px rgba(0,0,0,0.5);
+}
+/* 主题特化规则（按钮、logo、像素条等）仍使用 [data-theme="xxx"] 属性选择器，
+   由 applyTheme() 同时设置 data-theme 属性以保持兼容。详见下方 JS。
+   主题的颜色变量定义已迁移到 THEMES 数组的 vars 字段，由 applyTheme 动态注入。 */
+
+/* ============ 基础 ============ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background 0.3s, color 0.3s;
+}
+[data-theme="pixel"] body, [data-theme="neon"] body {
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  font-smoothing: none;
+}
+canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* 像素装饰条 */
+.pixel-bar {
+  height: 4px;
+  background: repeating-linear-gradient(90deg,
+    var(--accent) 0 8px, transparent 8px 12px,
+    var(--magenta) 12px 16px, transparent 16px 24px);
+  background-size: 24px 4px;
+  flex-shrink: 0;
+}
+
+/* ============ 顶栏 ============ */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  backdrop-filter: blur(6px);
+}
+.topbar .brand {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+.topbar .brand .blink {
+  color: var(--magenta);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.topbar .brand .ver {
+  font-size: 10px; color: var(--text-dim);
+  border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px;
+}
+.topbar .actions { display: flex; gap: 6px; align-items: center; }
+.topbar .btn-icon {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  color: var(--text-dim); width: 32px; height: 32px;
+  border-radius: var(--radius); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all 0.15s;
+}
+.topbar .btn-icon:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ============ 页面容器 ============ */
+.page { display: none; padding: 24px 20px 60px; max-width: 1100px; margin: 0 auto; }
+.page.active { display: block; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ============ 按钮 ============ */
+.btn {
+  font-family: var(--font-mono);
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  transition: all 0.15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+.btn.primary {
+  background: var(--accent); color: var(--bg); border-color: var(--accent);
+  font-weight: 700;
+}
+.btn.primary:hover { background: var(--accent-2); color: var(--bg); }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover { background: var(--danger); color: #fff; }
+.btn.sm { padding: 6px 12px; font-size: 11px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ============ 首页 ============ */
+#page-home { min-height: calc(100vh - 60px); display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+#page-home.active { display: flex; }
+.home-logo {
+  font-family: var(--font-mono);
+  font-size: 72px; font-weight: 800;
+  letter-spacing: -2px; line-height: 1;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 50%, var(--magenta) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+  text-shadow: 0 0 40px var(--cell-glow);
+}
+[data-theme="academic"] .home-logo { text-shadow: none; }
+/* 单色终端：logo 与像素条无彩色 */
+[data-theme="mono"] .home-logo {
+  background: none;
+  -webkit-text-fill-color: var(--text);
+  text-shadow: 0 0 8px rgba(255,255,255,0.4);
+}
+[data-theme="mono"] .pixel-bar {
+  background: repeating-linear-gradient(90deg,
+    var(--text) 0 8px, transparent 8px 12px,
+    var(--text-dim) 12px 16px, transparent 16px 24px);
+  background-size: 24px 4px;
+}
+/* 注：pixel2 主题的像素条无需单独覆盖，默认 .pixel-bar 已使用 var(--accent)/var(--magenta)，
+   在 pixel2 主题下会自动采用琥珀/橙色配色 */
+.home-sub {
+  font-family: var(--font-mono);
+  color: var(--text-dim); font-size: 14px;
+  letter-spacing: 2px; margin-bottom: 32px;
+}
+.home-desc {
+  max-width: 540px; color: var(--text-dim); font-size: 14px;
+  margin-bottom: 32px; line-height: 1.7;
+}
+.home-actions {
+  display: flex; flex-direction: column; gap: 14px; align-items: center;
+}
+.home-actions .btn { min-width: 220px; justify-content: center; }
+.home-actions-row {
+  display: flex; gap: 14px; align-items: center; justify-content: center;
+}
+.home-actions .home-actions-row > .btn:not(.primary):not(.sm) { min-width: 180px; }
+
+/* ============ 首页按钮设计 ============ */
+.home-actions .btn {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(.2,.8,.2,1), box-shadow 0.25s, border-color 0.25s, color 0.25s, background 0.25s;
+}
+
+/* ---------- 主按钮（开始游戏）---------- */
+/* 纯单色高透明背景 + 四角 2×2 像素方块（同四色不同排列） */
+.home-actions .btn.primary {
+  padding: 24px 56px;
+  font-family: var(--font-game);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  text-indent: 6px;
+  background: rgba(74,222,128,0.18);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.home-actions .btn.primary::before,
+.home-actions .btn.primary::after { display: none; }
+/* 四角 2×2 像素方块：相同四色（accent/cyan/magenta/白）不同排列 */
+.home-actions .btn.primary .pg-tl,
+.home-actions .btn.primary .pg-tr,
+.home-actions .btn.primary .pg-bl,
+.home-actions .btn.primary .pg-br {
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 1px;
+  opacity: 0.9;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+/* 左上：accent / cyan / magenta / 白 */
+.home-actions .btn.primary .pg-tl {
+  top: 10px; left: 10px;
+  background: var(--accent);
+  box-shadow:
+    6px 0 0 var(--cyan),
+    0 6px 0 var(--magenta),
+    6px 6px 0 rgba(255,255,255,0.9);
+}
+/* 右上：cyan / magenta / 白 / accent（顺时针旋转 90°） */
+.home-actions .btn.primary .pg-tr {
+  top: 10px; right: 16px;
+  background: var(--cyan);
+  box-shadow:
+    6px 0 0 var(--magenta),
+    0 6px 0 rgba(255,255,255,0.9),
+    6px 6px 0 var(--accent);
+}
+/* 左下：白 / accent / cyan / magenta（水平镜像） */
+.home-actions .btn.primary .pg-bl {
+  bottom: 16px; left: 10px;
+  background: rgba(255,255,255,0.9);
+  box-shadow:
+    6px 0 0 var(--accent),
+    0 6px 0 var(--cyan),
+    6px 6px 0 var(--magenta);
+}
+/* 右下：magenta / 白 / accent / cyan（旋转 180°） */
+.home-actions .btn.primary .pg-br {
+  bottom: 16px; right: 16px;
+  background: var(--magenta);
+  box-shadow:
+    6px 0 0 rgba(255,255,255,0.9),
+    0 6px 0 var(--accent),
+    6px 6px 0 var(--cyan);
+}
+.home-actions .btn.primary:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 16px 36px rgba(0,0,0,0.55);
+}
+.home-actions .btn.primary:hover .pg-tl { transform: translate(-2px, -2px); opacity: 1; }
+.home-actions .btn.primary:hover .pg-tr { transform: translate(2px, -2px); opacity: 1; }
+.home-actions .btn.primary:hover .pg-bl { transform: translate(-2px, 2px); opacity: 1; }
+.home-actions .btn.primary:hover .pg-br { transform: translate(2px, 2px); opacity: 1; }
+.home-actions .btn.primary:active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* ---------- 次级按钮（自定义）---------- */
+/* 四边彩色渐变边框 + 右下角像素角标，圆角 */
+.home-actions .btn:not(.primary):not(.sm) {
+  min-width: 110px;
+  padding: 14px 34px;
+  font-family: var(--font-game);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-indent: 4px;
+  /* 双层背景：内层 padding-box 内部底色，外层 border-box 四边渐变边框 */
+  background:
+    linear-gradient(180deg, var(--bg-card) 0%, var(--bg-soft) 100%) padding-box,
+    linear-gradient(135deg, var(--accent), var(--cyan), var(--magenta), var(--accent)) border-box;
+  color: var(--text);
+  border: 2px solid transparent;
+  border-radius: 14px;
+  box-shadow:
+    0 4px 12px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+}
+.home-actions .btn:not(.primary):not(.sm)::before { display: none; }
+.home-actions .btn:not(.primary):not(.sm)::after {
+  content: '';
+  position: absolute;
+  right: 10px; bottom: 10px;
+  width: 4px; height: 4px;
+  background: var(--accent);
+  box-shadow: 6px 0 0 var(--cyan), 0 -6px 0 var(--magenta), 6px -6px 0 var(--accent);
+  opacity: 0.35;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.home-actions .btn:not(.primary):not(.sm):hover {
+  transform: translateY(-2px);
+  color: var(--accent);
+  box-shadow:
+    0 8px 20px rgba(0,0,0,0.4),
+    0 0 24px var(--cell-glow),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+}
+.home-actions .btn:not(.primary):not(.sm):hover::after {
+  opacity: 1; transform: translate(-2px, -2px);
+}
+.home-actions .btn:not(.primary):not(.sm):active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* ---------- 主题差异化（纯单色高透明背景，替换主色）---------- */
+/* 霓虹生物科技 - cyan 主导 */
+[data-theme="neon"] .home-actions .btn.primary {
+  background: rgba(34,211,238,0.2);
+  color: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+}
+/* 宇宙微观 - magenta 主导 */
+[data-theme="cosmic"] .home-actions .btn.primary {
+  background: rgba(244,114,182,0.2);
+  color: var(--magenta);
+  border-color: var(--magenta);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+}
+/* 琥珀像素 - amber 主导 */
+[data-theme="pixel2"] .home-actions .btn.primary {
+  background: rgba(251,191,36,0.2);
+  color: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+}
+/* 极简学术 - 硬阴影 */
+[data-theme="academic"] .home-actions .btn.primary {
+  box-shadow: 4px 4px 0 var(--border);
+}
+[data-theme="academic"] .home-actions .btn.primary:hover {
+  box-shadow: 6px 6px 0 var(--border);
+}
+/* 单色终端 - 单色高透明 */
+[data-theme="mono"] .home-actions .btn.primary {
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+  border-color: var(--text);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+}
+
+/* ---------- 联机模式按钮（与开始游戏同设计，略小）---------- */
+.home-actions .btn.online-btn {
+  padding: 18px 44px;
+  font-family: var(--font-game);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-indent: 4px;
+  background: rgba(34,211,238,0.18);
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.home-actions .btn.online-btn::before,
+.home-actions .btn.online-btn::after { display: none; }
+.home-actions .btn.online-btn .pg-tl,
+.home-actions .btn.online-btn .pg-tr,
+.home-actions .btn.online-btn .pg-bl,
+.home-actions .btn.online-btn .pg-br {
+  position: absolute;
+  width: 3px; height: 3px;
+  border-radius: 1px;
+  opacity: 0.9;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.home-actions .btn.online-btn .pg-tl {
+  top: 8px; left: 8px;
+  background: var(--cyan);
+  box-shadow: 5px 0 0 var(--accent), 0 5px 0 var(--magenta), 5px 5px 0 rgba(255,255,255,0.9);
+}
+.home-actions .btn.online-btn .pg-tr {
+  top: 8px; right: 12px;
+  background: var(--accent);
+  box-shadow: 5px 0 0 var(--magenta), 0 5px 0 rgba(255,255,255,0.9), 5px 5px 0 var(--cyan);
+}
+.home-actions .btn.online-btn .pg-bl {
+  bottom: 12px; left: 8px;
+  background: var(--magenta);
+  box-shadow: 5px 0 0 rgba(255,255,255,0.9), 0 5px 0 var(--cyan), 5px 5px 0 var(--accent);
+}
+.home-actions .btn.online-btn .pg-br {
+  bottom: 12px; right: 12px;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 5px 0 0 var(--cyan), 0 5px 0 var(--accent), 5px 5px 0 var(--magenta);
+}
+.home-actions .btn.online-btn:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 14px 32px rgba(0,0,0,0.55);
+}
+.home-actions .btn.online-btn:hover .pg-tl { transform: translate(-2px, -2px); opacity: 1; }
+.home-actions .btn.online-btn:hover .pg-tr { transform: translate(2px, -2px); opacity: 1; }
+.home-actions .btn.online-btn:hover .pg-bl { transform: translate(-2px, 2px); opacity: 1; }
+.home-actions .btn.online-btn:hover .pg-br { transform: translate(2px, 2px); opacity: 1; }
+.home-actions .btn.online-btn:active { transform: translateY(0) scale(0.99); }
+/* 联机按钮全部主题统一采用复古像素方案（青色半透明 + 四角像素装饰），不做主题差异化 */
+
+.home-footer {
+  position: absolute; bottom: 16px; left: 0; right: 0;
+  text-align: center; font-size: 11px;
+  color: var(--text-dim); opacity: 0.6;
+  letter-spacing: 1px;
+}
+
+/* 演示网格背景 */
+.demo-grid-bg {
+  position: fixed; inset: 0; z-index: -1;
+  pointer-events: none;
+  /* opacity 改由 drawBg() 内 globalAlpha 控制：
+     背景细胞 0.15，按钮轮廓 0.55，使按钮比背景更亮。 */
+}
+
+/* ============ 通用页头 ============ */
+.page-head { margin-bottom: 24px; }
+.page-head h2 {
+  font-size: 24px; font-weight: 700; color: var(--text);
+  margin-bottom: 4px;
+}
+.page-head .crumb {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  letter-spacing: 1px;
+}
+.back-btn { margin-bottom: 16px; }
+
+/* ============ 关卡选择 ============ */
+.tree-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  overflow-x: auto;
+}
+.tree-title {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--accent); margin-bottom: 16px;
+  letter-spacing: 1px;
+}
+.branch {
+  margin-bottom: 24px;
+}
+.branch-label {
+  font-family: var(--font-mono); font-size: 12px;
+  margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+}
+.branch-label .dot { width: 8px; height: 8px; border-radius: 50%; }
+.branch-main .dot { background: var(--accent); }
+.branch-rule .dot { background: var(--magenta); }
+.branch-side .dot { background: var(--amber); }
+.branch-label .bname { font-weight: 700; }
+.branch-label .bdesc { color: var(--text-dim); font-size: 11px; }
+
+.levels-row {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  padding-left: 20px; border-left: 2px dashed var(--border);
+  margin-left: 4px;
+}
+.level-card {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  min-width: 140px; max-width: 160px;
+  /* 固定高度：状态行 + 编号 + 名称 + 星数行 + padding，确保解锁/锁定状态高度一致 */
+  height: 110px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.level-card:hover:not(.locked) { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+.level-card.locked { opacity: 0.4; cursor: not-allowed; }
+.level-card.completed { border-color: var(--accent); }
+.level-card .lv-num {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim); letter-spacing: 1px;
+}
+.level-card .lv-stars {
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: 1px;
+  margin-top: auto;
+  padding-top: 6px;
+  line-height: 1;
+}
+.level-card.locked .lv-stars { visibility: hidden; }
+
+.level-card .lv-name {
+  font-size: 14px; font-weight: 700; margin: 4px 0;
+}
+.level-card .lv-desc {
+  font-size: 11px; color: var(--text-dim); line-height: 1.4;
+}
+.level-card .lv-status {
+  position: absolute; top: 8px; right: 8px;
+  font-size: 10px;
+}
+.level-card.completed .lv-status { color: var(--accent); }
+
+/* ============ 联机模式页 ============ */
+.online-wrap { max-width: 600px; margin: 0 auto; }
+.online-section { margin-bottom: 32px; }
+.online-section h3 {
+  font-size: 14px; color: var(--text-dim);
+  margin-bottom: 14px; letter-spacing: 1px;
+}
+.online-mode-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+.online-mode-card {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 12px;
+  cursor: pointer; text-align: center;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.online-mode-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+.online-mode-card.selected { border-color: var(--accent); background: var(--bg-card); }
+.online-mode-card .om-icon { font-size: 28px; margin-bottom: 8px; }
+.online-mode-card .om-name { font-size: 14px; font-weight: 700; }
+.online-opponent-row { display: flex; gap: 12px; }
+.online-op-btn {
+  flex: 1; justify-content: center; padding: 14px 24px;
+  font-size: 14px; position: relative;
+}
+.online-op-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+.online-op-btn.selected { border-color: var(--accent); background: var(--bg-card); }
+.online-op-btn .op-tag {
+  font-size: 9px; color: var(--amber);
+  border: 1px solid var(--amber); padding: 1px 5px;
+  border-radius: 3px; margin-left: 8px; letter-spacing: 0.5px;
+}
+/* 开始按钮 */
+.online-start-wrap { display: flex; justify-content: center; margin-top: 8px; }
+.online-start-btn {
+  padding: 14px 48px; font-size: 15px; font-weight: 700;
+  letter-spacing: 2px; border-radius: var(--radius);
+  background: var(--accent); color: var(--bg);
+  border: 1px solid var(--accent); cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.online-start-btn:hover:not(.disabled) { transform: translateY(-2px); }
+.online-start-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+/* 联机游戏 UI */
+.online-hud {
+  display: flex; gap: 12px; align-items: center;
+  margin-bottom: 8px; flex-wrap: wrap;
+}
+.online-hud .hud-tag {
+  font-size: 11px; padding: 3px 10px;
+  border-radius: 3px; font-weight: 700; letter-spacing: 1px;
+}
+.online-hud .hud-tag.player { background: rgba(74,222,128,0.18); color: var(--cell); border: 1px solid var(--cell); }
+.online-hud .hud-tag.bot { background: rgba(244,114,182,0.18); color: var(--cell-b); border: 1px solid var(--cell-b); }
+.online-hud .hud-turn { font-size: 12px; color: var(--text-dim); }
+.online-hud .hud-turn b { color: var(--text); }
+.online-hud .hud-mode { font-size: 11px; color: var(--cyan); }
+
+/* ============ 游戏页 ============ */
+#page-game .game-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 20px;
+}
+@media (max-width: 880px) {
+  #page-game .game-layout { grid-template-columns: 1fr; }
+}
+.game-stage {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.game-canvas-wrap {
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex; justify-content: center; align-items: center;
+  padding: 8px;
+}
+#game-canvas {
+  display: block;
+  cursor: crosshair;
+  background: var(--bg);
+}
+.game-toolbar {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+  margin-top: 12px; align-items: center;
+}
+/* 第二行：数据 + 重置按钮（紧贴按钮行下方） */
+.game-toolbar.game-toolbar-info {
+  margin-top: 6px;
+}
+.game-toolbar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+/* 仅图标的小型方形按钮（单步 ▶ / 回退 ◀） */
+.game-toolbar .btn.icon-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+  min-width: 32px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.gen-display {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--text-dim); padding: 6px 10px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.gen-display b { color: var(--accent); }
+
+/* 侧栏 */
+.game-side {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.info-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.info-panel h4 {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--accent); letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.info-panel .info-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.info-panel .info-row:last-child { border-bottom: none; }
+.info-panel .info-row .k { color: var(--text-dim); font-size: 12px; }
+.info-panel .info-row .v { color: var(--text); font-family: var(--font-mono); font-weight: 700; }
+.info-panel .v.accent { color: var(--accent); }
+.info-panel .v.magenta { color: var(--magenta); }
+.info-panel .v.danger { color: var(--danger); }
+/* 自定义设置面板的输入控件 */
+.info-panel .sb-row { padding: 6px 0; }
+.info-panel .sb-input {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--font-mono); font-size: 12px;
+  padding: 4px 8px; border-radius: 3px; width: 100%; max-width: 150px;
+  cursor: pointer;
+}
+.info-panel .sb-input:focus { outline: none; border-color: var(--accent); color: var(--accent); }
+.info-panel .sb-range {
+  width: 100%; max-width: 150px; cursor: pointer;
+  accent-color: var(--accent);
+}
+.info-panel .sb-row select.sb-input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 24px;
+}
+.phase-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 2px 8px; border-radius: 3px; letter-spacing: 1px;
+}
+.phase-tag.layout { background: rgba(74,222,128,0.15); color: var(--accent); }
+.phase-tag.play { background: rgba(34,211,238,0.15); color: var(--cyan); }
+.phase-tag.done { background: rgba(251,191,36,0.15); color: var(--amber); }
+
+.target-preview {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px;
+  display: flex; justify-content: center;
+}
+#target-canvas { display: block; image-rendering: pixelated; }
+
+/* 消息提示 */
+.toast {
+  position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-card); border: 1px solid var(--border);
+  padding: 12px 20px; border-radius: var(--radius);
+  font-size: 13px; z-index: 200;
+  box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { border-color: var(--accent); color: var(--accent); }
+.toast.error { border-color: var(--danger); color: var(--danger); }
+.toast.info { border-color: var(--cyan); color: var(--cyan); }
+
+/* 胜利覆盖层 */
+.win-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.win-overlay.show { display: flex; }
+.win-card {
+  background: var(--bg-card); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 32px;
+  text-align: center; max-width: 360px;
+  box-shadow: 0 0 60px var(--cell-glow);
+}
+.win-card .win-title {
+  font-size: 28px; font-weight: 800; color: var(--accent);
+  margin-bottom: 8px;
+}
+#fail-overlay .win-card .win-title { color: var(--danger); }
+.win-card .win-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+.win-card .win-stars {
+  font-size: 32px; letter-spacing: 4px;
+  color: var(--amber); margin-bottom: 16px;
+  line-height: 1;
+  text-shadow: 0 0 16px rgba(251,191,36,0.4);
+}
+.win-card .win-actions { display: flex; gap: 8px; justify-content: center; }
+
+/* ============ 沙盒种子码模块（独立面板，与自定义设置并列） ============ */
+.sb-seed-panel {
+  position: relative;
+  padding: 16px 14px 14px;
+  /* 双层背景：内层 padding-box 底色，外层 border-box 四边渐变边框 */
+  background:
+    linear-gradient(180deg, var(--bg-card) 0%, var(--bg-soft) 100%) padding-box,
+    linear-gradient(135deg, var(--accent), var(--cyan), var(--magenta), var(--accent)) border-box;
+  border: 1.5px solid transparent;
+  overflow: hidden;
+}
+/* 标题行 */
+.sb-seed-head {
+  margin-bottom: 10px;
+}
+.sb-seed-tag {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 700;
+  color: var(--accent); letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: rgba(74,222,128,0.08);
+  display: inline-block;
+}
+/* 显示区：深色凹槽 + 四角像素角标 */
+.sb-seed-display-box {
+  position: relative;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 14px;
+  min-height: 56px;
+  display: flex; align-items: center;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+}
+.sb-seed-display {
+  font-family: var(--font-mono);
+  font-size: 13px; font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 1.5px;
+  word-break: break-all;
+  line-height: 1.5;
+  flex: 1;
+  /* 文字微光 */
+  text-shadow: 0 0 8px var(--cell-glow);
+}
+/* 四角像素角标（2×2 方块） */
+.sb-seed-corner {
+  position: absolute;
+  width: 3px; height: 3px;
+  pointer-events: none;
+}
+.sb-seed-corner.tl { top: 4px; left: 4px;  background: var(--accent);  box-shadow: 5px 0 0 var(--cyan); }
+.sb-seed-corner.tr { top: 4px; right: 4px; background: var(--magenta); box-shadow: -5px 0 0 var(--accent); }
+.sb-seed-corner.bl { bottom: 4px; left: 4px;  background: var(--cyan);    box-shadow: 5px 0 0 var(--magenta); }
+.sb-seed-corner.br { bottom: 4px; right: 4px; background: var(--accent);  box-shadow: -5px 0 0 var(--cyan); }
+
+/* 按钮组：生成 + 复制 并列 */
+.sb-seed-actions {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-top: 10px;
+}
+.sb-seed-btn {
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  padding: 8px 12px !important;
+  border-radius: 4px !important;
+  transition: all 0.2s;
+}
+.sb-seed-btn:first-child {
+  background: linear-gradient(135deg, rgba(74,222,128,0.15), rgba(34,211,238,0.15)) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+.sb-seed-btn:first-child:hover {
+  background: linear-gradient(135deg, rgba(74,222,128,0.3), rgba(34,211,238,0.3)) !important;
+  box-shadow: 0 0 16px var(--cell-glow);
+}
+.sb-seed-btn:last-child {
+  background: var(--bg-soft) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+.sb-seed-btn:last-child:hover {
+  border-color: var(--cyan) !important;
+  color: var(--cyan) !important;
+}
+/* 输入加载行 */
+.sb-seed-input-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+}
+.sb-seed-input {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg); color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 10px; outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  letter-spacing: 1px;
+}
+.sb-seed-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(74,222,128,0.15);
+}
+.sb-seed-input::placeholder {
+  color: var(--text-dim); opacity: 0.5;
+}
+.sb-seed-load {
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  padding: 7px 14px !important;
+  border-radius: 4px !important;
+  flex-shrink: 0;
+}
+
+/* ============ 设置页 ============ */
+.settings-section {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+}
+.settings-section h3 {
+  font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+  letter-spacing: 1px; margin-bottom: 12px;
+}
+.theme-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+/* 主题选择卡片：背景/文字使用内联样式渲染该主题自身的色彩，切换全局主题时这些卡片外观保持不变 */
+.theme-card-opt {
+  border-radius: 6px; padding: 12px; cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  border: 2px solid transparent;
+  position: relative;
+}
+.theme-card-opt:hover { transform: translateY(-2px); }
+.theme-card-opt.active {
+  box-shadow: 0 0 0 2px currentColor, 0 4px 20px rgba(0,0,0,0.3);
+}
+.theme-card-opt.active::after {
+  content: '✓'; position: absolute; top: 6px; right: 8px;
+  font-size: 12px; font-weight: 700; color: currentColor;
+}
+.theme-card-opt .swatches { display: flex; gap: 4px; margin-bottom: 8px; height: 18px; }
+.theme-card-opt .sw { flex: 1; border-radius: 3px; }
+.theme-card-opt .tname { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.theme-card-opt .tdesc { font-size: 10px; font-family: var(--font-mono); opacity: 0.7; }
+
+.lang-row { display: flex; gap: 8px; }
+.lang-btn {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  padding: 8px 16px; border-radius: var(--radius); cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+}
+.lang-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(74,222,128,0.08); }
+
+/* ============ 帮助页 FAQ ============ */
+.faq-item {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 8px; overflow: hidden;
+}
+.faq-q {
+  padding: 14px 16px; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; font-weight: 600;
+}
+.faq-q .arrow { color: var(--accent); transition: transform 0.2s; }
+.faq-item.open .faq-q .arrow { transform: rotate(90deg); }
+.faq-a {
+  max-height: 0; overflow: hidden; transition: max-height 0.25s;
+  font-size: 13px; color: var(--text-dim); line-height: 1.6;
+}
+.faq-item.open .faq-a { max-height: 300px; padding: 0 16px 14px; }
+
+/* ============ 开发者页 ============ */
+.dev-info { font-size: 13px; line-height: 1.8; color: var(--text-dim); }
+.dev-info b { color: var(--text); }
+.dev-info code {
+  font-family: var(--font-mono); background: var(--bg-soft);
+  color: var(--cyan); padding: 2px 6px; border-radius: 3px; font-size: 12px;
+}
+.dev-info ul { margin: 8px 0 8px 20px; }
+.dev-meta-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr));
+  gap: 1px; background: var(--border); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; margin: 12px 0;
+}
+.dev-meta-grid .cell { background: var(--bg-card); padding: 10px 14px; }
+.dev-meta-grid .k { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
+.dev-meta-grid .v { color: var(--text); font-size: 13px; margin-top: 3px; }
+.dev-meta-grid .v.accent { color: var(--accent); }
+
+/* ============ 响应式 ============ */
+@media (max-width: 640px) {
+  .topbar { padding: 8px 12px; }
+  .topbar .brand { font-size: 12px; }
+  .home-logo { font-size: 48px; }
+  .page { padding: 16px 12px 40px; }
+  #page-game .game-layout { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header class="topbar">
+  <div class="brand" onclick="nav('home')">
+    <span>LifeGame</span><span class="blink">▮</span>
+    <span class="ver">v0.1</span>
+  </div>
+  <div class="actions">
+    <button class="btn-icon" onclick="nav('settings')" title="设置">⚙</button>
+    <button class="btn-icon" onclick="nav('help')" title="帮助">?</button>
+    <button class="btn-icon" onclick="nav('dev')" title="开发者" style="font-size:12px;font-weight:700;">&lt;/&gt;</button>
+    <button class="btn-icon" onclick="quickReset()" title="重置进度">↻</button>
+  </div>
+</header>
+<div class="pixel-bar"></div>
+
+<!-- ===== 首页 ===== -->
+<section class="page" id="page-home">
+  <canvas class="demo-grid-bg" id="bg-canvas"></canvas>
+  <div class="home-logo">LifeGame</div>
+  <p class="home-desc" data-i18n="home.desc">以康威生命游戏为内核，通过布局、干预、规则设计三种角色，探索简单规则如何涌现出复杂生命行为。</p>
+  <div class="home-actions">
+    <button class="btn primary" onclick="startQuickPlay()">
+      <span class="pg-tl"></span>
+      <span class="pg-tr"></span>
+      <span class="pg-bl"></span>
+      <span class="pg-br"></span>
+      <span data-i18n="home.start">开始游戏</span>
+    </button>
+    <div class="home-actions-row">
+      <button class="btn" onclick="startSandbox()" data-i18n="home.sandbox">自定义</button>
+      <button class="btn online-btn" onclick="nav('online')">
+        <span class="pg-tl"></span>
+        <span class="pg-tr"></span>
+        <span class="pg-bl"></span>
+        <span class="pg-br"></span>
+        <span data-i18n="home.online">联机模式</span>
+      </button>
+    </div>
+  </div>
+  <div class="home-footer">TRAE AI 创造力大赛 2026 · LifeGame v0.1</div>
+</section>
+
+<!-- ===== 联机模式 ===== -->
+<section class="page" id="page-online">
+  <button class="btn sm back-btn" onclick="nav('home')">← <span data-i18n="common.back">返回首页</span></button>
+  <div class="page-head">
+    <h2 data-i18n="online.title">联机模式</h2>
+  </div>
+  <div class="online-wrap">
+    <!-- 模式选择 -->
+    <div class="online-section">
+      <h3 data-i18n="online.modeSelect">选择模式</h3>
+      <div class="online-mode-grid">
+        <div class="online-mode-card" data-mode="war" onclick="selectOnlineMode('war')">
+          <div class="om-icon">⚔</div>
+          <div class="om-name" data-i18n="online.warSym">对称对抗</div>
+        </div>
+        <div class="online-mode-card" data-mode="asym" onclick="selectOnlineMode('asym')">
+          <div class="om-icon">🗡</div>
+          <div class="om-name" data-i18n="online.warAsym">非对称对抗</div>
+        </div>
+        <div class="online-mode-card" data-mode="coop" onclick="selectOnlineMode('coop')">
+          <div class="om-icon">⚜</div>
+          <div class="om-name" data-i18n="online.coop">合作模式</div>
+        </div>
+      </div>
+    </div>
+    <!-- 阵营选择（仅非对称对抗模式） -->
+    <div class="online-section" id="online-side-section" style="display:none;">
+      <h3 data-i18n="online.sideSelect">选择阵营</h3>
+      <div class="online-mode-grid">
+        <div class="online-mode-card online-side-card" data-side="A" onclick="selectOnlineSide('A')">
+          <div class="om-icon">🛡</div>
+          <div class="om-name" data-i18n="online.sideDefender">A 防守方</div>
+        </div>
+        <div class="online-mode-card online-side-card" data-side="B" onclick="selectOnlineSide('B')">
+          <div class="om-icon">⚔</div>
+          <div class="om-name" data-i18n="online.sideAttacker">B 进攻方</div>
+        </div>
+      </div>
+    </div>
+    <!-- 对手选择 -->
+    <div class="online-section">
+      <h3 data-i18n="online.opponentSelect">选择对手</h3>
+      <div class="online-opponent-row">
+        <button class="btn online-op-btn disabled" id="op-human" onclick="toastOnlineSoon()">
+          <span data-i18n="online.human">与真人联机</span>
+          <span class="op-tag" data-i18n="online.soon">即将上线</span>
+        </button>
+        <button class="btn online-op-btn" id="op-bot" onclick="selectOnlineOpponent('bot')">
+          <span data-i18n="online.bot">与机器人联机</span>
+        </button>
+      </div>
+    </div>
+    <!-- 开始按钮 -->
+    <div class="online-section online-start-wrap">
+      <button class="btn online-start-btn disabled" id="online-start" onclick="startOnlineGame()">
+        <span data-i18n="online.start">开始游戏</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 关卡选择 ===== -->
+<section class="page" id="page-levels">
+  <button class="btn sm back-btn" onclick="nav('home')">← <span data-i18n="common.back">返回首页</span></button>
+  <div class="page-head">
+    <h2 data-i18n="levels.title">关卡</h2>
+  </div>
+  <div class="tree-wrap">
+
+    <div class="branch branch-main">
+      <div class="branch-label">
+        <span class="dot"></span>
+        <span class="bname" data-i18n="levels.mainBranch">主线</span>
+      </div>
+      <div class="levels-row" id="levels-main"></div>
+    </div>
+
+    <div class="branch branch-rule">
+      <div class="branch-label">
+        <span class="dot"></span>
+        <span class="bname" data-i18n="levels.ruleBranch">支线</span>
+      </div>
+      <div class="levels-row" id="levels-rule"></div>
+    </div>
+
+    <div class="branch branch-side">
+      <div class="branch-label">
+        <span class="dot"></span>
+        <span class="bname" data-i18n="levels.sideBranch">特殊挑战</span>
+      </div>
+      <div class="levels-row" id="levels-side"></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===== 游戏页 ===== -->
+<section class="page" id="page-game">
+  <button class="btn sm back-btn" id="game-back-btn" onclick="gameBack()">← <span data-i18n="common.backLevels">返回关卡</span></button>
+  <div class="page-head">
+    <h2 id="game-title">—</h2>
+    <div class="crumb" id="game-crumb">—</div>
+  </div>
+
+  <div class="game-layout">
+    <div class="game-stage">
+      <div class="game-canvas-wrap">
+        <canvas id="game-canvas" width="500" height="500"></canvas>
+      </div>
+      <div class="game-toolbar">
+        <button class="btn primary sm" id="btn-play" onclick="togglePlay()" data-i18n="game.play">▶ 播放</button>
+        <button class="btn sm icon-btn" id="btn-jump-start" onclick="jumpToStart()" title="回到开始" aria-label="回到开始">⏮</button>
+        <button class="btn sm icon-btn" id="btn-back" onclick="stepBack()" title="回退" aria-label="回退">◀</button>
+        <button class="btn sm icon-btn" id="btn-step" onclick="stepOnce()" aria-label="单步">▶</button>
+        <button class="btn sm icon-btn" id="btn-jump-end" onclick="jumpToEnd()" title="跳到结尾" aria-label="跳到结尾">⏭</button>
+        <button class="btn sm" id="btn-start" onclick="startEvolution()" data-i18n="game.startEvo">▶ 启动演化</button>
+      </div>
+      <div class="game-toolbar game-toolbar-info">
+        <span class="gen-display"><span data-i18n="game.furthestGen">已演化</span>: <b id="furthest-count">0</b><span data-i18n="game.genUnit">代</span></span>
+        <span class="gen-display"><span data-i18n="game.curGen">当前</span>: <b id="gen-count">0</b><span data-i18n="game.genUnit">代</span></span>
+        <span class="gen-display"><span data-i18n="game.cells">存活细胞数</span>: <b id="cell-count">0</b></span>
+        <span class="sep"></span>
+        <button class="btn danger sm" onclick="resetLevel()" data-i18n="game.reset">↻ 重置</button>
+      </div>
+    </div>
+
+    <div class="game-side">
+      <div class="info-panel" id="level-info-panel">
+        <h4 data-i18n="game.info">关卡信息</h4>
+        <div class="info-row">
+          <span class="k" data-i18n="game.phase">阶段</span>
+          <span class="v"><span class="phase-tag layout" id="phase-tag" data-i18n="game.phaseLayout">布局</span></span>
+        </div>
+        <div class="info-row">
+          <span class="k" data-i18n="game.target">目标</span>
+          <span class="v magenta" id="victory-target">—</span>
+        </div>
+        <div class="info-row" id="init-cells-row">
+          <span class="k" data-i18n="game.initCells">初始细胞</span>
+          <span class="v" id="init-cells-display">0 / 0</span>
+        </div>
+      </div>
+
+      <div class="info-panel" id="target-panel" style="display:none">
+        <h4 data-i18n="game.targetPattern">目标图案</h4>
+        <div class="target-preview">
+          <canvas id="target-canvas" width="160" height="160"></canvas>
+        </div>
+      </div>
+
+      <!-- 自定义模式设置面板 -->
+      <div class="info-panel" id="sandbox-panel" style="display:none">
+        <h4 data-i18n="sandbox.settings">自定义设置</h4>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.shape">细胞形状</span>
+          <span class="v">
+            <select id="sb-shape" class="sb-input" onchange="applySandboxSetting('shape', this.value)">
+              <option value="square" data-i18n="sandbox.shapeSquare">方形</option>
+              <option value="triangle" data-i18n="sandbox.shapeTriangle">三角形</option>
+              <option value="hexagon" data-i18n="sandbox.shapeHexagon">六边形</option>
+            </select>
+          </span>
+        </div>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.birth">繁衍邻居数</span>
+          <span class="v">
+            <select id="sb-birth" class="sb-input" onchange="applySandboxSetting('birth', parseInt(this.value))"></select>
+          </span>
+        </div>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.survivalMin">存活下限</span>
+          <span class="v">
+            <select id="sb-smin" class="sb-input" onchange="applySandboxSetting('survivalMin', parseInt(this.value))"></select>
+          </span>
+        </div>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.survivalMax">存活上限</span>
+          <span class="v">
+            <select id="sb-smax" class="sb-input" onchange="applySandboxSetting('survivalMax', parseInt(this.value))"></select>
+          </span>
+        </div>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.gridSize">网格大小</span>
+          <span class="v">
+            <select id="sb-grid" class="sb-input" onchange="applySandboxSetting('gridSize', parseInt(this.value))"></select>
+          </span>
+        </div>
+        <div class="info-row sb-row">
+          <span class="k" data-i18n="sandbox.speed">演化速度</span>
+          <span class="v">
+            <input type="range" id="sb-speed" class="sb-range" min="50" max="800" value="200" oninput="applySandboxSetting('speed', parseInt(this.value))">
+          </span>
+        </div>
+      </div>
+
+      <!-- 种子码模块（独立面板，与自定义设置并列） -->
+      <div class="info-panel sb-seed-panel" id="sandbox-seed-panel" style="display:none">
+        <div class="sb-seed-head">
+          <span class="sb-seed-tag" data-i18n="win.seed">种子码</span>
+        </div>
+        <!-- 显示区：大号等宽字体 + 深色凹槽背景 + 角标装饰 -->
+        <div class="sb-seed-display-box">
+          <span class="sb-seed-corner tl"></span>
+          <span class="sb-seed-corner tr"></span>
+          <span class="sb-seed-corner bl"></span>
+          <span class="sb-seed-corner br"></span>
+          <code class="sb-seed-display" id="sb-seed-display">-</code>
+        </div>
+        <!-- 按钮组：生成 + 复制 并列 -->
+        <div class="sb-seed-actions">
+          <button class="btn sm sb-seed-btn" onclick="generateSandboxSeedFromGrid()" data-i18n="sandbox.generateSeed">生成种子码</button>
+          <button class="btn sm sb-seed-btn" onclick="copySandboxSeed()" data-i18n="win.copy">复制</button>
+        </div>
+        <!-- 输入加载行 -->
+        <div class="sb-seed-input-row">
+          <input class="sb-seed-input" id="sb-seed-input" type="text" data-i18n-placeholder="sandbox.seedPlaceholder" placeholder="Ss25-323-200-7Z8P9" />
+          <button class="btn sm sb-seed-load" onclick="loadSandboxSeedFromInput()" data-i18n="win.seedLoad">加载</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 设置页 ===== -->
+<section class="page" id="page-settings">
+  <button class="btn sm back-btn" onclick="nav('home')">← <span data-i18n="common.back">返回首页</span></button>
+  <div class="page-head">
+    <h2 data-i18n="settings.title">设置</h2>
+  </div>
+
+  <div class="settings-section">
+    <h3 data-i18n="settings.theme">主题风格</h3>
+    <div class="theme-grid" id="theme-grid"></div>
+  </div>
+
+  <div class="settings-section">
+    <h3 data-i18n="settings.language">语言</h3>
+    <div class="lang-row">
+      <button class="lang-btn active" data-lang="zh" onclick="setLang('zh')">简体中文</button>
+      <button class="lang-btn" data-lang="zh-TW" onclick="setLang('zh-TW')">繁體中文</button>
+      <button class="lang-btn" data-lang="en" onclick="setLang('en')">English</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 开发者页 ===== -->
+<section class="page" id="page-dev">
+  <button class="btn sm back-btn" onclick="nav('home')">← <span data-i18n="common.back">返回首页</span></button>
+  <div class="page-head">
+    <h2 data-i18n="dev.title">开发者</h2>
+    <div class="crumb">DEVELOPER</div>
+  </div>
+
+  <div class="settings-section">
+    <div class="dev-meta-grid">
+      <div class="cell"><div class="k">PRODUCT</div><div class="v accent">LifeGame</div></div>
+      <div class="cell"><div class="k">VERSION</div><div class="v">v0.1</div></div>
+      <div class="cell"><div class="k">CORE</div><div class="v">Conway's Game of Life</div></div>
+      <div class="cell"><div class="k">RULE</div><div class="v">B3/S23</div></div>
+      <div class="cell"><div class="k">TECH</div><div class="v">HTML + Canvas + JS</div></div>
+      <div class="cell"><div class="k">TRACK</div><div class="v">生活娱乐</div></div>
+    </div>
+
+    <div class="dev-info" style="margin-top:16px">
+      <p><b data-i18n="dev.about">关于</b></p>
+      <p data-i18n="dev.aboutDesc">LifeGame 是以康威生命游戏（1970）为内核的多形态元胞自动机游戏。玩家通过布局初始图案、实时干预演化、修改底层规则，探索简单规则如何涌现出复杂生命行为。</p>
+
+      <p style="margin-top:14px"><b data-i18n="dev.features">当前 Demo 包含</b></p>
+      <ul>
+        <li data-i18n="dev.f1">主玩法：布局 + 干预融合</li>
+        <li data-i18n="dev.f2">4 种胜利条件：达量稳定 / 静物验证 / 振荡子 / 滑翔机位移</li>
+        <li data-i18n="dev.f3">单细胞增删干预手段</li>
+        <li data-i18n="dev.f5">主线 + 支线 + 特殊挑战关卡</li>
+        <li data-i18n="dev.f6">6 种主题切换</li>
+        <li data-i18n="dev.f7">简中 / 繁中 / English 三语</li>
+      </ul>
+
+      <p style="margin-top:14px"><b data-i18n="dev.engine">引擎参数</b></p>
+      <ul>
+        <li>网格：<code>25 × 25</code></li>
+        <li>规则：<code>B3/S23</code>（Birth on 3, Survival on 2 or 3）</li>
+        <li>边界：环形（toroidal）</li>
+        <li>渲染：Canvas 2D, <code>requestAnimationFrame</code></li>
+        <li>持久化：<code>localStorage</code></li>
+      </ul>
+
+      <p style="margin-top:14px"><b data-i18n="dev.roadmap">开发路线</b></p>
+      <ul>
+        <li data-i18n="dev.r1">✓ Phase 01 报名（创意提案）</li>
+        <li data-i18n="dev.r2">▶ Phase 02 初赛 MVP（当前）</li>
+        <li data-i18n="dev.r3">○ Phase 03 V1 完整版（规则探索模式）</li>
+        <li data-i18n="dev.r4">○ Phase 04 远期（高维 + 多状态）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 帮助页 ===== -->
+<section class="page" id="page-help">
+  <button class="btn sm back-btn" onclick="nav('home')">← <span data-i18n="common.back">返回首页</span></button>
+  <div class="page-head">
+    <h2 data-i18n="help.title">帮助</h2>
+    <div class="crumb">HELP · FAQ</div>
+  </div>
+
+  <div id="faq-list"></div>
+</section>
+
+<!-- 消息提示 -->
+<div class="toast" id="toast"></div>
+
+<!-- 胜利覆盖层 -->
+<div class="win-overlay" id="win-overlay">
+  <div class="win-card">
+    <div class="win-title" data-i18n="win.title">通关！</div>
+    <div class="win-sub" id="win-sub" data-i18n="win.sub">你已达成胜利条件</div>
+    <div class="win-stars" id="win-stars">★★★</div>
+    <div class="win-actions">
+      <button class="btn sm" onclick="closeWin(); nav('levels')" data-i18n="win.levels">关卡列表</button>
+      <button class="btn primary sm" onclick="closeWin(); resetLevel()" data-i18n="win.retry">再玩一次</button>
+    </div>
+  </div>
+</div>
+
+<!-- 失败覆盖层 -->
+<div class="win-overlay" id="fail-overlay">
+  <div class="win-card">
+    <div class="win-title" data-i18n="fail.title">失败</div>
+    <div class="win-sub" id="fail-sub" data-i18n="fail.sub">未在限定代数内达成目标</div>
+    <div class="win-actions">
+      <button class="btn sm" onclick="closeFail(); nav('levels')" data-i18n="win.levels">关卡列表</button>
+      <button class="btn primary sm" onclick="closeFail(); resetLevel()" data-i18n="win.retry">再玩一次</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ * LifeGame · 元胞自动机游戏引擎与逻辑
+ * Conway's Game of Life · B3/S23 · 单文件 HTML
+ * ============================================================ */
+
+// ============ i18n 文案 ============
+const I18N = {
+  zh: {
+    'home.sub': '元胞自动机 · 涌现之美',
+    'home.desc': '以康威生命游戏为内核，通过布局、干预、规则设计三种角色，探索简单规则如何涌现出复杂生命行为。',
+    'home.start': '开始游戏',
+    'home.online': '联机模式',
+    'home.sandbox': '自定义',
+    'home.settings': '设置',
+    'home.dev': '开发者',
+    'home.help': '帮助',
+    'common.back': '返回首页',
+    'common.backLevels': '返回关卡',
+    'levels.title': '关卡',
+    'levels.mainBranch': '主线',
+    'levels.ruleBranch': '支线',
+    'levels.sideBranch': '特殊挑战',
+    'levels.locked': '🔒',
+    'levels.completed': '✓',
+    'game.play': '▶ 播放',
+    'game.pause': '⏸ 暂停',
+    'game.step': '⏭',
+    'game.startEvo': '▶ 启动演化',
+    'game.jumpStart': '回到开始',
+    'game.jumpEnd': '跳到结尾',
+    'game.furthestGen': '已演化',
+    'game.curGen': '当前',
+    'game.genUnit': '代',
+    'game.cells': '存活细胞数',
+    'game.reset': '↻ 重置',
+    'game.info': '关卡信息',
+    'game.phase': '阶段',
+    'game.phaseLayout': '布局',
+    'game.phasePlay': '干预',
+    'game.phaseDone': '完成',
+    'game.victory': '胜利条件',
+    'game.target': '目标',
+    'game.targetPattern': '目标图案',
+    'game.initCells': '初始细胞',
+    'toast.maxCells': '已达初始细胞上限',
+    'settings.title': '设置',
+    'settings.theme': '主题风格',
+    'settings.language': '语言',
+    'settings.progress': '进度管理',
+    'settings.progressHint': '清除所有进度、解锁状态与设置',
+    'settings.resetAll': '清除全部进度',
+    'dev.title': '开发者',
+    'dev.about': '关于',
+    'dev.aboutDesc': 'LifeGame 是以康威生命游戏（1970）为内核的多形态元胞自动机游戏。玩家通过布局初始图案、实时干预演化、修改底层规则，探索简单规则如何涌现出复杂生命行为。',
+    'dev.features': '当前 Demo 包含',
+    'dev.f1': '主玩法：布局 + 干预融合',
+    'dev.f2': '4 种胜利条件：达量稳定 / 静物验证 / 振荡子 / 滑翔机位移',
+    'dev.f3': '单细胞增删干预手段',
+    'dev.f5': '主线 + 支线 + 特殊挑战关卡',
+    'dev.f6': '6 种主题切换',
+    'dev.f7': '简中 / 繁中 / English 三语',
+    'dev.engine': '引擎参数',
+    'dev.r1': '✓ Phase 01 报名（创意提案）',
+    'dev.r2': '▶ Phase 02 初赛 MVP（当前）',
+    'dev.r3': '○ Phase 03 V1 完整版（规则探索模式）',
+    'dev.r4': '○ Phase 04 远期（高维 + 多状态）',
+    'help.title': '帮助',
+    'win.title': '通关！',
+    'win.sub': '你已达成胜利条件',
+    'fail.title': '失败',
+    'fail.sub': '未在限定代数内达成目标',
+    'win.levels': '关卡列表',
+    'win.retry': '再玩一次',
+    'win.seed': '种子码',
+    'win.copy': '复制',
+    'win.seedLoad': '加载',
+    'sandbox.title': '自定义',
+    'sandbox.crumb': '',
+    'sandbox.victory': '自由模式',
+    'sandbox.target': '无目标',
+    'sandbox.phase': '自由',
+    'sandbox.settings': '自定义设置',
+    'sandbox.shape': '细胞形状',
+    'sandbox.shapeSquare': '方形',
+    'sandbox.shapeTriangle': '三角形',
+    'sandbox.shapeHexagon': '六边形',
+    'sandbox.birth': '繁衍邻居数',
+    'sandbox.survivalMin': '存活下限',
+    'sandbox.survivalMax': '存活上限',
+    'sandbox.gridSize': '网格大小',
+    'sandbox.speed': '演化速度',
+    'sandbox.seedPlaceholder': 'Ss25-323-200-7Z8P9',
+    'sandbox.generateSeed': '生成种子码',
+    'toast.locked': '关卡未解锁',
+    'toast.win': '达成胜利条件！',
+    'toast.fail': '未在限定代数内达成目标',
+    'toast.reset': '已重置',
+    'toast.cleared': '已清除全部进度与设置',
+    'toast.placeCells': '请先放置细胞',
+    'toast.confirmClear': '确认清除所有进度与设置？',
+    'toast.copied': '已复制到剪贴板',
+    'toast.copyFailed': '复制失败，请手动复制',
+    'toast.seedInvalid': '种子码格式错误',
+    'toast.seedLoaded': '种子码已加载',
+    'toast.seedEmpty': '网格为空，无法生成种子码',
+    'toast.seedGenerated': '种子码已生成',
+    'toast.seedNothing': '请先生成种子码',
+    'toast.newRecord': '新纪录',
+    'faq.q1': '生命游戏是什么？',
+    'faq.a1': '康威生命游戏（Conway\'s Game of Life）是 1970 年由数学家 John Conway 提出的元胞自动机。规则极简：一个死细胞周围恰好 3 个活邻居则诞生；一个活细胞周围有 2 或 3 个活邻居则存活，否则死亡。但就是这简单规则能涌现出滑翔机、振荡子、图灵机等复杂结构。',
+    'faq.q2': '怎么玩 LifeGame？',
+    'faq.a2': '每关分两阶段：1) 布局阶段——点击网格放置/移除细胞，布置初始图案；2) 演化阶段——点击"启动演化"开始自动演化，过程中可暂停。达成目标即通关。未在限定代数内达成则失败。',
+    'faq.q3': '胜利条件有哪些？',
+    'faq.a3': '本 Demo 含 4 种：1) 达量稳定——让活细胞数量达到目标值并维持稳定；2) 静物验证——复刻特定静物图案并保持不变；3) 振荡子——产生周期 2 的振荡结构；4) 滑翔机位移——验证滑翔机的对角移动。',
+    'faq.q4': '关卡怎么解锁？',
+    'faq.a4': '完成前一关卡即可解锁后续关卡。当前包含主线 10 关、支线 2 关与特殊挑战 1 关，共 13 个关卡。',
+    'faq.q5': '主题与设置会保存吗？',
+    'faq.a5': '会。所有进度、解锁状态、主题、语言设置都通过 localStorage 持久化，下次打开浏览器仍然保留。可在设置中清除全部进度。',
+    'online.title': '联机模式',
+    'online.modeSelect': '选择模式',
+    'online.warSym': '对称对抗',
+    'online.warSymDesc': '压制制 · 同色≥2且>异色存活',
+    'online.warAsym': '非对称对抗',
+    'online.warAsymDesc': '攻防制 · 进攻方强，防守方繁衍快',
+    'online.coop': '合作模式',
+    'online.coopDesc': '双色共存 · 标准 Conway 规则',
+    'online.opponentSelect': '选择对手',
+    'online.human': '与真人联机',
+    'online.bot': '与机器人联机',
+    'online.soon': '即将上线',
+    'online.selectMode': '请先选择模式',
+    'online.selectOpponent': '请先选择对手',
+    'online.selectSide': '请先选择阵营',
+    'online.sideSelect': '选择阵营',
+    'online.sideDefender': 'A 防守方',
+    'online.sideAttacker': 'B 进攻方',
+    'online.start': '开始游戏',
+    'online.playerTurn': '你的回合',
+    'online.botTurn': '机器人回合',
+    'online.cellsLeft': '剩余细胞',
+    'online.player': '玩家',
+    'online.bot': '机器人',
+    'online.evolving': '演化中',
+    'online.warSymName': '对称对抗',
+    'online.warAsymName': '非对称对抗',
+    'online.coopName': '合作模式',
+    'toast.onlineSoon': '真人联机功能即将上线，敬请期待',
+  },
+  en: {
+    'home.sub': 'Cellular Automata · Emergence',
+    'home.desc': 'Built on Conway\'s Game of Life. Explore how simple rules give rise to complex life through three roles: Layout, Intervention, and Rule Design.',
+    'home.start': 'Start Game',
+    'home.online': 'Online Mode',
+    'home.sandbox': 'Custom',
+    'home.settings': 'Settings',
+    'home.dev': 'Developer',
+    'home.help': 'Help',
+    'common.back': 'Back to Home',
+    'common.backLevels': 'Back to Levels',
+    'levels.title': 'Levels',
+    'levels.mainBranch': 'Main',
+    'levels.ruleBranch': 'Side',
+    'levels.sideBranch': 'Special',
+    'levels.locked': '🔒',
+    'levels.completed': '✓',
+    'game.play': '▶ Play',
+    'game.pause': '⏸ Pause',
+    'game.step': '⏭',
+    'game.startEvo': '▶ Start Evolution',
+    'game.jumpStart': 'Jump to Start',
+    'game.jumpEnd': 'Jump to End',
+    'game.furthestGen': 'Evolved',
+    'game.curGen': 'Current',
+    'game.genUnit': 'gen',
+    'game.cells': 'Alive',
+    'game.reset': '↻ Reset',
+    'game.info': 'Level Info',
+    'game.phase': 'Phase',
+    'game.phaseLayout': 'Layout',
+    'game.phasePlay': 'Intervene',
+    'game.phaseDone': 'Done',
+    'game.victory': 'Victory',
+    'game.target': 'Target',
+    'game.targetPattern': 'Target Pattern',
+    'game.initCells': 'Init Cells',
+    'toast.maxCells': 'Max initial cells reached',
+    'settings.title': 'Settings',
+    'settings.theme': 'Theme',
+    'settings.language': 'Language',
+    'settings.progress': 'Progress',
+    'settings.progressHint': 'Clear all progress, unlocks and settings',
+    'settings.resetAll': 'Clear All Progress',
+    'dev.title': 'Developer',
+    'dev.about': 'About',
+    'dev.aboutDesc': 'LifeGame is a multi-form cellular automaton game built on Conway\'s Game of Life (1970). Players explore how simple rules give rise to complex life through layout, real-time intervention, and rule design.',
+    'dev.features': 'Current Demo Includes',
+    'dev.f1': 'Main gameplay: Layout + Intervention',
+    'dev.f2': '4 Victory Conditions: Stable Count / Still Life / Oscillator / Glider Shift',
+    'dev.f3': 'Single-cell add/remove intervention',
+    'dev.f5': 'Main + Side + Special challenge levels',
+    'dev.f6': '6 theme switching',
+    'dev.f7': 'Simplified / Traditional Chinese / English',
+    'dev.engine': 'Engine Parameters',
+    'dev.r1': '✓ Phase 01 Registration (Concept Proposal)',
+    'dev.r2': '▶ Phase 02 Preliminary MVP (Current)',
+    'dev.r3': '○ Phase 03 V1 Full Version (Rule Design Mode)',
+    'dev.r4': '○ Phase 04 Long-term (High-dim + Multi-state)',
+    'help.title': 'Help',
+    'win.title': 'Cleared!',
+    'win.sub': 'You achieved the victory condition',
+    'fail.title': 'Failed',
+    'fail.sub': 'Target not reached within the generation limit',
+    'win.levels': 'Levels',
+    'win.retry': 'Retry',
+    'win.seed': 'Seed',
+    'win.copy': 'Copy',
+    'win.seedLoad': 'Load',
+    'sandbox.title': 'Custom',
+    'sandbox.crumb': '',
+    'sandbox.victory': 'Free Mode',
+    'sandbox.target': 'No target',
+    'sandbox.phase': 'Free',
+    'sandbox.settings': 'Custom Settings',
+    'sandbox.shape': 'Cell Shape',
+    'sandbox.shapeSquare': 'Square',
+    'sandbox.shapeTriangle': 'Triangle',
+    'sandbox.shapeHexagon': 'Hexagon',
+    'sandbox.birth': 'Birth Neighbors',
+    'sandbox.survivalMin': 'Survival Min',
+    'sandbox.survivalMax': 'Survival Max',
+    'sandbox.gridSize': 'Grid Size',
+    'sandbox.speed': 'Speed',
+    'sandbox.seedPlaceholder': 'Ss25-323-200-7Z8P9',
+    'sandbox.generateSeed': 'Generate Seed',
+    'toast.locked': 'Level locked',
+    'toast.win': 'Victory achieved!',
+    'toast.fail': 'Target not reached within the generation limit',
+    'toast.reset': 'Reset',
+    'toast.cleared': 'All progress cleared',
+    'toast.placeCells': 'Place cells first',
+    'toast.confirmClear': 'Clear all progress and settings?',
+    'toast.copied': 'Copied to clipboard',
+    'toast.copyFailed': 'Copy failed, please copy manually',
+    'toast.seedInvalid': 'Invalid seed code',
+    'toast.seedLoaded': 'Seed code loaded',
+    'toast.seedEmpty': 'Grid is empty, cannot generate seed',
+    'toast.seedGenerated': 'Seed code generated',
+    'toast.seedNothing': 'Please generate a seed code first',
+    'toast.newRecord': 'New record',
+    'faq.q1': 'What is Game of Life?',
+    'faq.a1': 'Conway\'s Game of Life (1970) is a cellular automaton by mathematician John Conway. Rules: a dead cell with exactly 3 live neighbors is born; a live cell with 2 or 3 live neighbors survives, otherwise dies. From these simple rules emerge gliders, oscillators, even Turing machines.',
+    'faq.q2': 'How to play LifeGame?',
+    'faq.a2': 'Each level has two phases: 1) Layout — click the grid to place/remove cells, design initial pattern; 2) Evolution — click "Start Evolution" to run auto-evolution, you can pause. Achieve the target to clear. Failing to reach the target within the generation limit ends in failure.',
+    'faq.q3': 'What are the victory conditions?',
+    'faq.a3': 'This demo has 4: 1) Stable Count — reach target alive count and stay stable; 2) Still Life — replicate a specific still life pattern unchanged; 3) Oscillator — produce a period-2 oscillating structure; 4) Glider Shift — verify diagonal movement of a glider.',
+    'faq.q4': 'How do levels unlock?',
+    'faq.a4': 'Completing a level unlocks the next one. The game includes 10 Main, 2 Side, and 1 Special Challenge levels, 13 in total.',
+    'faq.q5': 'Are settings saved?',
+    'faq.a5': 'Yes. All progress, unlocks, theme, and language settings persist via localStorage. You can clear all progress in Settings.',
+    'online.title': 'Online Mode',
+    'online.modeSelect': 'Select Mode',
+    'online.warSym': 'Symmetric War',
+    'online.warSymDesc': 'Suppression · same≥2 & >opponent to survive',
+    'online.warAsym': 'Asymmetric War',
+    'online.warAsymDesc': 'Assault · attacker strong, defender breeds fast',
+    'online.coop': 'Cooperation',
+    'online.coopDesc': 'Two colors coexist · standard Conway',
+    'online.opponentSelect': 'Select Opponent',
+    'online.human': 'Play Human',
+    'online.bot': 'Play Bot',
+    'online.soon': 'Coming Soon',
+    'online.selectMode': 'Please select a mode first',
+    'online.selectOpponent': 'Please select an opponent',
+    'online.selectSide': 'Please select a side',
+    'online.sideSelect': 'Select Side',
+    'online.sideDefender': 'A Defender',
+    'online.sideAttacker': 'B Attacker',
+    'online.start': 'Start Game',
+    'online.playerTurn': 'Your turn',
+    'online.botTurn': 'Bot turn',
+    'online.cellsLeft': 'Cells left',
+    'online.player': 'Player',
+    'online.bot': 'Bot',
+    'online.evolving': 'Evolving',
+    'online.warSymName': 'Symmetric War',
+    'online.warAsymName': 'Asymmetric War',
+    'online.coopName': 'Cooperation',
+    'toast.onlineSoon': 'Online play is coming soon, stay tuned',
+  },
+  'zh-TW': {
+    'home.sub': '元胞自動機 · 湧現之美',
+    'home.desc': '以康威生命遊戲為核心，通過佈局、干預、規則設計三種角色，探索簡單規則如何湧現出複雜生命行為。',
+    'home.start': '開始遊戲',
+    'home.online': '聯機模式',
+    'home.sandbox': '自訂',
+    'home.settings': '設定',
+    'home.dev': '開發者',
+    'home.help': '說明',
+    'common.back': '返回首頁',
+    'common.backLevels': '返回關卡',
+    'levels.title': '關卡',
+    'levels.mainBranch': '主線',
+    'levels.ruleBranch': '支線',
+    'levels.sideBranch': '特殊挑戰',
+    'levels.locked': '🔒',
+    'levels.completed': '✓',
+    'game.play': '▶ 播放',
+    'game.pause': '⏸ 暫停',
+    'game.step': '⏭',
+    'game.startEvo': '▶ 啟動演化',
+    'game.jumpStart': '回到開始',
+    'game.jumpEnd': '跳到結尾',
+    'game.furthestGen': '已演化',
+    'game.curGen': '當前',
+    'game.genUnit': '代',
+    'game.cells': '存活細胞數',
+    'game.reset': '↻ 重置',
+    'game.info': '關卡資訊',
+    'game.phase': '階段',
+    'game.phaseLayout': '佈局',
+    'game.phasePlay': '干預',
+    'game.phaseDone': '完成',
+    'game.victory': '勝利條件',
+    'game.target': '目標',
+    'game.targetPattern': '目標圖案',
+    'game.initCells': '初始細胞',
+    'toast.maxCells': '已達初始細胞上限',
+    'settings.title': '設定',
+    'settings.theme': '主題風格',
+    'settings.language': '語言',
+    'settings.progress': '進度管理',
+    'settings.progressHint': '清除所有進度、解鎖狀態與設定',
+    'settings.resetAll': '清除全部進度',
+    'dev.title': '開發者',
+    'dev.about': '關於',
+    'dev.aboutDesc': 'LifeGame 是以康威生命遊戲（1970）為核心的多形態元胞自動機遊戲。玩家通過佈局初始圖案、實時干預演化、修改底層規則，探索簡單規則如何湧現出複雜生命行為。',
+    'dev.features': '當前 Demo 包含',
+    'dev.f1': '主玩法：佈局 + 干預融合',
+    'dev.f2': '4 種勝利條件：達量穩定 / 靜物驗證 / 振盪子 / 滑翔機位移',
+    'dev.f3': '單細胞增刪干預手段',
+    'dev.f5': '主線 + 支線 + 特殊挑戰關卡',
+    'dev.f6': '6 種主題切換',
+    'dev.f7': '簡中 / 繁中 / English 三語',
+    'dev.engine': '引擎參數',
+    'dev.r1': '✓ Phase 01 報名（創意提案）',
+    'dev.r2': '▶ Phase 02 初賽 MVP（當前）',
+    'dev.r3': '○ Phase 03 V1 完整版（規則探索模式）',
+    'dev.r4': '○ Phase 04 遠期（高維 + 多狀態）',
+    'help.title': '說明',
+    'win.title': '通關！',
+    'win.sub': '你已達成勝利條件',
+    'fail.title': '失敗',
+    'fail.sub': '未在限定代數內達成目標',
+    'win.levels': '關卡列表',
+    'win.retry': '再玩一次',
+    'win.seed': '種子碼',
+    'win.copy': '複製',
+    'win.seedLoad': '載入',
+    'sandbox.title': '自訂',
+    'sandbox.crumb': '',
+    'sandbox.victory': '自由模式',
+    'sandbox.target': '無目標',
+    'sandbox.phase': '自由',
+    'sandbox.settings': '自訂設定',
+    'sandbox.shape': '細胞形狀',
+    'sandbox.shapeSquare': '方形',
+    'sandbox.shapeTriangle': '三角形',
+    'sandbox.shapeHexagon': '六邊形',
+    'sandbox.birth': '繁衍鄰居數',
+    'sandbox.survivalMin': '存活下限',
+    'sandbox.survivalMax': '存活上限',
+    'sandbox.gridSize': '網格大小',
+    'sandbox.speed': '演化速度',
+    'sandbox.seedPlaceholder': 'Ss25-323-200-7Z8P9',
+    'sandbox.generateSeed': '生成種子碼',
+    'toast.locked': '關卡未解鎖',
+    'toast.win': '達成勝利條件！',
+    'toast.fail': '未在限定代數內達成目標',
+    'toast.reset': '已重置',
+    'toast.cleared': '已清除全部進度與設定',
+    'toast.placeCells': '請先放置細胞',
+    'toast.confirmClear': '確認清除所有進度與設定？',
+    'toast.copied': '已複製到剪貼簿',
+    'toast.copyFailed': '複製失敗，請手動複製',
+    'toast.seedInvalid': '種子碼格式錯誤',
+    'toast.seedLoaded': '種子碼已載入',
+    'toast.seedEmpty': '網格為空，無法生成種子碼',
+    'toast.seedGenerated': '種子碼已生成',
+    'toast.seedNothing': '請先生成種子碼',
+    'toast.newRecord': '新紀錄',
+    'faq.q1': '生命遊戲是什麼？',
+    'faq.a1': '康威生命遊戲（Conway\'s Game of Life）是 1970 年由數學家 John Conway 提出的元胞自動機。規則極簡：一個死細胞周圍恰好 3 個活鄰居則誕生；一個活細胞周圍有 2 或 3 個活鄰居則存活，否則死亡。但就是這簡單規則能湧現出滑翔機、振盪子、圖靈機等複雜結構。',
+    'faq.q2': '怎麼玩 LifeGame？',
+    'faq.a2': '每關分兩階段：1) 佈局階段——點擊網格放置/移除細胞，佈置初始圖案；2) 演化階段——點擊「啟動演化」開始自動演化，過程中可暫停。達成目標即通關。未在限定代數內達成則失敗。',
+    'faq.q3': '勝利條件有哪些？',
+    'faq.a3': '本 Demo 含 4 種：1) 達量穩定——讓活細胞數量達到目標值並維持穩定；2) 靜物驗證——復刻特定靜物圖案並保持不變；3) 振盪子——產生週期 2 的振盪結構；4) 滑翔機位移——驗證滑翔機的對角移動。',
+    'faq.q4': '關卡怎麼解鎖？',
+    'faq.a4': '完成前一關卡即可解鎖後續關卡。當前包含主線 10 關、支線 2 關與特殊挑戰 1 關，共 13 個關卡。',
+    'faq.q5': '主題與設定會保存嗎？',
+    'faq.a5': '會。所有進度、解鎖狀態、主題、語言設定都通過 localStorage 持久化，下次打開瀏覽器仍然保留。可在設定中清除全部進度。',
+    'online.title': '聯機模式',
+    'online.modeSelect': '選擇模式',
+    'online.warSym': '對稱對抗',
+    'online.warSymDesc': '壓制制 · 同色≥2且>異色存活',
+    'online.warAsym': '非對稱對抗',
+    'online.warAsymDesc': '攻防制 · 進攻方強，防守方繁衍快',
+    'online.coop': '合作模式',
+    'online.coopDesc': '雙色共存 · 標準 Conway 規則',
+    'online.opponentSelect': '選擇對手',
+    'online.human': '與真人聯機',
+    'online.bot': '與機器人聯機',
+    'online.soon': '即將上線',
+    'online.selectMode': '請先選擇模式',
+    'online.selectOpponent': '請先選擇對手',
+    'online.selectSide': '請先選擇陣營',
+    'online.sideSelect': '選擇陣營',
+    'online.sideDefender': 'A 防守方',
+    'online.sideAttacker': 'B 進攻方',
+    'online.start': '開始遊戲',
+    'online.playerTurn': '你的回合',
+    'online.botTurn': '機器人回合',
+    'online.cellsLeft': '剩餘細胞',
+    'online.player': '玩家',
+    'online.bot': '機器人',
+    'online.evolving': '演化中',
+    'online.warSymName': '對稱對抗',
+    'online.warAsymName': '非對稱對抗',
+    'online.coopName': '合作模式',
+    'toast.onlineSoon': '真人聯機功能即將上線，敬請期待',
+  }
+};
+
+// ============ 关卡数据 ============
+// 主线 10 关（L01~L10）难度曲线：
+//   阶段一（L01~L04）：逐一引入 4 种胜利条件，让玩家通过目标数值自然理解概念
+//   阶段二（L05~L07）：同类型胜利条件的进阶版，强调组合与延续
+//   阶段三（L08~L10）：大规模 / 长期 / 极限综合挑战
+const LEVELS = [
+  // ===== 阶段一：基础认知 =====
+  {
+    id: 'L01',
+    name: { zh: '初生', en: 'Genesis', 'zh-TW': '初生' },
+    concept: { zh: '熵 · 无序中的生命起源', en: 'Entropy · Life from disorder', 'zh-TW': '熵 · 無序中的生命起源' },
+    branch: 'main', grid: 25,
+    vc: 'vc3', target: 2, stableGens: 1, stableTarget: 2, minGen: 3,
+    maxInitCells: 15, unlockAfter: null,
+    highlight: null,
+    targetLabel: { zh: '3 代后 ≥ 2 活细胞', en: '≥2 alive after 3 gens', 'zh-TW': '3 代後 ≥ 2 活細胞' },
+    maxGen: 12
+  },
+  {
+    id: 'L02',
+    name: { zh: '蜂巢', en: 'Hive', 'zh-TW': '蜂巢' },
+    concept: { zh: '自组织 · 静物的涌现', en: 'Self-organization · Still lifes', 'zh-TW': '自組織 · 靜物的湧現' },
+    branch: 'main', grid: 25,
+    vc: 'vc_stable', target: 6, stableGens: 3, minGen: 3,
+    maxInitCells: 8, unlockAfter: 'L01',
+    highlight: makeBeehivePattern(),
+    targetLabel: { zh: '3 代后 = 6 且 3 代不变', en: '6 alive & unchanged for 3 gens', 'zh-TW': '3 代後 = 6 且 3 代不變' },
+    maxGen: 15
+  },
+  {
+    id: 'L03',
+    name: { zh: '心跳', en: 'Heartbeat', 'zh-TW': '心跳' },
+    concept: { zh: '节律 · 时间维度的生命', en: 'Rhythm · Temporal life', 'zh-TW': '節律 · 時間維度的生命' },
+    branch: 'main', grid: 25,
+    vc: 'vc_osc', oscGens: 4, minGen: 2,
+    maxInitCells: 5, unlockAfter: 'L02',
+    highlight: makeBlinkerPattern(),
+    targetLabel: { zh: '连续 4 代稳定振荡', en: 'Oscillate for 4 gens', 'zh-TW': '連續 4 代穩定振盪' },
+    maxGen: 12
+  },
+  {
+    id: 'L04',
+    name: { zh: '漫游', en: 'Roam', 'zh-TW': '漫遊' },
+    concept: { zh: '涌现 · 复杂行为从简单规则', en: 'Emergence · Complexity from rules', 'zh-TW': '湧現 · 複雜行為從簡單規則' },
+    branch: 'main', grid: 25,
+    vc: 'vc_glider', glideGens: 4,
+    maxInitCells: 7, unlockAfter: 'L03',
+    highlight: makeGliderStartPattern(),
+    targetLabel: { zh: '4 代后对角位移 1 格', en: 'Diagonal shift after 4 gens', 'zh-TW': '4 代後對角位移 1 格' },
+    maxGen: 12
+  },
+  // ===== 阶段二：组合应用 =====
+  {
+    id: 'L05',
+    name: { zh: '繁衍', en: 'Proliferate', 'zh-TW': '繁衍' },
+    concept: { zh: '协同 · 多结构的共存', en: 'Synergy · Coexistence of structures', 'zh-TW': '協同 · 多結構的共存' },
+    branch: 'main', grid: 25,
+    vc: 'vc3', target: 10, stableGens: 3, stableTarget: 8, minGen: 8,
+    maxInitCells: 12, unlockAfter: 'L04',
+    highlight: null,
+    targetLabel: { zh: '8 代后 ≥ 10 且 3 代 ≥ 8', en: '≥10 after 8 gens, ≥8 for 3 gens', 'zh-TW': '8 代後 ≥ 10 且 3 代 ≥ 8' },
+    maxGen: 25
+  },
+  {
+    id: 'L06',
+    name: { zh: '律动', en: 'Rhythm', 'zh-TW': '律動' },
+    concept: { zh: '韵律 · 周期的延续', en: 'Rhythm · Periodicity extended', 'zh-TW': '韻律 · 週期的延續' },
+    branch: 'main', grid: 25,
+    vc: 'vc_osc', oscGens: 6, minGen: 3,
+    maxInitCells: 10, unlockAfter: 'L05',
+    highlight: null,
+    targetLabel: { zh: '连续 6 代稳定振荡', en: 'Oscillate for 6 gens', 'zh-TW': '連續 6 代穩定振盪' },
+    maxGen: 20
+  },
+  {
+    id: 'L07',
+    name: { zh: '远航', en: 'Voyage', 'zh-TW': '遠航' },
+    concept: { zh: '远行 · 移动的延续', en: 'Voyage · Sustained motion', 'zh-TW': '遠行 · 移動的延續' },
+    branch: 'main', grid: 25,
+    vc: 'vc_glider', glideGens: 8,
+    maxInitCells: 10, unlockAfter: 'L06',
+    highlight: null,
+    targetLabel: { zh: '8 代后对角位移 1 格', en: 'Diagonal shift after 8 gens', 'zh-TW': '8 代後對角位移 1 格' },
+    maxGen: 20
+  },
+  // ===== 阶段三：综合挑战 =====
+  {
+    id: 'L08',
+    name: { zh: '造物', en: 'Create', 'zh-TW': '造物' },
+    concept: { zh: '人工生命 · 造物与干预', en: 'Artificial life · Creation', 'zh-TW': '人工生命 · 造物與干預' },
+    branch: 'main', grid: 25,
+    vc: 'vc3', target: 25, stableGens: 5, stableTarget: 20, minGen: 15,
+    maxInitCells: 18, unlockAfter: 'L07',
+    highlight: null,
+    targetLabel: { zh: '15 代后 ≥ 25 且 5 代 ≥ 20', en: '≥25 after 15 gens, ≥20 for 5 gens', 'zh-TW': '15 代後 ≥ 25 且 5 代 ≥ 20' },
+    maxGen: 45
+  },
+  {
+    id: 'L09',
+    name: { zh: '凝固', en: 'Freeze', 'zh-TW': '凝固' },
+    concept: { zh: '凝固 · 时间中的不变', en: 'Stillness · Unchanging in time', 'zh-TW': '凝固 · 時間中的不變' },
+    branch: 'main', grid: 25,
+    vc: 'vc_stable', target: 12, stableGens: 5, minGen: 10,
+    maxInitCells: 15, unlockAfter: 'L08',
+    highlight: null,
+    targetLabel: { zh: '10 代后 = 12 且 5 代不变', en: '12 alive & unchanged for 5 gens', 'zh-TW': '10 代後 = 12 且 5 代不變' },
+    maxGen: 30
+  },
+  {
+    id: 'L10',
+    name: { zh: '巅峰', en: 'Zenith', 'zh-TW': '巔峰' },
+    concept: { zh: '极限 · 周期的极致延续', en: 'Extreme · Ultimate periodicity', 'zh-TW': '極限 · 週期的極致延續' },
+    branch: 'main', grid: 25,
+    vc: 'vc_osc', oscGens: 10, minGen: 5,
+    maxInitCells: 15, unlockAfter: 'L09',
+    highlight: null,
+    targetLabel: { zh: '连续 10 代稳定振荡', en: 'Oscillate for 10 gens', 'zh-TW': '連續 10 代穩定振盪' },
+    maxGen: 35
+  },
+  // ===== 支线关卡（规则设计探索）=====
+  {
+    id: 'R-01',
+    name: { zh: '规则之门', en: 'Gate of Rules', 'zh-TW': '規則之門' },
+    concept: { zh: '探索 · 规则的边界', en: 'Explore · Boundaries of Rules', 'zh-TW': '探索 · 規則的邊界' },
+    branch: 'rule', grid: 25,
+    vc: 'vc_stable', target: 4, stableGens: 3, minGen: 3,
+    maxInitCells: 6, unlockAfter: 'L04',
+    highlight: makeBlockPattern(),
+    targetLabel: { zh: '3 代后 = 4 且 3 代不变', en: '4 alive & unchanged for 3 gens', 'zh-TW': '3 代後 = 4 且 3 代不變' },
+    maxGen: 15
+  },
+  {
+    id: 'R-02',
+    name: { zh: '振荡之舞', en: 'Oscillation Dance', 'zh-TW': '振盪之舞' },
+    concept: { zh: '韵律 · 周期的艺术', en: 'Rhythm · Art of Periodicity', 'zh-TW': '韻律 · 週期的藝術' },
+    branch: 'rule', grid: 25,
+    vc: 'vc_osc', oscGens: 4, minGen: 2,
+    maxInitCells: 8, unlockAfter: 'R-01',
+    highlight: makeToadPattern(),
+    targetLabel: { zh: '连续 4 代稳定振荡', en: 'Oscillate for 4 gens', 'zh-TW': '連續 4 代穩定振盪' },
+    maxGen: 15
+  },
+  // ===== 特殊挑战 =====
+  {
+    id: 'S-01',
+    name: { zh: '极限挑战', en: 'Extreme Challenge', 'zh-TW': '極限挑戰' },
+    concept: { zh: '约束 · 极小空间中的生命', en: 'Constraint · Life in Minimal Space', 'zh-TW': '約束 · 極小空間中的生命' },
+    branch: 'side', grid: 15,
+    vc: 'vc3', target: 5, stableGens: 3, stableTarget: 5, minGen: 5,
+    maxInitCells: 5, unlockAfter: 'L10',
+    highlight: null,
+    targetLabel: { zh: '5 代后 ≥ 5 且 3 代不变', en: '≥5 after 5 gens, unchanged for 3 gens', 'zh-TW': '5 代後 ≥ 5 且 3 代不變' },
+    maxGen: 25
+  }
+];
+
+// 蜂巢（静物，6 格）——以 (11,11) 为左上
+function makeBeehivePattern() {
+  const p = [];
+  for (let i = 0; i < 25; i++) p.push(new Array(25).fill(0));
+  // . X X .
+  // X . . X
+  // . X X .
+  p[11][12]=1; p[11][13]=1;
+  p[12][11]=1; p[12][14]=1;
+  p[13][12]=1; p[13][13]=1;
+  return p;
+}
+
+// Blinker（周期 2 振荡子，3 格水平）
+function makeBlinkerPattern() {
+  const p = [];
+  for (let i = 0; i < 25; i++) p.push(new Array(25).fill(0));
+  p[12][11]=1; p[12][12]=1; p[12][13]=1;
+  return p;
+}
+
+// 滑翔机起点（5 格）——以 (11,11) 为左上，向右下移动
+function makeGliderStartPattern() {
+  const p = [];
+  for (let i = 0; i < 25; i++) p.push(new Array(25).fill(0));
+  // . X .
+  // . . X
+  // X X X
+  p[11][12]=1;
+  p[12][13]=1;
+  p[13][11]=1; p[13][12]=1; p[13][13]=1;
+  return p;
+}
+
+// 方块（静物，4 格）——以 (11,11) 为左上
+function makeBlockPattern() {
+  const p = [];
+  for (let i = 0; i < 25; i++) p.push(new Array(25).fill(0));
+  // X X
+  // X X
+  p[11][11]=1; p[11][12]=1;
+  p[12][11]=1; p[12][12]=1;
+  return p;
+}
+
+// 蟾蜍（周期 2 振荡子，6 格）——以 (11,11) 为左上
+function makeToadPattern() {
+  const p = [];
+  for (let i = 0; i < 25; i++) p.push(new Array(25).fill(0));
+  // . X X X
+  // X X X .
+  p[11][12]=1; p[11][13]=1; p[11][14]=1;
+  p[12][11]=1; p[12][12]=1; p[12][13]=1;
+  return p;
+}
+
+// ============ 主题数据 ============
+// 每个主题包含：
+//   - id/name/desc/bg/text/dim/border/sw：用于主题卡片预览（renderThemes）
+//   - vars：该主题的完整 CSS 变量集合，由 applyTheme() 通过 setProperty 注入到 <html> 的 inline style。
+//           变量值与原 [data-theme="xxx"] CSS 块保持一致。
+const THEMES = [
+  { id: 'pixel', name: { zh: '复古像素', en: 'Retro Pixel', 'zh-TW': '復古像素' }, desc: '8-bit · Neon',
+    bg: '#0d0d12', text: '#4ade80', dim: '#6b7280', border: '#2a2a3a',
+    sw: ['#4ade80','#f472b6','#22d3ee','#0d0d12'],
+    vars: {
+      '--bg': '#0d0d12',
+      '--bg-soft': '#15151d',
+      '--bg-card': '#1a1a24',
+      '--border': '#2a2a3a',
+      '--text': '#e4e4e7',
+      '--text-dim': '#9ca3af',
+      '--accent': '#4ade80',
+      '--accent-2': '#22c55e',
+      '--magenta': '#f472b6',
+      '--cyan': '#22d3ee',
+      '--amber': '#fbbf24',
+      '--danger': '#ef4444',
+      '--cell': '#4ade80',
+      '--cell-b': '#f472b6',
+      '--cell-glow': 'rgba(74,222,128,0.4)',
+      '--grid-line': 'rgba(74,222,128,0.08)',
+      '--target': 'rgba(244,114,182,0.25)',
+      '--target-border': '#f472b6',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': "'Press Start 2P', var(--font-mono), -apple-system, sans-serif",
+      '--radius': '6px',
+      '--shadow': '0 0 0 1px var(--border), 0 4px 20px rgba(0,0,0,0.5)'
+    } },
+  { id: 'neon', name: { zh: '霓虹生物科技', en: 'Neon Bio', 'zh-TW': '霓虹生物科技' }, desc: 'Cyberpunk',
+    bg: '#0a0a14', text: '#22d3ee', dim: '#64748b', border: '#1e293b',
+    sw: ['#22d3ee','#f472b6','#a78bfa','#0a0a14'],
+    vars: {
+      '--bg': '#0a0a14',
+      '--bg-soft': '#12121f',
+      '--bg-card': '#181828',
+      '--border': '#252540',
+      '--text': '#d4d8e8',
+      '--text-dim': '#7a809a',
+      '--accent': '#22d3ee',
+      '--accent-2': '#06b6d4',
+      '--magenta': '#f472b6',
+      '--cyan': '#22d3ee',
+      '--amber': '#fbbf24',
+      '--danger': '#ef4444',
+      '--cell': '#22d3ee',
+      '--cell-b': '#f472b6',
+      '--cell-glow': 'rgba(34,211,238,0.5)',
+      '--grid-line': 'rgba(34,211,238,0.08)',
+      '--target': 'rgba(244,114,182,0.25)',
+      '--target-border': '#f472b6',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': 'var(--font-mono), -apple-system, sans-serif',
+      '--radius': '4px',
+      '--shadow': '0 0 0 1px var(--border), 0 0 30px rgba(34,211,238,0.1)'
+    } },
+  { id: 'cosmic', name: { zh: '宇宙微观', en: 'Cosmic', 'zh-TW': '宇宙微觀' }, desc: 'Mystic',
+    bg: '#0a0a18', text: '#a78bfa', dim: '#7c7ca8', border: '#2a2848',
+    sw: ['#a78bfa','#f0abfc','#67e8f9','#0a0a18'],
+    vars: {
+      '--bg': '#0a0a18',
+      '--bg-soft': '#141428',
+      '--bg-card': '#1a1830',
+      '--border': '#2a2848',
+      '--text': '#e0e7ff',
+      '--text-dim': '#9ca3c0',
+      '--accent': '#a78bfa',
+      '--accent-2': '#8b5cf6',
+      '--magenta': '#f0abfc',
+      '--cyan': '#67e8f9',
+      '--amber': '#fcd34d',
+      '--danger': '#fb7185',
+      '--cell': '#a78bfa',
+      '--cell-b': '#fcd34d',
+      '--cell-glow': 'rgba(167,139,250,0.45)',
+      '--grid-line': 'rgba(167,139,250,0.08)',
+      '--target': 'rgba(240,171,252,0.2)',
+      '--target-border': '#f0abfc',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': 'var(--font-mono), -apple-system, sans-serif',
+      '--radius': '10px',
+      '--shadow': '0 0 0 1px var(--border), 0 4px 30px rgba(167,139,250,0.15)'
+    } },
+  { id: 'academic', name: { zh: '极简学术', en: 'Academic', 'zh-TW': '極簡學術' }, desc: 'Swiss',
+    bg: '#f5f5f0', text: '#0a7d4e', dim: '#6b7280', border: '#d4d4c8',
+    sw: ['#0a7d4e','#be185d','#0e7490','#f5f5f0'],
+    vars: {
+      '--bg': '#f5f5f0',
+      '--bg-soft': '#ebebe4',
+      '--bg-card': '#ffffff',
+      '--border': '#d4d4c8',
+      '--text': '#1a1a1a',
+      '--text-dim': '#666',
+      '--accent': '#0a7d4e',
+      '--accent-2': '#086d42',
+      '--magenta': '#be185d',
+      '--cyan': '#0e7490',
+      '--amber': '#b45309',
+      '--danger': '#b91c1c',
+      '--cell': '#0a7d4e',
+      '--cell-b': '#be185d',
+      '--cell-glow': 'rgba(10,125,78,0.3)',
+      '--grid-line': 'rgba(10,125,78,0.1)',
+      '--target': 'rgba(190,24,93,0.15)',
+      '--target-border': '#be185d',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      '--radius': '4px',
+      '--shadow': '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)'
+    } },
+  { id: 'pixel2', name: { zh: '琥珀像素', en: 'Amber Pixel', 'zh-TW': '琥珀像素' }, desc: '8-bit · Warm',
+    bg: '#1a1206', text: '#fbbf24', dim: '#92744a', border: '#3d2f15',
+    sw: ['#fbbf24','#fb923c','#ef4444','#1a1206'],
+    vars: {
+      '--bg': '#1a1206',
+      '--bg-soft': '#241808',
+      '--bg-card': '#2a1e0a',
+      '--border': '#3d2f15',
+      '--text': '#fde68a',
+      '--text-dim': '#92744a',
+      '--accent': '#fbbf24',
+      '--accent-2': '#f59e0b',
+      '--magenta': '#fb923c',
+      '--cyan': '#ef4444',
+      '--amber': '#fbbf24',
+      '--danger': '#ef4444',
+      '--cell': '#fbbf24',
+      '--cell-b': '#ef4444',
+      '--cell-glow': 'rgba(251,191,36,0.4)',
+      '--grid-line': 'rgba(251,191,36,0.1)',
+      '--target': 'rgba(239,68,68,0.2)',
+      '--target-border': '#ef4444',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': 'var(--font-mono), -apple-system, sans-serif',
+      '--radius': '6px',
+      '--shadow': '0 0 0 1px var(--border), 0 4px 20px rgba(251,191,36,0.1)'
+    } },
+  { id: 'mono', name: { zh: '单色终端', en: 'Monochrome', 'zh-TW': '單色終端' }, desc: 'Terminal',
+    bg: '#000000', text: '#ffffff', dim: '#666666', border: '#333333',
+    sw: ['#ffffff','#a3a3a3','#525252','#000000'],
+    vars: {
+      '--bg': '#000000',
+      '--bg-soft': '#0a0a0a',
+      '--bg-card': '#141414',
+      '--border': '#333333',
+      '--text': '#ffffff',
+      '--text-dim': '#888888',
+      '--accent': '#ffffff',
+      '--accent-2': '#cccccc',
+      '--magenta': '#a3a3a3',
+      '--cyan': '#d4d4d4',
+      '--amber': '#e5e5e5',
+      '--danger': '#ffffff',
+      '--cell': '#ffffff',
+      '--cell-b': '#525252',
+      '--cell-glow': 'rgba(255,255,255,0.3)',
+      '--grid-line': 'rgba(255,255,255,0.08)',
+      '--target': 'rgba(255,255,255,0.15)',
+      '--target-border': '#ffffff',
+      '--font-mono': "'JetBrains Mono', 'Courier New', Consolas, monospace",
+      '--font-sans': 'var(--font-mono), -apple-system, sans-serif',
+      '--radius': '2px',
+      '--shadow': '0 0 0 1px var(--border), 0 0 0 0 transparent'
+    } }
+];
+
+// ============ 状态 ============
+let state = {
+  lang: 'zh',
+  theme: 'pixel',
+  cellColorA: '#4ade80',   // 联机模式 A 色（applyTheme 时刷新）
+  cellColorB: '#f472b6',    // 联机模式 B 色（applyTheme 时刷新）
+  completed: {},   // {levelId: true}
+  currentLevel: null,
+  grid: [],
+  gridSize: 25,
+  generation: 0,
+  playing: false,
+  phase: 'layout', // 'layout' | 'play' | 'done'
+  // 联机模式状态
+  onlineMode: false,
+  battleMode: null,    // 'war' | 'asym' | 'coop'
+  onlineTurn: 'player', // 'player' | 'bot'
+  onlineCellsPerSide: 10,
+  onlinePlayerPlaced: 0,
+  onlineBotPlaced: 0,
+  onlinePlayerValue: 1, // 玩家细胞值（1=A防守方绿，2=B进攻方红）
+  onlineBotValue: 2,    // bot 细胞值
+  onlineBotTimeout: null, // bot 放置定时器（防冲突）
+  // 自定义模式规则设置（仅 sandbox 生效；正式关卡固定使用 B3/S23 / Moore / 环形）
+  sandbox: {
+    shape: 'square',         // 'square'（Moore 8邻）| 'triangle'（3 邻）| 'hexagon'（6 邻）
+    birth: 3,                // 繁衍所需邻居数
+    survivalMin: 2,          // 存活邻居数下限（含）
+    survivalMax: 3,          // 存活邻居数上限（含）
+    gridSize: 25,             // 网格大小
+    speed: 200,               // 演化步长（ms）
+  },
+  maxInitCells: 0,    // 布局阶段初始细胞上限
+  stableCount: 0,
+  stableTarget: 5,
+  rafId: null,
+  lastStep: 0,
+  stepInterval: 200,
+  // 静物验证（vc_stable）
+  prevGrid: null,      // 上一代网格快照
+  // 振荡子（vc_osc）
+  prevAlive: -1,
+  prevPrevAlive: -1,
+  prevPrevGrid: null,
+  oscCount: 0,
+  // 回退历史栈：每次 advance 前压入当前网格快照，stepBack 时弹出
+  // 仅用于回退功能；静物/振荡子检测仍使用 prevGrid/prevPrevGrid
+  history: [],
+  // 播放器式跳跃：记录演化轨迹的起点与最远点
+  //   firstGrid: 首次 advance 时的 grid 快照（generation=0 的状态）
+  //   furthestGrid/furthestGen: 已演化到的最远 grid 与代数
+  //   用户手动修改 grid 时重置（相当于重新开始轨迹）
+  firstGrid: null,
+  furthestGrid: null,
+  furthestGen: -1,
+  // 滑翔机位移（vc_glider）
+  initCells: null,    // 初始活细胞位置集合 [{x,y}]
+  // 通关星级评分（1-3 星）
+  stars: {},           // {levelId: 最佳星数 1-3}
+  usedInitCells: 0,    // 布局阶段实际放置的细胞数（用于精度星评分）
+  // 兼容旧字段
+  vc1StableGen: 0,
+  vc1BestSim: 0,
+};
+
+const SAVE_KEY = 'lifegame.save.v1';
+
+function loadSave() {
+  // 默认值
+  state.theme = 'pixel';
+  state.lang = 'zh';
+  state.completed = {};
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      state.lang = s.lang || 'zh';
+      // 验证 theme 值是否有效，无效则回退到 pixel
+      const validThemes = THEMES.map(th => th.id);
+      if (s.theme && validThemes.includes(s.theme)) {
+        state.theme = s.theme;
+      }
+      state.completed = s.completed || {};
+      state.stars = s.stars || {};
+      // ID 迁移：旧格式 L-01~L-10 → 新格式 L01~L10
+      // 主线 ID 格式曾从 L-XX 改为 LXX，需将旧存档中的 completed/stars 键名转换
+      const migrateId = (id) => {
+        const m = id.match(/^L-(\d+)$/);
+        return m ? 'L' + m[1] : id;
+      };
+      const migratedCompleted = {};
+      Object.keys(state.completed).forEach(k => { migratedCompleted[migrateId(k)] = true; });
+      state.completed = migratedCompleted;
+      const migratedStars = {};
+      Object.keys(state.stars).forEach(k => { migratedStars[migrateId(k)] = state.stars[k]; });
+      state.stars = migratedStars;
+    }
+  } catch (e) {
+    // 解析失败，保持默认值
+  }
+  // 加载后立即应用主题（通过 setProperty 注入变量 + 设置 data-theme 属性），
+  // 确保用户上次选择的主题在页面渲染时即生效，避免显示与设置不同步。
+  applyTheme(state.theme);
+}
+
+function persistSave() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      lang: state.lang, theme: state.theme, completed: state.completed,
+      stars: state.stars
+    }));
+  } catch (e) {}
+}
+
+// ============ i18n 应用 ============
+function applyI18n() {
+  const dict = I18N[state.lang] || I18N.zh;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const k = el.getAttribute('data-i18n');
+    if (dict[k] !== undefined) el.textContent = dict[k];
+  });
+  // 处理 placeholder 翻译
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const k = el.getAttribute('data-i18n-placeholder');
+    if (dict[k] !== undefined) el.placeholder = dict[k];
+  });
+  document.documentElement.setAttribute('data-lang', state.lang);
+  document.documentElement.lang = state.lang === 'en' ? 'en' : (state.lang === 'zh-TW' ? 'zh-TW' : 'zh-CN');
+  // 刷新动态内容
+  renderLevels();
+  renderFAQ();
+  if (state.currentLevel) {
+    updateGameUI();
+  } else if (document.getElementById('page-game').classList.contains('active')) {
+    // 自定义模式：刷新标题与返回按钮文案（crumb 已隐藏）
+    document.getElementById('game-title').textContent = t('sandbox.title');
+    const backBtn = document.getElementById('game-back-btn');
+    backBtn.innerHTML = '← <span data-i18n="common.back">' + t('common.back') + '</span>';
+  }
+}
+
+function t(key) {
+  return (I18N[state.lang] || I18N.zh)[key] || key;
+}
+
+function setLang(lang) {
+  state.lang = lang;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+  applyI18n();
+  // 同步刷新主题卡片，让名称跟随当前语言切换（中/英互为翻译）
+  renderThemes();
+  persistSave();
+}
+
+// ============ 主题 ============
+// applyTheme：将指定主题的 CSS 变量集合通过 setProperty 动态注入到 <html> 的 inline style。
+// 这是主题切换的核心机制（参考 ModelLab 实现），不再依赖 [data-theme="xxx"] CSS 选择器块。
+// 同时设置 data-theme 属性，保持与下方主题特化 CSS 规则（按钮、logo、像素条等）的兼容。
+function applyTheme(themeId) {
+  const theme = THEMES.find(th => th.id === themeId) || THEMES[0];
+  const root = document.documentElement;
+  Object.entries(theme.vars).forEach(([k, v]) => root.style.setProperty(k, v));
+  // 保持属性选择器兼容（主题特化 CSS 仍生效）
+  root.setAttribute('data-theme', theme.id);
+  state.theme = theme.id;
+  // 缓存联机模式 A/B 细胞色（与主题呼应，A=--cell, B=--cell-b）
+  state.cellColorA = theme.vars['--cell'];
+  state.cellColorB = theme.vars['--cell-b'];
+}
+
+function setTheme(themeId) {
+  applyTheme(themeId);
+  persistSave();
+  // 重新渲染卡片以更新选中态边框（用各自主题色）
+  renderThemes();
+}
+
+function renderThemes() {
+  const grid = document.getElementById('theme-grid');
+  grid.innerHTML = '';
+  THEMES.forEach(th => {
+    const c = document.createElement('div');
+    c.className = 'theme-card-opt' + (th.id === state.theme ? ' active' : '');
+    c.dataset.theme = th.id;
+    // 用该主题自身的颜色渲染卡片，固定不变
+    c.style.background = th.bg;
+    c.style.color = th.text;
+    c.style.border = th.id === state.theme ? `2px solid ${th.text}` : `1px solid ${th.border}`;
+    c.innerHTML = `
+      <div class="swatches">${th.sw.map(s => `<div class="sw" style="background:${s};border:1px solid ${th.border}"></div>`).join('')}</div>
+      <div class="tname">${th.name[state.lang]}</div>
+    `;
+    c.onclick = () => setTheme(th.id);
+    grid.appendChild(c);
+  });
+}
+
+// ============ FAQ ============
+function renderFAQ() {
+  const list = document.getElementById('faq-list');
+  list.innerHTML = '';
+  for (let i = 1; i <= 5; i++) {
+    const item = document.createElement('div');
+    item.className = 'faq-item';
+    item.innerHTML = `
+      <div class="faq-q">
+        <span>${t('faq.q' + i)}</span>
+        <span class="arrow">▶</span>
+      </div>
+      <div class="faq-a">${t('faq.a' + i)}</div>
+    `;
+    item.querySelector('.faq-q').onclick = () => item.classList.toggle('open');
+    list.appendChild(item);
+  }
+}
+
+// ============ 页面导航 ============
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+  if (page !== 'game' && state.rafId) {
+    cancelAnimationFrame(state.rafId);
+    state.rafId = null;
+    state.playing = false;
+  }
+  // 进入关卡列表时重新渲染，确保解锁状态最新
+  if (page === 'levels') renderLevels();
+  // 进入联机模式时重置选择状态
+  if (page === 'online') resetOnlineSelection();
+  window.scrollTo(0, 0);
+  if (page === 'home') startBgAnim();
+  else stopBgAnim();
+}
+
+// 首页"开始游戏"：进入关卡选择界面
+function startQuickPlay() {
+  nav('levels');
+}
+
+// 首页"随便玩"：沙盒模式，无胜利条件、无能量约束、无阶段切换
+function startSandbox() {
+  state.currentLevel = null; // 标记沙盒模式
+  // 应用自定义设置：网格大小、演化速度
+  state.gridSize = state.sandbox.gridSize;
+  state.stepInterval = state.sandbox.speed;
+  state.phase = 'play'; // 沙盒直接进入演化可用阶段，但保持暂停
+  // 清空 grid 与历史栈，同步重置种子码 UI（避免残留上次状态）
+  resetSandboxState(true);
+
+  // 标题：自定义（任务 2：随便玩 → 自定义）
+  document.getElementById('game-title').textContent = t('sandbox.title');
+  // 隐藏 crumb 行（任务 4：删除 SANDBOX · 自由设计）
+  document.getElementById('game-crumb').style.display = 'none';
+  // 返回按钮文案改为"返回首页"（任务 1）
+  const backBtn = document.getElementById('game-back-btn');
+  backBtn.innerHTML = '← <span data-i18n="common.back">' + t('common.back') + '</span>';
+  // 切换面板：隐藏关卡信息与目标图案，显示自定义设置 + 种子码模块
+  document.getElementById('level-info-panel').style.display = 'none';
+  document.getElementById('target-panel').style.display = 'none';
+  document.getElementById('sandbox-panel').style.display = 'block';
+  document.getElementById('sandbox-seed-panel').style.display = 'block';
+  // 同步设置面板的输入控件
+  syncSandboxPanel();
+
+  const sz = 500;
+  canvas.width = sz; canvas.height = sz;
+  updateGameUI();
+  renderGrid();
+  nav('game');
+}
+
+// ============ 联机模式 ============
+// 网格值：0=空，1=A细胞（防守方，绿色），2=B细胞（进攻方，红色）
+// 三种模式：war（对称压制）、asym（非对称攻防）、coop（合作）
+let onlineSelectedMode = null;
+let onlineSelectedOpponent = null;
+let onlineSelectedSide = null; // 'A' 防守方 | 'B' 进攻方（仅 asym 模式）
+
+function resetOnlineSelection() {
+  onlineSelectedMode = null;
+  onlineSelectedOpponent = null;
+  onlineSelectedSide = null;
+  document.querySelectorAll('.online-mode-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.online-op-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('online-side-section').style.display = 'none';
+  updateOnlineStartBtn();
+}
+
+function selectOnlineMode(mode) {
+  onlineSelectedMode = mode;
+  document.querySelectorAll('.online-mode-card:not(.online-side-card)').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector('.online-mode-card[data-mode="' + mode + '"]');
+  if (card) card.classList.add('selected');
+  // 非对称对抗模式：显示阵营选择，需选阵营才能开始
+  // 其他模式：隐藏阵营选择，清除已选阵营
+  onlineSelectedSide = null;
+  document.querySelectorAll('.online-side-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('online-side-section').style.display = (mode === 'asym') ? '' : 'none';
+  updateOnlineStartBtn();
+}
+
+function selectOnlineSide(side) {
+  onlineSelectedSide = side;
+  document.querySelectorAll('.online-side-card').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector('.online-side-card[data-side="' + side + '"]');
+  if (card) card.classList.add('selected');
+  updateOnlineStartBtn();
+}
+
+function selectOnlineOpponent(opp) {
+  onlineSelectedOpponent = opp;
+  document.querySelectorAll('.online-op-btn').forEach(b => b.classList.remove('selected'));
+  const btn = document.getElementById('op-' + opp);
+  if (btn) btn.classList.add('selected');
+  updateOnlineStartBtn();
+}
+
+function updateOnlineStartBtn() {
+  const btn = document.getElementById('online-start');
+  if (!btn) return;
+  let ready = onlineSelectedMode && onlineSelectedOpponent;
+  // 非对称对抗模式需额外选择阵营
+  if (ready && onlineSelectedMode === 'asym' && !onlineSelectedSide) ready = false;
+  btn.classList.toggle('disabled', !ready);
+}
+
+function toastOnlineSoon() {
+  toast(t('toast.onlineSoon'), 'info');
+}
+
+// 启动机器人联机
+function startOnlineGame() {
+  const startBtn = document.getElementById('online-start');
+  if (startBtn && startBtn.classList.contains('disabled')) {
+    if (!onlineSelectedMode) { toast(t('online.selectMode'), 'error'); return; }
+    if (!onlineSelectedOpponent) { toast(t('online.selectOpponent'), 'error'); return; }
+    if (onlineSelectedMode === 'asym' && !onlineSelectedSide) { toast(t('online.selectSide'), 'error'); return; }
+  }
+  if (onlineSelectedOpponent === 'human') { toastOnlineSoon(); return; }
+  state.onlineMode = true;
+  state.battleMode = onlineSelectedMode; // 'war' | 'asym' | 'coop'
+  state.currentLevel = null; // 联机模式无关卡
+  state.gridSize = 25;
+  state.grid = emptyGrid(25);
+  state.generation = 0;
+  state.phase = 'layout'; // 布局阶段
+  state.playing = false;
+  // 阵营设置：A=防守方(value=1, 绿)，B=进攻方(value=2, 红)
+  // 玩家选 A → player=1, bot=2；玩家选 B → player=2, bot=1
+  // war/coop 模式默认 player=1, bot=2
+  if (state.battleMode === 'asym' && onlineSelectedSide === 'B') {
+    state.onlinePlayerValue = 2;
+    state.onlineBotValue = 1;
+  } else {
+    state.onlinePlayerValue = 1;
+    state.onlineBotValue = 2;
+  }
+  // 回合制布局：每人 10 个细胞，交替放置
+  state.onlineTurn = 'player'; // 'player' | 'bot'
+  state.onlineCellsPerSide = 10;
+  state.onlinePlayerPlaced = 0;
+  state.onlineBotPlaced = 0;
+  state.onlineBotTimeout = null;
+  state.maxInitCells = 0; // 联机模式不用 maxInitCells 限制
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  state.history = [];
+  state.firstGrid = null;
+  state.furthestGrid = null;
+  state.furthestGen = -1;
+
+  // UI
+  const modeName = state.battleMode === 'war' ? t('online.warSymName')
+    : state.battleMode === 'asym' ? t('online.warAsymName') : t('online.coopName');
+  document.getElementById('game-title').textContent = t('online.title') + ' · ' + modeName;
+  document.getElementById('game-crumb').style.display = 'none';
+  const backBtn = document.getElementById('game-back-btn');
+  backBtn.innerHTML = '← <span data-i18n="common.back">' + t('common.back') + '</span>';
+  backBtn.onclick = function() { gameBackOnline(); };
+  // 隐藏关卡/沙盒面板，显示联机 HUD
+  document.getElementById('level-info-panel').style.display = 'none';
+  document.getElementById('target-panel').style.display = 'none';
+  document.getElementById('sandbox-panel').style.display = 'none';
+  document.getElementById('sandbox-seed-panel').style.display = 'none';
+  // 显示联机 HUD
+  showOnlineHUD();
+  // 显示启动演化按钮（布局阶段）
+  document.getElementById('btn-start').style.display = '';
+  document.getElementById('btn-start').disabled = false;
+
+  canvas.width = 500; canvas.height = 500;
+  updateOnlineHUD();
+  renderGrid();
+  nav('game');
+}
+
+// 联机 HUD：在游戏画布上方显示回合/剩余细胞/模式
+function showOnlineHUD() {
+  let hud = document.getElementById('online-hud');
+  if (!hud) {
+    hud = document.createElement('div');
+    hud.id = 'online-hud';
+    hud.className = 'online-hud';
+    const stage = document.querySelector('.game-stage');
+    stage.insertBefore(hud, stage.firstChild);
+  }
+  hud.style.display = 'flex';
+}
+
+function hideOnlineHUD() {
+  const hud = document.getElementById('online-hud');
+  if (hud) hud.style.display = 'none';
+}
+
+function updateOnlineHUD() {
+  const hud = document.getElementById('online-hud');
+  if (!hud) return;
+  // 阵营标签：A=防守方（绿），B=进攻方（红）
+  const playerSide = state.onlinePlayerValue === 1 ? 'A' : 'B';
+  const botSide = state.onlineBotValue === 1 ? 'A' : 'B';
+  if (state.phase === 'layout') {
+    const turnText = state.onlineTurn === 'player' ? t('online.playerTurn') : t('online.botTurn');
+    const playerLeft = state.onlineCellsPerSide - state.onlinePlayerPlaced;
+    const botLeft = state.onlineCellsPerSide - state.onlineBotPlaced;
+    hud.innerHTML =
+      '<span class="hud-tag player">' + t('online.player') + ' ' + playerSide + '</span>' +
+      '<span class="hud-turn">' + t('online.cellsLeft') + ': <b>' + playerLeft + '</b></span>' +
+      '<span class="hud-tag bot">' + t('online.bot') + ' ' + botSide + '</span>' +
+      '<span class="hud-turn">' + t('online.cellsLeft') + ': <b>' + botLeft + '</b></span>' +
+      '<span class="hud-mode">▸ ' + turnText + '</span>';
+  } else {
+    const modeName = state.battleMode === 'war' ? t('online.warSymName')
+      : state.battleMode === 'asym' ? t('online.warAsymName') : t('online.coopName');
+    hud.innerHTML =
+      '<span class="hud-tag player">' + t('online.player') + ' ' + playerSide + '</span>' +
+      '<span class="hud-tag bot">' + t('online.bot') + ' ' + botSide + '</span>' +
+      '<span class="hud-mode">▸ ' + modeName + ' · ' + t('online.evolving') + '</span>';
+  }
+}
+
+// 智能 AI：1 步演化前瞻 + 局势自适应 + 多维评分
+// 核心改进（vs 旧版机械围攻）：
+//   1. 1 步前瞻：模拟放置后下一代演化，评估真实存活/压制/扩张效果
+//   2. 局势自适应：根据双方细胞比动态调整攻防权重（劣势防御/优势扩张/均势均衡）
+//   3. 多维评分：存活分 + 压制分 + 扩张分 + 连接分，不再只看邻居数
+//   4. 候选筛选：只在已有细胞 2 格范围内评估，避免无意义远距放置
+//   5. 随机扰动：top-3 候选中加权随机，避免完全确定性
+//   6. 阵营自适应（asym）：bot 为 A 防守方时侧重防御，为 B 进攻方时侧重扩张
+function botPlaceCell() {
+  const n = state.gridSize;
+  const pv = state.onlinePlayerValue; // 玩家细胞值（1 或 2）
+  const bv = state.onlineBotValue;   // bot 细胞值（2 或 1）
+
+  // 1. 收集候选位置：已有细胞 2 格范围内的空格
+  const candSet = new Set();
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (state.grid[y][x] !== 0) {
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const nx = (x + dx + n) % n, ny = (y + dy + n) % n;
+            if (state.grid[ny][nx] === 0) candSet.add(ny * n + nx);
+          }
+        }
+      }
+    }
+  }
+  const candidates = [];
+  candSet.forEach(idx => candidates.push({ x: idx % n, y: Math.floor(idx / n) }));
+  if (candidates.length === 0) {
+    // 全空网格：放中心区域
+    const cx = Math.floor(n / 2) + Math.floor(Math.random() * 3) - 1;
+    const cy = Math.floor(n / 2) + Math.floor(Math.random() * 3) - 1;
+    state.grid[cy][cx] = bv;
+    state.onlineBotPlaced++;
+    return true;
+  }
+
+  // 2. 局势评估：当前双方细胞数
+  let playerCount = 0, botCount = 0;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (state.grid[y][x] === pv) playerCount++;
+      else if (state.grid[y][x] === bv) botCount++;
+    }
+  }
+
+  // 3. 权重根据模式 + 局势 + 阵营自适应
+  let wSurvive, wAttack, wExpand, wConnect;
+  if (state.battleMode === 'coop') {
+    // 合作：侧重扩张（共同出生），不压制
+    wSurvive = 1.0; wAttack = 0; wExpand = 3.0; wConnect = 0.5;
+  } else if (state.battleMode === 'war') {
+    // 对称压制：局势自适应
+    if (botCount < playerCount * 0.6) {
+      // 劣势：转为防御，优先存活与连接
+      wSurvive = 3.0; wAttack = 1.0; wExpand = 0.5; wConnect = 2.0;
+    } else if (botCount > playerCount * 1.5) {
+      // 优势：扩张压制
+      wSurvive = 1.5; wAttack = 1.5; wExpand = 2.5; wConnect = 0.5;
+    } else {
+      // 均势：均衡
+      wSurvive = 2.0; wAttack = 2.0; wExpand = 1.5; wConnect = 1.0;
+    }
+  } else {
+    // asym 非对称：根据 bot 阵营调整策略
+    const botIsDefender = (bv === 1); // bot 是 A 防守方
+    if (botIsDefender) {
+      // A 防守方：侧重存活与连接（建堡垒），扩张保守
+      if (botCount < playerCount * 0.8) {
+        wSurvive = 3.5; wAttack = 0.5; wExpand = 0.8; wConnect = 2.5;
+      } else {
+        wSurvive = 2.5; wAttack = 1.0; wExpand = 1.5; wConnect = 2.0;
+      }
+    } else {
+      // B 进攻方：侧重扩张与压制（绕侧包抄）
+      if (botCount < playerCount * 0.5) {
+        wSurvive = 2.0; wAttack = 1.5; wExpand = 1.0; wConnect = 1.5;
+      } else {
+        wSurvive = 0.8; wAttack = 2.5; wExpand = 3.0; wConnect = 0.5;
+      }
+    }
+  }
+
+  // 4. 对每个候选评分：1 步前瞻模拟
+  const scored = [];
+  for (const c of candidates) {
+    // 复制网格并放置 bot 细胞
+    const test = state.grid.map(row => row.slice());
+    test[c.y][c.x] = bv;
+    // 模拟下一代演化
+    const next = stepLifeOnline(test, n);
+
+    // 维度 1：存活分（放置位置本身下一代是否存活）
+    let surviveScore = (next[c.y][c.x] === bv) ? 1 : 0;
+
+    // 统计下一代双方数量
+    let nextBot = 0, nextPlayer = 0;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        if (next[y][x] === bv) nextBot++;
+        else if (next[y][x] === pv) nextPlayer++;
+      }
+    }
+
+    // 维度 2：压制分（敌方减少量）
+    let attackScore = playerCount - nextPlayer;
+
+    // 维度 3：扩张分（自方净增长，扣除本次放置的 1 个）
+    let expandScore = nextBot - botCount - 1;
+
+    // 维度 4：连接分（8 邻域内己方数）
+    let connectScore = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = (c.x + dx + n) % n, ny = (c.y + dy + n) % n;
+        if (state.grid[ny][nx] === bv) connectScore++;
+      }
+    }
+
+    // coop 特殊：鼓励形成 total=3 促进共同出生
+    if (state.battleMode === 'coop') {
+      let total = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = (c.x + dx + n) % n, ny = (c.y + dy + n) % n;
+          if (state.grid[ny][nx] !== 0) total++;
+        }
+      }
+      if (total === 2) expandScore += 3; // 放下后 total=3，触发出生
+    }
+
+    // war/asym 惩罚：放置后立即死亡 = 无效放置
+    if (state.battleMode !== 'coop' && surviveScore === 0) {
+      expandScore -= 1.5;
+    }
+
+    const score = wSurvive * surviveScore
+                + wAttack * attackScore
+                + wExpand * expandScore
+                + wConnect * connectScore
+                + Math.random() * 1.0;
+
+    scored.push({ c, score });
+  }
+
+  // 5. 取 top-3 候选，加权随机选择（避免完全确定性）
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, Math.min(3, scored.length));
+  const weights = [0.6, 0.3, 0.1]; // 第 1 名 60%，第 2 名 30%，第 3 名 10%
+  let r = Math.random();
+  let pick = top[0];
+  for (let i = 0; i < top.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { pick = top[i]; break; }
+  }
+
+  if (pick) state.grid[pick.c.y][pick.c.x] = bv;
+  state.onlineBotPlaced++;
+  return true;
+}
+
+// 玩家放置/移除细胞（联机模式）
+function onlinePlayerClick(x, y) {
+  if (state.phase !== 'layout') return;
+  if (state.onlineTurn !== 'player') return;
+  if (state.onlinePlayerPlaced >= state.onlineCellsPerSide) return;
+  const pv = state.onlinePlayerValue;
+  const bv = state.onlineBotValue;
+  // 不能在已有对方细胞的位置放置
+  if (state.grid[y][x] === bv) return;
+  // 切换：如果是自己的细胞则移除（不消耗回合），空格则放置
+  if (state.grid[y][x] === pv) {
+    state.grid[y][x] = 0;
+    state.onlinePlayerPlaced--;
+  } else {
+    state.grid[y][x] = pv;
+    state.onlinePlayerPlaced++;
+    // 切换到机器人回合
+    state.onlineTurn = 'bot';
+    updateOnlineHUD();
+    renderGrid();
+    // 延迟后机器人放置
+    if (state.onlineBotTimeout) clearTimeout(state.onlineBotTimeout);
+    state.onlineBotTimeout = setTimeout(() => {
+      // 防冲突：若演化已启动则不再放置
+      if (state.phase !== 'layout') return;
+      botPlaceCell();
+      state.onlineTurn = 'player';
+      renderGrid();
+      updateOnlineHUD();
+      // 检查是否双方都放完
+      checkOnlineLayoutDone();
+    }, 500);
+    return;
+  }
+  renderGrid();
+  updateOnlineHUD();
+  checkOnlineLayoutDone();
+}
+
+// 检查布局是否完成（双方都放完）
+function checkOnlineLayoutDone() {
+  if (state.onlinePlayerPlaced >= state.onlineCellsPerSide &&
+      state.onlineBotPlaced >= state.onlineCellsPerSide) {
+    // 自动开始演化
+    startOnlineEvolution();
+  }
+}
+
+// 玩家提前开始演化（不等放完）
+function startOnlineEvolution() {
+  if (state.phase !== 'layout') return;
+  // 清除未触发的机器人放置定时器，防止演化启动后仍放置额外细胞
+  if (state.onlineBotTimeout) { clearTimeout(state.onlineBotTimeout); state.onlineBotTimeout = null; }
+  // 如果机器人还没放完，先让机器人放完
+  while (state.onlineBotPlaced < state.onlineCellsPerSide) {
+    botPlaceCell();
+  }
+  state.phase = 'play';
+  state.playing = true;
+  state.usedInitCells = state.onlinePlayerPlaced + state.onlineBotPlaced;
+  state.firstGrid = cloneGrid(state.grid);
+  state.furthestGrid = cloneGrid(state.grid);
+  state.furthestGen = 0;
+  state.history = [cloneGrid(state.grid)];
+  updateOnlineHUD();
+  renderGrid();
+  updateGameUI();
+}
+
+// 联机模式演化一代（三套规则）
+function stepLifeOnline(g, n) {
+  const next = emptyGrid(n);
+  const offsets = NEIGHBOR_OFFSETS.square; // 联机模式固定方形（Moore 8 邻域）
+
+  if (state.battleMode === 'coop') {
+    // 合作共生：所有细胞共同贡献邻居数，标准 Conway B3/S23
+    //   存活：total ∈ [2,3]，颜色保留
+    //   出生：total == 3，颜色 = 周围多数色（平局随机）
+    // 数学依据：保留 Conway 稳定结构（block/beacon/glider），
+    //          双方靠近放置可互相支撑存活与出生，体现"合作"
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        let n1 = 0, n2 = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const dx = offsets[i][0], dy = offsets[i][1];
+          const v = g[(y + dy + n) % n][(x + dx + n) % n];
+          if (v === 1) n1++;
+          else if (v === 2) n2++;
+        }
+        const total = n1 + n2;
+        const t = g[y][x];
+        if (t !== 0) {
+          next[y][x] = (total >= 2 && total <= 3) ? t : 0;
+        } else {
+          if (total === 3) {
+            if (n1 > n2) next[y][x] = 1;
+            else if (n2 > n1) next[y][x] = 2;
+            else next[y][x] = Math.random() < 0.5 ? 1 : 2;
+          } else {
+            next[y][x] = 0;
+          }
+        }
+      }
+    }
+  } else if (state.battleMode === 'war') {
+    // 对称压制：双方规则完全对称，接触时多数压制少数
+    //   存活：same ∈ [2,4] 且 same >= opp（同色不少于异色）
+    //   出生：same >= 3 且 opp <= same - 2（同色占绝对多数才扩张）
+    // 数学依据：
+    //   - 存活上限 4：比 Conway 的 3 更韧，避免接触瞬间双亡
+    //   - same >= opp：3A+2B 时 A 活 B 死，实现压制
+    //   - 出生 opp <= same-2：3A+1B 出生 A，3A+2B 不出生（势均力敌不扩张）
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const t = g[y][x];
+        let n1 = 0, n2 = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const dx = offsets[i][0], dy = offsets[i][1];
+          const v = g[(y + dy + n) % n][(x + dx + n) % n];
+          if (v === 1) n1++;
+          else if (v === 2) n2++;
+        }
+        if (t !== 0) {
+          const same = (t === 1) ? n1 : n2;
+          const opp = (t === 1) ? n2 : n1;
+          next[y][x] = (same >= 2 && same <= 4 && same >= opp) ? t : 0;
+        } else {
+          if (n1 >= 3 && n2 <= n1 - 2) next[y][x] = 1;
+          else if (n2 >= 3 && n1 <= n2 - 2) next[y][x] = 2;
+          else next[y][x] = 0;
+        }
+      }
+    }
+  } else if (state.battleMode === 'asym') {
+    // 非对称攻防（平衡版 v2）：A 坚韧防御但保守扩张，B 脆弱防御但积极扩张
+    //   A 防守方：存活 n1 ∈ [2,3] 且 n2 ≤ 3（坚韧，仅 4+ 敌人才能击破）
+    //             出生 n1 ≥ 3 且 n2 ≤ 1（保守，需近安全区才扩张）
+    //   B 进攻方：存活 n2 ∈ [2,3] 且 n1 ≤ 2（脆弱，3+ 敌人即死）
+    //             出生 n2 ≥ 3 且 n1 ≤ 2（积极，可在轻度争议区扩张）
+    // 数学依据与平衡分析（对称性检验）：
+    //   - A 存活容忍 3 敌人，B 存活容忍 2 敌人 → A 存活优势 +1
+    //   - A 出生容忍 1 敌人，B 出生容忍 2 敌人 → B 出生优势 +1
+    //   - 两优势数值相等 → 理论平衡
+    //   关键场景：
+    //   - 3A+3B 争议区：A 不出生(n2>1)，B 不出生(n1>2) → 绞肉机（A 堡垒边缘消耗 B）
+    //   - 2A+3B 轻度争议：B 能出生(n1≤2) → B 绕侧扩张路径
+    //   - 3A+1B 近安全区：A 能出生(n2≤1) → A 堡垒内部生长路径
+    //   博弈核心：A 须抢建不可破的堡垒群靠绞肉机消耗 B，B 须在 A 堡垒成型前绕侧到 2A 邻接区扩张包围
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const t = g[y][x];
+        let n1 = 0, n2 = 0;
+        for (let i = 0; i < offsets.length; i++) {
+          const dx = offsets[i][0], dy = offsets[i][1];
+          const v = g[(y + dy + n) % n][(x + dx + n) % n];
+          if (v === 1) n1++;
+          else if (v === 2) n2++;
+        }
+        if (t === 1) {
+          // A 防守方：坚韧，仅 4+ 敌人才能击破
+          next[y][x] = (n1 >= 2 && n1 <= 3 && n2 <= 3) ? 1 : 0;
+        } else if (t === 2) {
+          // B 进攻方：脆弱，3+ 敌人即死
+          next[y][x] = (n2 >= 2 && n2 <= 3 && n1 <= 2) ? 2 : 0;
+        } else {
+          // 空格出生
+          if (n1 >= 3 && n2 <= 1) next[y][x] = 1;        // A 保守扩张
+          else if (n2 >= 3 && n1 <= 2) next[y][x] = 2;   // B 积极扩张
+          else next[y][x] = 0;
+        }
+      }
+    }
+  }
+  return next;
+}
+
+// 联机模式返回
+function gameBackOnline() {
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  state.onlineMode = false;
+  state.playing = false;
+  state.currentLevel = null;
+  state.phase = 'layout';
+  hideOnlineHUD();
+  // 恢复返回按钮
+  const backBtn = document.getElementById('game-back-btn');
+  backBtn.innerHTML = '← <span data-i18n="common.backLevels">' + t('common.backLevels') + '</span>';
+  backBtn.onclick = function() { gameBack(); };
+  nav('online');
+}
+
+// 重置演化轨迹（保留当前 grid，但清空代数/历史/快照/跳跃锚点）
+// 用于用户手动修改 grid 后的轨迹重置（修改相当于重新开始）
+function resetEvolutionTrack() {
+  state.generation = 0;
+  state.firstGrid = null;
+  state.furthestGrid = null;
+  state.furthestGen = -1;
+  state.history = [];
+  state.prevGrid = null;
+  state.prevPrevGrid = null;
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+}
+
+// 重置沙盒演化状态：清空 grid、代数、快照、回退历史栈、停止播放
+// 用于 startSandbox / gridSize/shape 切换 / resetLevel 等场景
+function resetSandboxState(clearSeedUI) {
+  state.grid = emptyGrid(state.gridSize);
+  state.generation = 0;
+  state.playing = false;
+  state.prevGrid = null;
+  state.prevPrevGrid = null;
+  state.history = [];
+  state.firstGrid = null;
+  state.furthestGrid = null;
+  state.furthestGen = -1;
+  state.lastStep = 0;
+  state.stableCount = 0;
+  state.oscCount = 0;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  if (clearSeedUI) {
+    const sd = document.getElementById('sb-seed-display');
+    if (sd) sd.textContent = '-';
+    const si = document.getElementById('sb-seed-input');
+    if (si) si.value = '';
+  }
+}
+
+// 自定义设置：单一入口，按 key 应用并刷新
+function applySandboxSetting(key, value) {
+  const sb = state.sandbox;
+  const max = maxNeighborsForShape(sb.shape);
+  // 校验范围（上限由当前形状的最大邻居数决定）
+  if (key === 'birth') sb.birth = Math.max(0, Math.min(max, value | 0));
+  else if (key === 'survivalMin') sb.survivalMin = Math.max(0, Math.min(max, value | 0));
+  else if (key === 'survivalMax') sb.survivalMax = Math.max(0, Math.min(max, value | 0));
+  else if (key === 'gridSize') {
+    const n = Math.max(10, Math.min(80, value | 0));
+    sb.gridSize = n;
+    state.gridSize = n;
+    // 网格大小变化：清空 grid 与历史快照（避免越界/不同尺寸回退）
+    resetSandboxState(true);
+  } else if (key === 'speed') {
+    sb.speed = Math.max(50, Math.min(800, value | 0));
+    state.stepInterval = sb.speed;
+  } else if (key === 'shape') {
+    sb.shape = ['square','triangle','hexagon'].indexOf(value) >= 0 ? value : 'square';
+    // 形状切换：根据形状重置默认规则参数
+    //   - square：B3/S23（8 邻）；triangle：B1/S1-2（3 邻）；hexagon：B2/S2-3（6 邻）
+    if (sb.shape === 'square') {
+      sb.birth = 3; sb.survivalMin = 2; sb.survivalMax = 3;
+    } else if (sb.shape === 'triangle') {
+      sb.birth = 1; sb.survivalMin = 1; sb.survivalMax = 2;
+    } else if (sb.shape === 'hexagon') {
+      sb.birth = 2; sb.survivalMin = 2; sb.survivalMax = 3;
+    }
+    // 拓扑结构改变：清空 grid 与历史快照，回到初始状态
+    resetSandboxState(true);
+  }
+  syncSandboxPanel();
+  renderGrid();
+  updateGameUI();
+}
+
+// 根据细胞形状返回该形状的最大邻居数（决定可选数字范围）
+function maxNeighborsForShape(shape) {
+  if (shape === 'triangle') return 3;
+  if (shape === 'hexagon') return 6;
+  return 8; // square
+}
+
+// 同步设置面板控件显示当前 state.sandbox 值
+// 繁衍/存活数字下拉项根据形状动态生成（square:0-8, triangle:0-3, hexagon:0-6）
+function syncSandboxPanel() {
+  const sb = state.sandbox;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('sb-shape', sb.shape);
+  const max = maxNeighborsForShape(sb.shape);
+  // 为三个下拉框生成 0..max 的选项
+  ['sb-birth', 'sb-smin', 'sb-smax'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = parseInt(sel.value);
+    sel.innerHTML = '';
+    for (let i = 0; i <= max; i++) {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = i;
+      sel.appendChild(opt);
+    }
+    // 保留当前选中值（若超出范围则钳制）
+    sel.value = (cur >= 0 && cur <= max) ? cur : 0;
+  });
+  set('sb-birth', sb.birth);
+  set('sb-smin', sb.survivalMin);
+  set('sb-smax', sb.survivalMax);
+  // 网格大小下拉项：10-80，步长 5（共 15 项，避免过密）
+  const gridSel = document.getElementById('sb-grid');
+  if (gridSel) {
+    const cur = parseInt(gridSel.value);
+    gridSel.innerHTML = '';
+    for (let i = 10; i <= 80; i += 5) {
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = i;
+      gridSel.appendChild(opt);
+    }
+    // 若当前值不在选项中（如旧值 25 在，但保险起见），选最接近的
+    const opts = Array.from(gridSel.options).map(o => parseInt(o.value));
+    const closest = opts.reduce((a, b) => Math.abs(b - sb.gridSize) < Math.abs(a - sb.gridSize) ? b : a);
+    gridSel.value = closest;
+    sb.gridSize = closest; // 同步状态到合法值
+  }
+  set('sb-speed', sb.speed);
+}
+
+// 游戏页返回按钮：自定义模式返回首页，正式关卡返回关卡列表
+function gameBack() {
+  if (!state.currentLevel) {
+    // 自定义模式 → 返回首页
+    if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+    state.playing = false;
+    nav('home');
+  } else {
+    nav('levels');
+  }
+}
+
+// 顶栏重置按钮：仅重置进度（解锁），保留语言和主题，直接重置无弹窗
+function quickReset() {
+  state.completed = {};
+  state.stars = {};
+  persistSave();
+  renderLevels();
+  // 若当前在游戏页，停止演化并重置游戏状态
+  if (document.getElementById('page-game').classList.contains('active')) {
+    if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+    state.playing = false;
+    state.currentLevel = null;
+    state.phase = 'layout';
+    state.generation = 0;
+    state.grid = emptyGrid(state.gridSize);
+    state.onlineMode = false;
+    hideOnlineHUD();
+    // 恢复返回按钮
+    const backBtn = document.getElementById('game-back-btn');
+    backBtn.innerHTML = '← <span data-i18n="common.backLevels">' + t('common.backLevels') + '</span>';
+    backBtn.onclick = function() { gameBack(); };
+  }
+  nav('home');
+  toast(t('toast.cleared'), 'info');
+}
+
+// ============ 关卡列表 ============
+function isLevelUnlocked(idx) {
+  const lv = LEVELS[idx];
+  if (!lv.unlockAfter) return true;
+  return !!state.completed[lv.unlockAfter];
+}
+
+function renderLevels() {
+  const branches = [
+    { id: 'main', container: 'levels-main' },
+    { id: 'rule', container: 'levels-rule' },
+    { id: 'side', container: 'levels-side' }
+  ];
+  branches.forEach(br => {
+    const wrap = document.getElementById(br.container);
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    LEVELS.forEach((lv, i) => {
+      if (lv.branch !== br.id) return;
+      const unlocked = isLevelUnlocked(i);
+      const completed = !!state.completed[lv.id];
+      const bestStars = state.stars[lv.id] || 0;
+      const c = document.createElement('div');
+      c.className = 'level-card' + (unlocked ? '' : ' locked') + (completed ? ' completed' : '');
+      // 所有卡片都渲染星数行（锁定关卡用 CSS visibility:hidden 占位，保持高度一致）
+      const starsStr = '★'.repeat(bestStars) + '☆'.repeat(3 - bestStars);
+      c.innerHTML = `
+        <div class="lv-status">${completed ? t('levels.completed') : (unlocked ? '' : t('levels.locked'))}</div>
+        <div class="lv-num">${lv.id}</div>
+        <div class="lv-name">${lv.name[state.lang]}</div>
+        <div class="lv-stars" title="最佳评分">${starsStr}</div>
+      `;
+      if (unlocked) c.onclick = () => startLevel(i);
+      wrap.appendChild(c);
+    });
+  });
+}
+
+// ============ 引擎：元胞自动机 ============
+function emptyGrid(n) {
+  const g = [];
+  for (let i = 0; i < n; i++) g.push(new Uint8Array(n));
+  return g;
+}
+
+function cloneGrid(g) {
+  return g.map(row => row.slice());
+}
+
+// ============ 邻居拓扑表（每种形状的边邻接关系，经几何推导验证）============
+// 三种形状共用 state.grid[y][x] 二维坐标，但邻域定义各自独立：
+//
+// 【方形 square】Moore 8 邻域（八向）
+//   周围 8 格均为邻居，经典 Conway 拓扑。
+//
+// 【三角形 triangle】3 边邻域（三角密铺）
+//   等边三角形密铺中，每个三角形仅与 3 个三角形共享边：
+//     - 朝上 △ (x+y)%2==0：左 (x-1,y)、右 (x+1,y)、下 (x,y+1)
+//         推导：左/右斜边与同行朝下三角形共享；底边与下一行朝下三角形共享。
+//     - 朝下 ▽ (x+y)%2==1：左 (x-1,y)、右 (x+1,y)、上 (x,y-1)
+//         推导：左/右斜边与同行朝上三角形共享；顶边与上一行朝上三角形共享。
+//   最大邻居数 = 3，故 B/S 参数范围 0-3。
+//
+// 【六边形 hexagon】6 边邻域（蜂窝密铺，pointy-top, odd-r offset）
+//   奇数行向右偏移 w/2，每个六边形与 6 个六边形共享边：
+//     - 偶数行（无偏移）：W(-1,0) E(1,0) NW(-1,-1) NE(0,-1) SW(-1,1) SE(0,1)
+//     - 奇数行（右偏移）：W(-1,0) E(1,0) NW(0,-1)  NE(1,-1) SW(0,1)  SE(1,1)
+//   推导：奇数行 hex 中心在 (x+1)*w，偶数行在 (x+0.5)*w；
+//         奇数行左上方的偶数行 hex 为 (x, y-1)（中心 x*w+0.5*w 最接近）。
+//   最大邻居数 = 6，故 B/S 参数范围 0-6。
+//
+// 边界统一为环形（toroidal）：(x+dx+n)%n，上下/左右边缘相连。
+const NEIGHBOR_OFFSETS = {
+  square: [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]],
+  triangleUp:   [[-1,0],[1,0],[0,1]],   // 朝上 △
+  triangleDown: [[-1,0],[1,0],[0,-1]],  // 朝下 ▽
+  hexEven: [[-1,0],[1,0],[-1,-1],[0,-1],[-1,1],[0,1]],  // 偶数行
+  hexOdd:  [[-1,0],[1,0],[0,-1],[1,-1],[0,1],[1,1]],    // 奇数行
+};
+
+// 返回某细胞的邻居偏移表（按形状 + 朝向/行奇偶性分支）
+function getNeighborOffsets(shape, x, y) {
+  if (shape === 'triangle') {
+    return (x + y) % 2 === 0 ? NEIGHBOR_OFFSETS.triangleUp : NEIGHBOR_OFFSETS.triangleDown;
+  }
+  if (shape === 'hexagon') {
+    return y % 2 === 1 ? NEIGHBOR_OFFSETS.hexOdd : NEIGHBOR_OFFSETS.hexEven;
+  }
+  return NEIGHBOR_OFFSETS.square;
+}
+
+// 计算某细胞的活邻居数（环形边界）
+function countNeighbors(g, x, y, n, offsets) {
+  let c = 0;
+  for (let i = 0; i < offsets.length; i++) {
+    const dx = offsets[i][0], dy = offsets[i][1];
+    c += g[(y + dy + n) % n][(x + dx + n) % n];
+  }
+  return c;
+}
+
+// 演化一代：按形状选择邻域，按 B/S 规则更新所有细胞
+//   - 正式关卡：固定方形 + B3/S23（Conway 经典）
+//   - 自定义模式：按 state.sandbox 的 shape / birth / survivalMin / survivalMax
+// 性能：形状判断与规则参数在循环外提取一次，避免 n² 次重复读取
+function stepLife(g, n) {
+  const isSandbox = !state.currentLevel;
+  const sb = state.sandbox;
+  const shape = isSandbox ? sb.shape : 'square';
+  const birth = isSandbox ? sb.birth : 3;
+  const sMin = isSandbox ? sb.survivalMin : 2;
+  const sMax = isSandbox ? sb.survivalMax : 3;
+  const next = emptyGrid(n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      // 按形状与朝向/行奇偶性取邻居表（三角形逐格判断朝向，六边形逐行判断奇偶）
+      const offsets = getNeighborOffsets(shape, x, y);
+      const nb = countNeighbors(g, x, y, n, offsets);
+      if (g[y][x] === 1) {
+        next[y][x] = (nb >= sMin && nb <= sMax) ? 1 : 0;
+      } else {
+        next[y][x] = (nb === birth) ? 1 : 0;
+      }
+    }
+  }
+  return next;
+}
+
+function countAlive(g, n) {
+  let c = 0;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) c += g[y][x];
+  return c;
+}
+
+// ============ Canvas 渲染 ============
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+
+// 从鼠标事件计算网格坐标（click / mousemove 共用，避免重复）
+// 不同形状的密铺方式不同，坐标反算也不同：
+//   - square：直接除以格子大小
+//   - triangle：等边三角形密铺，行高 = side*sqrt(3)/2，朝下三角形偏移 side/2
+//   - hexagon：六边形蜂窝密铺（pointy-top, odd-r），奇数行偏移 w/2，行高 1.5*size
+function getCellFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const py = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const n = state.gridSize;
+  const cs = canvas.width / n;
+  const isSandbox = !state.currentLevel;
+  const shape = isSandbox ? state.sandbox.shape : 'square';
+  const cv = canvas.width; // 正方形画布
+
+  if (shape === 'hexagon') {
+    // pointy-top 六边形，odd-r offset
+    // 宽度 w = cs，半径 r = w/sqrt(3)，高度 h = 2r，垂直间距 = 1.5r
+    const w = cs;
+    const r = w / Math.sqrt(3);
+    const vSpacing = 1.5 * r;
+    const totalH = (n - 1) * vSpacing + 2 * r;
+    const startY = (cv - totalH) / 2;
+    let y = Math.floor((py - startY) / vSpacing);
+    y = Math.max(0, Math.min(n - 1, y));
+    // 奇数行向右偏移 w/2
+    const offsetX = (y % 2) * w / 2;
+    let x = Math.floor((px - offsetX) / w);
+    x = Math.max(0, Math.min(n - 1, x));
+    return { x, y };
+  } else if (shape === 'triangle') {
+    // 等边三角形密铺：水平间距 = side/2，行高 = side*sqrt(3)/2
+    const side = 2 * cv / (n + 1);
+    const halfSide = side / 2;
+    const h = side * Math.sqrt(3) / 2;
+    const totalH = n * h;
+    const startY = (cv - totalH) / 2;
+    let y = Math.floor((py - startY) / h);
+    y = Math.max(0, Math.min(n - 1, y));
+    let x = Math.floor(px / halfSide);
+    x = Math.max(0, Math.min(n - 1, x));
+    return { x, y };
+  } else {
+    // 方形：直接除以格子大小
+    const x = Math.max(0, Math.min(n - 1, Math.floor(px / cs)));
+    const y = Math.max(0, Math.min(n - 1, Math.floor(py / cs)));
+    return { x, y };
+  }
+}
+
+function renderGrid() {
+  const n = state.gridSize;
+  const cs = canvas.width / n;
+  const cv = canvas.width; // 正方形画布
+  const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const bg = cssVar('--bg') || '#0d0d12';
+  const cell = cssVar('--cell') || '#4ade80';
+  const line = cssVar('--grid-line') || 'rgba(74,222,128,0.08)';
+  const tgtBg = cssVar('--target') || 'rgba(244,114,182,0.25)';
+  const tgtBd = cssVar('--target-border') || '#f472b6';
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, cv, cv);
+
+  // 正式关卡始终方形；自定义模式按 sandbox.shape
+  const shape = state.currentLevel ? 'square' : state.sandbox.shape;
+
+  // 高亮提示位置（仅方形关卡模式）
+  if (shape === 'square' && state.currentLevel && state.currentLevel.highlight) {
+    const tp = state.currentLevel.highlight;
+    ctx.fillStyle = tgtBg;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      if (tp[y][x]) ctx.fillRect(x * cs, y * cs, cs, cs);
+    }
+    ctx.strokeStyle = tgtBd;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      if (tp[y][x]) ctx.strokeRect(x * cs + 0.5, y * cs + 0.5, cs - 1, cs - 1);
+    }
+    ctx.setLineDash([]);
+  }
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = line;
+
+  if (shape === 'hexagon') {
+    // ===== 六边形蜂窝密铺（pointy-top, odd-r offset）=====
+    // 宽度 w = cs，半径 r = w/sqrt(3)，高度 h = 2r，垂直间距 = 1.5r
+    const w = cs;
+    const r = w / Math.sqrt(3);
+    const vSpacing = 1.5 * r;
+    const totalH = (n - 1) * vSpacing + 2 * r;
+    const startY = (cv - totalH) / 2;
+    const drawHex = (cx, cy) => {
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const ang = Math.PI / 2 + i * Math.PI / 3; // pointy-top，顶点在上
+        const hx = cx + r * Math.cos(ang);
+        const hy = cy + r * Math.sin(ang);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+    };
+    // 网格线 + 细胞
+    ctx.fillStyle = cell;
+    for (let y = 0; y < n; y++) {
+      const cy = startY + y * vSpacing + r;
+      const offsetX = (y % 2) * w / 2;
+      for (let x = 0; x < n; x++) {
+        const cx = x * w + offsetX + w / 2;
+        drawHex(cx, cy);
+        ctx.stroke();
+        if (state.grid[y][x]) ctx.fill();
+      }
+    }
+  } else if (shape === 'triangle') {
+    // ===== 等边三角形密铺（行内朝上/朝下交错，水平间距 side/2 实现紧贴）=====
+    // 关键：相邻三角形水平间距 = side/2（非 side），使 △ 与 ▽ 共享斜边
+    //   - 朝上 △ (x+y)%2==0：顶点 (px+side/2, py)，底边 (px, py+h)-(px+side, py+h)
+    //   - 朝下 ▽ (x+y)%2==1：顶点 (px+side/2, py+h)，底边 (px, py)-(px+side, py)
+    //   其中 px = x * (side/2)
+    // 验证：△ at x=0 右斜边 (side/2,0)-(side,h) == ▽ at x=1 左斜边 (side/2,0)-(side,h) ✓
+    const side = 2 * cv / (n + 1); // 适配画布宽度：(n+1)*side/2 = cv
+    const h = side * Math.sqrt(3) / 2;
+    const totalH = n * h;
+    const startY = (cv - totalH) / 2;
+    const halfSide = side / 2;
+    const drawTri = (px, py, isUp) => {
+      ctx.beginPath();
+      if (isUp) {
+        ctx.moveTo(px + halfSide, py);
+        ctx.lineTo(px, py + h);
+        ctx.lineTo(px + side, py + h);
+      } else {
+        ctx.moveTo(px + halfSide, py + h);
+        ctx.lineTo(px, py);
+        ctx.lineTo(px + side, py);
+      }
+      ctx.closePath();
+    };
+    ctx.fillStyle = cell;
+    for (let y = 0; y < n; y++) {
+      const py = startY + y * h;
+      for (let x = 0; x < n; x++) {
+        const isUp = (x + y) % 2 === 0;
+        const px = x * halfSide;
+        drawTri(px, py, isUp);
+        ctx.stroke();
+        if (state.grid[y][x]) ctx.fill();
+      }
+    }
+  } else {
+    // ===== 方形密铺（默认）=====
+    // 网格线
+    for (let i = 0; i <= n; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cs, 0); ctx.lineTo(i * cs, cv); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * cs); ctx.lineTo(cv, i * cs); ctx.stroke();
+    }
+    // 细胞
+    if (state.onlineMode) {
+      // 联机模式：A 用主题 --cell，B 用主题 --cell-b（与主题呼应且高对比）
+      const cellA = state.cellColorA || '#4ade80';
+      const cellB = state.cellColorB || '#f472b6';
+      const pad = Math.max(1, Math.floor(cs * 0.12));
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        const v = state.grid[y][x];
+        if (v === 1) {
+          ctx.fillStyle = cellA;
+          ctx.fillRect(x * cs + pad, y * cs + pad, cs - pad * 2, cs - pad * 2);
+        } else if (v === 2) {
+          ctx.fillStyle = cellB;
+          ctx.fillRect(x * cs + pad, y * cs + pad, cs - pad * 2, cs - pad * 2);
+        }
+      }
+    } else {
+      ctx.fillStyle = cell;
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        if (state.grid[y][x]) {
+          ctx.fillRect(x * cs + 1, y * cs + 1, cs - 2, cs - 2);
+        }
+      }
+    }
+  }
+}
+
+function renderTargetPreview() {
+  const lv = state.currentLevel;
+  if (!lv || !lv.highlight) return;
+  const tc = document.getElementById('target-canvas');
+  const tctx = tc.getContext('2d');
+  const n = state.gridSize;
+  const cs = tc.width / n;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0d0d12';
+  const cell = getComputedStyle(document.documentElement).getPropertyValue('--magenta').trim() || '#f472b6';
+  tctx.fillStyle = bg;
+  tctx.fillRect(0, 0, tc.width, tc.height);
+  tctx.fillStyle = cell;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (lv.highlight[y][x]) tctx.fillRect(x * cs, y * cs, cs, cs);
+  }
+}
+
+// ============ 关卡控制 ============
+function startLevel(idx) {
+  const lv = LEVELS[idx];
+  if (!isLevelUnlocked(idx)) { toast(t('toast.locked'), 'error'); return; }
+  state.currentLevel = lv;
+  state.gridSize = lv.grid;
+  state.grid = emptyGrid(lv.grid);
+  state.generation = 0;
+  state.phase = 'layout';
+  state.playing = false;
+  state.maxInitCells = lv.maxInitCells || 0;
+  state.stableCount = 0;
+  state.prevGrid = null;
+  state.prevPrevGrid = null;
+  state.history = [];     // 清空回退历史栈
+  state.prevAlive = -1;
+  state.prevPrevAlive = -1;
+  state.oscCount = 0;
+  state.initCells = null;
+  state.usedInitCells = 0;
+  state.vc1StableGen = 0;
+  state.vc1BestSim = 0;
+  state.firstGrid = null;
+  state.furthestGrid = null;
+  state.furthestGen = -1;
+  state.lastStep = 0;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+
+  // UI 更新
+  document.getElementById('game-title').textContent = lv.name[state.lang];
+  document.getElementById('game-crumb').textContent = lv.id;
+  document.getElementById('game-crumb').style.display = '';
+  // 返回按钮文案改回"返回关卡"
+  const backBtn = document.getElementById('game-back-btn');
+  backBtn.innerHTML = '← <span data-i18n="common.backLevels">' + t('common.backLevels') + '</span>';
+  // 切换面板：显示关卡信息与目标图案，隐藏自定义设置 + 种子码模块
+  document.getElementById('level-info-panel').style.display = 'block';
+  document.getElementById('target-panel').style.display = lv.highlight ? 'block' : 'none';
+  document.getElementById('sandbox-panel').style.display = 'none';
+  document.getElementById('sandbox-seed-panel').style.display = 'none';
+
+  // 调整 canvas 尺寸
+  const sz = 500;
+  canvas.width = sz; canvas.height = sz;
+
+  updateGameUI();
+  renderGrid();
+  if (lv.highlight) renderTargetPreview();
+  nav('game');
+}
+
+function updateGameUI() {
+  const lv = state.currentLevel;
+  const isSandbox = !lv;
+  // 联机模式布局阶段：隐藏启动演化按钮（由自动触发或提前开始处理）
+  if (state.onlineMode && state.phase === 'layout') {
+    const btnStart = document.getElementById('btn-start');
+    if (btnStart) { btnStart.disabled = true; btnStart.style.display = 'none'; }
+    return;
+  }
+  if (isSandbox && state.phase !== 'play') return; // 沙盒只需 play 阶段更新
+
+  // 阶段标签
+  const pt = document.getElementById('phase-tag');
+  if (isSandbox) {
+    pt.textContent = t('sandbox.phase');
+    pt.className = 'phase-tag play';
+  } else {
+    pt.textContent = state.phase === 'layout' ? t('game.phaseLayout') : (state.phase === 'play' ? t('game.phasePlay') : t('game.phaseDone'));
+    pt.className = 'phase-tag ' + (state.phase === 'layout' ? 'layout' : (state.phase === 'play' ? 'play' : 'done'));
+  }
+
+  // 目标（合并胜利条件与目标为单一标签）
+  if (isSandbox) {
+    document.getElementById('victory-target').textContent = t('sandbox.target');
+    document.getElementById('init-cells-row').style.display = 'none';
+  } else {
+    document.getElementById('victory-target').textContent = lv.targetLabel[state.lang];
+    // 初始细胞上限显示（布局阶段）
+    const initRow = document.getElementById('init-cells-row');
+    if (state.phase === 'layout' && state.maxInitCells > 0) {
+      initRow.style.display = '';
+      const used = countAlive(state.grid, state.gridSize);
+      const disp = document.getElementById('init-cells-display');
+      disp.textContent = used + ' / ' + state.maxInitCells;
+      disp.className = 'v ' + (used >= state.maxInitCells ? 'danger' : 'accent');
+    } else {
+      initRow.style.display = 'none';
+    }
+  }
+
+  // 代数与活细胞
+  document.getElementById('gen-count').textContent = state.generation;
+  document.getElementById('furthest-count').textContent = Math.max(0, state.furthestGen);
+  document.getElementById('cell-count').textContent = countAlive(state.grid, state.gridSize);
+
+  // 按钮状态：沙盒模式下播放/单步/回退可用，启动演化按钮隐藏
+  const btnPlay = document.getElementById('btn-play');
+  const btnStep = document.getElementById('btn-step');
+  const btnBack = document.getElementById('btn-back');
+  const btnStart = document.getElementById('btn-start');
+  const btnJumpStart = document.getElementById('btn-jump-start');
+  const btnJumpEnd = document.getElementById('btn-jump-end');
+  // 回退按钮启用条件：处于演化阶段，且历史栈非空（即至少经过一次 advance）
+  const canBack = state.phase === 'play' && state.history.length > 0;
+  // 跳到起点：存在起点快照且当前不在起点
+  const canJumpStart = state.phase === 'play' && !!state.firstGrid && state.generation > 0;
+  // 跳到结尾：存在最远快照且当前代数小于最远代数（即用户曾回退过）
+  const canJumpEnd = state.phase === 'play' && !!state.furthestGrid && state.furthestGen > state.generation;
+  if (isSandbox) {
+    btnPlay.disabled = false;
+    btnStep.disabled = false;
+    btnBack.disabled = !canBack;
+    btnJumpStart.disabled = !canJumpStart;
+    btnJumpEnd.disabled = !canJumpEnd;
+    btnStart.disabled = true;
+    btnStart.style.display = 'none';
+    btnPlay.textContent = state.playing ? t('game.pause') : t('game.play');
+  } else if (state.phase === 'layout') {
+    btnPlay.disabled = true;
+    btnStep.disabled = true;
+    btnBack.disabled = true;
+    btnJumpStart.disabled = true;
+    btnJumpEnd.disabled = true;
+    btnStart.disabled = false;
+    btnStart.style.display = '';
+  } else if (state.phase === 'play') {
+    btnPlay.disabled = false;
+    btnStep.disabled = false;
+    btnBack.disabled = !canBack;
+    btnJumpStart.disabled = !canJumpStart;
+    btnJumpEnd.disabled = !canJumpEnd;
+    btnStart.disabled = true;
+    btnStart.style.display = '';
+    btnPlay.textContent = state.playing ? t('game.pause') : t('game.play');
+  } else {
+    btnPlay.disabled = true;
+    btnStep.disabled = true;
+    btnBack.disabled = true;
+    btnJumpStart.disabled = true;
+    btnJumpEnd.disabled = true;
+    btnStart.disabled = true;
+    btnStart.style.display = '';
+  }
+}
+
+function resetLevel() {
+  if (!state.currentLevel) {
+    // 沙盒模式：清空 grid 与历史快照，保留设置（形状/规则/速度）
+    resetSandboxState(false);
+    renderGrid();
+    updateGameUI();
+    toast(t('toast.reset'), 'info');
+    return;
+  }
+  const idx = LEVELS.indexOf(state.currentLevel);
+  startLevel(idx);
+  toast(t('toast.reset'), 'info');
+}
+
+// ============ 布局 / 干预交互 ============
+canvas.addEventListener('click', (e) => {
+  // 联机模式：使用联机专用的点击处理
+  if (state.onlineMode) {
+    if (state.phase === 'play') return;
+    const { x, y } = getCellFromEvent(e);
+    if (x < 0 || y < 0 || x >= state.gridSize || y >= state.gridSize) return;
+    onlinePlayerClick(x, y);
+    return;
+  }
+  const isSandbox = !state.currentLevel;
+  if (isSandbox) {
+    // 沙盒模式：任意时刻点击放置/移除细胞，无能量消耗
+    const { x, y } = getCellFromEvent(e);
+    if (x < 0 || y < 0 || x >= state.gridSize || y >= state.gridSize) return;
+    state.grid[y][x] = state.grid[y][x] ? 0 : 1;
+    // 修改 grid 相当于重新开始演化轨迹
+    resetEvolutionTrack();
+    renderGrid();
+    updateGameUI();
+    return;
+  }
+  if (state.phase === 'done') return;
+  const { x, y } = getCellFromEvent(e);
+  if (x < 0 || y < 0 || x >= state.gridSize || y >= state.gridSize) return;
+
+  // 布局阶段：限制初始细胞上限（删除不受限）
+  if (state.phase === 'layout' && state.maxInitCells > 0 && !state.grid[y][x]) {
+    const used = countAlive(state.grid, state.gridSize);
+    if (used >= state.maxInitCells) { toast(t('toast.maxCells'), 'error'); return; }
+  }
+  // 演化阶段：无干预（能量系统已移除）
+  if (state.phase === 'play') return;
+  state.grid[y][x] = state.grid[y][x] ? 0 : 1;
+  renderGrid();
+  updateGameUI();
+  checkVictory();
+});
+
+// 拖拽放置：mousedown 起笔，mousemove 持续放置；若发生拖动则抑制随后的 click 事件避免重复切换
+let dragging = false;
+let dragMoved = false;
+let dragValue = 1;
+canvas.addEventListener('mousedown', (e) => { dragging = true; dragMoved = false; });
+window.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('mousemove', (e) => {
+  if (state.onlineMode) return; // 联机模式禁用拖拽
+  const isSandbox = !state.currentLevel;
+  if (!dragging) return;
+  if (!isSandbox && state.phase === 'done') return;
+  if (!isSandbox && state.phase === 'play') return;  // 演化阶段无干预
+  const { x, y } = getCellFromEvent(e);
+  if (x < 0 || y < 0 || x >= state.gridSize || y >= state.gridSize) return;
+  if (state.grid[y][x] === dragValue) return;
+  // 布局阶段：限制初始细胞上限（只限制放置，不限制删除）
+  if (!isSandbox && state.phase === 'layout' && state.maxInitCells > 0 && dragValue === 1) {
+    const used = countAlive(state.grid, state.gridSize);
+    if (used >= state.maxInitCells) return;
+  }
+  state.grid[y][x] = dragValue;
+  dragMoved = true;
+  // 沙盒模式：修改 grid 相当于重新开始演化轨迹
+  if (isSandbox) resetEvolutionTrack();
+  renderGrid();
+  updateGameUI();
+});
+// 捕获阶段拦截：若刚发生拖动则阻止随后的 click 切换，避免末位被重复切换
+canvas.addEventListener('click', (e) => {
+  if (dragMoved) { dragMoved = false; e.stopPropagation(); }
+}, true);
+
+// ============ 演化控制 ============
+function startEvolution() {
+  if (state.phase !== 'layout') return;
+  // 联机模式走专用流程
+  if (state.onlineMode) { startOnlineEvolution(); return; }
+  const alive = countAlive(state.grid, state.gridSize);
+  if (alive === 0) { toast(t('toast.placeCells'), 'error'); return; }
+  state.phase = 'play';
+  state.playing = true;
+  // 记录初始活细胞位置（用于滑翔机位移检测）
+  state.initCells = [];
+  for (let y = 0; y < state.gridSize; y++) for (let x = 0; x < state.gridSize; x++) {
+    if (state.grid[y][x]) state.initCells.push({x, y});
+  }
+  // 记录布局阶段使用的细胞数（用于精度星评分）
+  state.usedInitCells = alive;
+  state.prevGrid = cloneGrid(state.grid);
+  state.prevPrevGrid = null;
+  state.history = [];     // 清空回退历史栈（布局→演化切换时重置）
+  // 播放器式跳跃锚点：起点 = 当前布局，最远点 = 起点（尚未演化）
+  state.firstGrid = cloneGrid(state.grid);
+  state.furthestGrid = cloneGrid(state.grid);
+  state.furthestGen = 0;
+  state.prevAlive = alive;
+  state.prevPrevAlive = -1;
+  state.oscCount = 0;
+  state.stableCount = 0;
+  updateGameUI();
+  loop();
+}
+
+function togglePlay() {
+  if (state.phase !== 'play') return;
+  state.playing = !state.playing;
+  if (state.playing) {
+    // 重置 lastStep：设为当前时间减去一个步长，使首次 advance 立即执行
+    state.lastStep = performance.now() - state.stepInterval;
+    loop();
+  }
+  else if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  updateGameUI();
+}
+
+function stepOnce() {
+  if (state.phase !== 'play') return;
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  advance();
+  updateGameUI();
+}
+
+// 回退一代：从历史栈弹出上一代网格，撤销最近一次 advance
+// 历史栈在每次 advance 前压入快照，因此只要栈非空即可回退
+function stepBack() {
+  if (state.phase !== 'play') return;
+  if (state.history.length === 0) return;
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  // 从历史栈弹出上一代网格
+  state.grid = state.history.pop();
+  state.generation = Math.max(0, state.generation - 1);
+  // 同步更新 prevGrid/prevPrevGrid（取历史栈顶，保持一致；若栈空则置 null）
+  state.prevPrevGrid = null;
+  if (state.history.length > 0) {
+    state.prevGrid = cloneGrid(state.history[state.history.length - 1]);
+  } else {
+    state.prevGrid = null;
+  }
+  state.prevAlive = countAlive(state.grid, state.gridSize);
+  state.prevPrevAlive = -1;
+  // 复位稳定/振荡计数，避免误判
+  state.stableCount = 0;
+  state.oscCount = 0;
+  renderGrid();
+  updateGameUI();
+}
+
+// 跳到演化轨迹起点（generation=0 的初始布局）
+function jumpToStart() {
+  if (state.phase !== 'play') return;
+  if (!state.firstGrid) return;
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  state.grid = cloneGrid(state.firstGrid);
+  state.generation = 0;
+  // 跳跃后清空回退历史（避免回退到错误的中间状态）
+  state.history = [];
+  state.prevGrid = null;
+  state.prevPrevGrid = null;
+  state.stableCount = 0;
+  state.oscCount = 0;
+  renderGrid();
+  updateGameUI();
+}
+
+// 跳到已演化到的最远点
+function jumpToEnd() {
+  if (state.phase !== 'play') return;
+  if (!state.furthestGrid || state.furthestGen <= 0) return;
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  state.grid = cloneGrid(state.furthestGrid);
+  state.generation = state.furthestGen;
+  state.history = [];
+  state.prevGrid = null;
+  state.prevPrevGrid = null;
+  state.stableCount = 0;
+  state.oscCount = 0;
+  renderGrid();
+  updateGameUI();
+}
+
+function loop() {
+  if (!state.playing || state.phase !== 'play') return;
+  const now = performance.now();
+  if (now - state.lastStep >= state.stepInterval) {
+    try {
+      advance();
+    } catch (e) {
+      console.error('Evolution error:', e);
+      state.playing = false;
+      updateGameUI();
+    }
+    state.lastStep = now;
+  }
+  if (state.playing) state.rafId = requestAnimationFrame(loop);
+}
+
+function advance() {
+  // 沙盒模式下首次演化时记录起点（关卡模式在 startEvolution 中已设置）
+  if (!state.firstGrid) state.firstGrid = cloneGrid(state.grid);
+  // 压入回退历史栈（限制最大 200 代，避免长演化占用过多内存）
+  state.history.push(cloneGrid(state.grid));
+  if (state.history.length > 200) state.history.shift();
+  // 保存快照（用于静物/振荡子验证）
+  state.prevPrevGrid = state.prevGrid;
+  state.prevGrid = cloneGrid(state.grid);
+  state.prevPrevAlive = state.prevAlive;
+  state.prevAlive = countAlive(state.grid, state.gridSize);
+  state.grid = state.onlineMode ? stepLifeOnline(state.grid, state.gridSize) : stepLife(state.grid, state.gridSize);
+  state.generation++;
+  // 更新已演化到的最远点（用于"跳到结尾"按钮）
+  if (state.generation > state.furthestGen) {
+    state.furthestGen = state.generation;
+    state.furthestGrid = cloneGrid(state.grid);
+  }
+  renderGrid();
+  if (!state.onlineMode) checkVictory();
+  updateOnlineHUD();
+  updateGameUI();
+}
+
+// ============ 胜利检测 ============
+function checkVictory() {
+  const lv = state.currentLevel;
+  if (!lv || state.phase !== 'play') return;
+  const alive = countAlive(state.grid, state.gridSize);
+  const minGen = lv.minGen || 0;
+  // 达到指定代数前不检测
+  if (state.generation < minGen) return;
+
+  if (lv.vc === 'vc3') {
+    // 达量稳定：达到 target 后，保持 stableTarget 持续 stableGens 代
+    const keepTarget = lv.stableTarget || lv.target;
+    if (alive >= keepTarget) {
+      state.stableCount++;
+      if (state.stableCount >= lv.stableGens) winLevel();
+    } else {
+      state.stableCount = 0;
+    }
+  } else if (lv.vc === 'vc_stable') {
+    // 静物验证：活细胞数 = target 且与上一代完全相同
+    if (alive === lv.target && state.prevGrid && gridsEqual(state.grid, state.prevGrid, state.gridSize)) {
+      state.stableCount++;
+      if (state.stableCount >= lv.stableGens) winLevel();
+    } else {
+      state.stableCount = 0;
+    }
+  } else if (lv.vc === 'vc_osc') {
+    // 振荡子：周期 2，当前网格 != 上一代 但 == 上上代
+    if (state.prevPrevGrid && state.prevGrid &&
+        !gridsEqual(state.grid, state.prevGrid, state.gridSize) &&
+        gridsEqual(state.grid, state.prevPrevGrid, state.gridSize)) {
+      state.oscCount++;
+      if (state.oscCount >= lv.oscGens) winLevel();
+    } else {
+      state.oscCount = 0;
+    }
+  } else if (lv.vc === 'vc_glider') {
+    // 滑翔机位移：演化 glideGens 代后，存在活细胞位于初始位置右下对角位移 1 格
+    if (state.generation >= lv.glideGens && state.initCells) {
+      let shifted = false;
+      for (let y = 0; y < state.gridSize && !shifted; y++) {
+        for (let x = 0; x < state.gridSize && !shifted; x++) {
+          if (state.grid[y][x]) {
+            // 检查是否是某个初始位置右下位移 1 格（环面）
+            for (const c of state.initCells) {
+              const sx = (c.x + 1) % state.gridSize;
+              const sy = (c.y + 1) % state.gridSize;
+              if (sx === x && sy === y) { shifted = true; break; }
+            }
+          }
+        }
+      }
+      if (shifted) winLevel();
+    }
+  }
+
+  // 失败判定：超出限定代数仍未达成胜利条件（未胜利才判失败）
+  if (state.phase === 'play' && lv.maxGen && state.generation >= lv.maxGen) {
+    failLevel();
+  }
+}
+
+// 失败：暂停演化并显示失败覆盖层
+function failLevel() {
+  state.phase = 'done';
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  updateGameUI();
+  document.getElementById('fail-overlay').classList.add('show');
+  toast(t('toast.fail'), 'error');
+}
+
+function closeFail() {
+  document.getElementById('fail-overlay').classList.remove('show');
+}
+
+// 比较两个网格是否完全相同
+function gridsEqual(g1, g2, n) {
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (g1[y][x] !== g2[y][x]) return false;
+  }
+  return true;
+}
+
+function winLevel() {
+  state.phase = 'done';
+  state.playing = false;
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  const lv = state.currentLevel;
+  state.completed[lv.id] = true;
+  // 计算通关星级（1-3 星）
+  const { stars, reasons } = computeStars(lv);
+  const prevBest = state.stars[lv.id] || 0;
+  if (stars > prevBest) state.stars[lv.id] = stars;
+  persistSave();
+  updateGameUI();
+  // 显示星级
+  const starsEl = document.getElementById('win-stars');
+  if (starsEl) {
+    starsEl.innerHTML = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+    starsEl.style.color = 'var(--amber)';
+  }
+  document.getElementById('win-overlay').classList.add('show');
+  toast(t('toast.win') + (stars > prevBest ? ' · ' + stars + '★ ' + t('toast.newRecord') : ''), 'success');
+}
+
+// 通关星级评分（1-3 星）
+// 通关星：达成胜利条件即获得
+// 精度星：初始细胞使用量 ≤ maxInitCells × 80%
+// 速度星：通关代数 ≤ 基础代数 × 1.5
+function computeStars(lv) {
+  let stars = 0;
+  const reasons = [];
+  // 通关星：胜利即得
+  stars++; reasons.push('clear');
+  if (state.maxInitCells > 0 && state.usedInitCells <= Math.floor(state.maxInitCells * 0.8)) {
+    stars++; reasons.push('precision');
+  }
+  // 计算通关所需的最小代数：
+  //   vc3 / vc_stable：需等待 minGen 代，再保持 stableGens 代
+  //   vc_osc：需等待 minGen 代，再持续振荡 oscGens 代
+  //   vc_glider：需演化 glideGens 代后验证位移
+  let baseGen = lv.minGen || 0;
+  if (lv.vc === 'vc3' || lv.vc === 'vc_stable') {
+    baseGen += (lv.stableGens || 0);
+  } else if (lv.vc === 'vc_osc') {
+    baseGen += (lv.oscGens || 0);
+  } else if (lv.vc === 'vc_glider') {
+    baseGen = lv.glideGens || baseGen;
+  }
+  if (baseGen < 1) baseGen = 5; // 兜底
+  // 速度星：通关代数不超过基础代数的 1.5 倍
+  if (state.generation <= Math.ceil(baseGen * 1.5)) {
+    stars++; reasons.push('speed');
+  }
+  return { stars, reasons };
+}
+
+// ============ 种子码系统（仅自定义模式）============
+// 完整格式：S{shape}{gridSize}-{birth}{smin}{smax}-{speed}-{coords}
+//   shape: s=方形, t=三角形, h=六边形
+//   gridSize: 网格大小（10-80）
+//   birth/smin/smax: 各 1 位数字（繁衍/存活下限/存活上限，0-8）
+//   speed: 演化步长（ms，50-800）
+//   coords: 每个活细胞 (y,x) 编码为 y*gridSize+x 的 2 位 36 进制大写，可空
+// 例：Ss25-323-200-7Z8P9 表示 方形/25网格/B3/S2-3/200ms/2 个细胞
+function generateSandboxSeedCode(shape, gridSize, birth, smin, smax, speed, cells) {
+  const shapeChar = shape === 'triangle' ? 't' : (shape === 'hexagon' ? 'h' : 's');
+  const rules = `${birth}${smin}${smax}`;
+  const coords = cells.map(c => {
+    const v = c.y * gridSize + c.x;
+    return v.toString(36).padStart(3, '0').toUpperCase();
+  }).join('');
+  return `S${shapeChar}${gridSize}-${rules}-${speed}-${coords}`;
+}
+
+function parseSeedCode(code) {
+  const s = code.trim();
+  const m = /^S([sth])(\d+)-(\d)(\d)(\d)-(\d+)-([0-9A-Z]*)$/i.exec(s);
+  if (!m) return null;
+  const shape = m[1].toLowerCase() === 't' ? 'triangle'
+              : (m[1].toLowerCase() === 'h' ? 'hexagon' : 'square');
+  const gridSize = parseInt(m[2], 10);
+  const birth = parseInt(m[3], 10);
+  const smin = parseInt(m[4], 10);
+  const smax = parseInt(m[5], 10);
+  const speed = parseInt(m[6], 10);
+  // 范围校验：gridSize 必须在 10-80，speed 必须在 50-800
+  if (gridSize < 10 || gridSize > 80) return null;
+  if (speed < 50 || speed > 800) return null;
+  // B/S 值范围由形状最大邻居数决定
+  const max = maxNeighborsForShape(shape);
+  if (birth > max || smin > max || smax > max) return null;
+  if (smin > smax) return null;
+  const coordsStr = m[7].toUpperCase();
+  if (coordsStr.length % 3 !== 0) return null;
+  const cells = [];
+  for (let i = 0; i < coordsStr.length; i += 3) {
+    const v = parseInt(coordsStr.substr(i, 3), 36);
+    const y = Math.floor(v / gridSize), x = v % gridSize;
+    if (y >= gridSize || x >= gridSize) return null;
+    cells.push({ y, x });
+  }
+  return { type: 'sandbox', shape, gridSize, birth, smin, smax, speed, cells };
+}
+
+// 从种子码加载到自定义模式：应用全部设置（形状/网格/规则/速度/布局）
+function loadFromSeed(code) {
+  const parsed = parseSeedCode(code);
+  if (!parsed) { toast(t('toast.seedInvalid'), 'error'); return false; }
+  state.sandbox.shape = parsed.shape;
+  state.sandbox.gridSize = parsed.gridSize;
+  state.sandbox.birth = parsed.birth;
+  state.sandbox.survivalMin = parsed.smin;
+  state.sandbox.survivalMax = parsed.smax;
+  state.sandbox.speed = parsed.speed;
+  startSandbox();
+  // 清空当前网格，按种子码填入初始细胞
+  state.grid = emptyGrid(state.gridSize);
+  for (const c of parsed.cells) {
+    if (c.y >= 0 && c.x >= 0 && c.y < state.gridSize && c.x < state.gridSize) {
+      state.grid[c.y][c.x] = 1;
+    }
+  }
+  renderGrid();
+  updateGameUI();
+  toast(t('toast.seedLoaded'), 'success');
+  return true;
+}
+
+function closeWin() {
+  document.getElementById('win-overlay').classList.remove('show');
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); toast(t('toast.copied'), 'success'); }
+  catch (e) { toast(t('toast.copyFailed'), 'error'); }
+  document.body.removeChild(ta);
+}
+
+// ============ 沙盒种子码 ============
+// 一键生成种子码：将当前网格细胞排布 + 沙盒自定义设置编码为种子码
+// 仅在用户点击「生成种子码」按钮时调用（不再随网格变化自动更新）
+function generateSandboxSeedFromGrid() {
+  const el = document.getElementById('sb-seed-display');
+  if (!el) return;
+  // 收集当前网格的活细胞坐标
+  const cells = [];
+  for (let y = 0; y < state.gridSize; y++) {
+    for (let x = 0; x < state.gridSize; x++) {
+      if (state.grid[y][x]) cells.push({ x, y });
+    }
+  }
+  if (cells.length === 0) {
+    el.textContent = '-';
+    toast(t('toast.seedEmpty'), 'error');
+    return;
+  }
+  const code = generateSandboxSeedCode(
+    state.sandbox.shape,
+    state.gridSize,
+    state.sandbox.birth,
+    state.sandbox.survivalMin,
+    state.sandbox.survivalMax,
+    state.sandbox.speed,
+    cells
+  );
+  el.textContent = code;
+  toast(t('toast.seedGenerated'), 'success');
+}
+
+// 从沙盒面板的输入框加载种子码
+function loadSandboxSeedFromInput() {
+  const input = document.getElementById('sb-seed-input');
+  if (!input) return;
+  const code = input.value.trim();
+  if (!code) { toast(t('toast.seedInvalid'), 'error'); return; }
+  loadFromSeed(code);
+  input.value = '';
+}
+
+// 复制沙盒种子码到剪贴板
+function copySandboxSeed() {
+  const el = document.getElementById('sb-seed-display');
+  if (!el) return;
+  const seed = el.textContent;
+  // 显示为占位符 '-' 表示尚未生成种子码，禁止复制
+  if (!seed || seed === '-') {
+    toast(t('toast.seedNothing'), 'error');
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(seed).then(
+      () => toast(t('toast.copied'), 'success'),
+      () => fallbackCopy(seed)
+    );
+  } else {
+    fallbackCopy(seed);
+  }
+}
+
+// ============ Toast ============
+let toastTimer = null;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ============ 重置全部 ============
+function resetAll() {
+  if (!confirm(t('toast.confirmClear'))) return;
+  // 停止演化动画，避免后台持续运行
+  if (state.rafId) { cancelAnimationFrame(state.rafId); state.rafId = null; }
+  state.playing = false;
+  state.currentLevel = null;
+  state.onlineMode = false;
+  state.completed = {};
+  state.stars = {};
+  hideOnlineHUD();
+  // 仅重置进度，不修改主题和语言
+  persistSave();
+  renderLevels();
+  nav('home');
+  toast(t('toast.cleared'), 'info');
+}
+
+// ============ 首页背景动画 ============
+const bgCanvas = document.getElementById('bg-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+let bgGrid = null;
+let bgRafId = null;
+let bgLast = 0;
+
+function resizeBg() {
+  bgCanvas.width = window.innerWidth;
+  bgCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeBg);
+
+function initBg() {
+  const n = 60;
+  bgGrid = [];
+  for (let i = 0; i < n; i++) {
+    bgGrid.push(new Uint8Array(n));
+    for (let j = 0; j < n; j++) bgGrid[i][j] = Math.random() < 0.25 ? 1 : 0;
+  }
+}
+
+function stepBg() {
+  const n = bgGrid.length;
+  const offsets = NEIGHBOR_OFFSETS.square;
+  const next = [];
+  for (let y = 0; y < n; y++) {
+    next.push(new Uint8Array(n));
+    for (let x = 0; x < n; x++) {
+      // 复用 square Moore 8 邻居表，B3/S23 规则
+      let c = 0;
+      for (let i = 0; i < offsets.length; i++) {
+        c += bgGrid[(y + offsets[i][1] + n) % n][(x + offsets[i][0] + n) % n];
+      }
+      next[y][x] = bgGrid[y][x] ? ((c === 2 || c === 3) ? 1 : 0) : ((c === 3) ? 1 : 0);
+    }
+  }
+  bgGrid = next;
+}
+
+function drawBg() {
+  const n = bgGrid.length;
+  const cs = Math.max(bgCanvas.width, bgCanvas.height) / n;
+  const cell = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#4ade80';
+  bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+  // 背景细胞：较暗（globalAlpha 0.15）
+  bgCtx.fillStyle = cell;
+  bgCtx.globalAlpha = 0.15;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (bgGrid[y][x]) bgCtx.fillRect(x * cs, y * cs, cs, cs);
+  }
+  bgCtx.globalAlpha = 1.0;
+}
+
+function bgLoop(ts) {
+  if (!bgGrid) return;
+  if (ts - bgLast > 400) {
+    stepBg();
+    drawBg();
+    bgLast = ts;
+    // 偶尔重置避免全死
+    let alive = 0;
+    const n = bgGrid.length;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) alive += bgGrid[y][x];
+    if (alive < 30) initBg();
+  }
+  bgRafId = requestAnimationFrame(bgLoop);
+}
+
+function startBgAnim() {
+  if (bgRafId) return;
+  resizeBg();
+  initBg();
+  drawBg();
+  bgRafId = requestAnimationFrame(bgLoop);
+}
+
+function stopBgAnim() {
+  if (bgRafId) { cancelAnimationFrame(bgRafId); bgRafId = null; }
+}
+
+// ============ 初始化 ============
+function init() {
+  // loadSave 内部已调用 applyTheme，主题变量与 data-theme 属性均已就位
+  loadSave();
+  document.documentElement.setAttribute('data-lang', state.lang);
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === state.lang));
+  renderThemes();
+  renderFAQ();
+  applyI18n();
+  nav('home');
+}
+
+init();
+</script>
+</body>
+</html>
