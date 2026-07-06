@@ -36,6 +36,78 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Optimize artifact size
+        run: |
+          echo "Before cleanup:"
+          du -sh dist/
+          # Remove development/source files not needed in production
+          find dist/demos -type f \( -name "*.py" -o -name "*.pyc" -o -name "*.go" -o -name "*.rs" \
+            -o -name "*.ts" -o -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" -o -name "*.svelte" \
+            -o -name "*.sh" -o -name "*.bat" -o -name "*.command" -o -name "*.log" -o -name "*.pid" \
+            -o -name "*.map" -o -name "*.lock" -o -name "*.toml" -o -name "*.cfg" -o -name "*.ini" \
+            -o -name "*.yml" -o -name "*.yaml" \
+            -o -name "package.json" -o -name "package-lock.json" -o -name "pnpm-lock.yaml" -o -name "yarn.lock" \
+            -o -name "requirements.txt" -o -name "tsconfig.json" -o -name "vite.config.*" -o -name "webpack.config.*" \
+            -o -name ".gitignore" -o -name "Dockerfile" -o -name "docker-compose*" -o -name "Makefile" \
+            -o -name "README*" -o -name "*.md" -o -name "*.txt" \) -delete
+          # Remove cache/build directories
+          find dist/demos -type d \( -name "__pycache__" -o -name "node_modules" -o -name ".trae" \
+            -o -name "__MACOSX" -o -name ".git" -o -name ".vscode" -o -name ".idea" \
+            -o -name "snapshots" -o -name "__snapshots__" \) -exec rm -rf {} + 2>/dev/null || true
+          # Remove OS junk files
+          find dist/demos -name ".DS_Store" -delete
+          find dist/demos -name "._*" -delete
+          # Remove ML model files and large data files
+          find dist/demos -type f \( -name "*.pt" -o -name "*.safetensors" -o -name "*.tflite" \
+            -o -name "*.onnx" -o -name "*.h5" -o -name "*.ckpt" -o -name "*.pth" \) -delete
+          find dist/demos -name "*.bin" -size +1M -delete
+          find dist/demos -name "*.wasm" -size +1M -delete
+          find dist/demos -name "*.json" -size +500k -delete
+          find dist/demos -name "data.js" -size +1M -delete
+          # Remove large media files
+          find dist/demos -name "*.mp3" -delete
+          find dist/demos -name "*.wav" -delete
+          find dist/demos -name "*.mp4" -size +5M -delete
+          find dist/demos -name "*.webm" -size +5M -delete
+          find dist/demos -name "*.zip" -delete
+          find dist/demos -name "*.exe" -delete
+          find dist/demos -name "*.dmg" -delete
+          find dist/demos -name "*.bmp" -delete
+          find dist/demos -name "*.png" -size +2M -delete
+          find dist/demos -name "*.jpg" -size +2M -delete
+          find dist/demos -name "*.jpeg" -size +2M -delete
+          find dist/demos -name "*.gif" -size +1M -delete
+          find dist/demos -name "*.ttf" -size +2M -delete
+          find dist/demos -name "*.otf" -size +2M -delete
+          find dist/demos -name "*.ttc" -delete
+          # Deduplicate files >100KB by content hash
+          python3 -c "
+          import os, hashlib
+          BASE = 'dist/demos'
+          hash_map = {}
+          saved = 0
+          deleted = 0
+          for root, dirs, files in os.walk(BASE):
+              dirs[:] = [d for d in dirs if d not in ('__pycache__', 'node_modules', '.git', '.trae')]
+              for f in files:
+                  fp = os.path.join(root, f)
+                  try: size = os.path.getsize(fp)
+                  except: continue
+                  if size < 102400: continue
+                  try:
+                      with open(fp, 'rb') as fh: md5 = hashlib.md5(fh.read()).hexdigest()
+                  except: continue
+                  if md5 in hash_map:
+                      saved += size
+                      os.remove(fp)
+                      deleted += 1
+                  else:
+                      hash_map[md5] = fp
+          print(f'Deduplicated: {deleted} files, saved {saved/1048576:.1f}MB')
+          "
+          echo "After cleanup:"
+          du -sh dist/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
