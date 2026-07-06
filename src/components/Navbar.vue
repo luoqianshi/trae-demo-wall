@@ -1,11 +1,11 @@
 <template>
   <nav
     class="fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-8 transition-all duration-300"
-    :class="scrolled ? 'bg-trae-bg/85 backdrop-blur-xl border-b border-white/5' : 'bg-trae-bg/55 backdrop-blur-md'"
+    :class="scrolled ? 'glass-nav-scrolled' : 'glass-nav-top'"
   >
     <router-link to="/" class="flex items-center gap-2.5 no-underline min-w-0">
       <img :src="logoUrl" alt="TRAE" class="w-7 h-7 shrink-0" />
-      <span class="text-trae-text font-bold text-base tracking-wide whitespace-nowrap flex items-center">
+      <span class="text-trae-text font-bold text-base tracking-wide whitespace-nowrap flex items-center" style="font-family: var(--font-display);">
         <span class="typewriter-base">TRAE</span>
         <span
           class="typewriter-insert"
@@ -15,7 +15,6 @@
         <span class="typewriter-base"> Demo Wall</span>
       </span>
     </router-link>
-
   </nav>
 </template>
 
@@ -93,9 +92,25 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.glass-nav-top {
+  background: rgba(10, 15, 13, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid transparent;
+}
+
+.glass-nav-scrolled {
+  background: rgba(10, 15, 13, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid;
+  border-image: linear-gradient(90deg, transparent, rgba(52, 211, 153, 0.15), transparent) 1;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+}
+
 .typewriter-insert {
   display: inline;
-  color: #22c55e;
+  color: #34d399;
   opacity: 1;
 }
 
@@ -115,28 +130,5 @@ onUnmounted(() => {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
-}
-
-.nav-glass-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.875rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  text-decoration: none;
-  transition: all 0.2s ease;
-}
-
-.nav-glass-btn:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
 }
 </style>
