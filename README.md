@@ -6,6 +6,8 @@
 
 Python 爬虫自动采集论坛数据，Vue 3 + Vite 构建，GitHub Actions 自动部署到 GitHub Pages。
 
+**视觉风格：墨绿宝石** — 沉稳、精致、有生命力，像一块被打磨过的翡翠。
+
 [在线访问](https://luoqianshi.github.io/trae-demo-wall/) · [效果演示](#demo-gallery)
 
 ---
@@ -17,10 +19,12 @@ Python 爬虫自动采集论坛数据，Vue 3 + Vite 构建，GitHub Actions 自
 | **Data Pipeline** | 从 Discourse 论坛自动爬取作品，过滤 web/前端项目，生成索引 + 分页 JSON | Python + requests + BeautifulSoup |
 | **Lazy Loading** | 首屏仅加载轻量索引，滚动时按需加载分页，每次增量 12 条 | Pinia + IntersectionObserver |
 | **Live Preview** | 详情页以 16:9 iframe 沙盒预览 Demo，支持外部链接和本地部署 | iframe sandbox |
-| **Particle BG** | Canvas 2D 粒子背景，80 粒子 + 鼠标吸引 + 距离连线 | `requestAnimationFrame` |
+| **Particle BG** | Canvas 2D 粒子背景，80 粒子 + 鼠标吸引 + 距离连线，墨绿宝石色调 | `requestAnimationFrame` |
 | **Typewriter** | 品牌标题循环打字机效果，纯 JS `setTimeout` 实现 | — |
-| **Glass Nav** | 液态玻璃质感导航栏，滚动感知 blur 强度变化 | `backdrop-filter` |
+| **Glass Nav** | 液态玻璃质感导航栏，滚动感知 blur 强度变化 + 渐变边框 | `backdrop-filter` |
+| **Immersive Hero** | 全屏沉浸式 Hero，三层流动光晕 + noise 纹理 + staggered 入场动画 | CSS `@keyframes` |
 | **Card Hover** | 项目卡片悬停时边框发光、阴影扩散、图片微缩放、标题变色 | CSS transition |
+| **Default Illustrations** | 6 张墨绿宝石风格 SVG 插画，按作品类别自动匹配无缩略图的作品 | SVG + tag 映射 |
 
 ---
 
@@ -110,32 +114,46 @@ filteredProjects // 过滤排序后的完整列表
 | 浏览器缓存旧 JS | Cache-busting URL params | 强制刷新获取最新构建 |
 | 爬虫 ZIP 路径 | `urljoin()` 处理相对路径 | Discourse 附件 URL 可能为相对路径 `/uploads/...` |
 | 无效标签 | Store getter 过滤 `['65-tag', '68-tag']` | 论坛内部标签对用户无意义 |
+| 默认排序 | 按 `createdAt` 降序 | 用户优先看到最新发布的作品 |
+| 无缩略图占位 | 按 tag 分类匹配 SVG 插画 | 避免单调的首字母方块，提升视觉一致性 |
 
 ---
 
 ## Design System
 
-### Colors
+### Colors（墨绿宝石色谱）
 
 | Token | Hex | Usage |
 |---|---|---|
-| `trae-bg` | `#0a0a0a` | Page background |
-| `trae-card` | `#18181b` | Card surface |
-| `trae-accent` | `#22c55e` | Primary brand green |
-| `trae-text` | `#ffffff` | Primary text |
-| `trae-text-secondary` | `#a1a1aa` | Secondary text |
-| `trae-text-muted` | `#71717a` | Muted text |
-| `trae-border` | `#27272a` | Default border |
+| `trae-bg` | `#0a0f0d` | 主背景，近黑墨绿 |
+| `trae-bg-elevated` | `#0f1714` | 卡片/面板背景 |
+| `trae-card` | `#131e1a` | 悬浮卡片 |
+| `trae-border` | `#1e2d27` | 边框/分割线 |
+| `trae-accent` | `#10b981` | 主强调色（emerald-500） |
+| `trae-accent-deep` | `#047857` | hover/active 深翡翠 |
+| `trae-accent-glow` | `#34d399` | 高光发光色（emerald-400） |
+| `trae-text` | `#e8f5ee` | 主文字，带绿调的白 |
+| `trae-text-secondary` | `#8fa89e` | 次要文字 |
+| `trae-text-muted` | `#6b8278` | 辅助/禁用文字 |
+
+### Typography
+
+| Purpose | Font | Note |
+|---|---|---|
+| Display（大标题） | **Noto Serif SC**（思源宋体） | 衬线体，用于 Hero/章节标题，典雅气质 |
+| Body（正文/卡片） | **Noto Sans SC**（思源黑体） | 比 Inter 更有中文阅读质感 |
+| Mono（数据/标签） | **JetBrains Mono** | 开发者气质，等宽数字 |
 
 ### Components
 
 | Class | Style |
 |---|---|
-| `.btn-primary` | Green pill, `hover:-translate-y-0.5 hover:shadow-trae-glow` |
-| `.btn-secondary` | Transparent + white border, `hover:border-trae-accent hover:text-trae-accent` |
-| `.tag-pill` | Gray pill, `.active` → green bg + black text |
-| `.trae-card` | `#18181b` bg, `hover:border-trae-accent hover:shadow-trae-glow` |
-| `.nav-glass-btn` | `bg-white/5 backdrop-blur(12px) border-white/8` |
+| `.btn-primary` | 实心宝石绿 pill，`hover:-translate-y-0.5 hover:shadow-trae-glow-strong` |
+| `.btn-secondary` | 透明 + 深绿边框，`hover:border-trae-accent hover:text-trae-accent-glow` |
+| `.btn-glass` | 磨砂玻璃质感，`backdrop-filter: blur(20px)` + 宝石绿边框 |
+| `.tag-pill` | 深绿灰 pill，`.active` → 宝石绿 bg + 深绿 text |
+| `.trae-card` | `#131e1a` bg，`hover:border-trae-accent-glow/30 hover:shadow-trae-card-hover` |
+| `.glass-panel` | `backdrop-filter: blur(20px)` + 半透明背景 + 宝石绿边框 |
 
 ---
 
@@ -187,4 +205,4 @@ MIT
 
 *本站为社区爱好者自发搭建的作品展示页，非 TRAE 官方网站。*
 *数据来自 [TRAE 社区论坛](https://forum.trae.cn)。*
-*作者 [@骆谦实](https://forum.trae.cn/u/%E9%AA%86%E8%B0%A6%E5%AE%9E/summary)*
+*作者 [@骆谦实](https://forum.trae.cn/u/%E9%AA%86%E8%B0%A2%E5%AE%9E/summary)*
