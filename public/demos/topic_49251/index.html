@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HeapLens - AI Java 内存诊断助手 (演示版)</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg2: #1e293b;
+      --bg3: #334155;
+      --ink: #f1f5f9;
+      --muted: #94a3b8;
+      --rule: #334155;
+      --accent: #38bdf8;
+      --accent2: #a78bfa;
+      --danger: #f87171;
+      --warning: #fbbf24;
+      --success: #34d399;
+      --font: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); color: var(--ink); background: var(--bg); line-height: 1.6; }
+
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+      padding: 3rem 1.5rem 2rem; text-align: center;
+    }
+    .hero h1 {
+      font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .hero p { color: var(--muted); font-size: 1.05rem; }
+    .hero-badge {
+      display: inline-block; padding: 0.3rem 0.8rem; background: rgba(56,189,248,0.15);
+      border: 1px solid rgba(56,189,248,0.3); border-radius: 999px; font-size: 0.8rem;
+      color: var(--accent); margin-bottom: 1rem;
+    }
+
+    .demo-bar {
+      max-width: 800px; margin: -1.5rem auto 0; padding: 0 1.5rem; position: relative; z-index: 1;
+    }
+    .demo-card {
+      background: var(--bg2); border: 1px solid var(--accent); border-radius: 12px;
+      padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem;
+    }
+    .demo-card .icon { font-size: 1.5rem; }
+    .demo-card p { color: var(--muted); font-size: 0.85rem; margin: 0; flex: 1; }
+    .btn-demo {
+      padding: 0.5rem 1.2rem; background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: var(--bg); font-weight: 600; border: none; border-radius: 6px; cursor: pointer;
+      white-space: nowrap; transition: opacity 0.2s;
+    }
+    .btn-demo:hover { opacity: 0.9; }
+
+    .results { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+    .results-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;
+    }
+    .results-header h2 { font-size: 1.5rem; }
+    .severity-badge {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600;
+    }
+    .sev-critical { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.3); }
+    .sev-warning { background: rgba(251,191,36,0.15); color: var(--warning); border: 1px solid rgba(251,191,36,0.3); }
+    .sev-info { background: rgba(56,189,248,0.15); color: var(--accent); border: 1px solid rgba(56,189,248,0.3); }
+    .sev-normal { background: rgba(52,211,153,0.15); color: var(--success); border: 1px solid rgba(52,211,153,0.3); }
+
+    .stat-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--rule); border-radius: 10px; padding: 1.25rem;
+    }
+    .stat-card .label { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    .stat-card .value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+
+    .section-title {
+      font-size: 1.15rem; font-weight: 600; margin: 1.5rem 0 0.75rem;
+      padding-bottom: 0.5rem; border-bottom: 1px solid var(--rule);
+    }
+    .issue-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .issue-item {
+      display: flex; gap: 1rem; padding: 1rem; background: var(--bg2);
+      border-radius: 8px; border-left: 4px solid var(--rule);
+    }
+    .issue-item.critical { border-left-color: var(--danger); }
+    .issue-item.warning { border-left-color: var(--warning); }
+    .issue-item.info { border-left-color: var(--accent); }
+    .issue-item .icon { font-size: 1.2rem; flex-shrink: 0; }
+    .issue-item .body { flex: 1; }
+    .issue-item h4 { font-size: 0.95rem; margin-bottom: 0.25rem; }
+    .issue-item p { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+    .suggestion-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .suggestion-item {
+      padding: 0.75rem 1rem; background: var(--bg2); border-radius: 6px;
+      border: 1px solid var(--rule); font-size: 0.9rem;
+    }
+    .suggestion-item::before { content: "→ "; color: var(--accent); }
+
+    .chart-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0;
+    }
+    .chart-card {
+      background: var(--bg2); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem;
+    }
+    .chart-card h3 { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.5rem; }
+    .chart-card .chart { width: 100%; height: 300px; }
+
+    .table-wrap {
+      overflow-x: auto; margin: 1rem 0; border: 1px solid var(--rule); border-radius: 8px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--rule); }
+    th { background: var(--bg3); color: var(--accent); font-weight: 600; white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(56,189,248,0.03); }
+
+    .tab-bar {
+      display: flex; gap: 0.5rem; margin-bottom: 1.5rem;
+    }
+    .tab {
+      padding: 0.5rem 1.2rem; background: var(--bg2); border: 1px solid var(--rule);
+      border-radius: 8px; cursor: pointer; font-size: 0.9rem; color: var(--muted);
+      transition: all 0.2s;
+    }
+    .tab.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    footer { text-align: center; padding: 2rem; color: var(--muted); font-size: 0.8rem; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 1.8rem; }
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <section class="hero">
+    <div class="hero-badge">TRAE AI 创造力大赛 · 初赛 Demo</div>
+    <h1>HeapLens</h1>
+    <p>AI 驱动的 Java 内存泄漏智能诊断助手</p>
+  </section>
+
+  <div class="demo-bar">
+    <div class="demo-card">
+      <span class="icon">🎬</span>
+      <p>这是一个基于实际案例（脱敏后）的演示。点击下方按钮体验 HeapLens 的完整分析能力，包含堆内存诊断和线程转储诊断两种模式。</p>
+      <button class="btn-demo" onclick="runDemo('hprof')">体验堆内存分析</button>
+      <button class="btn-demo" onclick="runDemo('jstack')">体验线程分析</button>
+    </div>
+  </div>
+
+  <div class="results" id="results" style="display:none;">
+    <div class="tab-bar">
+      <div class="tab active" id="tab-hprof" onclick="switchTab('hprof')">堆内存诊断</div>
+      <div class="tab" id="tab-jstack" onclick="switchTab('jstack')">线程转储诊断</div>
+    </div>
+
+    <div class="tab-content active" id="content-hprof">
+      <div class="results-header">
+        <h2>堆内存诊断结果</h2>
+        <span class="severity-badge sev-critical" id="hprof-severity">🔴 严重</span>
+      </div>
+      <div class="stat-grid" id="hprof-stats"></div>
+      <div class="chart-grid" id="hprof-charts"></div>
+      <h3 class="section-title">发现问题</h3>
+      <div class="issue-list" id="hprof-issues"></div>
+      <h3 class="section-title">修复建议</h3>
+      <div class="suggestion-list" id="hprof-suggestions"></div>
+      <div id="hprof-details"></div>
+    </div>
+
+    <div class="tab-content" id="content-jstack">
+      <div class="results-header">
+        <h2>线程转储诊断结果</h2>
+        <span class="severity-badge sev-warning" id="jstack-severity">🟡 警告</span>
+      </div>
+      <div class="stat-grid" id="jstack-stats"></div>
+      <div class="chart-grid" id="jstack-charts"></div>
+      <h3 class="section-title">发现问题</h3>
+      <div class="issue-list" id="jstack-issues"></div>
+      <h3 class="section-title">修复建议</h3>
+      <div class="suggestion-list" id="jstack-suggestions"></div>
+      <div id="jstack-details"></div>
+    </div>
+  </div>
+
+  <footer>HeapLens v1.0 — 使用 TRAE Work 构建 · 基于实际案例（脱敏后）演示</footer>
+
+<script>
+// === 演示数据（基于实际案例分析结果，脱敏处理） ===
+
+const hprofData = {
+  severity: "critical",
+  summary: {
+    total_instances: 1854321,
+    total_heap_size: 312562348,
+    class_count: 35154,
+    file_size: 436211712
+  },
+  class_stats: [
+    { class_name: "char[]", instance_count: 458231, total_size: 78234567 },
+    { class_name: "byte[]", instance_count: 156432, total_size: 45123456 },
+    { class_name: "java.lang.String", instance_count: 384567, total_size: 30852336 },
+    { class_name: "java.util.HashMap$Node", instance_count: 234567, total_size: 18765344 },
+    { class_name: "java.lang.Object[]", instance_count: 89432, total_size: 14324567 },
+    { class_name: "java.util.HashMap", instance_count: 45678, total_size: 10987654 },
+    { class_name: "int[]", instance_count: 34567, total_size: 9876543 },
+    { class_name: "java.lang.Integer", instance_count: 198765, total_size: 7902360 },
+    { class_name: "java.util.ArrayList", instance_count: 56789, total_size: 6789012 },
+    { class_name: "java.util.concurrent.ConcurrentHashMap$Node", instance_count: 34567, total_size: 5543210 }
+  ],
+  issues: [
+    { title: "内存泄漏嫌疑: char[]", severity: "critical", description: "char[] 实例数达 458,231，占用 74.6MB，远超正常水平。可能存在大量字符串未释放。" },
+    { title: "内存泄漏嫌疑: java.lang.String", severity: "critical", description: "String 实例数达 384,567，占用 29.4MB。字符串对象过多可能导致内存压力。" },
+    { title: "内存泄漏嫌疑: java.util.HashMap$Node", severity: "critical", description: "HashMap$Node 实例数达 234,567，占用 17.9MB。可能存在 Map 未清理的情况。" },
+    { title: "内存泄漏嫌疑: java.lang.Integer", severity: "critical", description: "Integer 实例数达 198,765，占用 7.5MB。大量包装类对象可能影响性能。" },
+    { title: "大对象: byte[]", severity: "warning", description: "byte[] 占用 43.0MB，可能存在大字节数组未及时释放。" },
+    { title: "大对象: java.util.HashMap", severity: "warning", description: "HashMap 实例占用 10.5MB，建议检查 Map 的使用场景。" }
+  ],
+  suggestions: [
+    "检查字符串拼接场景，使用 StringBuilder 替代 + 拼接，减少 char[] 创建",
+    "排查 HashMap/ConcurrentHashMap 是否存在 key 一直增加未清理的情况，考虑使用 LRU 或弱引用",
+    "检查 Integer 等包装类的使用，考虑使用基本类型数组替代",
+    "排查 byte[] 大数组来源（如文件读取、网络缓冲），确保使用后及时释放",
+    "建议添加 JVM 参数 -XX:+HeapDumpOnOutOfMemoryError 自动生成堆转储",
+    "考虑使用 WeakReference/SoftReference 缓存非关键数据"
+  ]
+};
+
+const jstackData = {
+  severity: "warning",
+  summary: {
+    total_threads: 544,
+    min_thread_num: 0,
+    max_thread_num: 10955986
+  },
+  thread_groups: [
+    { name: "nacos-grpc-client-executor", count: 12, max_num: 10955986, status: "TIMED_WAITING" },
+    { name: "redisson", count: 15, max_num: 848308, status: "WAITING" },
+    { name: "pool-12", count: 50, max_num: 86160, status: "WAITING" },
+    { name: "DubboServerHandler", count: 200, max_num: 22867, status: "RUNNABLE" },
+    { name: "grpc-default-executor", count: 8, max_num: 15432, status: "RUNNABLE" },
+    { name: "netty", count: 32, max_num: 8765, status: "RUNNABLE" },
+    { name: "GC task thread", count: 16, max_num: 1234, status: "RUNNABLE" },
+    { name: "http-nio-exec", count: 50, max_num: 5678, status: "WAITING" },
+    { name: "C2 CompilerThread", count: 4, max_num: 234, status: "RUNNABLE" },
+    { name: "VM Thread", count: 1, max_num: 2, status: "RUNNABLE" }
+  ],
+  status_distribution: { "RUNNABLE": 193, "BLOCKED": 0, "WAITING": 178, "TIMED_WAITING": 173 },
+  issues: [
+    { title: "线程泄漏告警", severity: "warning", description: "当前线程总数为 544，超过阈值 500。线程数值异常偏高，可能存在线程池未限制上限、未复用线程或资源未释放等问题。线程状态分布: RUNNABLE=193, BLOCKED=0, WAITING/TIMED_WAITING=351。" },
+    { title: "线程编号异常: 服务注册中心客户端", severity: "warning", description: "线程编号累积至 #10955986，表明已创建大量线程。服务注册中心客户端在连接重建时未正确关闭旧线程池。" },
+    { title: "线程编号异常: 缓存连接池", severity: "warning", description: "缓存客户端线程池编号从 #452604 到 #848308，连接重建时创建新线程池，旧线程池未释放。" },
+    { title: "线程编号偏高: 业务线程池", severity: "warning", description: "业务线程池编号达 #86160，存在中等程度线程泄漏，建议检查线程池关闭逻辑。" }
+  ],
+  suggestions: [
+    "检查线程池配置（corePoolSize/maxPoolSize/队列容量）是否合理",
+    "排查是否存在 new Thread() 手动创建线程未纳入池管理",
+    "确认线程池在应用关闭时正确 shutdown",
+    "服务注册中心: 优化连接超时配置，确保连接重建时关闭旧线程池",
+    "缓存客户端: 配置连接池参数，设置空闲连接检测和重试策略",
+    "建议 JVM 参数 -Xss256k 减小线程栈大小",
+    "使用线程池监控暴露活跃线程数指标"
+  ]
+};
+
+let charts = [];
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('content-' + tab).classList.add('active');
+  setTimeout(() => charts.forEach(c => c.resize()), 100);
+}
+
+function runDemo(type) {
+  document.getElementById('results').style.display = 'block';
+  if (type === 'hprof') {
+    renderHprof();
+    switchTab('hprof');
+  } else {
+    renderJstack();
+    switchTab('jstack');
+  }
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function renderHprof() {
+  const d = hprofData;
+  document.getElementById('hprof-stats').innerHTML = [
+    statCard('总实例数', formatNum(d.summary.total_instances)),
+    statCard('堆大小(估算)', formatSize(d.summary.total_heap_size)),
+    statCard('加载类数', formatNum(d.summary.class_count)),
+    statCard('文件大小', formatSize(d.summary.file_size))
+  ].join('');
+
+  charts.forEach(c => c.dispose());
+  charts = [];
+
+  document.getElementById('hprof-charts').innerHTML =
+    chartCard('chart-h1', 'Top 10 类内存占用') + chartCard('chart-h2', '实例数 Top 10');
+
+  renderBarChart('chart-h1', d.class_stats.map(c => c.class_name), d.class_stats.map(c => c.total_size), '字节');
+  const byCount = [...d.class_stats].sort((a, b) => b.instance_count - a.instance_count).slice(0, 10);
+  renderBarChart('chart-h2', byCount.map(c => c.class_name), byCount.map(c => c.instance_count), '个');
+
+  document.getElementById('hprof-issues').innerHTML = d.issues.map(i =>
+    issueHTML(i)
+  ).join('');
+
+  document.getElementById('hprof-suggestions').innerHTML = d.suggestions.map(s =>
+    '<div class="suggestion-item">' + s + '</div>'
+  ).join('');
+
+  let detailHTML = '<h3 class="section-title">类详情 Top 10</h3>';
+  detailHTML += '<div class="table-wrap"><table><thead><tr><th>类名</th><th>实例数</th><th>占用大小</th></tr></thead><tbody>';
+  d.class_stats.forEach(c => {
+    detailHTML += '<tr><td>' + c.class_name + '</td><td>' + formatNum(c.instance_count) + '</td><td>' + formatSize(c.total_size) + '</td></tr>';
+  });
+  detailHTML += '</tbody></table></div>';
+  document.getElementById('hprof-details').innerHTML = detailHTML;
+}
+
+function renderJstack() {
+  const d = jstackData;
+  document.getElementById('jstack-stats').innerHTML = [
+    statCard('线程总数', formatNum(d.summary.total_threads)),
+    statCard('最大线程编号', '#' + formatNum(d.summary.max_thread_num)),
+    statCard('线程组数', formatNum(d.thread_groups.length)),
+    statCard('BLOCKED 线程', formatNum(d.status_distribution.BLOCKED || 0))
+  ].join('');
+
+  const groups = d.thread_groups.slice(0, 10);
+  document.getElementById('jstack-charts').innerHTML =
+    chartCard('chart-j1', '线程类型分布') + chartCard('chart-j2', '线程状态分布');
+
+  renderBarChart('chart-j1', groups.map(g => g.name), groups.map(g => g.count), '个');
+  renderPieChart('chart-j2', Object.entries(d.status_distribution).map(([k, v]) => ({ name: k, value: v })));
+
+  document.getElementById('jstack-issues').innerHTML = d.issues.map(i =>
+    issueHTML(i)
+  ).join('');
+
+  document.getElementById('jstack-suggestions').innerHTML = d.suggestions.map(s =>
+    '<div class="suggestion-item">' + s + '</div>'
+  ).join('');
+
+  let detailHTML = '<h3 class="section-title">线程组详情</h3>';
+  detailHTML += '<div class="table-wrap"><table><thead><tr><th>线程组</th><th>数量</th><th>最大编号</th><th>主要状态</th></tr></thead><tbody>';
+  d.thread_groups.forEach(g => {
+    detailHTML += '<tr><td>' + g.name + '</td><td>' + g.count + '</td><td>#' + formatNum(g.max_num) + '</td><td>' + g.status + '</td></tr>';
+  });
+  detailHTML += '</tbody></table></div>';
+  document.getElementById('jstack-details').innerHTML = detailHTML;
+}
+
+function statCard(label, value) {
+  return '<div class="stat-card"><div class="label">' + label + '</div><div class="value">' + value + '</div></div>';
+}
+
+function chartCard(id, title) {
+  return '<div class="chart-card"><h3>' + title + '</h3><div class="chart" id="' + id + '"></div></div>';
+}
+
+function issueHTML(i) {
+  const icons = { critical: '🔴', warning: '🟡', info: '🔵', normal: '🟢' };
+  return '<div class="issue-item ' + i.severity + '"><div class="icon">' + (icons[i.severity] || 'ℹ️') + '</div><div class="body"><h4>' + i.title + '</h4><p>' + i.description + '</p></div></div>';
+}
+
+function renderBarChart(id, names, values, unit) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const chart = echarts.init(el);
+  chart.setOption({
+    tooltip: { trigger: 'axis', formatter: p => p[0].name + '<br/>' + p[0].value + ' ' + unit },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#334155' } } },
+    yAxis: { type: 'category', data: names.reverse(), axisLabel: { color: '#94a3b8', fontSize: 10, width: 180, overflow: 'truncate' } },
+    series: [{ type: 'bar', data: values.reverse(), itemStyle: { color: '#38bdf8', borderRadius: [0, 4, 4, 0] } }]
+  });
+  charts.push(chart);
+}
+
+function renderPieChart(id, data) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const chart = echarts.init(el);
+  chart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 5, textStyle: { color: '#94a3b8', fontSize: 10 } },
+    color: ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#94a3b8'],
+    series: [{ type: 'pie', radius: ['40%', '70%'], label: { color: '#f1f5f9', fontSize: 11 }, data: data }]
+  });
+  charts.push(chart);
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return bytes.toFixed(i === 0 ? 0 : 2) + ' ' + units[i];
+}
+
+function formatNum(n) {
+  return (n || 0).toLocaleString('en-US');
+}
+
+window.addEventListener('resize', () => charts.forEach(c => c.resize()));
+</script>
+</body>
+</html>

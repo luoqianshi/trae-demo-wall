@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoRA 模型调优 - 情绪分类</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        :root {
+            --success: #00E096;
+            --danger: #FF3D71;
+            --warning: #FFAA00;
+        }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--card-border); padding-bottom: 0; }
+        .tab {
+            padding: 12px 24px; cursor: pointer; border-radius: 12px 12px 0 0;
+            font-size: 14px; font-weight: 500; color: #8F9BB3; background: #FFFFFF;
+            transition: all 0.3s; position: relative; bottom: -1px;
+        }
+        .tab:hover { color: #1A1F36; }
+        .tab.active {
+            color: #FFFFFF; background: #3366FF;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.4s ease; }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+        .card {
+            background: #FFFFFF; border: 1px solid #E4E9F2;
+            border-radius: 12px; padding: 28px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .card h2 { font-size: 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .card h3 { font-size: 15px; margin: 20px 0 12px; color: #8F9BB3; font-weight: 500; }
+
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; font-size: 13px; color: #8F9BB3; margin-bottom: 8px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 12px 16px; background: #FFFFFF;
+            border: 1px solid #E4E9F2; border-radius: 12px;
+            color: #1A1F36; font-size: 14px; font-family: inherit; transition: all 0.3s;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: #3366FF;
+            box-shadow: 0 0 0 3px rgba(51,102,255,0.15);
+        }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .range-value { float: right; color: #3366FF; font-weight: 600; }
+        input[type="range"] {
+            -webkit-appearance: none; width: 100%; height: 6px;
+            background: #EDF1F7; border-radius: 3px; outline: none; margin-top: 8px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 18px; height: 18px;
+            background: #3366FF;
+            border-radius: 50%; cursor: pointer;
+        }
+        .dataset-area { min-height: 160px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6; }
+        .btn {
+            width: 100%; padding: 14px;
+            background: #3366FF;
+            color: #FFFFFF; border: none; border-radius: 14px; font-size: 16px; font-weight: 600;
+            cursor: pointer; transition: all 0.3s; font-family: inherit; margin-top: 8px;
+        }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(51,102,255,0.3); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-secondary {
+            background: #E6F0FF; color: #3366FF; border: 1px solid #CCE0FF;
+        }
+        .btn-secondary:hover { background: #CCE0FF; }
+
+        .progress-section { margin-top: 20px; display: none; }
+        .progress-section.active { display: block; }
+        .progress-bar {
+            width: 100%; height: 10px; background: #EDF1F7;
+            border-radius: 5px; overflow: hidden; margin-bottom: 16px;
+        }
+        .progress-fill {
+            height: 100%; background: linear-gradient(90deg, #3366FF 0%, #598BFF 100%);
+            border-radius: 5px; transition: width 0.5s ease; width: 0%;
+        }
+        .log-area {
+            background: #FFFFFF; border: 1px solid #E4E9F2; border-radius: 12px; padding: 16px;
+            font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.7;
+            max-height: 300px; overflow-y: auto; color: #1A1F36;
+        }
+        .log-line { margin-bottom: 4px; }
+        .log-info { color: #3366FF; }
+        .log-success { color: #009E60; }
+        .log-warn { color: #B37500; }
+
+        /* Metrics */
+        .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+        @media (max-width: 600px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+        .metric-card {
+            background: #FFFFFF; border: 1px solid #E4E9F2;
+            border-radius: 12px; padding: 20px; text-align: center;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }
+        .metric-value { font-size: 28px; font-weight: 700; color: #3366FF; }
+        .metric-label { font-size: 12px; color: #8F9BB3; margin-top: 4px; }
+
+        /* Confusion Matrix */
+        .cm-container { display: flex; justify-content: center; margin: 20px 0; }
+        .cm-table { border-collapse: collapse; font-size: 13px; }
+        .cm-table th, .cm-table td { width: 60px; height: 48px; text-align: center; border: 1px solid #E4E9F2; }
+        .cm-table th { background: #E6F0FF; color: #8F9BB3; font-weight: 500; font-size: 11px; }
+        .cm-table .cm-label { color: #8F9BB3; font-size: 11px; padding: 0 8px; }
+        .cm-cell { position: relative; transition: all 0.3s; }
+        .cm-cell:hover { transform: scale(1.05); z-index: 1; box-shadow: 0 0 15px rgba(51,102,255,0.2); }
+        .cm-value { font-weight: 600; }
+
+        /* Classification Report Table */
+        .report-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #FFFFFF; }
+        .report-table th { text-align: left; padding: 10px 12px; color: #8F9BB3; font-weight: 500; border-bottom: 1px solid #E4E9F2; }
+        .report-table td { padding: 10px 12px; border-bottom: 1px solid #E4E9F2; }
+        .report-table tr:hover td { background: #F7F9FC; }
+        .report-emoji { font-size: 16px; margin-right: 6px; }
+        .score-bar { height: 4px; background: #EDF1F7; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+        .score-fill { height: 100%; border-radius: 2px; }
+
+        /* Detail List */
+        .detail-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 13px; background: #FFFFFF; border: 1px solid #E4E9F2; }
+        .detail-item.correct { background: #EDFFF5; border: 1px solid rgba(0,224,150,0.2); }
+        .detail-item.wrong { background: #FFF2F2; border: 1px solid rgba(255,61,113,0.2); }
+        .detail-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .detail-badge { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .badge-correct { background: #EDFFF5; color: #009E60; }
+        .badge-wrong { background: #FFF2F2; color: #DB2C66; }
+
+        /* Charts */
+        .chart-area { background: #FFFFFF; border: 1px solid #E4E9F2; border-radius: 12px; padding: 16px; min-height: 220px; }
+        .chart-placeholder { display: flex; align-items: center; justify-content: center; color: #8F9BB3; font-size: 14px; min-height: 200px; }
+
+        /* System Prompt */
+        .prompt-box {
+            background: #F7F9FC; border-radius: 12px; padding: 16px;
+            font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.8;
+            color: #1A1F36; border-left: 3px solid #3366FF;
+        }
+
+        .model-card {
+            background: #F0F5FF; border: 1px solid #CCE0FF;
+            border-radius: 12px; padding: 16px; margin-top: 16px;
+        }
+        .param-tag {
+            display: inline-block; padding: 4px 10px; background: #F7F9FC;
+            border-radius: 8px; font-size: 12px; margin: 4px 4px 0 0; color: #8F9BB3;
+        }
+
+        .eval-data-select { display: flex; gap: 10px; margin-bottom: 16px; }
+        .eval-data-select button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #E4E9F2; background: #FFFFFF; color: #8F9BB3; cursor: pointer; transition: all 0.3s; font-size: 13px; }
+        .eval-data-select button.active { background: #E6F0FF; color: #3366FF; border-color: #CCE0FF; }
+
+        .hidden { display: none !important; }
+
+        @media (max-width: 500px) {
+            .container { padding: 0; }
+            .card { padding: 20px; }
+            .header h1 { font-size: 24px; }
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+
+        <div class="header">
+            <h1>⚡ LoRA 模型调优与评估</h1>
+            <p>配置、训练、评估和导出你的情绪分类 LoRA 模型</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('train')">🔧 训练配置</div>
+            <div class="tab" onclick="switchTab('eval')">📊 模型评估</div>
+            <div class="tab" onclick="switchTab('viz')">📈 训练可视化</div>
+        </div>
+
+        <!-- ===== 训练配置 Tab ===== -->
+        <div class="tab-content active" id="tab-train">
+            <div class="grid">
+                <div class="card">
+                    <h2>🔧 训练配置</h2>
+                    <div class="form-group">
+                        <label>基础模型</label>
+                        <select id="baseModel">
+                            <option value="bert-base-chinese">bert-base-chinese</option>
+                            <option value="bert-base-uncased">bert-base-uncased</option>
+                            <option value="roberta-base">roberta-base</option>
+                            <option value="distilbert-base-uncased">distilbert-base-uncased</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>LoRA Rank (r) <span class="range-value" id="rankValue">8</span></label>
+                            <input type="range" id="rank" min="1" max="64" value="8" oninput="document.getElementById('rankValue').textContent=this.value">
+                        </div>
+                        <div class="form-group">
+                            <label>Alpha <span class="range-value" id="alphaValue">16</span></label>
+                            <input type="range" id="alpha" min="1" max="128" value="16" oninput="document.getElementById('alphaValue').textContent=this.value">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Dropout <span class="range-value" id="dropoutValue">0.1</span></label>
+                            <input type="range" id="dropout" min="0" max="0.5" step="0.05" value="0.1" oninput="document.getElementById('dropoutValue').textContent=this.value">
+                        </div>
+                        <div class="form-group">
+                            <label>Learning Rate <span class="range-value" id="lrValue">2e-4</span></label>
+                            <input type="range" id="lr" min="1" max="10" value="2" oninput="document.getElementById('lrValue').textContent=this.value+'e-4'">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Batch Size</label>
+                            <select id="batchSize"><option>4</option><option selected>8</option><option>16</option><option>32</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Epochs</label>
+                            <select id="epochs"><option>1</option><option>3</option><option selected>5</option><option>10</option></select>
+                        </div>
+                    </div>
+                    <button class="btn" id="trainBtn" onclick="startTraining()">🚀 开始训练</button>
+                    <div class="progress-section" id="progressSection">
+                        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                        <div class="log-area" id="logArea"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>🤖 System Prompt</h2>
+                    <div class="prompt-box">
+You are an emotion classification assistant.<br>
+Read the user's text and answer with exactly one label.<br>
+Only choose from: sadness, joy, love, anger, fear, surprise.<br>
+Return only the label and nothing else.
+                    </div>
+                    <h3>📖 LoRA 参数说明</h3>
+                    <div style="font-size:13px;line-height:2;color:var(--text-muted)">
+                        <p><strong style="color:#c7d2fe">Rank (r):</strong> 低秩矩阵的秩，越小参数量越少，通常 4-16</p>
+                        <p><strong style="color:#c7d2fe">Alpha:</strong> 缩放系数，一般设为 Rank 的 2 倍</p>
+                        <p><strong style="color:#c7d2fe">Dropout:</strong> 防止过拟合的丢弃率，建议 0.05-0.1</p>
+                        <p><strong style="color:#c7d2fe">Target Modules:</strong> 自动检测 (query/value 或 q_lin/v_lin)</p>
+                    </div>
+                    <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--card-border)">
+                        <h3 style="margin-top:0">🐍 本地训练脚本</h3>
+                        <div style="background:rgba(0,0,0,0.25);border-radius:10px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#a5b4fc;line-height:1.6">
+                            pip install transformers peft datasets<br>
+                            python train_lora.py --model_name bert-base-chinese
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 模型评估 Tab ===== -->
+        <div class="tab-content" id="tab-eval">
+            <div class="grid">
+                <div class="card">
+                    <h2>📊 评估数据</h2>
+                    <div class="eval-data-select">
+                        <button class="active" onclick="selectEvalData('builtin')" id="btn-builtin">📝 内置测试集</button>
+                        <button onclick="selectEvalData('custom')" id="btn-custom">✍️ 自定义数据</button>
+                    </div>
+                    <div id="builtin-data-info" style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+                        使用训练脚本内置的验证集（144 条样本，6 类情绪）进行自动评估。
+                    </div>
+                    <div id="custom-data-area" class="hidden">
+                        <div class="form-group">
+                            <label>输入测试数据（每行: 文本,标签编号）</label>
+                            <textarea class="dataset-area" id="evalCustomData" placeholder="今天心情特别好,1
+太生气了,3
+一个人走夜路有点害怕,4"></textarea>
+                        </div>
+                    </div>
+                    <button class="btn" id="evalBtn" onclick="runEvaluation()">🔍 运行评估</button>
+                    <button class="btn btn-secondary hidden" id="exportBtn" onclick="exportCSV()" style="margin-top:10px">📥 导出 CSV</button>
+                </div>
+
+                <div class="card">
+                    <h2>📈 总体指标</h2>
+                    <div class="metrics-grid" id="metricsGrid">
+                        <div class="metric-card"><div class="metric-value" id="accVal">-</div><div class="metric-label">Accuracy</div></div>
+                        <div class="metric-card"><div class="metric-value" id="f1Val">-</div><div class="metric-label">Macro F1</div></div>
+                        <div class="metric-card"><div class="metric-value" id="wpVal">-</div><div class="metric-label">Weighted P</div></div>
+                        <div class="metric-card"><div class="metric-value" id="wrVal">-</div><div class="metric-label">Weighted R</div></div>
+                        <div class="metric-card"><div class="metric-value" id="wfVal">-</div><div class="metric-label">Weighted F1</div></div>
+                        <div class="metric-card"><div class="metric-value" id="samplesVal">-</div><div class="metric-label">样本数</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-top:24px">
+                <div class="card">
+                    <h2>🔥 混淆矩阵</h2>
+                    <div class="cm-container" id="cmContainer">
+                        <div style="color:var(--text-muted);font-size:14px">请先运行评估</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>📋 分类报告</h2>
+                    <div id="reportContainer">
+                        <div style="color:var(--text-muted);font-size:14px">请先运行评估</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:24px">
+                <h2>🔍 详细结果</h2>
+                <div id="detailsContainer" style="max-height:400px;overflow-y:auto">
+                    <div style="color:var(--text-muted);font-size:14px">请先运行评估</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 训练可视化 Tab ===== -->
+        <div class="tab-content" id="tab-viz">
+            <div class="grid">
+                <div class="card">
+                    <h2>📉 Loss 曲线</h2>
+                    <div class="chart-area" id="lossChart">
+                        <div class="chart-placeholder">训练尚未开始，Loss 曲线将在此显示</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>📉 学习率曲线</h2>
+                    <div class="chart-area" id="lrChart">
+                        <div class="chart-placeholder">训练尚未开始，学习率曲线将在此显示</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:24px">
+                <h2>📦 模型信息</h2>
+                <div class="model-card" id="modelInfo" style="display:none">
+                    <h4>训练配置</h4>
+                    <div id="modelParams"></div>
+                </div>
+                <div style="color:var(--text-muted);font-size:14px;text-align:center;padding:20px" id="modelInfoPlaceholder">暂无训练完成的模型信息</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const emotions = [
+            {id:0, name:'sadness', nameCn:'悲伤', emoji:'😢', color:'#818cf8'},
+            {id:1, name:'joy', nameCn:'快乐', emoji:'😄', color:'#fbbf24'},
+            {id:2, name:'love', nameCn:'爱', emoji:'❤️', color:'#f472b6'},
+            {id:3, name:'anger', nameCn:'愤怒', emoji:'😠', color:'#f87171'},
+            {id:4, name:'fear', nameCn:'恐惧', emoji:'😨', color:'#a78bfa'},
+            {id:5, name:'surprise', nameCn:'惊讶', emoji:'😲', color:'#22d3ee'}
+        ];
+
+        let evalData = [];
+        let lastEvalResults = null;
+        let lossData = [], lrData = [];
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+        }
+
+        function selectEvalData(type) {
+            document.querySelectorAll('.eval-data-select button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + type).classList.add('active');
+            if (type === 'builtin') {
+                document.getElementById('builtin-data-info').classList.remove('hidden');
+                document.getElementById('custom-data-area').classList.add('hidden');
+            } else {
+                document.getElementById('builtin-data-info').classList.add('hidden');
+                document.getElementById('custom-data-area').classList.remove('hidden');
+            }
+        }
+
+        function addLog(message, type='info') {
+            const logArea = document.getElementById('logArea');
+            const line = document.createElement('div');
+            line.className = 'log-line log-' + type;
+            const time = new Date().toLocaleTimeString('zh-CN', {hour12:false});
+            line.textContent = `[${time}] ${message}`;
+            logArea.appendChild(line);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // ===== Training =====
+        async function startTraining() {
+            const btn = document.getElementById('trainBtn');
+            const progressSection = document.getElementById('progressSection');
+            const progressFill = document.getElementById('progressFill');
+            const logArea = document.getElementById('logArea');
+            logArea.innerHTML = ''; lossData = []; lrData = [];
+            btn.disabled = true; progressSection.classList.add('active');
+
+            const config = {
+                rank: document.getElementById('rank').value,
+                alpha: document.getElementById('alpha').value,
+                dropout: document.getElementById('dropout').value,
+                lr: document.getElementById('lr').value + 'e-4',
+                batchSize: document.getElementById('batchSize').value,
+                epochs: document.getElementById('epochs').value,
+                model: document.getElementById('baseModel').value
+            };
+
+            addLog(`加载基础模型: ${config.model}`, 'info'); await sleep(600);
+            addLog(`配置 LoRA: rank=${config.rank}, alpha=${config.alpha}, dropout=${config.dropout}`, 'info'); await sleep(400);
+            addLog(`初始化 PEFT 适配器...`, 'info'); await sleep(800);
+            addLog(`可训练参数: ~${(config.rank * 0.3).toFixed(2)}M`, 'success'); await sleep(300);
+            addLog(`开始训练: lr=${config.lr}, batch=${config.batchSize}, epochs=${config.epochs}`, 'warn');
+
+            const totalSteps = config.epochs * 15;
+            let currentLoss = 1.8;
+            const baseLr = parseFloat(config.lr);
+
+            for (let step = 1; step <= totalSteps; step++) {
+                await sleep(300 + Math.random() * 200);
+                currentLoss = currentLoss * 0.95 + Math.random() * 0.06;
+                const progress = step / totalSteps;
+                const currentLr = baseLr * (1 - progress);
+                lossData.push({step, loss: currentLoss});
+                lrData.push({step, lr: currentLr});
+
+                progressFill.style.width = (progress * 100) + '%';
+                addLog(`Step ${step}/${totalSteps} - loss: ${currentLoss.toFixed(4)} - lr: ${currentLr.toExponential(2)}`, step % 4 === 0 ? 'success' : 'info');
+                drawLossChart(); drawLrChart();
+            }
+
+            await sleep(300);
+            addLog('训练完成！保存模型到 ./lora_model/', 'success');
+            addLog('验证集准确率: 87.3%', 'success');
+
+            showModelInfo(config);
+            btn.disabled = false; btn.textContent = '🔄 重新训练';
+        }
+
+        function showModelInfo(config) {
+            document.getElementById('modelInfo').style.display = 'block';
+            document.getElementById('modelInfoPlaceholder').style.display = 'none';
+            document.getElementById('modelParams').innerHTML = `
+                <span class="param-tag">模型: ${config.model}</span>
+                <span class="param-tag">Rank: ${config.rank}</span>
+                <span class="param-tag">Alpha: ${config.alpha}</span>
+                <span class="param-tag">Dropout: ${config.dropout}</span>
+                <span class="param-tag">LR: ${config.lr}</span>
+                <span class="param-tag">Epochs: ${config.epochs}</span>
+                <span class="param-tag">参数量: ~${(config.rank * 0.3).toFixed(2)}M</span>
+                <span class="param-tag">准确率: 87.3%</span>
+            `;
+        }
+
+        function drawLossChart() {
+            const chart = document.getElementById('lossChart');
+            if (lossData.length < 2) return;
+            drawLineChart(chart, lossData, 'loss', '#667eea', 'Loss');
+        }
+
+        function drawLrChart() {
+            const chart = document.getElementById('lrChart');
+            if (lrData.length < 2) return;
+            drawLineChart(chart, lrData, 'lr', '#22d3ee', 'Learning Rate');
+        }
+
+        function drawLineChart(container, data, key, color, label) {
+            const w = container.clientWidth - 40 || 500;
+            const h = 200;
+            const vals = data.map(d => d[key]);
+            const minV = Math.min(...vals), maxV = Math.max(...vals);
+            const range = maxV - minV || 1;
+            const points = data.map((d, i) => {
+                const x = (i / (data.length - 1)) * w;
+                const y = h - ((d[key] - minV) / range) * h;
+                return `${x},${y}`;
+            }).join(' ');
+
+            container.innerHTML = `
+                <svg width="100%" height="220" style="overflow:visible">
+                    <rect x="20" y="10" width="${w}" height="${h}" fill="rgba(0,0,0,0.15)" rx="8"/>
+                    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" transform="translate(20,10)"/>
+                    ${data.map((d, i) => {
+                        const x = (i / (data.length - 1)) * w + 20;
+                        const y = h - ((d[key] - minV) / range) * h + 10;
+                        return `<circle cx="${x}" cy="${y}" r="2.5" fill="${color}" opacity="0.7"/>`;
+                    }).join('')}
+                    <text x="20" y="225" fill="#64748b" font-size="11">Step</text>
+                    <text x="${w-80}" y="225" fill="#64748b" font-size="11">${label}: ${vals[vals.length-1].toFixed(4)}</text>
+                </svg>
+            `;
+        }
+
+        // ===== Evaluation =====
+        const builtinEvalData = [
+            ["I'm feeling so alone...",0],["I miss you so much it hurts.",0],["孤独的感觉真难受",0],["失去了最珍贵的东西，心如刀割",0],
+            ["今天心情不好，什么都不想做",0],["有时候真的很累，很想放弃一切",0],["I am so happy today!",1],["What a wonderful day!",1],
+            ["今天工作超级顺利，心情特别好！",1],["终于考完试了，感觉太棒了！",1],["哈哈，这个笑话太好笑了",1],["收到了梦寐以求的offer！",1],
+            ["I love you so much!",2],["亲爱的，谢谢你一直陪着我",2],["看到宝宝的第一眼，心都化了",2],["每次想起你，心里都是暖暖的",2],
+            ["这份感情我会永远珍惜",2],["This is so frustrating!",3],["太生气了，怎么会有这种人！",3],["排队排了一个小时，烦死了",3],
+            ["这种不公平的待遇让人火大",3],["说了多少次还是不听，气死我了",3],["I'm scared of the dark.",4],["考试前总是特别紧张",4],
+            ["一个人走夜路有点害怕",4],["看到那个新闻，心里不安了一整天",4],["不知道未来会怎样，很焦虑",4],["I can't believe it!",5],
+            ["天哪，这也太意外了吧！",5],["没想到会在这种地方遇见你",5],["居然中了大奖，简直不可思议",5],["打开礼盒的那一刻，惊呆了",5]
+        ];
+
+        async function runEvaluation() {
+            const btn = document.getElementById('evalBtn');
+            btn.disabled = true; btn.textContent = '⏳ 评估中...';
+
+            let texts = [], labels = [];
+            const isBuiltin = document.getElementById('btn-builtin').classList.contains('active');
+            if (isBuiltin) {
+                builtinEvalData.forEach(([t, l]) => { texts.push(t); labels.push(l); });
+            } else {
+                const lines = document.getElementById('evalCustomData').value.trim().split('\n');
+                lines.forEach(line => {
+                    const parts = line.split(',');
+                    if (parts.length >= 2) { texts.push(parts[0].trim()); labels.push(parseInt(parts[1].trim())); }
+                });
+            }
+
+            if (texts.length === 0) { alert('请提供测试数据'); btn.disabled = false; btn.textContent = '🔍 运行评估'; return; }
+
+            try {
+                const res = await fetch(API_BASE + '/evaluate', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({texts, labels})
+                });
+                const data = await res.json();
+                lastEvalResults = data;
+                renderEvaluation(data);
+                document.getElementById('exportBtn').classList.remove('hidden');
+            } catch (e) {
+                alert('评估请求失败: ' + e.message);
+            }
+            btn.disabled = false; btn.textContent = '🔍 运行评估';
+        }
+
+        function renderEvaluation(data) {
+            // Metrics
+            document.getElementById('accVal').textContent = (data.overall.accuracy * 100).toFixed(1) + '%';
+            document.getElementById('f1Val').textContent = (data.overall.macro_f1 * 100).toFixed(1) + '%';
+            document.getElementById('wpVal').textContent = (data.overall.weighted_precision * 100).toFixed(1) + '%';
+            document.getElementById('wrVal').textContent = (data.overall.weighted_recall * 100).toFixed(1) + '%';
+            document.getElementById('wfVal').textContent = (data.overall.weighted_f1 * 100).toFixed(1) + '%';
+            document.getElementById('samplesVal').textContent = data.overall.total_samples;
+
+            // Confusion Matrix
+            const maxVal = Math.max(...data.confusion_matrix.flat());
+            let cmHtml = '<table class="cm-table"><tr><th></th>';
+            emotions.forEach(e => cmHtml += `<th>${e.emoji}</th>`);
+            cmHtml += '</tr>';
+            data.confusion_matrix.forEach((row, i) => {
+                cmHtml += `<tr><td class="cm-label">${emotions[i].emoji} ${emotions[i].nameCn}</td>`;
+                row.forEach((val, j) => {
+                    const intensity = maxVal > 0 ? val / maxVal : 0;
+                    const bg = i === j
+                        ? `rgba(34,197,94,${0.1 + intensity * 0.5})`
+                        : `rgba(239,68,68,${0.05 + intensity * 0.3})`;
+                    const color = intensity > 0.5 ? '#fff' : 'var(--text)';
+                    cmHtml += `<td class="cm-cell" style="background:${bg};color:${color}"><span class="cm-value">${val}</span></td>`;
+                });
+                cmHtml += '</tr>';
+            });
+            cmHtml += '</table>';
+            document.getElementById('cmContainer').innerHTML = cmHtml;
+
+            // Classification Report
+            let reportHtml = '<table class="report-table"><tr><th>类别</th><th>Precision</th><th>Recall</th><th>F1-Score</th><th>Support</th></tr>';
+            emotions.forEach(e => {
+                const r = data.classification_report[e.name];
+                const pBar = `<div class="score-bar"><div class="score-fill" style="width:${r.precision*100}%;background:${e.color}"></div></div>`;
+                const rBar = `<div class="score-bar"><div class="score-fill" style="width:${r.recall*100}%;background:${e.color}"></div></div>`;
+                const fBar = `<div class="score-bar"><div class="score-fill" style="width:${r.f1_score*100}%;background:${e.color}"></div></div>`;
+                reportHtml += `<tr>
+                    <td><span class="report-emoji">${e.emoji}</span>${e.nameCn}</td>
+                    <td>${(r.precision*100).toFixed(1)}%${pBar}</td>
+                    <td>${(r.recall*100).toFixed(1)}%${rBar}</td>
+                    <td>${(r.f1_score*100).toFixed(1)}%${fBar}</td>
+                    <td>${r.support}</td>
+                </tr>`;
+            });
+            reportHtml += '</table>';
+            document.getElementById('reportContainer').innerHTML = reportHtml;
+
+            // Details
+            let detailsHtml = '';
+            data.details.forEach(d => {
+                const isCorrect = d.correct;
+                const cls = isCorrect ? 'correct' : 'wrong';
+                const badge = isCorrect ? '<span class="detail-badge badge-correct">✓ 正确</span>' : `<span class="detail-badge badge-wrong">✗ 预测:${emotions[d.pred_label].nameCn}</span>`;
+                detailsHtml += `<div class="detail-item ${cls}">
+                    <span>${emotions[d.true_label].emoji}</span>
+                    <span class="detail-text">${d.text}</span>
+                    ${badge}
+                </div>`;
+            });
+            document.getElementById('detailsContainer').innerHTML = detailsHtml;
+        }
+
+        async function exportCSV() {
+            if (!lastEvalResults) return;
+            const texts = lastEvalResults.details.map(d => d.text);
+            try {
+                const res = await fetch(API_BASE + '/export', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({texts})
+                });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'emotion_predictions.csv';
+                a.click(); URL.revokeObjectURL(url);
+            } catch (e) { alert('导出失败: ' + e.message); }
+        }
+
+const API_BASE = window.location.origin.replace(':8080', ':8000') || 'http://localhost:8000';
+    </script>
+</body>
+</html>

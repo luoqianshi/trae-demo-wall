@@ -1,0 +1,3685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>财务发票管理系统</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js 3.x（稳定版本）-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+    <!-- SheetJS -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script>
+        /* Tailwind 自定义配置 - 深色蓝色主题 */
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                            950: '#172554',
+                        },
+                        dark: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            300: '#cbd5e1',
+                            400: '#94a3b8',
+                            500: '#64748b',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 全局样式 */
+        body {
+            background-color: #f8fafc;
+            color: #1f2937;
+            font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #e5e7eb; }
+        ::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+        /* 拖拽上传区域样式 */
+        .upload-zone {
+            border: 2px dashed #d1d5db;
+            transition: all 0.3s ease;
+        }
+        .upload-zone:hover, .upload-zone.drag-over {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.02);
+        }
+
+        /* 表格样式 */
+        .invoice-table th {
+            background-color: #f1f5f9;
+            color: #374151;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .invoice-table tr:hover td {
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+        .invoice-table tr.duplicate-row td {
+            background-color: rgba(239, 68, 68, 0.1);
+        }
+
+        /* 进度条动画 */
+        .progress-bar {
+            transition: width 0.3s ease;
+            background: linear-gradient(90deg, #2563eb, #3b82f6, #60a5fa);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        /* 统计卡片悬浮效果 */
+        .stat-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+        }
+
+        /* 按钮点击效果 */
+        .btn-action:active {
+            transform: scale(0.97);
+        }
+
+        /* Toast 通知 */
+        .toast {
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        /* 排序箭头 */
+        .sort-arrow { opacity: 0.3; transition: opacity 0.2s; }
+        .sort-arrow.active { opacity: 1; }
+
+        /* 文件列表项 */
+        .file-item {
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 标签页 */
+        .tab-btn.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+        }
+
+        /* 调试面板样式 */
+        .debug-panel {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .debug-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background-color: #f1f5f9;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+        }
+        .debug-header:hover {
+            background-color: #e2e8f0;
+        }
+        .debug-content {
+            padding: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            border-top: 1px solid #e2e8f0;
+        }
+        .debug-item {
+            margin-bottom: 16px;
+            padding: 12px;
+            background-color: white;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+        .debug-item:last-child {
+            margin-bottom: 0;
+        }
+        .debug-item pre {
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 12px;
+            color: #374151;
+            margin: 8px 0 0 0;
+            padding: 8px;
+            background-color: #f8fafc;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* 高铁票卡片样式 */
+        .train-ticket-card {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            border: 1px solid #93c5fd;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .train-ticket-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+        }
+        .train-ticket-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px dashed #93c5fd;
+        }
+        .train-route {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin: 12px 0;
+        }
+        .train-station {
+            text-align: center;
+        }
+        .train-station-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1e40af;
+        }
+        .train-arrow {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .train-arrow-line {
+            flex: 1;
+            height: 2px;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+        .train-arrow-icon {
+            color: #3b82f6;
+            margin: 0 8px;
+        }
+        .train-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .train-detail-item {
+            background-color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        .train-detail-label {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 2px;
+        }
+        .train-detail-value {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1e293b;
+        }
+
+        /* 高铁票行高亮 */
+        .invoice-table tr.train-row td {
+            background-color: rgba(59, 130, 246, 0.08);
+        }
+        .invoice-table tr.train-row:hover td {
+            background-color: rgba(59, 130, 246, 0.15);
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Toast 通知容器 -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+    <!-- 顶部标题栏 -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 shadow-lg">
+        <div class="max-w-[1600px] mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">财务发票管理系统</h1>
+                    <p class="text-xs text-gray-500">PDF发票解析 / 高铁票识别 / Excel报表生成</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 text-sm text-gray-500">
+                <span id="clockDisplay"></span>
+                <span class="px-2 py-1 bg-primary-100 text-primary-700 rounded text-xs">v1.0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="max-w-[1600px] mx-auto p-4 md:p-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- 左侧操作面板 -->
+            <aside class="lg:col-span-4 xl:col-span-3 space-y-4">
+                <!-- 员工信息 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <h2 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                        </svg>
+                        员工信息
+                    </h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1.5">员工姓名 <span class="text-red-500">*</span></label>
+                            <input type="text" id="employeeName" placeholder="请输入员工姓名"
+                                class="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PDF上传区域 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <h2 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        发票上传
+                    </h2>
+                    <div id="pdfDropZone" class="upload-zone rounded-lg p-6 text-center">
+                        <svg class="w-10 h-10 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p class="text-sm text-gray-500 mb-1">拖拽PDF文件到此处</p>
+                        <p class="text-xs text-gray-400 mb-3">或点击下方选择文件</p>
+                        <input type="file" id="pdfFileInput" accept=".pdf" multiple class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary-500 file:text-white hover:file:bg-primary-600 cursor-pointer">
+                    </div>
+                    <!-- 已上传文件列表 -->
+                    <div id="fileList" class="mt-3 max-h-40 overflow-y-auto space-y-1"></div>
+                </div>
+
+                <!-- 历史发票上传 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <h2 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                        </svg>
+                        历史发票查重
+                    </h2>
+                    <div id="excelDropZone" class="upload-zone rounded-lg p-4 text-center">
+                        <svg class="w-8 h-8 text-gray-400 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        <p class="text-xs text-gray-500 mb-2">上传历史发票Excel用于查重</p>
+                        <label for="excelFileInput" class="inline-block px-4 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded-lg transition cursor-pointer">选择Excel文件</label>
+                        <input type="file" id="excelFileInput" accept=".xlsx,.xls" class="sr-only">
+                    </div>
+                    <div id="historyInfo" class="mt-2 text-xs text-gray-400 hidden">
+                        <span class="text-green-600">已加载历史数据</span>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm">
+                    <h2 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        操作
+                    </h2>
+                    <button id="btnProcess" onclick="processInvoices()"
+                        class="btn-action w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        开始处理
+                    </button>
+                    <button id="btnExport" onclick="exportExcel()" disabled
+                        class="btn-action w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        导出Excel报表
+                    </button>
+                    <button id="btnDownload" onclick="downloadRenamedFiles()" disabled
+                        class="btn-action w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        下载重命名发票
+                    </button>
+                    <button id="btnRename" onclick="renameOriginalFiles()" disabled
+                        class="btn-action w-full bg-orange-600 hover:bg-orange-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                        重命名原始文件
+                    </button>
+                    <button onclick="clearAll()"
+                        class="btn-action w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2.5 px-4 rounded-lg transition flex items-center justify-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        清空所有数据
+                    </button>
+                </div>
+
+                <!-- 处理进度 -->
+                <div id="progressSection" class="bg-white rounded-xl border border-gray-200 p-5 hidden shadow-sm">
+                    <h2 class="text-base font-semibold text-gray-900 mb-3">处理进度</h2>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                        <div id="progressBar" class="progress-bar h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p id="progressText" class="text-xs text-gray-500">准备中...</p>
+                </div>
+            </aside>
+
+            <!-- 右侧结果展示区 -->
+            <section class="lg:col-span-8 xl:col-span-9 space-y-4">
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="stat-card bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                        <p class="text-xs text-gray-500 mb-1">发票总数</p>
+                        <p id="statTotal" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                    <div class="stat-card bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                        <p class="text-xs text-gray-500 mb-1">报销总金额</p>
+                        <p id="statAmount" class="text-2xl font-bold text-green-600">¥0.00</p>
+                    </div>
+                    <div class="stat-card bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                        <p class="text-xs text-gray-500 mb-1">高铁票/机票数量</p>
+                        <p id="statTrain" class="text-2xl font-bold text-blue-600">0</p>
+                    </div>
+                    <div class="stat-card bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                        <p class="text-xs text-gray-500 mb-1">重复发票</p>
+                        <p id="statDuplicate" class="text-2xl font-bold text-red-600">0</p>
+                    </div>
+                </div>
+
+                <!-- 标签页切换 -->
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+                    <div class="flex border-b border-gray-200">
+                        <button class="tab-btn active px-5 py-3 text-sm font-medium text-primary-600 border-b-2 border-primary-500 transition" onclick="switchTab('invoices')">
+                            发票明细
+                        </button>
+                        <button class="tab-btn px-5 py-3 text-sm font-medium text-gray-500 border-b-2 border-transparent transition" onclick="switchTab('stats')">
+                            员工统计
+                        </button>
+                        <button class="tab-btn px-5 py-3 text-sm font-medium text-gray-500 border-b-2 border-transparent transition" onclick="switchTab('duplicates')">
+                            重复预警
+                        </button>
+                    </div>
+
+                    <!-- 发票明细标签页 -->
+                    <div id="tabInvoices" class="tab-content p-4">
+                        <!-- 调试面板 -->
+                        <div id="debugPanel" class="hidden mb-4">
+                            <div class="bg-gray-100 border border-gray-300 rounded-lg">
+                                <div class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-200 rounded-t-lg" onclick="toggleDebugPanel()">
+                                    <div class="flex items-center gap-2">
+                                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                                        </svg>
+                                        <span class="text-sm font-medium text-gray-700">调试信息</span>
+                                        <span id="debugCount" class="text-xs text-gray-400"></span>
+                                    </div>
+                                    <span id="debugToggleBtn" class="text-sm text-blue-600 hover:text-blue-700 font-medium">▼ 点击展开</span>
+                                </div>
+                                <div id="debugContent" class="hidden px-4 py-3 border-t border-gray-200 bg-white rounded-b-lg max-h-[400px] overflow-y-auto">
+                                    <!-- 调试内容将动态填充 -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto max-h-[600px] overflow-y-auto rounded-lg">
+                            <table class="invoice-table w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-xs">
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('index')">
+                                            序号 <span class="sort-arrow" id="sort-index">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('employee')">
+                                            员工姓名 <span class="sort-arrow" id="sort-employee">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('type')">
+                                            发票类型 <span class="sort-arrow" id="sort-type">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">发票号码</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('date')">
+                                            开票日期 <span class="sort-arrow" id="sort-date">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">购买方</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">销售方</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">商品名称</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('amount')">
+                                            金额 <span class="sort-arrow" id="sort-amount">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">税额</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap cursor-pointer" onclick="sortTable('total')">
+                                            价税合计 <span class="sort-arrow" id="sort-total">&#x25B2;&#x25BC;</span>
+                                        </th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">车次</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">出发站</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">到达站</th>
+                                        <th class="px-3 py-2.5 whitespace-nowrap">状态</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoiceTableBody" class="text-gray-600">
+                                    <tr>
+                                        <td colspan="16" class="px-3 py-12 text-center text-gray-400">
+                                            <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                            </svg>
+                                            暂无数据，请上传PDF发票后点击"开始处理"
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 增值税发票汇总表格区域 -->
+                        <div id="normalInvoicesSection" class="mt-6">
+                            <h3 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                </svg>
+                                增值税发票
+                                <span id="normalInvoiceCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <div class="overflow-x-auto rounded-lg">
+                                <table class="invoice-table w-full text-sm">
+                                    <thead>
+                                        <tr class="text-left text-xs">
+                                            <th class="px-3 py-2.5 whitespace-nowrap">序号</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">员工姓名</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">发票类型</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">发票号码</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">开票日期</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">购买方</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">销售方</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">商品名称</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">金额</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">税额</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">价税合计</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">状态</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="normalInvoicesTableBody" class="text-gray-600">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 高铁票汇总表格区域 -->
+                        <div id="trainTicketsSection" class="mt-6">
+                            <h3 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                </svg>
+                                高铁票汇总
+                                <span id="trainTicketCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <div class="overflow-x-auto rounded-lg">
+                                <table class="invoice-table w-full text-sm">
+                                    <thead>
+                                        <tr class="text-left text-xs">
+                                            <th class="px-3 py-2.5 whitespace-nowrap">序号</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">姓名</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">发票号码</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">开票日期</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">票价</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">购买方名称</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">出发站</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">终点站</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">乘车日期</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">状态</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="trainTicketsTableBody" class="text-gray-600">
+                                        <!-- 高铁票数据将动态填充 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 机票汇总表格区域 -->
+                        <div id="airlineTicketsSection" class="mt-6">
+                            <h3 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <svg class="w-5 h-5 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                                </svg>
+                                机票汇总
+                                <span id="airlineTicketCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <div class="overflow-x-auto rounded-lg">
+                                <table class="invoice-table w-full text-sm">
+                                    <thead>
+                                        <tr class="text-left text-xs">
+                                            <th class="px-3 py-2.5 whitespace-nowrap">序号</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">姓名</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">发票号码</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">开票日期</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">航班号</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">出发地</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">目的地</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">价税合计</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">购买方名称</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">状态</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="airlineTicketsTableBody" class="text-gray-600">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 按购买方汇总报销区域 -->
+                        <div id="buyerSummarySection" class="mt-6 hidden">
+                            <h3 class="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                                </svg>
+                                按购买方汇总报销
+                                <span id="buyerSummaryCount" class="text-sm font-normal text-gray-500"></span>
+                            </h3>
+                            <div class="overflow-x-auto rounded-lg">
+                                <table class="invoice-table w-full text-sm">
+                                    <thead>
+                                        <tr class="text-left text-xs">
+                                            <th class="px-3 py-2.5 whitespace-nowrap">购买方名称</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">发票类型</th>
+                                            <th class="px-3 py-2.5 whitespace-nowrap">合计金额</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="buyerSummaryTableBody" class="text-gray-600">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 员工统计标签页 -->
+                    <div id="tabStats" class="tab-content p-4 hidden">
+                        <div class="overflow-x-auto rounded-lg">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-xs text-gray-700 bg-gray-50">
+                                        <th class="px-4 py-3 whitespace-nowrap">员工姓名</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">发票总数</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">报销总金额</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">高铁票/机票数量</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">高铁票/机票金额</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">普通发票数量</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">普通发票金额</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="statsTableBody" class="text-gray-600">
+                                    <tr>
+                                        <td colspan="7" class="px-4 py-12 text-center text-gray-400">暂无统计数据</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 重复预警标签页 -->
+                    <div id="tabDuplicates" class="tab-content p-4 hidden">
+                        <div id="duplicateAlert" class="hidden mb-4 bg-red-50 border border-red-200 rounded-lg p-4">
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                                </svg>
+                                <div>
+                                    <p class="text-sm font-medium text-red-700">检测到重复发票</p>
+                                    <p id="duplicateCount" class="text-xs text-red-600 mt-1"></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto rounded-lg">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-xs text-gray-700 bg-gray-50">
+                                        <th class="px-4 py-3 whitespace-nowrap">序号</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">员工姓名</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">发票类型</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">发票代码/车次</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">发票号码/座位</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">日期</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">金额</th>
+                                        <th class="px-4 py-3 whitespace-nowrap">重复来源</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="duplicateTableBody" class="text-gray-600">
+                                    <tr>
+                                        <td colspan="8" class="px-4 py-12 text-center text-gray-400">未检测到重复发票</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        // ==================== 全局变量 ====================
+        // 存储所有解析后的发票数据
+        let invoiceData = [];
+        // 存储上传的PDF文件（File对象）
+        let pdfFiles = [];
+        // 存储历史发票数据（用于查重）
+        let historyInvoices = [];
+        // 存储调试信息（PDF原始文本）
+        let debugInfo = [];
+        // 当前排序状态
+        let currentSort = { field: 'index', asc: true };
+        // PDF.js worker 设置
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // ==================== Python代理配置 ====================
+        const OCR_PROXY_URL = 'http://localhost:8765';
+
+        // 通过Python代理提取PDF（发送PDF文件到服务器，用pdfplumber提取）
+        async function extractWithPythonProxy(file) {
+            try {
+                const healthResp = await fetch(OCR_PROXY_URL + '/health');
+                const healthData = await healthResp.json();
+                if (!healthData.pdfplumber_available) {
+                    console.log('Python proxy: pdfplumber not installed');
+                    return null;
+                }
+                console.log('Python proxy: server running, pdfplumber available');
+            } catch (e) {
+                console.log('Python proxy: server not running, start ocr_proxy.py first');
+                return null;
+            }
+            
+            try {
+                // 将PDF文件通过FormData发送到代理服务器
+                const formData = new FormData();
+                formData.append('file', file, file.name);
+                
+                const response = await fetch(OCR_PROXY_URL + '/extract_pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success && data.text) {
+                    console.log('Python proxy: extracted successfully, text length:', data.text.length);
+                    console.log('Python proxy: amount=', data.amount, 'tax=', data.tax, 'total=', data.totalAmount);
+                    console.log('Python proxy: buyer=', data.buyer, 'seller=', data.seller);
+                    console.log('Python proxy: invoiceNumber=', data.invoiceNumber);
+                    return {
+                        text: data.text,
+                        structured: data.words_result,
+                        extracted: data  // 直接包含提取的结构化数据
+                    };
+                } else {
+                    console.log('Python proxy: extraction failed', data);
+                }
+            } catch (e) {
+                console.error('Python proxy: request failed', e);
+            }
+            return null;
+        }
+
+        // ==================== 初始化 ====================
+        document.addEventListener('DOMContentLoaded', function() {
+            initUploadZones();
+            updateClock();
+            setInterval(updateClock, 1000);
+        });
+
+        // 更新时钟显示
+        function updateClock() {
+            const now = new Date();
+            const str = now.getFullYear() + '-' +
+                String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(now.getDate()).padStart(2, '0') + ' ' +
+                String(now.getHours()).padStart(2, '0') + ':' +
+                String(now.getMinutes()).padStart(2, '0') + ':' +
+                String(now.getSeconds()).padStart(2, '0');
+            document.getElementById('clockDisplay').textContent = str;
+        }
+
+        // ==================== 上传区域初始化 ====================
+        function initUploadZones() {
+            const pdfZone = document.getElementById('pdfDropZone');
+            const pdfInput = document.getElementById('pdfFileInput');
+            const excelZone = document.getElementById('excelDropZone');
+            const excelInput = document.getElementById('excelFileInput');
+
+            // 检查元素是否存在
+            if (!pdfInput) {
+                console.error('PDF上传输入框未找到');
+                return;
+            }
+            if (!excelZone || !excelInput) {
+                console.error('Excel上传区域元素未找到');
+            }
+
+            // PDF 文件选择（原生input直接处理，不需要额外事件）
+            pdfInput.addEventListener('change', function(e) {
+                handlePdfFiles(e.target.files);
+                pdfInput.value = '';
+            });
+
+            // PDF 拖拽上传
+            if (pdfZone) {
+                pdfZone.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    pdfZone.classList.add('drag-over');
+                });
+                pdfZone.addEventListener('dragleave', function() {
+                    pdfZone.classList.remove('drag-over');
+                });
+                pdfZone.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    pdfZone.classList.remove('drag-over');
+                    handlePdfFiles(e.dataTransfer.files);
+                });
+            }
+
+            // Excel 点击上传（由label原生for属性处理，不需要额外事件）
+            if (excelZone && excelInput) {
+                excelInput.addEventListener('change', function(e) {
+                    handleHistoryExcel(e.target.files[0]);
+                    excelInput.value = '';
+                });
+
+                // Excel 拖拽上传
+                excelZone.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    excelZone.classList.add('drag-over');
+                });
+                excelZone.addEventListener('dragleave', function() {
+                    excelZone.classList.remove('drag-over');
+                });
+                excelZone.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    excelZone.classList.remove('drag-over');
+                    if (e.dataTransfer.files.length > 0) {
+                        handleHistoryExcel(e.dataTransfer.files[0]);
+                    }
+                });
+            }
+        }
+
+        // ==================== PDF文件处理 ====================
+        // 处理上传的PDF文件
+        function handlePdfFiles(files) {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    pdfFiles.push(file);
+                }
+            }
+            renderFileList();
+            if (pdfFiles.length > 0) {
+                showToast('已添加 ' + files.length + ' 个PDF文件', 'success');
+            } else {
+                showToast('请选择有效的PDF文件', 'error');
+            }
+        }
+
+        // 渲染已上传文件列表
+        function renderFileList() {
+            const container = document.getElementById('fileList');
+            if (pdfFiles.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            let html = '';
+            pdfFiles.forEach(function(file, idx) {
+                const size = (file.size / 1024).toFixed(1);
+                html += '<div class="file-item flex items-center justify-between bg-gray-50 rounded px-3 py-1.5 text-xs">' +
+                    '<span class="text-gray-600 truncate flex-1 mr-2">' + escapeHtml(file.name) + '</span>' +
+                    '<span class="text-gray-400 mr-2">' + size + 'KB</span>' +
+                    '<button onclick="removeFile(' + idx + ')" class="text-red-500 hover:text-red-600">&times;</button>' +
+                    '</div>';
+            });
+            container.innerHTML = html;
+        }
+
+        // 移除单个文件
+        function removeFile(idx) {
+            pdfFiles.splice(idx, 1);
+            renderFileList();
+        }
+
+        // ==================== 历史Excel处理 ====================
+        // 处理上传的历史发票Excel
+        function handleHistoryExcel(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    // 尝试读取工作表：优先"发票明细"，否则取第一个工作表
+                    let sheet = workbook.Sheets['发票明细'];
+                    let sheetName = '发票明细';
+                    if (!sheet) {
+                        sheetName = workbook.SheetNames[0];
+                        sheet = workbook.Sheets[sheetName];
+                        console.log('未找到"发票明细"工作表，使用第一个工作表:', sheetName);
+                    }
+                    
+                    if (!sheet) {
+                        showToast('Excel文件中没有可读取的工作表', 'error');
+                        return;
+                    }
+                    
+                    const jsonData = XLSX.utils.sheet_to_json(sheet);
+                    console.log('历史Excel数据行数:', jsonData.length, '列名:', Object.keys(jsonData[0] || {}));
+                    
+                    historyInvoices = jsonData.map(function(row) {
+                        return {
+                            invoiceCode: (row['发票代码'] || '').toString(),
+                            invoiceNumber: (row['发票号码'] || '').toString(),
+                            trainNo: (row['车次'] || row['车次/航班'] || '').toString(),
+                            trainDate: (row['开票日期'] || '').toString(),
+                            seat: (row['座位'] || '').toString(),
+                            employee: (row['员工姓名'] || row['员工'] || '').toString(),
+                            type: (row['发票类型'] || row['类型'] || '').toString(),
+                            isTrain: (row['是否高铁票'] || row['发票类型'] || '') === '是' || 
+                                     (row['发票类型'] || '') === '高铁票' || 
+                                     (row['发票类型'] || '') === '机票'
+                        };
+                    }).filter(function(inv) {
+                        // 过滤掉没有发票号码的记录
+                        return inv.invoiceNumber && inv.invoiceNumber.length > 0;
+                    });
+                    
+                    document.getElementById('historyInfo').classList.remove('hidden');
+                    document.getElementById('historyInfo').innerHTML =
+                        '<span class="text-green-600">已加载 ' + historyInvoices.length + ' 条历史发票记录（来源: ' + sheetName + '）</span>';
+                    showToast('成功加载 ' + historyInvoices.length + ' 条历史记录', 'success');
+                } catch (err) {
+                    console.error('Excel解析失败:', err);
+                    showToast('Excel解析失败: ' + err.message, 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ==================== 核心处理逻辑 ====================
+        // 主处理函数 - 解析所有PDF发票
+        async function processInvoices() {
+            const employeeName = document.getElementById('employeeName').value.trim();
+            if (!employeeName) {
+                showToast('请输入员工姓名', 'error');
+                document.getElementById('employeeName').focus();
+                return;
+            }
+            if (pdfFiles.length === 0) {
+                showToast('请先上传PDF发票文件', 'error');
+                return;
+            }
+
+            // 显示进度条
+            const progressSection = document.getElementById('progressSection');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            progressSection.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressText.textContent = '开始处理...';
+
+            // 禁用按钮
+            document.getElementById('btnProcess').disabled = true;
+
+            // 清空之前的数据
+            invoiceData = [];
+            debugInfo = [];
+
+            const total = pdfFiles.length;
+
+            for (let i = 0; i < total; i++) {
+                const file = pdfFiles[i];
+                progressText.textContent = '正在处理: ' + file.name + ' (' + (i + 1) + '/' + total + ')';
+                progressBar.style.width = Math.round(((i) / total) * 100) + '%';
+
+                try {
+                    // 读取PDF文件
+                    const arrayBuffer = await file.arrayBuffer();
+                    let text = '';
+                    
+                    try {
+                        text = await extractPdfText(arrayBuffer, file);
+                    } catch (pdfErr) {
+                        console.warn('PDF文本提取失败，尝试备用方法:', pdfErr);
+                        // 备用方法：直接从原始数据提取
+                        try {
+                            const decoder = new TextDecoder('utf-8');
+                            text = decoder.decode(arrayBuffer);
+                            // 尝试提取XML标签
+                            const xmlTags = text.match(/<[\w:]+[^>]*>[^<]*<\/[\w:]+>/g);
+                            if (xmlTags && xmlTags.length > 0) {
+                                text = '<?xml version="1.0"?>\n<ExtractedData>\n' + xmlTags.join('\n') + '\n</ExtractedData>';
+                                text = '\n---EMBEDDED_XML---\n' + text + '\n---END_XML---\n';
+                            }
+                        } catch (e) {
+                            console.error('备用提取也失败:', e);
+                        }
+                    }
+
+                    // 保存调试信息
+                    // 提取XML部分单独显示
+                    const xmlMatchDebug = text.match(/---EMBEDDED_XML---([\s\S]*?)---END_XML---/);
+                    const xmlContent = xmlMatchDebug ? xmlMatchDebug[1] : '';
+                    debugInfo.push({
+                        fileName: file.name,
+                        rawText: text,
+                        xmlContent: xmlContent
+                    });
+
+                    // 解析发票信息
+                    const invoice = parseInvoiceText(text, employeeName, file);
+                    invoiceData.push(invoice);
+                } catch (err) {
+                    // 解析失败时记录基本信息
+                    debugInfo.push({
+                        fileName: file.name,
+                        rawText: '[解析失败] ' + err.message
+                    });
+                    invoiceData.push({
+                        index: i + 1,
+                        employee: employeeName,
+                        type: '解析失败',
+                        invoiceCode: '',
+                        invoiceNumber: '',
+                        date: '',
+                        buyer: '',
+                        seller: '',
+                        goodsName: '',
+                        amount: 0,
+                        tax: 0,
+                        total: 0,
+                        isTrain: false,
+                        trainNo: '',
+                        departure: '',
+                        arrival: '',
+                        seat: '',
+                        isDuplicate: false,
+                        duplicateSource: '',
+                        fileName: file.name,
+                        fileData: file
+                    });
+                    console.error('解析文件失败:', file.name, err);
+                }
+
+                // 让UI有时间更新
+                await sleep(50);
+            }
+
+            // 重复检测
+            detectDuplicates();
+
+            // 更新进度
+            progressBar.style.width = '100%';
+            progressText.textContent = '处理完成！共 ' + invoiceData.length + ' 张发票';
+
+            // 重新编号
+            invoiceData.forEach(function(inv, idx) { inv.index = idx + 1; });
+
+            // 更新界面
+            renderInvoiceTable();
+            renderStats();
+            renderDuplicates();
+            updateSummaryCards();
+            renderDebugPanel();
+            renderNormalInvoices();
+            renderTrainTickets();
+            renderAirlineTickets();
+            renderBuyerSummary();
+
+            // 启用按钮
+            document.getElementById('btnProcess').disabled = false;
+            document.getElementById('btnExport').disabled = false;
+            document.getElementById('btnDownload').disabled = false;
+            document.getElementById('btnRename').disabled = false;
+
+            showToast('处理完成，共解析 ' + invoiceData.length + ' 张发票', 'success');
+        }
+
+        // 提取PDF文本内容 - 改进版，尝试提取更多中文内容和嵌入XML
+        async function extractPdfText(arrayBuffer, file) {
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = '';
+            let embeddedXml = '';
+            
+            // 方法1：尝试提取嵌入的XML文件（铁路电子客票包含XML数据）
+            try {
+                const attachments = await pdf.getAttachments();
+                console.log('PDF嵌入文件:', attachments);
+                if (attachments) {
+                    for (const key in attachments) {
+                        const attachment = attachments[key];
+                        console.log('检查附件:', key, attachment);
+                        // 检查是否为XML文件
+                        const filename = attachment.filename || key || '';
+                        if (filename.toLowerCase().indexOf('xml') !== -1 || filename.toLowerCase().endsWith('.xml')) {
+                            // 获取内容 - 可能在content属性或data属性
+                            let content = attachment.content || attachment.data;
+                            console.log('附件内容类型:', typeof content, '是否为Uint8Array:', content instanceof Uint8Array);
+                            if (content) {
+                                let decoder;
+                                // 尝试不同的编码
+                                try {
+                                    decoder = new TextDecoder('utf-8');
+                                    embeddedXml = decoder.decode(content);
+                                } catch (e) {
+                                    console.log('UTF-8解码失败，尝试GBK');
+                                    try {
+                                        decoder = new TextDecoder('gbk');
+                                        embeddedXml = decoder.decode(content);
+                                    } catch (e2) {
+                                        console.log('GBK解码也失败');
+                                    }
+                                }
+                                if (embeddedXml && embeddedXml.indexOf('<?xml') !== -1) {
+                                    fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                                    console.log('成功提取XML，长度:', embeddedXml.length);
+                                    break;
+                                } else {
+                                    console.log('提取的内容不是有效XML，前100字符:', embeddedXml.substring(0, 100));
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('提取嵌入文件失败:', e);
+            }
+            
+            // 方法2：使用pdf.js的getData获取原始PDF数据并解压
+            let pdfData = null;
+            let rawText = '';  // 原始PDF文本（用于XML搜索）
+            if (!embeddedXml) {
+                try {
+                    console.log('尝试方法2: 使用pdf.getData()');
+                    pdfData = await pdf.getData();
+                    console.log('获取到PDF数据，长度:', pdfData.length);
+                    // 这里的数据已经是解压后的
+                    const decoder = new TextDecoder('utf-8');
+                    rawText = decoder.decode(pdfData);
+                    
+                    // 搜索XML声明
+                    const xmlStart = rawText.indexOf('<?xml');
+                    if (xmlStart !== -1) {
+                        // 找到XML内容（通常是XBRL格式）
+                        const xmlEnd = rawText.indexOf('</xbrl>', xmlStart);
+                        if (xmlEnd !== -1) {
+                            embeddedXml = rawText.substring(xmlStart, xmlEnd + 8);
+                            fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                            console.log('从pdf.getData()提取XML成功，长度:', embeddedXml.length);
+                        }
+                    }
+                } catch (e) {
+                    console.log('pdf.getData()提取XML失败:', e);
+                }
+            }
+            
+            // 方法3：从已提取的文本内容中搜索金额和发票信息（备用方案）
+            // 使用pdf.js提取的文本内容（fullText）来查找金额
+            try {
+                console.log('方法3: 尝试从提取的文本中提取金额和信息...');
+                console.log('fullText长度:', fullText.length);
+                console.log('fullText前500字符:', fullText.substring(0, 500));
+                
+                // 查找发票号码（20位数字，在"统一发票监制"附近）
+                const invoiceNumMatch = fullText.match(/统一发票监[\s\S]{0,30}(\d{20})/);
+                if (invoiceNumMatch) {
+                    fullText += '\n---EXTRACTED_INVOICE_NUM---\n' + invoiceNumMatch[1] + '\n---END_INVOICE_NUM---\n';
+                    console.log('从文本提取到发票号码:', invoiceNumMatch[1]);
+                }
+                
+                // 查找公司名（在统一社会信用代码前面）
+                const companyPattern = /([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|民宿|客栈|宾馆))/g;
+                const companyMatches = fullText.match(companyPattern);
+                console.log('找到的所有公司名:', companyMatches);
+                
+                // 尝试从"购买方"/"销售方"标签附近提取
+                let buyerFromTag = '', sellerFromTag = '';
+                
+                // 方法A：从"购买方名称"或"名称："后面提取（更精确）
+                // 使用更宽松的匹配，捕获冒号后面直到公司后缀的所有字符
+                const buyerTagMatch = fullText.match(/购买方(?:名称)?[：:\s]+([^\n]+?(?:公司|集团|企业|中心|研究院|大学|学院))/);
+                if (buyerTagMatch) {
+                    buyerFromTag = buyerTagMatch[1].trim();
+                    console.log('从购买方标签提取到:', buyerFromTag);
+                }
+                
+                const sellerTagMatch = fullText.match(/销售方(?:名称)?[：:\s]+([^\n]+?(?:公司|集团|企业|中心|研究院|大学|学院))/);
+                if (sellerTagMatch) {
+                    sellerFromTag = sellerTagMatch[1].trim();
+                    console.log('从销售方标签提取到:', sellerFromTag);
+                }
+                
+                // 如果从标签提取成功，优先使用
+                if (buyerFromTag || sellerFromTag) {
+                    fullText += '\n---EXTRACTED_COMPANIES---\n';
+                    fullText += 'BUYER:' + buyerFromTag + '\n';
+                    fullText += 'SELLER:' + sellerFromTag + '\n';
+                    fullText += '---END_COMPANIES---\n';
+                    console.log('从标签提取到公司 - 购买方:', buyerFromTag, '销售方:', sellerFromTag);
+                } else if (companyMatches && companyMatches.length >= 2) {
+                    console.log('原始公司名列表:', companyMatches);
+                    
+                    // 过滤：只保留真正的公司名（排除人名）
+                    // 真正的公司名应该包含"公司"、"集团"、"企业"等关键词
+                    const realCompanies = companyMatches.filter(c => 
+                        /公司|集团|企业|研究院|大学|学院|中心/.test(c)
+                    );
+                    
+                    console.log('过滤后的公司名列表:', realCompanies);
+                    
+                    // 去重
+                    const uniqueCompanies = [];
+                    for (let c of realCompanies) {
+                        let isDuplicate = false;
+                        for (let u of uniqueCompanies) {
+                            if (c.indexOf(u) !== -1 || u.indexOf(c) !== -1) {
+                                isDuplicate = true;
+                                break;
+                            }
+                        }
+                        if (!isDuplicate) {
+                            uniqueCompanies.push(c);
+                        }
+                        if (uniqueCompanies.length >= 2) break;
+                    }
+                    
+                    if (uniqueCompanies.length >= 2) {
+                        // 判断哪个是购买方，哪个是销售方
+                        // 航空公司/铁路公司是销售方，其他公司是购买方
+                        let buyer = '', seller = '';
+                        for (let c of uniqueCompanies) {
+                            if (/航空|铁路|机场|航司/.test(c)) {
+                                seller = c;
+                            } else {
+                                buyer = c;
+                            }
+                        }
+                        // 如果没有识别出航空公司，默认第一个是购买方，第二个是销售方
+                        if (!buyer) buyer = uniqueCompanies[0];
+                        if (!seller) seller = uniqueCompanies[1];
+                        
+                        fullText += '\n---EXTRACTED_COMPANIES---\n';
+                        fullText += 'BUYER:' + buyer + '\n';
+                        fullText += 'SELLER:' + seller + '\n';
+                        fullText += '---END_COMPANIES---\n';
+                        console.log('从文本提取到公司 - 购买方:', buyer, '销售方:', seller);
+                    }
+                }
+                
+                // 查找金额（根据"合计"后面的数字）
+                // 查找RAW_ITEMS中的金额格式 [¥304.95]
+                const rawItemsMatch = fullText.match(/---RAW_ITEMS---([\s\S]*?)(?:---|$)/);
+                if (rawItemsMatch) {
+                    const rawItems = rawItemsMatch[1];
+                    console.log('RAW_ITEMS内容:', rawItems.substring(0, 500));
+                    
+                    // 查找带¥的金额 [¥304.95]
+                    const yenMatches = rawItems.match(/\[¥\s*([\d,]+\.\d{2})\]/g);
+                    console.log('RAW_ITEMS中的¥金额:', yenMatches);
+                    
+                    if (yenMatches && yenMatches.length >= 2) {
+                        // 解析金额
+                        const amounts = yenMatches.map(y => parseFloat(y.replace(/[\[\]¥,]/g, '')));
+                        console.log('解析后的金额:', amounts);
+                        
+                        // 假设：第一个是金额，第二个是税额，最大的一个是价税合计
+                        const extractedAmount = amounts[0];
+                        const extractedTax = amounts[1];
+                        const extractedTotal = Math.max(...amounts);
+                        
+                        fullText += '\n---EXTRACTED_AMOUNTS---\n';
+                        fullText += 'TOTAL:' + extractedTotal + '\n';
+                        fullText += 'AMOUNT:' + extractedAmount + '\n';
+                        fullText += 'TAX:' + extractedTax + '\n';
+                        fullText += '---END_AMOUNTS---\n';
+                        console.log('从RAW_ITEMS提取金额 - 金额:', extractedAmount, '税额:', extractedTax, '价税合计:', extractedTotal);
+                    }
+                }
+                
+                // 方法3.1: 搜索rai:Invoice标签（完整XBRL文档）
+                const raiMatch = rawText.match(/<rai:Invoice[^>]*>[\s\S]*?<\/rai:Invoice>/);
+                if (raiMatch) {
+                    embeddedXml = raiMatch[0];
+                    fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                    console.log('从原始数据提取rai:Invoice XML成功，长度:', embeddedXml.length);
+                } else {
+                    // 方法3.2: 搜索xbrl标签（完整XBRL文档）
+                    const xbrlMatch = rawText.match(/<xbrl[^>]*>[\s\S]*?<\/xbrl>/i);
+                    if (xbrlMatch) {
+                        embeddedXml = xbrlMatch[0];
+                        fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                        console.log('从原始数据提取xbrl XML成功，长度:', embeddedXml.length);
+                    } else {
+                        // 方法3.3: 搜索Invoice标签（不带命名空间）
+                        const invoiceMatch = rawText.match(/<Invoice[^>]*>[\s\S]*?<\/Invoice>/);
+                        if (invoiceMatch) {
+                            embeddedXml = invoiceMatch[0];
+                            fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                            console.log('从原始数据提取Invoice XML成功，长度:', embeddedXml.length);
+                        } else {
+                            // 方法3.4: 搜索包含铁路相关标签的XML片段
+                            const railMatch = rawText.match(/<[^>]*(?:DepartureStation|TrainNumber|BuyerName|NameOfPurchaser)[^>]*>[\s\S]{0,1000}/);
+                            if (railMatch) {
+                                console.log('找到铁路相关标签:', railMatch[0].substring(0, 200));
+                            }
+                            // 方法3.5: 尝试提取所有XML标签内容
+                            const allXmlTags = rawText.match(/<[\w:]+[^>]*>[^<]*<\/[\w:]+>/g);
+                            if (allXmlTags && allXmlTags.length > 0) {
+                                // 过滤出可能包含发票数据的标签
+                                const invoiceTags = allXmlTags.filter(tag => 
+                                    /Invoice|Buyer|Seller|Amount|Tax|Train|Station/i.test(tag)
+                                );
+                                if (invoiceTags.length > 0) {
+                                    console.log('找到发票相关XML标签:', invoiceTags.slice(0, 10));
+                                    // 将所有标签组合成一个XML片段
+                                    embeddedXml = '<?xml version="1.0"?>\n<ExtractedData>\n' + invoiceTags.join('\n') + '\n</ExtractedData>';
+                                    fullText += '\n---EMBEDDED_XML---\n' + embeddedXml + '\n---END_XML---\n';
+                                    console.log('从标签组合提取XML成功，标签数:', invoiceTags.length);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('从原始数据提取XML失败:', e);
+            }
+            
+            // 方法4：使用Python代理提取（当pdf.js无法提取文本时）
+            let ocrText = '';
+            try {
+                console.log('方法4: 尝试使用Python代理提取...');
+                
+                // 直接发送PDF文件到Python代理服务器
+                const proxyResult = await extractWithPythonProxy(file);
+                
+                if (proxyResult) {
+                    ocrText = proxyResult.text || '';
+                    console.log('Python代理提取完成，文本长度:', ocrText.length);
+                    console.log('Python代理提取结果前500字符:', ocrText.substring(0, 500));
+                    
+                    // 将提取的文本添加到fullText
+                    if (ocrText && ocrText.length > 50) {
+                        fullText += '\n---OCR_TEXT---\n' + ocrText + '\n---END_OCR---\n';
+                    }
+                    
+                    // 如果代理返回了结构化数据，直接使用
+                    if (proxyResult.extracted) {
+                        const ext = proxyResult.extracted;
+                        console.log('Python代理返回结构化数据:', ext);
+                        
+                        // 直接写入提取结果
+                        if (ext.invoiceNumber && !fullText.includes('---EXTRACTED_INVOICE_NUM---')) {
+                            fullText += '\n---EXTRACTED_INVOICE_NUM---\n' + ext.invoiceNumber + '\n---END_INVOICE_NUM---\n';
+                            console.log('Python代理提取到发票号码:', ext.invoiceNumber);
+                        }
+                        if (ext.amount && !fullText.includes('---EXTRACTED_AMOUNTS---')) {
+                            fullText += '\n---EXTRACTED_AMOUNTS---\n';
+                            fullText += 'TOTAL:' + (ext.totalAmount || 0) + '\n';
+                            fullText += 'AMOUNT:' + ext.amount + '\n';
+                            fullText += 'TAX:' + (ext.tax || 0) + '\n';
+                            fullText += '---END_AMOUNTS---\n';
+                            console.log('Python代理提取到金额 - 金额:', ext.amount, '税额:', ext.tax, '价税合计:', ext.totalAmount);
+                        }
+                        if (ext.buyer && ext.seller && !fullText.includes('---EXTRACTED_COMPANIES---')) {
+                            fullText += '\n---EXTRACTED_COMPANIES---\n';
+                            fullText += 'BUYER:' + ext.buyer + '\n';
+                            fullText += 'SELLER:' + ext.seller + '\n';
+                            fullText += '---END_COMPANIES---\n';
+                            console.log('Python代理提取到公司 - 购买方:', ext.buyer, '销售方:', ext.seller);
+                        }
+                        if (ext.date && !fullText.includes('---EXTRACTED_DATE---')) {
+                            fullText += '\n---EXTRACTED_DATE---\n' + ext.date + '\n---END_DATE---\n';
+                            console.log('Python代理提取到日期:', ext.date);
+                        }
+                        // 出发地和目的地
+                        console.log('Python代理返回的出发地/目的地:', ext.departure, ext.arrival);
+                        if (ext.departure && ext.arrival && !fullText.includes('---EXTRACTED_ROUTE---')) {
+                            fullText += '\n---EXTRACTED_ROUTE---\n';
+                            fullText += 'DEPARTURE:' + ext.departure + '\n';
+                            fullText += 'ARRIVAL:' + ext.arrival + '\n';
+                            fullText += '---END_ROUTE---\n';
+                            console.log('Python代理提取到出发地/目的地:', ext.departure, '→', ext.arrival);
+                        }
+                    }
+                } else {
+                    console.log('Python代理提取失败或服务器未启动');
+                }
+            } catch (ocrErr) {
+                console.log('Python代理提取异常:', ocrErr);
+            }
+            
+            // 遍历所有页面提取文本
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                // 方法1：标准文本提取
+                const content = await page.getTextContent({ normalizeWhitespace: false });
+                // 按行分组，保留换行结构
+                let lastY = null;
+                let lineText = '';
+                for (let j = 0; j < content.items.length; j++) {
+                    const item = content.items[j];
+                    const y = Math.round(item.transform[5]);
+                    if (lastY !== null && Math.abs(y - lastY) > 3) {
+                        fullText += lineText + '\n';
+                        lineText = '';
+                    }
+                    lineText += item.str;
+                    lastY = y;
+                }
+                if (lineText) fullText += lineText + '\n';
+                
+                // 方法2：尝试提取所有文本项（包括可能的中文）
+                fullText += '\n---RAW_ITEMS---\n';
+                for (let j = 0; j < content.items.length; j++) {
+                    const item = content.items[j];
+                    if (item.str && item.str.trim()) {
+                        fullText += '[' + item.str + '] ';
+                    }
+                }
+                fullText += '\n';
+            }
+            return fullText;
+        }
+        
+        // ==================== 发票文本解析 ====================
+        // 解析发票文本，提取结构化信息
+        function parseInvoiceText(text, employeeName, file) {
+            console.log('开始解析发票:', file.name, '文本长度:', text.length);
+            
+            // ========== 第一步：判断是否为机票（优先检测）==========
+            // 机票有关键词：航空运输电子客票行程单、航班号
+            // 或者XML中使用 atr: 命名空间
+            let isAirlineTicket = false;
+            if (text.indexOf('航空运输电子客票行程单') !== -1 || 
+                text.indexOf('航班号') !== -1 ||
+                (text.indexOf('航空') !== -1 && text.indexOf('行程单') !== -1) ||
+                text.indexOf('atr:') !== -1) {  // 机票XML使用atr命名空间
+                isAirlineTicket = true;
+                console.log('通过关键词识别为机票');
+            }
+            
+            // ========== 第二步：判断是否为高铁票 ==========
+            let isTrain = false;
+            
+            // 如果已经是机票，不再检测高铁票
+            if (!isAirlineTicket) {
+                // 判断是否为高铁票/火车票 - 使用更全面的关键词
+                const trainKeywords = [
+                    '铁路', '火车票', '高铁', '动车组', '车次', '出发站', '到达站', '中国铁路', 
+                    '电子客票', '铁路电子客票', '电子发票（铁路', '二等座', '一等座', '商务座',
+                    '12306', '95306', '旅途愉快', 'DepartureStation', 'DestinationStation', 
+                    'TrainNumber', 'PassengerName', 'rai:', 'Puyang', 'Zhengzhou', 'Luoyang',
+                    '濮阳', '郑州', '洛阳', '南阳', 'Nanyang', 'G6635', 'G6605', 'G7996'
+                ];
+                for (let i = 0; i < trainKeywords.length; i++) {
+                    if (text.indexOf(trainKeywords[i]) !== -1) {
+                        console.log('通过关键词识别为高铁票:', trainKeywords[i]);
+                        isTrain = true;
+                        break;
+                    }
+                }
+                
+                // 额外检查：如果有嵌入XML且包含铁路相关标签，也识别为高铁票
+                if (!isTrain && text.indexOf('---EMBEDDED_XML---') !== -1) {
+                    const xmlMatch = text.match(/---EMBEDDED_XML---([\s\S]*?)---END_XML---/);
+                    if (xmlMatch) {
+                        const xml = xmlMatch[1];
+                        // 检查XML中是否有铁路电子客票相关标签
+                        if (xml.indexOf('DepartureStation') !== -1 || 
+                            xml.indexOf('TrainNumber') !== -1 ||
+                            xml.indexOf('rai:') !== -1 ||
+                            xml.indexOf('Railway') !== -1) {
+                            console.log('通过XML标签识别为高铁票');
+                            isTrain = true;
+                        }
+                    }
+                }
+                
+                // 额外检查：车次格式（G/D/C + 数字）
+                if (!isTrain) {
+                    const trainNoMatch = text.match(/\b[GDC]\d{1,4}\b/);
+                    if (trainNoMatch) {
+                        console.log('找到车次格式:', trainNoMatch[0]);
+                        // 如果有车次格式，再检查是否有座位格式或铁路相关特征
+                        const seatMatch = text.match(/\d{1,2}[车\s]\d{1,2}[A-Z]/);
+                        const hasRailwayFeature = text.match(/\d{4}\s+\d{1,2}\s+\d{1,2}\s+\d{1,2}:\d{2}/); // 日期时间格式
+                        if (seatMatch || hasRailwayFeature) {
+                            console.log('通过车次+座位/日期格式识别为高铁票');
+                            isTrain = true;
+                        }
+                    }
+                }
+                
+                // 检查文件名是否包含铁路相关关键词
+                if (!isTrain) {
+                    const fileNameLower = file.name.toLowerCase();
+                    const railFileKeywords = ['高铁', '火车', '铁路', '车票', 'ticket', 'railway'];
+                    for (let kw of railFileKeywords) {
+                        if (fileNameLower.indexOf(kw) !== -1) {
+                            console.log('通过文件名识别为高铁票:', kw);
+                            isTrain = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            console.log('最终判断结果:', isAirlineTicket ? '机票' : (isTrain ? '高铁票' : '普通发票'));
+            
+            // ========== 第三步：根据类型调用相应解析函数 ==========
+            if (isAirlineTicket || isTrain) {
+                return parseTrainTicket(text, employeeName, file, isAirlineTicket);
+            } else {
+                return parseNormalInvoice(text, employeeName, file);
+            }
+        }
+
+        // 解析普通发票 - 增强版，支持更多格式
+        function parseNormalInvoice(text, employeeName, file) {
+            console.log('========== 开始解析普通发票 ==========');
+            console.log('文件名:', file.name);
+            console.log('文本长度:', text.length);
+            console.log('前2000字符:', text.substring(0, 2000));
+            
+            // ===== 首先尝试从嵌入XML提取数据（电子发票常见）=====
+            let xmlData = {
+                invoiceCode: '',
+                invoiceNumber: '',
+                date: '',
+                buyer: '',
+                seller: '',
+                goodsName: '',
+                amount: 0,
+                tax: 0,
+                total: 0
+            };
+            
+            const xmlMatch = text.match(/---EMBEDDED_XML---([\s\S]*?)---END_XML---/);
+            if (xmlMatch) {
+                const xml = xmlMatch[1];
+                console.log('从XML提取普通发票数据，XML长度:', xml.length);
+                console.log('XML前1000字符:', xml.substring(0, 1000));
+                
+                // 发票代码 - 多种可能的标签名
+                const codePatterns = [
+                    /<(?:[\w]+:)?InvoiceCode[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceCode>/i,
+                    /<(?:[\w]+:)?Code[^>]*>([^<]+)<\/(?:[\w]+:)?Code>/i,
+                    /发票代码[^>]*>([^<]+)</i
+                ];
+                for (let p of codePatterns) {
+                    const m = xml.match(p);
+                    if (m) { xmlData.invoiceCode = m[1].trim(); console.log('提取到发票代码:', xmlData.invoiceCode); break; }
+                }
+                
+                // 发票号码 - 多种可能的标签名
+                const numPatterns = [
+                    /<(?:[\w]+:)?InvoiceNumber[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceNumber>/i,
+                    /<(?:[\w]+:)?InvoiceNo[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceNo>/i,
+                    /<(?:[\w]+:)?Invoice_ID[^>]*>([^<]+)<\/(?:[\w]+:)?Invoice_ID>/i
+                ];
+                for (let p of numPatterns) {
+                    const m = xml.match(p);
+                    if (m) { xmlData.invoiceNumber = m[1].trim(); console.log('提取到发票号码:', xmlData.invoiceNumber); break; }
+                }
+                
+                // 开票日期
+                const datePatterns = [
+                    /<(?:[\w]+:)?IssueDate[^>]*>([^<]+)<\/(?:[\w]+:)?IssueDate>/i,
+                    /<(?:[\w]+:)?Date[^>]*>([^<]+)<\/(?:[\w]+:)?Date>/i,
+                    /<(?:[\w]+:)?InvoiceDate[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceDate>/i
+                ];
+                for (let p of datePatterns) {
+                    const m = xml.match(p);
+                    if (m) {
+                        const d = m[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.date = d;
+                        } else if (d.length === 8) {
+                            xmlData.date = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                        console.log('提取到日期:', xmlData.date); 
+                        break;
+                    }
+                }
+                
+                // 购买方名称 - 多种可能的标签名
+                const buyerPatterns = [
+                    /<(?:[\w]+:)?BuyerName[^>]*>([^<]+)<\/(?:[\w]+:)?BuyerName>/i,
+                    /<(?:[\w]+:)?PurchaserName[^>]*>([^<]+)<\/(?:[\w]+:)?PurchaserName>/i,
+                    /<(?:[\w]+:)?NameOfPurchaser[^>]*>([^<]+)<\/(?:[\w]+:)?NameOfPurchaser>/i,
+                    /<(?:[\w]+:)?Buyer[^>]*>([^<]+)<\/(?:[\w]+:)?Buyer>/i,
+                    /<(?:[\w]+:)?Purchaser[^>]*>([^<]+)<\/(?:[\w]+:)?Purchaser>/i
+                ];
+                for (let p of buyerPatterns) {
+                    const m = xml.match(p);
+                    if (m) { xmlData.buyer = m[1].trim(); console.log('提取到购买方:', xmlData.buyer); break; }
+                }
+                
+                // 销售方名称
+                const sellerPatterns = [
+                    /<(?:[\w]+:)?SellerName[^>]*>([^<]+)<\/(?:[\w]+:)?SellerName>/i,
+                    /<(?:[\w]+:)?NameOfSeller[^>]*>([^<]+)<\/(?:[\w]+:)?NameOfSeller>/i,
+                    /<(?:[\w]+:)?Seller[^>]*>([^<]+)<\/(?:[\w]+:)?Seller>/i
+                ];
+                for (let p of sellerPatterns) {
+                    const m = xml.match(p);
+                    if (m) { xmlData.seller = m[1].trim(); console.log('提取到销售方:', xmlData.seller); break; }
+                }
+                
+                // 商品名称
+                const goodsPatterns = [
+                    /<(?:[\w]+:)?ItemName[^>]*>([^<]+)<\/(?:[\w]+:)?ItemName>/i,
+                    /<(?:[\w]+:)?GoodsName[^>]*>([^<]+)<\/(?:[\w]+:)?GoodsName>/i,
+                    /<(?:[\w]+:)?ProductName[^>]*>([^<]+)<\/(?:[\w]+:)?ProductName>/i,
+                    /<(?:[\w]+:)?Description[^>]*>([^<]+)<\/(?:[\w]+:)?Description>/i
+                ];
+                for (let p of goodsPatterns) {
+                    const m = xml.match(p);
+                    if (m) { xmlData.goodsName = m[1].trim(); console.log('提取到商品名称:', xmlData.goodsName); break; }
+                }
+                
+                // 金额（不含税）- 多种可能的标签名
+                const amountPatterns = [
+                    /<(?:[\w]+:)?Amount[^>]*>([^<]+)<\/(?:[\w]+:)?Amount>/i,
+                    /<(?:[\w]+:)?TotalAmountExcludingTax[^>]*>([^<]+)<\/(?:[\w]+:)?TotalAmountExcludingTax>/i,
+                    /<(?:[\w]+:)?Price[^>]*>([^<]+)<\/(?:[\w]+:)?Price>/i
+                ];
+                for (let p of amountPatterns) {
+                    const m = xml.match(p);
+                    if (m) {
+                        const val = parseFloat(m[1].trim());
+                        if (!isNaN(val) && val > 0) { xmlData.amount = val; console.log('提取到金额:', xmlData.amount); break; }
+                    }
+                }
+                
+                // 税额
+                const taxPatterns = [
+                    /<(?:[\w]+:)?TaxAmount[^>]*>([^<]+)<\/(?:[\w]+:)?TaxAmount>/i,
+                    /<(?:[\w]+:)?Tax[^>]*>([^<]+)<\/(?:[\w]+:)?Tax>/i,
+                    /<(?:[\w]+:)?TaxRate[^>]*>([^<]+)<\/(?:[\w]+:)?TaxRate>/i
+                ];
+                for (let p of taxPatterns) {
+                    const m = xml.match(p);
+                    if (m) {
+                        const val = parseFloat(m[1].trim());
+                        if (!isNaN(val) && val >= 0) { xmlData.tax = val; console.log('提取到税额:', xmlData.tax); break; }
+                    }
+                }
+                
+                // 价税合计
+                const totalPatterns = [
+                    /<(?:[\w]+:)?TotalAmount[^>]*>([^<]+)<\/(?:[\w]+:)?TotalAmount>/i,
+                    /<(?:[\w]+:)?TotalAmountIncludingTax[^>]*>([^<]+)<\/(?:[\w]+:)?TotalAmountIncludingTax>/i,
+                    /<(?:[\w]+:)?Sum[^>]*>([^<]+)<\/(?:[\w]+:)?Sum>/i
+                ];
+                for (let p of totalPatterns) {
+                    const m = xml.match(p);
+                    if (m) {
+                        const val = parseFloat(m[1].trim());
+                        if (!isNaN(val) && val > 0) { xmlData.total = val; console.log('提取到价税合计:', xmlData.total); break; }
+                    }
+                }
+                
+                console.log('XML提取结果:', xmlData);
+            }
+            
+            // ===== 从文本提取（备用）=====
+            console.log('从文本提取备用数据...');
+            
+            // 发票代码 - 多种格式
+            let invoiceCode = xmlData.invoiceCode;
+            if (!invoiceCode) {
+                const codePatterns = [
+                    /发票代码[：:\s]*(\d{10,12})/,
+                    /代码[：:\s]*(\d{10,12})/,
+                    /InvoiceCode[\s>]*([^<\s]{10,20})/i,
+                    /第.*?位.*?码.*?(\d{10,12})/
+                ];
+                for (let p of codePatterns) {
+                    const m = text.match(p);
+                    if (m) { invoiceCode = m[1]; console.log('文本提取到发票代码:', invoiceCode); break; }
+                }
+            }
+
+            // 发票号码 - 多种格式（优先使用已有的XML数据）
+            let invoiceNumber = xmlData.invoiceNumber;
+            
+            // 方法0：从EXTRACTED_INVOICE_NUM中提取（从PDF原始数据提取）
+            if (!invoiceNumber) {
+                const extractedNumMatch = text.match(/---EXTRACTED_INVOICE_NUM---\n(\d+)\n---END_INVOICE_NUM---/);
+                if (extractedNumMatch) {
+                    invoiceNumber = extractedNumMatch[1];
+                    console.log('从EXTRACTED_INVOICE_NUM提取到发票号码:', invoiceNumber);
+                }
+            }
+            
+            if (!invoiceNumber) {
+                const numPatterns = [
+                    /发票号码[：:\s]*(\d{8,20})/,
+                    /号码[：:\s]*(\d{8,20})/,
+                    /No[.:]?\s*(\d{8,20})/i,
+                    /InvoiceNumber[\s>]*([^<\s]{8,20})/i,
+                    /编号[：:\s]*(\d{8,20})/,
+                    /统一发票监[\s\S]{0,50}(\d{20})/,  // 统一发票监制章后面的20位数字
+                    /(\d{20})/  // 20位数字也可能是发票号码
+                ];
+                for (let p of numPatterns) {
+                    const m = text.match(p);
+                    if (m) { 
+                        invoiceNumber = m[1]; 
+                        console.log('文本提取到发票号码:', invoiceNumber); 
+                        break; 
+                    }
+                }
+            }
+
+            // 开票日期
+            let dateStr = xmlData.date;
+            if (!dateStr) {
+                dateStr = extractDate(text);
+                if (dateStr) console.log('文本提取到日期:', dateStr);
+            }
+
+            // 价税合计（金额）- 优先从"价税合计（大写）"或"小写"后面提取，不计算生成
+            let totalAmount = xmlData.total;
+            
+            // 方法1：优先从"小写"或"价税合计"关键字后面提取
+            if (totalAmount === 0) {
+                const totalPatterns = [
+                    /价税合计[（(]?(?:大写)?[）)]?[\s\S]{0,50}?[（(]?小写[）)]?[\s¥￥]*([\d,]+\.\d{2})/,  // 价税合计(大写)...小写¥23.49
+                    /[（(]?小写[）)]?[\s¥￥]*([\d,]+\.\d{2})/,  // （小写）¥23.49
+                    /小写[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/,  // 小写: ¥23.49
+                    /(?:价税合计|合计金额)[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/  // 价税合计: ¥23.49
+                ];
+                for (let p of totalPatterns) {
+                    const m = text.match(p);
+                    if (m) { 
+                        const val = parseFloat(m[1].replace(/,/g, ''));
+                        if (!isNaN(val) && val > 0) { 
+                            totalAmount = val; 
+                            console.log('从文本关键字提取到价税合计:', totalAmount, '模式:', p);
+                            break; 
+                        }
+                    }
+                }
+            }
+            
+            // 方法2：如果方法1失败，从所有¥数字中取最大值（备用方案）
+            if (totalAmount === 0) {
+                const allYenMatches = text.match(/[¥￥]\s*([\d,]+\.\d{2})/g);
+                if (allYenMatches) {
+                    const allValues = allYenMatches.map(m => {
+                        const match = m.match(/[¥￥]\s*([\d,]+\.\d{2})/);
+                        return match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+                    }).filter(v => v > 0);
+                    
+                    if (allValues.length > 0) {
+                        // 取最大的作为价税合计
+                        totalAmount = Math.max(...allValues);
+                        console.log('从所有¥数字中提取到价税合计(最大值):', totalAmount, '所有值:', allValues);
+                    }
+                }
+            }
+
+            // 金额（不含税）- 从"合 计"行或 ¥数字 格式提取
+            let amount = xmlData.amount;
+            if (amount === 0) {
+                const amountPatterns = [
+                    /合\s*计[\s\S]{0,100}?([\d,]+\.\d{2})[\s\S]{0,50}?\d+%/,  // 合计行后面跟着税率
+                    /合\s*计[：:\s]*[\u4e00-\u9fa5]*[（(]?(?:¥|￥)?[）)]?\s*([\d,]+\.\d{2})/,
+                    /[¥￥]\s*([\d,]+\.\d{2})\s+[¥￥]\s*([\d,]+\.\d{2})/,  // 匹配 ¥701.98 ¥7.02 格式
+                    /金额[（(]?(?:不含税|不含税金额)[）)]?[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/,
+                    /不含税金额[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/,
+                    /不含税[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/
+                ];
+                for (let p of amountPatterns) {
+                    const m = text.match(p);
+                    if (m) { 
+                        // 取第一个捕获组
+                        const val = parseFloat((m[1] || m[2]).replace(/,/g, ''));
+                        if (!isNaN(val) && val > 0) { 
+                            amount = val; 
+                            console.log('文本提取到金额:', amount); 
+                            break; 
+                        }
+                    }
+                }
+            }
+
+            // 税额 - 从"¥金额 ¥税额"格式或税率行提取
+            let tax = xmlData.tax;
+            if (tax === 0) {
+                const taxPatterns = [
+                    /税\s*额[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/,  // 优先匹配明确的"税额"标签
+                    /税额[：:\s]*([\d,]+\.\d{2})/,  // 匹配"税额"后面的数字
+                    /[¥￥]\s*[\d,]+\.\d{2}\s+[¥￥]\s*([\d,]+\.\d{2})/,  // 匹配 ¥701.98 ¥7.02 中的第二个数字
+                    /\d+%\s+([\d,]+\.\d{2})/,  // 匹配税率后面的金额（如 3% 21.22）
+                    /合计.*?税额[：:\s]*(?:¥|￥)?\s*([\d,]+\.\d{2})/,
+                    /TaxAmount[\s>]*([^<\s]{1,20})/i
+                ];
+                for (let p of taxPatterns) {
+                    const m = text.match(p);
+                    if (m) { 
+                        const val = parseFloat(m[1].replace(/,/g, ''));
+                        if (!isNaN(val) && val >= 0) { 
+                            tax = val; 
+                            console.log('文本提取到税额:', tax); 
+                            break; 
+                        }
+                    }
+                }
+            }
+            
+            // 从RAW_ITEMS中基于关键词位置提取（最可靠的方法）
+            // 注意：如果已经从文本关键字提取到金额，跳过RAW_ITEMS处理，避免覆盖
+            if (amount === 0 && totalAmount === 0) {
+                const rawItemsMatch = text.match(/---RAW_ITEMS---([\s\S]*?)$/);
+                if (rawItemsMatch) {
+                    const rawItems = rawItemsMatch[1];
+                    console.log('RAW_ITEMS原始内容:', rawItems.substring(0, 500));
+                
+                // 方法1：基于关键词位置提取
+                // 找"合 计"后面的数字（金额和税额）
+                const hejiIdx = rawItems.indexOf('[合]');
+                if (hejiIdx !== -1) {
+                    const afterHeji = rawItems.substring(hejiIdx);
+                    // "合 计"后面紧跟的数字是金额，再后面是税额
+                    // 先尝试匹配带¥符号的数字格式 [¥304.95]
+                    let hejiNums = afterHeji.match(/\[¥\s*([\d,]+\.\d{2})\]/g);
+                    // 如果不匹配，再尝试不带¥符号的格式 [701.98]
+                    if (!hejiNums || hejiNums.length === 0) {
+                        hejiNums = afterHeji.match(/\[([\d,]+\.\d{2})\]/g);
+                    }
+                    if (!hejiNums || hejiNums.length === 0) {
+                        // 如果没有完整数字，尝试拼接拆分的数字字符
+                        // 例如: [¥] [7] [0] [1] [.9] [8] [¥] [7] [.0] [2]
+                        // ¥符号作为分隔符，拼接每个¥后面的数字
+                        const afterHejiShort = afterHeji.substring(0, 300);
+                        // 按 [¥] 分割，然后拼接每个部分中的数字字符
+                        const parts = afterHejiShort.split(/\[¥\s*\]/);
+                        const foundNums = [];
+                        for (let part of parts) {
+                            // 移除非数字和非小数点的字符，保留数字和小数点
+                            const numStr = part.replace(/\[[^\d.]*\]/g, '').replace(/\]\s*\[/g, '');
+                            const match = numStr.match(/([\d]+\.\d{2})/);
+                            if (match) {
+                                foundNums.push('[' + match[1] + ']');
+                            }
+                        }
+                        if (foundNums.length > 0) {
+                            hejiNums = foundNums;
+                        }
+                    }
+                    if (hejiNums && hejiNums.length >= 1) {
+                        // 解析金额（去除[、]、¥、,符号）
+                        const hejiAmount = parseFloat(hejiNums[0].replace(/[\[\]¥,]/g, ''));
+                        if (!isNaN(hejiAmount) && hejiAmount > 0) {
+                            amount = hejiAmount;
+                            console.log('从"合 计"位置提取到金额:', amount);
+                        }
+                        if (hejiNums.length >= 2) {
+                            const hejiTax = parseFloat(hejiNums[1].replace(/[\[\]¥,]/g, ''));
+                            if (!isNaN(hejiTax) && hejiTax >= 0) {
+                                tax = hejiTax;
+                                console.log('从"合 计"位置提取到税额:', tax);
+                            }
+                        }
+                    }
+                }
+                
+                // 找"（小写）"后面的数字（价税合计）- 尝试多种可能的关键词格式
+                let xiaoxieIdx = rawItems.indexOf('[（ 小 写 ）]');
+                if (xiaoxieIdx === -1) xiaoxieIdx = rawItems.indexOf('[（小写）]');
+                if (xiaoxieIdx === -1) xiaoxieIdx = rawItems.indexOf('[小写]');
+                if (xiaoxieIdx === -1) xiaoxieIdx = rawItems.indexOf('[(小写)]');
+                
+                if (xiaoxieIdx !== -1) {
+                    const afterXiaoxie = rawItems.substring(xiaoxieIdx);
+                    console.log('找到"（小写）"位置，后面内容:', afterXiaoxie.substring(0, 200));
+                    
+                    // 方法1：优先匹配 [¥数字] 格式
+                    let xiaoxieNums = afterXiaoxie.match(/\[¥\s*([\d,]+\.\d{2})\]/g);
+                    if (xiaoxieNums && xiaoxieNums.length >= 1) {
+                        // 取最后一个 [¥数字] 作为价税合计（通常价税合计在最后）
+                        const lastMatch = xiaoxieNums[xiaoxieNums.length - 1];
+                        const val = parseFloat(lastMatch.match(/\[¥\s*([\d,]+\.\d{2})\]/)[1].replace(/,/g, ''));
+                        if (!isNaN(val) && val > 0) {
+                            totalAmount = val;
+                            console.log('从"（小写）"位置提取到价税合计([¥数字]格式):', totalAmount);
+                        }
+                    } else {
+                        // 方法2：匹配所有 [数字] 格式，取最大的
+                        xiaoxieNums = afterXiaoxie.match(/\[([\d,]+\.\d{2})\]/g);
+                        if (xiaoxieNums && xiaoxieNums.length >= 1) {
+                            const values = xiaoxieNums.map(n => parseFloat(n.replace(/[\[\],]/g, ''))).filter(v => v > 0);
+                            if (values.length > 0) {
+                                totalAmount = Math.max(...values);
+                                console.log('从"（小写）"位置提取到价税合计(最大值):', totalAmount, '所有值:', values);
+                            }
+                        }
+                    }
+                    
+                    // 方法3：如果没有完整数字，尝试拼接拆分的数字字符
+                    if (totalAmount === 0) {
+                        const afterXiaoxieShort = afterXiaoxie.substring(0, 200);
+                        const parts = afterXiaoxieShort.split(/\[¥\s*\]/);
+                        const foundNums = [];
+                        for (let part of parts) {
+                            const numStr = part.replace(/\[[^\d.]*\]/g, '').replace(/\]\s*\[/g, '');
+                            const match = numStr.match(/([\d]+\.\d{2})/);
+                            if (match) {
+                                foundNums.push(parseFloat(match[1]));
+                            }
+                        }
+                        if (foundNums.length > 0) {
+                            totalAmount = Math.max(...foundNums);
+                            console.log('从"（小写）"位置提取到价税合计(拼接后):', totalAmount);
+                        }
+                    }
+                } else {
+                    console.log('未找到"（小写）"关键词');
+                }
+                
+                // 方法2：如果关键词方法失败，回退到数字匹配
+                if (amount === 0 && tax === 0 && totalAmount === 0) {
+                    const allNumbers = rawItems.match(/\[(?:¥\s*)?([\d,]+\.\d{2})\]/g);
+                    if (allNumbers && allNumbers.length >= 2) {
+                        const nums = [...new Set(allNumbers.map(n => {
+                            const match = n.match(/\[(?:¥\s*)?([\d,]+\.\d{2})\]/);
+                            return match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+                        }).filter(n => n > 0))];
+                        
+                        if (nums.length >= 2) {
+                            const sortedNums = [...nums].sort((a, b) => a - b);
+                            totalAmount = sortedNums[sortedNums.length - 1];
+                            tax = sortedNums[0];
+                            amount = Math.round((totalAmount - tax) * 100) / 100;
+                            console.log('回退方法 - 税额:', tax, '金额:', amount, '价税合计:', totalAmount);
+                        }
+                    }
+                }
+                
+                console.log('RAW_ITEMS最终提取 - 税额:', tax, '金额:', amount, '价税合计:', totalAmount);
+                }
+            }
+            
+            // 方法4：从原始PDF数据中提取的金额（CNY或¥格式）
+            if (amount === 0 && totalAmount === 0) {
+                // 尝试从RAW_CNY中提取
+                const rawCnyMatch = text.match(/---RAW_CNY---([\s\S]*?)---END_CNY---/);
+                if (rawCnyMatch) {
+                    const cnyLines = rawCnyMatch[1].trim().split('\n');
+                    if (cnyLines.length >= 2) {
+                        // 最后一个是价税合计，第一个是金额
+                        totalAmount = parseFloat(cnyLines[cnyLines.length - 1].replace(/CNY\s*/, '').replace(/,/g, ''));
+                        amount = parseFloat(cnyLines[0].replace(/CNY\s*/, '').replace(/,/g, ''));
+                        tax = Math.round((totalAmount - amount) * 100) / 100;
+                        console.log('从RAW_CNY提取 - 金额:', amount, '税额:', tax, '价税合计:', totalAmount);
+                    }
+                }
+                
+                // 尝试从RAW_YEN中提取
+                if (totalAmount === 0) {
+                    const rawYenMatch = text.match(/---RAW_YEN---([\s\S]*?)---END_YEN---/);
+                    if (rawYenMatch) {
+                        const yenLines = rawYenMatch[1].trim().split('\n');
+                        if (yenLines.length >= 1) {
+                            // 取所有¥数字，排序后最大的作为价税合计
+                            const yenValues = yenLines.map(y => parseFloat(y.replace(/[¥,]/g, ''))).filter(v => v > 0);
+                            if (yenValues.length > 0) {
+                                yenValues.sort((a, b) => a - b);
+                                totalAmount = yenValues[yenValues.length - 1];
+                                if (yenValues.length >= 2) {
+                                    amount = yenValues[yenValues.length - 2];
+                                    tax = Math.round((totalAmount - amount) * 100) / 100;
+                                }
+                                console.log('从RAW_YEN提取 - 金额:', amount, '税额:', tax, '价税合计:', totalAmount);
+                            }
+                        }
+                    }
+                }
+                
+                // 方法4：从EXTRACTED_AMOUNTS中提取（Python代理或OCR提取的金额，优先使用）
+                const extractedMatch = text.match(/---EXTRACTED_AMOUNTS---([\s\S]*?)---END_AMOUNTS---/);
+                if (extractedMatch) {
+                    const extractedText = extractedMatch[1];
+                    const totalMatch = extractedText.match(/TOTAL:([\d.]+)/);
+                    const amountMatch = extractedText.match(/AMOUNT:([\d.]+)/);
+                    const taxMatch = extractedText.match(/TAX:([\d.]+)/);
+                    
+                    // 优先使用EXTRACTED_AMOUNTS中的值（这是Python代理或OCR直接提取的，最准确）
+                    if (totalMatch) totalAmount = parseFloat(totalMatch[1]);
+                    if (amountMatch) amount = parseFloat(amountMatch[1]);
+                    if (taxMatch) tax = parseFloat(taxMatch[1]);
+                    
+                    console.log('从EXTRACTED_AMOUNTS提取（优先）- 金额:', amount, '税额:', tax, '价税合计:', totalAmount);
+                }
+            }
+
+            // 购买方 - 优先从EXTRACTED_COMPANIES提取（公司名称最准确）
+            let buyer = '';
+            
+            // 方法0：从EXTRACTED_COMPANIES中提取（从PDF原始数据提取，最准确）
+            const extractedCompaniesMatch = text.match(/---EXTRACTED_COMPANIES---\nBUYER:([^\n]+)\nSELLER:([^\n]+)\n---END_COMPANIES---/);
+            if (extractedCompaniesMatch) {
+                buyer = extractedCompaniesMatch[1].trim();
+                console.log('从EXTRACTED_COMPANIES提取到购买方:', buyer);
+            }
+            
+            // 如果没有提取到，再使用XML中的数据
+            if (!buyer && xmlData.buyer) {
+                buyer = xmlData.buyer;
+                console.log('使用XML中的购买方:', buyer);
+            }
+            
+            if (!buyer) {
+                // 方法1：从RAW_ITEMS中提取 - 找第一个"名称："后面的公司名
+                const rawItemsMatch = text.match(/---RAW_ITEMS---([\s\S]*?)$/);
+                if (rawItemsMatch) {
+                    const rawItems = rawItemsMatch[1];
+                    // 找所有公司名格式的项（包括有限公司、民宿等）
+                    const companyItems = rawItems.match(/\[([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|杂货店|超市|饭店|民宿|客栈))\]/g);
+                    if (companyItems && companyItems.length >= 1) {
+                        buyer = companyItems[0].replace(/[\[\]]/g, '').trim();
+                        console.log('从RAW_ITEMS提取到购买方:', buyer);
+                    }
+                }
+                
+                if (!buyer) {
+                    // 方法2：从"购买方信息"和"名称："之间提取
+                    const buyerMatch1 = text.match(/购买方信息[\s\S]*?名称[：:]\s*([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|民宿|客栈))/);
+                    if (buyerMatch1) {
+                        buyer = buyerMatch1[1].trim();
+                        console.log('从购买方信息区域提取到购买方:', buyer);
+                    } else {
+                        // 方法3：从文本中提取第一个公司名
+                        const textCompanyMatch = text.match(/([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|民宿|客栈))/);
+                        if (textCompanyMatch) {
+                            buyer = textCompanyMatch[1];
+                            console.log('从文本提取到购买方:', buyer);
+                        } else {
+                            // 方法4：使用通用提取函数
+                            buyer = extractCompanyName(text, '购买方', '销售方');
+                            if (buyer) console.log('文本提取到购买方:', buyer);
+                        }
+                    }
+                }
+            }
+
+            // 销售方
+            let seller = xmlData.seller;
+            
+            // 方法0：从EXTRACTED_COMPANIES中提取（从PDF原始数据提取）
+            if (!seller) {
+                const extractedCompaniesMatch = text.match(/---EXTRACTED_COMPANIES---\nBUYER:([^\n]+)\nSELLER:([^\n]+)\n---END_COMPANIES---/);
+                if (extractedCompaniesMatch) {
+                    seller = extractedCompaniesMatch[2].trim();
+                    console.log('从EXTRACTED_COMPANIES提取到销售方:', seller);
+                }
+            }
+            
+            if (!seller) {
+                // 方法1：从RAW_ITEMS中提取 - 找第二个公司名（第一个是购买方，第二个是销售方）
+                const rawItemsMatch = text.match(/---RAW_ITEMS---([\s\S]*?)$/);
+                if (rawItemsMatch) {
+                    const rawItems = rawItemsMatch[1];
+                    // 找所有公司名格式的项（包括有限公司、民宿等）
+                    const companyItems = rawItems.match(/\[([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|杂货店|超市|饭店|宾馆|医院|民宿|客栈))\]/g);
+                    console.log('RAW_ITEMS中找到的公司名:', companyItems);
+                    if (companyItems && companyItems.length >= 2) {
+                        seller = companyItems[1].replace(/[\[\]]/g, '').trim();
+                        console.log('从RAW_ITEMS提取到销售方:', seller);
+                    } else if (companyItems && companyItems.length === 1) {
+                        // 如果只找到一个公司名，可能是购买方和销售方同名，或者提取有问题
+                        // 尝试找不同的公司名
+                        const allTextItems = rawItems.match(/\[([^\]]+)\]/g);
+                        if (allTextItems) {
+                            // 找包含"公司"或"店"或"民宿"的项
+                            const companyLikeItems = allTextItems.filter(item => 
+                                /公司|商行|商店|店|企业|中心|集团|民宿|客栈/.test(item)
+                            );
+                            if (companyLikeItems.length >= 2) {
+                                seller = companyLikeItems[1].replace(/[\[\]]/g, '').trim();
+                                console.log('从RAW_ITEMS筛选后提取到销售方:', seller);
+                            }
+                        }
+                    }
+                }
+                
+                if (!seller) {
+                    // 方法2：从"销售方信息"和"名称："之间提取 - 扩展匹配范围
+                    const sellerMatch1 = text.match(/销售方信息[\s\S]*?名称[：:]\s*([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|民宿|客栈))/);
+                    if (sellerMatch1) {
+                        seller = sellerMatch1[1].trim();
+                        console.log('从销售方信息区域提取到销售方:', seller);
+                    } else {
+                        // 方法3：从文本中提取两个公司名，第二个是销售方
+                        const textCompanyMatch = text.match(/([\u4e00-\u9fa5（）()a-zA-Z\d]+(?:公司|商行|商店|店|企业|中心|集团|民宿|客栈))/g);
+                        if (textCompanyMatch && textCompanyMatch.length >= 2) {
+                            seller = textCompanyMatch[1];
+                            console.log('从文本提取到销售方:', seller);
+                        } else {
+                            // 方法4：使用通用提取函数
+                            seller = extractCompanyName(text, '销售方', '备注');
+                            if (seller) console.log('文本提取到销售方:', seller);
+                        }
+                    }
+                }
+            }
+
+            // 商品名称
+            let goodsName = xmlData.goodsName;
+            if (!goodsName) {
+                // 方法1：从RAW_ITEMS中提取带*的商品名
+                const goodsPatterns = [
+                    /\*([^\[\]]+?)(?:\s+\d+元|\s+\d+%|\s+\d+\.\d+)/,  // 匹配 *家用厨房电器具*烧水壶 后面跟着价格或税率
+                    /\*([^\[\]]+?\*[^\[\]]+?)(?:\s|$)/,  // 匹配带*的商品名
+                    /\*([^\s]+\*[^\s]+)/,  // 匹配带*的商品名
+                    /项目名称[\s\S]*?\*([^\s]+\*[^\s]+)/,  // 匹配 *乳制品*酸奶通用杯 格式
+                    /(?:货物或应税劳务|服务名称)[：:\s]*([\u4e00-\u9fa5\w\s*%+]+?)(?:\s*数量|\s*单价|\s*规格|\s*单位|\s*金额)/,
+                    /项目名称[：:\s]*([\u4e00-\u9fa5\w\s*%+]+?)(?:\s*数量|\s*单价)/,
+                    /ItemName[\s>]*([^<]{1,50})/i
+                ];
+                for (let p of goodsPatterns) {
+                    const m = text.match(p);
+                    if (m) { 
+                        goodsName = m[1].trim().substring(0, 50); 
+                        console.log('提取到商品名称:', goodsName);
+                        break; 
+                    }
+                }
+            }
+            
+            // 调试：输出提取到的原始值
+            console.log('提取到的原始值 - amount:', amount, 'tax:', tax, 'totalAmount:', totalAmount);
+            
+            // 如果没有提取到金额，尝试从价税合计计算
+            if (amount === 0 && totalAmount > 0 && tax >= 0) {
+                amount = Math.round((totalAmount - tax) * 100) / 100;
+                console.log('从价税合计计算金额:', amount);
+            }
+            // 如果没有价税合计，尝试计算
+            if (totalAmount === 0 && amount > 0) {
+                totalAmount = Math.round((amount + tax) * 100) / 100;
+                console.log('从金额+税额计算价税合计:', totalAmount);
+            }
+
+            console.log('普通发票解析结果:', {
+                invoiceCode, invoiceNumber, date: dateStr, buyer, seller, 
+                goodsName, amount, tax, total: totalAmount
+            });
+
+            return {
+                index: 0,
+                employee: employeeName,
+                type: '普通发票',
+                invoiceCode: invoiceCode,
+                invoiceNumber: invoiceNumber,
+                date: dateStr,
+                buyer: buyer,
+                seller: seller,
+                goodsName: goodsName,
+                amount: amount,
+                tax: tax,
+                total: totalAmount || amount + tax,
+                isTrain: false,
+                trainNo: '',
+                departure: '',
+                arrival: '',
+                seat: '',
+                isDuplicate: false,
+                duplicateSource: '',
+                fileName: file.name,
+                fileData: file
+            };
+        }
+
+        // 解析高铁票 - 根据铁路电子客票实际格式，优先从嵌入XML提取
+        function parseTrainTicket(text, employeeName, file, isAirlineTicketFromCaller) {
+            // ===== 从嵌入XML中提取数据（优先） =====
+            let xmlData = {
+                invoiceNumber: '',
+                trainNo: '',
+                departure: '',
+                arrival: '',
+                trainDate: '',
+                invoiceDate: '',
+                seat: '',
+                amount: 0,
+                totalAmount: 0,
+                taxAmount: 0,
+                buyer: '',
+                passengerName: ''
+            };
+            
+            // 使用调用者传递的isAirlineTicket参数，如果没有则重新判断
+            let isAirlineTicket = isAirlineTicketFromCaller || false;
+            console.log('parseTrainTicket接收到的isAirlineTicket:', isAirlineTicket);
+            
+            // 检查是否有嵌入的XML数据
+            const xmlMatch = text.match(/---EMBEDDED_XML---([\s\S]*?)---END_XML---/);
+            if (xmlMatch) {
+                const xml = xmlMatch[1];
+                console.log('找到嵌入XML数据，长度:', xml.length);
+                console.log('XML前1000字符:', xml.substring(0, 1000));
+                
+                // 判断XML类型：XBRL格式（中国铁路电子客票）或 rai:Invoice格式 或 atr:机票格式
+                const isXBRL = xml.indexOf('xbrl') !== -1 || xml.indexOf('xmlns=') !== -1;
+                const isAirlineXML = xml.indexOf('atr:') !== -1 || xml.indexOf('航空') !== -1;
+                console.log('是否为XBRL格式:', isXBRL, '是否为机票XML:', isAirlineXML);
+                
+                // 调试：提取所有atr:标签
+                if (isAirlineXML) {
+                    const atrTags = xml.match(/<atr:[^>]+>/g);
+                    console.log('机票XML中的所有atr标签:', atrTags ? atrTags.slice(0, 20) : '无');
+                }
+                
+                if (isAirlineXML) {
+                    // ===== 机票XML格式解析（atr:命名空间）=====
+                    console.log('解析机票XML格式');
+                    
+                    // 发票号码 - 机票使用 InvoiceNo 或 ElectronicTicketNum
+                    const invNumPatterns = [
+                        /<(?:atr:)?InvoiceNo[^>]*>([^<]+)<\/(?:atr:)?InvoiceNo>/i,
+                        /<(?:atr:)?ElectronicTicketNum[^>]*>([^<]+)<\/(?:atr:)?ElectronicTicketNum>/i,
+                        /<(?:atr:)?InvoiceNumber[^>]*>([^<]+)<\/(?:atr:)?InvoiceNumber>/i
+                    ];
+                    for (let p of invNumPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.invoiceNumber = m[1].trim(); console.log('机票XML提取到发票号码:', xmlData.invoiceNumber); break; }
+                    }
+                    
+                    // 航班号
+                    const flightNoMatch = xml.match(/<(?:atr:)?FlightNo[^>]*>([^<]+)<\/(?:atr:)?FlightNo>/i) ||
+                                          xml.match(/<(?:atr:)?FlightNumber[^>]*>([^<]+)<\/(?:atr:)?FlightNumber>/i);
+                    if (flightNoMatch) xmlData.trainNo = flightNoMatch[1].trim();
+                    
+                    // 出发地 - 尝试多种标签名
+                    const depPatterns = [
+                        /<(?:atr:)?Departure[^>]*>([^<]+)<\/(?:atr:)?Departure>/i,
+                        /<(?:atr:)?Origin[^>]*>([^<]+)<\/(?:atr:)?Origin>/i,
+                        /<(?:atr:)?From[^>]*>([^<]+)<\/(?:atr:)?From>/i,
+                        /<(?:atr:)?DepartureAirport[^>]*>([^<]+)<\/(?:atr:)?DepartureAirport>/i,
+                        /<(?:atr:)?OriginAirport[^>]*>([^<]+)<\/(?:atr:)?OriginAirport>/i
+                    ];
+                    for (let p of depPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.departure = m[1].trim(); console.log('机票XML提取到出发地:', xmlData.departure); break; }
+                    }
+                    
+                    // 目的地 - 尝试多种标签名
+                    const arrPatterns = [
+                        /<(?:atr:)?Destination[^>]*>([^<]+)<\/(?:atr:)?Destination>/i,
+                        /<(?:atr:)?Arrival[^>]*>([^<]+)<\/(?:atr:)?Arrival>/i,
+                        /<(?:atr:)?To[^>]*>([^<]+)<\/(?:atr:)?To>/i,
+                        /<(?:atr:)?ArrivalAirport[^>]*>([^<]+)<\/(?:atr:)?ArrivalAirport>/i,
+                        /<(?:atr:)?DestinationAirport[^>]*>([^<]+)<\/(?:atr:)?DestinationAirport>/i
+                    ];
+                    for (let p of arrPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.arrival = m[1].trim(); console.log('机票XML提取到目的地:', xmlData.arrival); break; }
+                    }
+                    
+                    // 购买方名称 - 优先匹配公司名称，最后才是旅客姓名
+                    const buyerPatterns = [
+                        /<(?:atr:)?Purchaser[^>]*>([^<]+)<\/(?:atr:)?Purchaser>/i,  // 购买方（通常为公司）
+                        /<(?:atr:)?BuyerParty[^>]*>([^<]+)<\/(?:atr:)?BuyerParty>/i,  // 购买方单位
+                        /<(?:atr:)?BuyerName[^>]*>([^<]+)<\/(?:atr:)?BuyerName>/i,  // 购买方名称
+                        /<(?:atr:)?PassengerName[^>]*>([^<]+)<\/(?:atr:)?PassengerName>/i  // 旅客姓名（个人）
+                    ];
+                    for (let p of buyerPatterns) {
+                        const m = xml.match(p);
+                        if (m) {
+                            const val = m[1].trim();
+                            // 忽略占位符如 "Name", "TBD", "Unknown" 等
+                            if (val && val.length > 1 && !/^(Name|TBD|Unknown|N\/A)$/i.test(val)) {
+                                xmlData.buyer = val;
+                                console.log('机票XML提取到购买方:', xmlData.buyer, '模式:', p);
+                                break;
+                            } else {
+                                console.log('机票XML提取到占位符，忽略:', val);
+                            }
+                        }
+                    }
+                    
+                    // 乘机日期
+                    const flightDateMatch = xml.match(/<(?:atr:)?FlightDate[^>]*>([^<]+)<\/(?:atr:)?FlightDate>/i) ||
+                                            xml.match(/<(?:atr:)?DateOfFlight[^>]*>([^<]+)<\/(?:atr:)?DateOfFlight>/i);
+                    if (flightDateMatch) {
+                        const d = flightDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.trainDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.trainDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 开票日期
+                    const issueDateMatch = xml.match(/<(?:atr:)?IssueDate[^>]*>([^<]+)<\/(?:atr:)?IssueDate>/i) ||
+                                            xml.match(/<(?:atr:)?DateOfIssue[^>]*>([^<]+)<\/(?:atr:)?DateOfIssue>/i);
+                    if (issueDateMatch) {
+                        const d = issueDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.invoiceDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.invoiceDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 金额 - 机票使用 TotalAmountIncludingTax 或 Total
+                    const totalMatch = xml.match(/<(?:atr:)?TotalAmountIncludingTax[^>]*>([^<]+)<\/(?:atr:)?TotalAmountIncludingTax>/i) ||
+                                       xml.match(/<(?:atr:)?Total[^>]*>([^<]+)<\/(?:atr:)?Total>/i);
+                    if (totalMatch) {
+                        xmlData.totalAmount = parseFloat(totalMatch[1].trim());
+                        console.log('机票XML提取到金额:', xmlData.totalAmount);
+                    }
+                    
+                } else if (isXBRL) {
+                    // ===== XBRL格式解析（中国铁路电子客票/机票）=====
+                    // XBRL标签格式: <rai:TagName contextRef="...">value</rai:TagName>
+                    
+                    // 发票号码 - 尝试多种命名空间前缀和标签名
+                    const invNumPatterns = [
+                        /<(?:[\w]+:)?InvoiceNumber[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceNumber>/i,
+                        /<(?:[\w]+:)?InvoiceNo[^>]*>([^<]+)<\/(?:[\w]+:)?InvoiceNo>/i,
+                        /<(?:[\w]+:)?ElectronicTicketNum[^>]*>([^<]+)<\/(?:[\w]+:)?ElectronicTicketNum>/i,
+                        /<(?:[\w]+:)?TicketNumber[^>]*>([^<]+)<\/(?:[\w]+:)?TicketNumber>/i,
+                        /<(?:[\w]+:)?ID[^>]*>([^<]+)<\/(?:[\w]+:)?ID>/i
+                    ];
+                    for (let p of invNumPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.invoiceNumber = m[1].trim(); console.log('XBRL提取到发票号码:', xmlData.invoiceNumber, '模式:', p); break; }
+                    }
+                    
+                    // 车次
+                    const trainNoMatch = xml.match(/<(?:[\w]+:)?TrainNumber[^>]*>([^<]+)<\/(?:[\w]+:)?TrainNumber>/i);
+                    if (trainNoMatch) xmlData.trainNo = trainNoMatch[1].trim();
+                    
+                    // 出发站/出发地 - 尝试多种标签名（高铁票和机票可能不同）
+                    const depPatterns = [
+                        /<(?:[\w]+:)?DepartureStation[^>]*>([^<]+)<\/(?:[\w]+:)?DepartureStation>/i,  // 高铁票
+                        /<(?:[\w]+:)?Departure[^>]*>([^<]+)<\/(?:[\w]+:)?Departure>/i,  // 机票
+                        /<(?:[\w]+:)?Origin[^>]*>([^<]+)<\/(?:[\w]+:)?Origin>/i,  // 机票
+                        /<(?:[\w]+:)?From[^>]*>([^<]+)<\/(?:[\w]+:)?From>/i  // 通用
+                    ];
+                    for (let p of depPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.departure = m[1].trim(); console.log('XBRL提取到出发地:', xmlData.departure, '模式:', p); break; }
+                    }
+                    
+                    // 到达站/目的地 - 尝试多种标签名
+                    const arrPatterns = [
+                        /<(?:[\w]+:)?DestinationStation[^>]*>([^<]+)<\/(?:[\w]+:)?DestinationStation>/i,  // 高铁票
+                        /<(?:[\w]+:)?Destination[^>]*>([^<]+)<\/(?:[\w]+:)?Destination>/i,  // 机票
+                        /<(?:[\w]+:)?Arrival[^>]*>([^<]+)<\/(?:[\w]+:)?Arrival>/i,  // 机票
+                        /<(?:[\w]+:)?To[^>]*>([^<]+)<\/(?:[\w]+:)?To>/i  // 通用
+                    ];
+                    for (let p of arrPatterns) {
+                        const m = xml.match(p);
+                        if (m) { xmlData.arrival = m[1].trim(); console.log('XBRL提取到目的地:', xmlData.arrival, '模式:', p); break; }
+                    }
+                    
+                    // 乘车日期 - XBRL格式使用 TravelDate 或 DepartureDate
+                    const travelDateMatch = xml.match(/<(?:[\w]+:)?TravelDate[^>]*>([^<]+)<\/(?:[\w]+:)?TravelDate>/i) ||
+                                             xml.match(/<(?:[\w]+:)?DepartureDate[^>]*>([^<]+)<\/(?:[\w]+:)?DepartureDate>/i);
+                    if (travelDateMatch) {
+                        const d = travelDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.trainDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.trainDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 开票日期 - XBRL格式使用 DateOfIssue
+                    const issueDateMatch = xml.match(/<(?:[\w]+:)?DateOfIssue[^>]*>([^<]+)<\/(?:[\w]+:)?DateOfIssue>/i) ||
+                                            xml.match(/<(?:[\w]+:)?IssueDate[^>]*>([^<]+)<\/(?:[\w]+:)?IssueDate>/i);
+                    if (issueDateMatch) {
+                        const d = issueDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.invoiceDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.invoiceDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 座位 - XBRL格式使用 Seat 或 SeatNumber
+                    const seatMatch = xml.match(/<(?:[\w]+:)?Seat[^>]*>([^<]+)<\/(?:[\w]+:)?Seat>/i) ||
+                                       xml.match(/<(?:[\w]+:)?SeatNumber[^>]*>([^<]+)<\/(?:[\w]+:)?SeatNumber>/i);
+                    if (seatMatch) xmlData.seat = seatMatch[1].trim();
+                    
+                    // 金额 - 优先使用Fare（票价），而不是TotalAmountExcludingTax（不含税金额）
+                    const amountMatch = xml.match(/<(?:[\w]+:)?Fare[^>]*>([^<]+)<\/(?:[\w]+:)?Fare>/i) ||
+                                         xml.match(/<(?:[\w]+:)?TotalAmountExcludingTax[^>]*>([^<]+)<\/(?:[\w]+:)?TotalAmountExcludingTax>/i);
+                    if (amountMatch) {
+                        const val = parseFloat(amountMatch[1].trim());
+                        if (!isNaN(val) && val > 0) xmlData.amount = val;
+                    }
+                    
+                    // 价税合计 - 机票需要提取TotalAmountIncludingTax
+                    const totalTaxMatch = xml.match(/<(?:[\w]+:)?TotalAmountIncludingTax[^>]*>([^<]+)<\/(?:[\w]+:)?TotalAmountIncludingTax>/i);
+                    if (totalTaxMatch) {
+                        const val = parseFloat(totalTaxMatch[1].trim());
+                        if (!isNaN(val) && val > 0) xmlData.totalAmount = val;
+                    }
+                    
+                    // 税额 - 直接提取TaxAmount
+                    const taxMatch = xml.match(/<(?:[\w]+:)?TaxAmount[^>]*>([^<]+)<\/(?:[\w]+:)?TaxAmount>/i);
+                    if (taxMatch) {
+                        const val = parseFloat(taxMatch[1].trim());
+                        if (!isNaN(val) && val > 0) xmlData.taxAmount = val;
+                    }
+                    
+                    // 购买方名称 - XBRL格式使用多种可能的标签名
+                    let buyerMatch = xml.match(/<(?:[\w]+:)?NameOfPurchaser[^>]*>([^<]+)<\/(?:[\w]+:)?NameOfPurchaser>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:[\w]+:)?BuyerName[^>]*>([^<]+)<\/(?:[\w]+:)?BuyerName>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:[\w]+:)?PurchaserName[^>]*>([^<]+)<\/(?:[\w]+:)?PurchaserName>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:[\w]+:)?Purchaser[^>]*>([^<]+)<\/(?:[\w]+:)?Purchaser>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:[\w]+:)?Buyer[^>]*>([^<]+)<\/(?:[\w]+:)?Buyer>/i);
+                    if (buyerMatch) {
+                        xmlData.buyer = buyerMatch[1].trim();
+                        console.log('XBRL格式提取到购买方名称:', xmlData.buyer);
+                    }
+                    
+                    // 旅客姓名 - XBRL格式使用 Name
+                    const passengerMatch = xml.match(/<(?:[\w]+:)?Name[^>]*>([^<]+)<\/(?:[\w]+:)?Name>/i);
+                    if (passengerMatch) xmlData.passengerName = passengerMatch[1].trim();
+                    
+                } else {
+                    // ===== rai:Invoice格式解析（旧格式）=====
+                    // 发票号码 <rai:InvoiceNumber>或<InvoiceNumber>
+                    const invNumMatch = xml.match(/<(?:rai:)?InvoiceNumber[^>]*>([^<]+)<\/(?:rai:)?InvoiceNumber>/i);
+                    if (invNumMatch) xmlData.invoiceNumber = invNumMatch[1].trim();
+                    
+                    // 车次 <rai:TrainNumber>
+                    const trainNoMatch = xml.match(/<(?:rai:)?TrainNumber[^>]*>([^<]+)<\/(?:rai:)?TrainNumber>/i);
+                    if (trainNoMatch) xmlData.trainNo = trainNoMatch[1].trim();
+                    
+                    // 出发站 <rai:DepartureStation>
+                    const depMatch = xml.match(/<(?:rai:)?DepartureStation[^>]*>([^<]+)<\/(?:rai:)?DepartureStation>/i);
+                    if (depMatch) xmlData.departure = depMatch[1].trim();
+                    
+                    // 到达站 <rai:DestinationStation>
+                    const arrMatch = xml.match(/<(?:rai:)?DestinationStation[^>]*>([^<]+)<\/(?:rai:)?DestinationStation>/i);
+                    if (arrMatch) xmlData.arrival = arrMatch[1].trim();
+                    
+                    // 乘车日期 <rai:DepartureDate>
+                    const depDateMatch = xml.match(/<(?:rai:)?DepartureDate[^>]*>([^<]+)<\/(?:rai:)?DepartureDate>/i);
+                    if (depDateMatch) {
+                        const d = depDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.trainDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.trainDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 开票日期 <rai:IssueDate> 或 <InvoiceIssueDate>
+                    const issueDateMatch = xml.match(/<(?:rai:)?(?:IssueDate|InvoiceIssueDate)[^>]*>([^<]+)<\/(?:rai:)?(?:IssueDate|InvoiceIssueDate)>/i);
+                    if (issueDateMatch) {
+                        const d = issueDateMatch[1].trim();
+                        if (d.indexOf('-') !== -1) {
+                            xmlData.invoiceDate = d;
+                        } else if (d.length === 8) {
+                            xmlData.invoiceDate = d.substring(0,4) + '-' + d.substring(4,6) + '-' + d.substring(6,8);
+                        }
+                    }
+                    
+                    // 座位 <rai:SeatNumber>
+                    const seatMatch = xml.match(/<(?:rai:)?SeatNumber[^>]*>([^<]+)<\/(?:rai:)?SeatNumber>/i);
+                    if (seatMatch) xmlData.seat = seatMatch[1].trim();
+                    
+                    // 金额 <rai:Amount> 或 <TotalAmount>
+                    const amountMatch = xml.match(/<(?:rai:)?(?:Amount|TotalAmount)[^>]*>([^<]+)<\/(?:rai:)?(?:Amount|TotalAmount)>/i);
+                    if (amountMatch) {
+                        const val = parseFloat(amountMatch[1].trim());
+                        if (!isNaN(val) && val > 0) xmlData.amount = val;
+                    }
+                    
+                    // 购买方名称 - 尝试多种可能的标签名
+                    let buyerMatch = xml.match(/<(?:rai:)?NameOfPurchaser[^>]*>([^<]+)<\/(?:rai:)?NameOfPurchaser>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:rai:)?BuyerName[^>]*>([^<]+)<\/(?:rai:)?BuyerName>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:rai:)?PurchaserName[^>]*>([^<]+)<\/(?:rai:)?PurchaserName>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:rai:)?Purchaser[^>]*>([^<]+)<\/(?:rai:)?Purchaser>/i);
+                    if (!buyerMatch) buyerMatch = xml.match(/<(?:rai:)?Buyer[^>]*>([^<]+)<\/(?:rai:)?Buyer>/i);
+                    if (buyerMatch) {
+                        xmlData.buyer = buyerMatch[1].trim();
+                        console.log('rai格式提取到购买方名称:', xmlData.buyer);
+                    }
+                    
+                    // 旅客姓名 <rai:PassengerName>
+                    const passengerMatch = xml.match(/<(?:rai:)?PassengerName[^>]*>([^<]+)<\/(?:rai:)?PassengerName>/i);
+                    if (passengerMatch) xmlData.passengerName = passengerMatch[1].trim();
+                }
+                
+                // 如果仍未找到购买方名称，输出调试信息
+                if (!xmlData.buyer) {
+                    console.log('未找到购买方名称，XML中包含的所有标签:');
+                    const allTags = xml.match(/<[\w:]+[^>]*>/g);
+                    if (allTags) {
+                        const uniqueTags = [...new Set(allTags)].slice(0, 50);
+                        console.log(uniqueTags.join('\n'));
+                    }
+                    // 尝试搜索包含"购"或"买方"的内容
+                    const buyerContentMatch = xml.match(/>([^<]*购[^<]*公司[^<]*)</g);
+                    if (buyerContentMatch) {
+                        console.log('可能包含购买方的内容:', buyerContentMatch.slice(0, 5));
+                    }
+                }
+            }
+            
+            // ===== 发票号码（备用：从文本提取） =====
+            let invoiceNumber = xmlData.invoiceNumber;
+            if (!invoiceNumber) {
+                // 尝试多种模式提取发票号码
+                const numPatterns = [
+                    /[：:]\s*(\d{15,25})/,  // 中文冒号或英文冒号后跟15-25位数字
+                    /发票号码[：:]?\s*(\d{15,25})/i,  // "发票号码"关键字后跟数字
+                    /InvoiceNo[：:]?\s*(\d{15,25})/i,  // InvoiceNo后跟数字
+                    /电子票号[：:]?\s*(\d{15,25})/i,   // 电子票号后跟数字
+                    /\b(\d{20})\b/,  // 独立的20位数字（常见发票号码长度）
+                    /\b(\d{15,25})\b/  // 独立的15-25位数字
+                ];
+                for (let pattern of numPatterns) {
+                    const numMatch = text.match(pattern);
+                    if (numMatch) {
+                        invoiceNumber = numMatch[1];
+                        console.log('从文本提取到发票号码:', invoiceNumber, '模式:', pattern);
+                        break;
+                    }
+                }
+            }
+
+            // ===== 车次（备用） =====
+            let trainNo = xmlData.trainNo;
+            if (!trainNo) {
+                const trainMatch = text.match(/\b([GDC]\d{1,4})\b/);
+                if (trainMatch) trainNo = trainMatch[1];
+            }
+
+            // ===== 出发站和到达站 - 优先使用XML数据 =====
+            let departure = xmlData.departure;
+            let arrival = xmlData.arrival;
+            console.log('XML中的出发地/目的地:', departure, '→', arrival);
+            
+            // 从EXTRACTED_ROUTE中提取（Python代理提取的）
+            if ((!departure || !arrival)) {
+                const routeMatch = text.match(/---EXTRACTED_ROUTE---\nDEPARTURE:([^\n]+)\nARRIVAL:([^\n]+)\n---END_ROUTE---/);
+                if (routeMatch) {
+                    if (!departure) departure = routeMatch[1].trim();
+                    if (!arrival) arrival = routeMatch[2].trim();
+                    console.log('从EXTRACTED_ROUTE提取到出发地/目的地:', departure, '→', arrival);
+                }
+            }
+            
+            // 如果还是没有，从文本提取（支持"自："/"至："和箭头格式）
+            if (!departure || !arrival) {
+                // 优先匹配 "自：xxx" 和 "至：xxx" 格式
+                const depMatch2 = text.match(/自[：:]\s*([\u4e00-\u9fa5]{2,6})/);
+                const arrMatch2 = text.match(/至[：:]\s*([\u4e00-\u9fa5]{2,6})/);
+                if (depMatch2 && arrMatch2) {
+                    if (!departure) departure = depMatch2[1];
+                    if (!arrival) arrival = arrMatch2[1];
+                    console.log('从"自/至"提取到出发地/目的地:', departure, '→', arrival);
+                } else {
+                    // 备用：箭头格式
+                    const routeMatch = text.match(/([\u4e00-\u9fa5]{2,6})\s*[→\-—]\s*([\u4e00-\u9fa5]{2,6})/);
+                    if (routeMatch) {
+                        if (!departure) departure = routeMatch[1];
+                        if (!arrival) arrival = routeMatch[2];
+                        console.log('从箭头格式提取到出发地/目的地:', departure, '→', arrival);
+                    }
+                }
+            }
+
+            // ===== 乘车日期（备用） =====
+            let trainDate = xmlData.trainDate;
+            if (!trainDate) {
+                const trainDateMatch1 = text.match(/(\d{4})\s+(\d{1,2})\s+(\d{1,2})\s+\d{1,2}:\d{2}/);
+                if (trainDateMatch1) {
+                    trainDate = trainDateMatch1[1] + '-' + trainDateMatch1[2].padStart(2, '0') + '-' + trainDateMatch1[3].padStart(2, '0');
+                } else {
+                    const trainDateMatch2 = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+                    if (trainDateMatch2) {
+                        trainDate = trainDateMatch2[1] + '-' + trainDateMatch2[2].padStart(2, '0') + '-' + trainDateMatch2[3].padStart(2, '0');
+                    }
+                }
+            }
+
+            // ===== 开票日期（备用） =====
+            let invoiceDate = xmlData.invoiceDate;
+            if (!invoiceDate) {
+                const invoiceDateMatch1 = text.match(/[：:]\s*(\d{4})\s+(\d{1,2})\s+(\d{1,2})/);
+                if (invoiceDateMatch1) {
+                    invoiceDate = invoiceDateMatch1[1] + '-' + invoiceDateMatch1[2].padStart(2, '0') + '-' + invoiceDateMatch1[3].padStart(2, '0');
+                } else {
+                    const invoiceDateMatch2 = text.match(/开票日期[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日/);
+                    if (invoiceDateMatch2) {
+                        invoiceDate = invoiceDateMatch2[1] + '-' + invoiceDateMatch2[2].padStart(2, '0') + '-' + invoiceDateMatch2[3].padStart(2, '0');
+                    }
+                }
+            }
+
+            // ===== 座位（备用） =====
+            let seat = xmlData.seat;
+            if (!seat) {
+                const seatMatch1 = text.match(/(\d{1,2})\s+(\d{1,2}[A-Z])/);
+                if (seatMatch1) {
+                    seat = seatMatch1[1] + '车' + seatMatch1[2] + '号';
+                } else {
+                    const seatMatch2 = text.match(/(\d{1,2}车\d{1,2}[A-Z]号?)/);
+                    if (seatMatch2) seat = seatMatch2[1];
+                }
+            }
+
+            // ===== 金额（备用） =====
+            let amount = xmlData.amount;
+            if (amount === 0) {
+                const colonMatch = text.match(/[：:]\s*(\d+(?:\.\d{1,2})?)/);
+                if (colonMatch) {
+                    const val = parseFloat(colonMatch[1]);
+                    if (val >= 1 && val <= 10000) amount = val;
+                }
+            }
+            if (amount === 0) {
+                const yenMatch = text.match(/[¥￥]\s*(\d+(?:\.\d{1,2})?)/);
+                if (yenMatch) amount = parseFloat(yenMatch[1]);
+            }
+            if (amount === 0) {
+                const allNumbers = text.match(/(\d+\.\d{2})/g);
+                if (allNumbers) {
+                    for (let i = 0; i < allNumbers.length; i++) {
+                        const val = parseFloat(allNumbers[i]);
+                        if (val >= 1 && val <= 10000) {
+                            amount = val;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // ===== 购买方名称 - 优先从EXTRACTED_COMPANIES提取（公司名称最准确）=====
+            let buyer = '';
+            
+            // 方法0：从EXTRACTED_COMPANIES中提取（从PDF原始数据提取，最准确）
+            const extractedCompaniesMatch = text.match(/---EXTRACTED_COMPANIES---\nBUYER:([^\n]+)\nSELLER:([^\n]+)\n---END_COMPANIES---/);
+            if (extractedCompaniesMatch) {
+                buyer = extractedCompaniesMatch[1].trim();
+                console.log('从EXTRACTED_COMPANIES提取到购买方:', buyer);
+            }
+            
+            // 如果没有提取到，再使用XML中的数据
+            if (!buyer && xmlData.buyer) {
+                buyer = xmlData.buyer;
+                console.log('使用XML中的购买方:', buyer);
+            }
+            
+            // 如果还是没有，尝试从文本提取
+            if (!buyer) {
+                const buyerMatch = text.match(/购买方名称[：:]\s*([\u4e00-\u9fa5（）()a-zA-Z]+)/);
+                if (buyerMatch) {
+                    buyer = buyerMatch[1].trim();
+                    console.log('从文本提取到购买方:', buyer);
+                }
+            }
+
+            // ===== 金额和税额计算 =====
+            let taxAmount = xmlData.taxAmount;
+            let totalAmount = xmlData.totalAmount;
+            
+            if (isAirlineTicket) {
+                // 机票：优先使用XML中的TotalAmountIncludingTax
+                if (totalAmount > 0) {
+                    console.log('机票使用XML中的TotalAmountIncludingTax:', totalAmount);
+                } else {
+                    // 从所有CNY数字中取最大值作为合计金额
+                    const cnyMatches = text.match(/CNY\s*([\d,]+\.?\d*)/g);
+                    if (cnyMatches && cnyMatches.length > 0) {
+                        let maxAmount = 0;
+                        for (let i = 0; i < cnyMatches.length; i++) {
+                            const val = parseFloat(cnyMatches[i].replace(/CNY\s*/, '').replace(/,/g, ''));
+                            if (val > maxAmount) {
+                                maxAmount = val;
+                            }
+                        }
+                        totalAmount = maxAmount;
+                        console.log('机票从所有CNY数字取最大值:', cnyMatches, '->', totalAmount);
+                    }
+                }
+            } else {
+                // 高铁票：计算税额（通常是9%税率）
+                const taxRate = 0.09;
+                taxAmount = amount > 0 ? Math.round(amount * taxRate * 100) / 100 : 0;
+                totalAmount = amount + taxAmount;
+            }
+            
+            console.log('高铁票/机票解析结果:', {
+                invoiceNumber, trainNo, departure, arrival, trainDate, invoiceDate,
+                buyer, seat, amount, tax: taxAmount, total: totalAmount, isAirlineTicket
+            });
+
+            // 根据类型设置显示信息
+            const ticketType = isAirlineTicket ? '机票' : '高铁票';
+            const sellerName = isAirlineTicket ? '航空公司' : '中国铁路';
+
+            return {
+                index: 0,
+                employee: employeeName,
+                type: ticketType,
+                invoiceCode: '',
+                invoiceNumber: invoiceNumber,
+                date: invoiceDate || trainDate,
+                buyer: buyer,
+                seller: sellerName,
+                goodsName: trainNo + ' ' + departure + '→' + arrival,
+                amount: amount,
+                tax: taxAmount,
+                total: totalAmount,
+                isTrain: true,
+                trainNo: trainNo,
+                departure: departure,
+                arrival: arrival,
+                seat: seat,
+                trainDate: trainDate,
+                ticketPrice: amount,
+                isDuplicate: false,
+                duplicateSource: '',
+                fileName: file.name,
+                fileData: file
+            };
+        }
+
+        // ==================== 辅助解析函数 ====================
+        // 提取日期并标准化格式
+        function extractDate(text) {
+            // 尝试匹配多种日期格式
+            const patterns = [
+                { regex: /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/, groups: [1, 2, 3] },  // 2026年04月01日
+                { regex: /(\d{4})[/-](\d{1,2})[/-](\d{1,2})/, groups: [1, 2, 3] },  // 2026-04-01 或 2026/04/01
+                { regex: /开票日期[：:\s]*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/, groups: [1, 2, 3] },  // 开票日期：2026年04月01日
+                { regex: /日期[：:\s]*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/, groups: [1, 2, 3] }  // 日期：2026年04月01日
+            ];
+            for (let p of patterns) {
+                const m = text.match(p.regex);
+                if (m) {
+                    const year = m[p.groups[0]];
+                    const month = m[p.groups[1]];
+                    const day = m[p.groups[2]];
+                    // 验证日期是否合理
+                    const monthNum = parseInt(month, 10);
+                    const dayNum = parseInt(day, 10);
+                    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+                        return year + '-' + month.padStart(2, '0') + '-' + day.padStart(2, '0');
+                    }
+                }
+            }
+            return '';
+        }
+
+        // 提取公司名称 - 增强版
+        function extractCompanyName(text, startKeyword, endKeyword) {
+            // 方法1：从指定关键词之间提取
+            const startIdx = text.indexOf(startKeyword);
+            if (startIdx !== -1) {
+                const endIdx = text.indexOf(endKeyword, startIdx);
+                const segment = endIdx !== -1 ? text.substring(startIdx, endIdx) : text.substring(startIdx, startIdx + 300);
+                console.log('提取公司名称，搜索范围:', segment.substring(0, 100));
+                
+                // 匹配公司名 - 多种格式
+                const companyPatterns = [
+                    /([\u4e00-\u9fa5]{2,30}(?:公司|有限公司|股份有限公司|企业|中心|集团|商行|商店|饭店|酒店|宾馆|超市|医院|学校|单位))/,
+                    /([A-Z][A-Za-z\s]{5,50}(?:Co\.|Ltd\.|Inc\.|Corp\.|Company))/i,
+                    /([\u4e00-\u9fa5A-Za-z]{3,30})/
+                ];
+                for (let p of companyPatterns) {
+                    const m = segment.match(p);
+                    if (m) {
+                        console.log('提取到公司名:', m[1]);
+                        return m[1].trim();
+                    }
+                }
+            }
+            
+            // 方法2：从整个文本中搜索公司相关关键词
+            const fullTextPatterns = [
+                /([\u4e00-\u9fa5]{2,30}(?:公司|有限公司|股份有限公司|企业|中心|集团|商行|商店|饭店|酒店|宾馆|超市|医院|学校))/g,
+            ];
+            for (let p of fullTextPatterns) {
+                const matches = text.match(p);
+                if (matches && matches.length > 0) {
+                    console.log('从全文提取到公司名:', matches[0]);
+                    return matches[0];
+                }
+            }
+            
+            return '';
+        }
+
+        // ==================== 重复检测 ====================
+        function detectDuplicates() {
+            // 当前批次内查重
+            const seenNormal = {}; // 普通发票：发票代码+发票号码
+            const seenTrain = {};  // 高铁票：日期+车次+座位+员工姓名
+            const seenFlight = {}; // 机票：发票号码（唯一标识）
+            // 是否有历史发票数据
+            const hasHistory = historyInvoices.length > 0;
+
+            for (let i = 0; i < invoiceData.length; i++) {
+                const inv = invoiceData[i];
+                
+                if (inv.type === '机票') {
+                    // 机票查重：仅通过发票号码判断（每张机票有唯一的发票号码）
+                    const key = inv.invoiceNumber || '';
+                    if (key && seenFlight[key]) {
+                        inv.isDuplicate = true;
+                        inv.duplicateSource = '当前批次内重复（发票号码相同）';
+                    } else if (key) {
+                        seenFlight[key] = true;
+                    }
+                    // 与历史数据比对
+                    if (hasHistory && key) {
+                        for (let j = 0; j < historyInvoices.length; j++) {
+                            const h = historyInvoices[j];
+                            if ((h.type === '机票' || h.isTrain) && h.invoiceNumber === key) {
+                                inv.isDuplicate = true;
+                                inv.duplicateSource = '与历史发票重复（发票号码相同）';
+                                break;
+                            }
+                        }
+                    }
+                } else if (inv.isTrain) {
+                    // 高铁票查重：优先用发票号码，没有则用日期+车次+座位+员工姓名
+                    const invNumKey = inv.invoiceNumber || '';
+                    if (invNumKey) {
+                        // 有发票号码，直接用发票号码判断
+                        if (seenTrain[invNumKey]) {
+                            inv.isDuplicate = true;
+                            inv.duplicateSource = '当前批次内重复（发票号码相同）';
+                        } else {
+                            seenTrain[invNumKey] = true;
+                        }
+                        if (hasHistory) {
+                            for (let j = 0; j < historyInvoices.length; j++) {
+                                const h = historyInvoices[j];
+                                if (h.isTrain && h.invoiceNumber === invNumKey) {
+                                    inv.isDuplicate = true;
+                                    inv.duplicateSource = '与历史发票重复（发票号码相同）';
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // 没有发票号码，用日期+车次+座位+员工姓名
+                        const key = inv.date + '|' + inv.trainNo + '|' + inv.seat + '|' + inv.employee;
+                        if (seenTrain[key]) {
+                            inv.isDuplicate = true;
+                            inv.duplicateSource = '当前批次内重复';
+                        } else {
+                            seenTrain[key] = true;
+                        }
+                        if (hasHistory) {
+                            for (let j = 0; j < historyInvoices.length; j++) {
+                                const h = historyInvoices[j];
+                                if (h.isTrain) {
+                                    const hKey = h.trainDate + '|' + h.trainNo + '|' + h.seat + '|' + h.employee;
+                                    if (key === hKey) {
+                                        inv.isDuplicate = true;
+                                        inv.duplicateSource = '与历史发票重复';
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // 普通发票查重：发票代码+发票号码
+                    const key = inv.invoiceCode + '|' + inv.invoiceNumber;
+                    if (key !== '|' && seenNormal[key]) {
+                        inv.isDuplicate = true;
+                        inv.duplicateSource = '当前批次内重复';
+                    } else if (key !== '|') {
+                        seenNormal[key] = true;
+                    }
+                    // 与历史数据比对（仅当有历史发票时）
+                    if (hasHistory) {
+                        for (let j = 0; j < historyInvoices.length; j++) {
+                            const h = historyInvoices[j];
+                            if (!h.isTrain) {
+                                const hKey = h.invoiceCode + '|' + h.invoiceNumber;
+                                if (key === hKey && key !== '|') {
+                                    inv.isDuplicate = true;
+                                    inv.duplicateSource = '与历史发票重复';
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 界面渲染 ====================
+        // 渲染发票明细表格
+        function renderInvoiceTable() {
+            const tbody = document.getElementById('invoiceTableBody');
+            if (invoiceData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="16" class="px-3 py-12 text-center text-gray-400">暂无数据</td></tr>';
+                return;
+            }
+
+            // 排序
+            const sorted = invoiceData.slice().sort(function(a, b) {
+                let va = a[currentSort.field];
+                let vb = b[currentSort.field];
+                if (typeof va === 'string') va = va.toLowerCase();
+                if (typeof vb === 'string') vb = vb.toLowerCase();
+                if (va < vb) return currentSort.asc ? -1 : 1;
+                if (va > vb) return currentSort.asc ? 1 : -1;
+                return 0;
+            });
+
+            let html = '';
+            sorted.forEach(function(inv) {
+                // 行样式：重复发票优先显示红色，否则高铁票显示蓝色
+                let rowClass = '';
+                if (inv.isDuplicate) {
+                    rowClass = ' class="duplicate-row"';
+                } else if (inv.isTrain) {
+                    rowClass = ' class="train-row"';
+                }
+                const statusHtml = inv.isDuplicate
+                    ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">重复</span>'
+                    : '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">正常</span>';
+                const typeHtml = inv.type === '机票'
+                    ? '<span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs">机票</span>'
+                    : (inv.isTrain
+                        ? '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">高铁票</span>'
+                        : '<span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">普通发票</span>');
+
+                // 高铁票和机票：金额/税额显示"-"，价税合计显示ticketPrice或total
+                let amountHtml, taxHtml, totalHtml;
+                if (inv.type === '高铁票') {
+                    amountHtml = '-';
+                    taxHtml = '-';
+                    totalHtml = '<span class="font-medium text-green-600">' + formatMoney(inv.ticketPrice || 0) + '</span>';
+                } else if (inv.type === '机票') {
+                    amountHtml = '-';
+                    taxHtml = '-';
+                    totalHtml = '<span class="font-medium text-green-600">' + formatMoney(inv.total || 0) + '</span>';
+                } else {
+                    amountHtml = formatMoney(inv.amount);
+                    taxHtml = formatMoney(inv.tax);
+                    totalHtml = '<span class="font-medium text-green-600">' + formatMoney(getReimbursementAmount(inv)) + '</span>';
+                }
+
+                html += '<tr' + rowClass + '>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + inv.index + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.employee) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + typeHtml + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs">' + escapeHtml(inv.invoiceNumber) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.date) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[120px] truncate" title="' + escapeHtml(cleanCompanyName(inv.buyer)) + '">' + escapeHtml(cleanCompanyName(inv.buyer)) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[120px] truncate" title="' + escapeHtml(cleanCompanyName(inv.seller)) + '">' + escapeHtml(cleanCompanyName(inv.seller)) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[100px] truncate" title="' + escapeHtml(inv.goodsName) + '">' + escapeHtml(inv.goodsName) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right">' + amountHtml + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right">' + taxHtml + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right">' + totalHtml + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.trainNo) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.departure) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.arrival) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + statusHtml + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // ==================== 增值税发票汇总表格 ====================
+        // 渲染非高铁票的增值税发票
+        function renderNormalInvoices() {
+            const section = document.getElementById('normalInvoicesSection');
+            const tbody = document.getElementById('normalInvoicesTableBody');
+            const countSpan = document.getElementById('normalInvoiceCount');
+
+            const normalInvoices = invoiceData.filter(function(inv) { return !inv.isTrain; });
+
+            countSpan.textContent = '(共 ' + normalInvoices.length + ' 张)';
+
+            let html = '';
+            normalInvoices.forEach(function(inv, idx) {
+                let rowClass = '';
+                if (inv.isDuplicate) {
+                    rowClass = ' class="duplicate-row"';
+                }
+
+                const statusHtml = inv.isDuplicate
+                    ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">重复</span>'
+                    : '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">正常</span>';
+
+                html += '<tr' + rowClass + '>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + (idx + 1) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.employee) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.type) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.invoiceNumber || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.date || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[150px] truncate" title="' + escapeHtml(cleanCompanyName(inv.buyer)) + '">' + escapeHtml(cleanCompanyName(inv.buyer) || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[150px] truncate" title="' + escapeHtml(cleanCompanyName(inv.seller)) + '">' + escapeHtml(cleanCompanyName(inv.seller) || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[150px] truncate" title="' + escapeHtml(inv.goodsName) + '">' + escapeHtml(inv.goodsName || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right">' + formatMoney(inv.amount) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right">' + formatMoney(inv.tax) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right font-medium text-green-600">' + formatMoney(getReimbursementAmount(inv)) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + statusHtml + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // ==================== 按购买方汇总报销 ====================
+        function renderBuyerSummary() {
+            const section = document.getElementById('buyerSummarySection');
+            const tbody = document.getElementById('buyerSummaryTableBody');
+            const countSpan = document.getElementById('buyerSummaryCount');
+
+            if (invoiceData.length === 0) {
+                section.classList.add('hidden');
+                return;
+            }
+
+            // 按购买方+发票类型汇总
+            const summary = {};
+            invoiceData.forEach(function(inv) {
+                if (inv.isDuplicate) return; // 跳过重复发票
+                const buyer = cleanCompanyName(inv.buyer) || '未知购买方';
+                // 使用inv.type来区分：机票、高铁票、增值税发票
+                const type = inv.type || (inv.isTrain ? '高铁票' : '增值税发票');
+                const key = buyer + '|||' + type;
+                if (!summary[key]) {
+                    summary[key] = { buyer: buyer, type: type, amount: 0 };
+                }
+                // 机票用total（价税合计），高铁票用ticketPrice，普通发票用total
+                if (type === '机票') {
+                    summary[key].amount += (inv.total || 0);
+                } else if (type === '高铁票') {
+                    summary[key].amount += (inv.ticketPrice || 0);
+                } else {
+                    summary[key].amount += (inv.total || 0);
+                }
+            });
+
+            const rows = Object.values(summary);
+            if (rows.length === 0) {
+                section.classList.add('hidden');
+                return;
+            }
+
+            section.classList.remove('hidden');
+            countSpan.textContent = '(共 ' + rows.length + ' 项)';
+
+            // 按金额降序排列
+            rows.sort(function(a, b) { return b.amount - a.amount; });
+
+            let html = '';
+            let totalAmount = 0;
+            rows.forEach(function(row) {
+                totalAmount += row.amount;
+                html += '<tr>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[250px] truncate" title="' + escapeHtml(row.buyer) + '">' + escapeHtml(row.buyer) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(row.type) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right font-medium text-green-600">' + formatMoney(row.amount) + '</td>' +
+                    '</tr>';
+            });
+            // 合计行
+            html += '<tr class="bg-gray-50 font-semibold">' +
+                '<td class="px-3 py-2 whitespace-nowrap" colspan="2">合计</td>' +
+                '<td class="px-3 py-2 whitespace-nowrap text-right text-green-700">' + formatMoney(totalAmount) + '</td>' +
+                '</tr>';
+            tbody.innerHTML = html;
+        }
+
+        // 渲染员工统计表
+        function renderStats() {
+            const tbody = document.getElementById('statsTableBody');
+            if (invoiceData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-12 text-center text-gray-400">暂无统计数据</td></tr>';
+                return;
+            }
+
+            // 按员工分组统计
+            const stats = {};
+            invoiceData.forEach(function(inv) {
+                if (!stats[inv.employee]) {
+                    stats[inv.employee] = {
+                        name: inv.employee,
+                        total: 0,
+                        amount: 0,
+                        trainCount: 0,
+                        trainAmount: 0,
+                        normalCount: 0,
+                        normalAmount: 0
+                    };
+                }
+                stats[inv.employee].total++;
+                if (inv.type === '机票') {
+                    stats[inv.employee].amount += (inv.total || 0);
+                    stats[inv.employee].trainCount++;
+                    stats[inv.employee].trainAmount += (inv.total || 0);
+                } else if (inv.type === '高铁票') {
+                    stats[inv.employee].amount += (inv.ticketPrice || 0);
+                    stats[inv.employee].trainCount++;
+                    stats[inv.employee].trainAmount += (inv.ticketPrice || 0);
+                } else {
+                    stats[inv.employee].amount += (inv.total || 0);
+                    stats[inv.employee].normalCount++;
+                    stats[inv.employee].normalAmount += (inv.total || 0);
+                }
+            });
+
+            let html = '';
+            Object.values(stats).forEach(function(s) {
+                html += '<tr class="border-b border-gray-100">' +
+                    '<td class="px-4 py-3 whitespace-nowrap font-medium text-gray-900">' + escapeHtml(s.name) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + s.total + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap text-green-600 font-medium">' + formatMoney(s.amount) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap text-blue-600">' + s.trainCount + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + formatMoney(s.trainAmount) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap text-purple-600">' + s.normalCount + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + formatMoney(s.normalAmount) + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // 渲染重复发票预警
+        function renderDuplicates() {
+            const tbody = document.getElementById('duplicateTableBody');
+            const alert = document.getElementById('duplicateAlert');
+            const duplicates = invoiceData.filter(function(inv) { return inv.isDuplicate; });
+
+            if (duplicates.length === 0) {
+                alert.classList.add('hidden');
+                tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-12 text-center text-gray-400">未检测到重复发票</td></tr>';
+                return;
+            }
+
+            alert.classList.remove('hidden');
+            document.getElementById('duplicateCount').textContent =
+                '共检测到 ' + duplicates.length + ' 张重复发票，请核实后处理。';
+
+            let html = '';
+            duplicates.forEach(function(inv, idx) {
+                html += '<tr class="border-b border-gray-100 bg-red-50">' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + (idx + 1) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + escapeHtml(inv.employee) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + escapeHtml(inv.type || '普通发票') + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + (inv.isTrain ? escapeHtml(inv.trainNo) : escapeHtml(inv.invoiceCode)) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + (inv.isTrain ? escapeHtml(inv.seat) : escapeHtml(inv.invoiceNumber)) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + escapeHtml(inv.date) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap">' + formatMoney(getReimbursementAmount(inv)) + '</td>' +
+                    '<td class="px-4 py-3 whitespace-nowrap text-red-600">' + escapeHtml(inv.duplicateSource) + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // 更新汇总卡片
+        function updateSummaryCards() {
+            const total = invoiceData.length;
+            // 总金额 = 普通发票价税合计 + 高铁票票价 + 机票价税合计
+            const amount = invoiceData.reduce(function(sum, inv) {
+                if (inv.type === '高铁票') {
+                    return sum + (inv.ticketPrice || 0);
+                } else {
+                    return sum + (inv.total || 0);
+                }
+            }, 0);
+            const trainCount = invoiceData.filter(function(inv) { return inv.isTrain; }).length;
+            const dupCount = invoiceData.filter(function(inv) { return inv.isDuplicate; }).length;
+
+            document.getElementById('statTotal').textContent = total;
+            document.getElementById('statAmount').textContent = formatMoney(amount);
+            document.getElementById('statTrain').textContent = trainCount;
+            document.getElementById('statDuplicate').textContent = dupCount;
+        }
+
+        // ==================== 调试面板 ====================
+        // 切换调试面板展开/收起
+        function toggleDebugPanel() {
+            const content = document.getElementById('debugContent');
+            const btn = document.getElementById('debugToggleBtn');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                btn.textContent = '▲ 点击收起';
+            } else {
+                content.classList.add('hidden');
+                btn.textContent = '▼ 点击展开';
+            }
+        }
+
+        // 渲染调试面板
+        function renderDebugPanel() {
+            const panel = document.getElementById('debugPanel');
+            const content = document.getElementById('debugContent');
+            const countSpan = document.getElementById('debugCount');
+
+            if (debugInfo.length === 0) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            panel.classList.remove('hidden');
+            countSpan.textContent = '(' + debugInfo.length + ' 个文件)';
+
+            let html = '';
+            debugInfo.forEach(function(info) {
+                html += '<div class="debug-item">' +
+                    '<div class="text-sm font-medium text-gray-700">' +
+                    '<svg class="w-4 h-4 inline-block mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+                    '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' +
+                    '</svg>' +
+                    escapeHtml(info.fileName) +
+                    '</div>' +
+                    '<div class="text-xs text-gray-500 mt-1">提取文本:</div>' +
+                    '<pre>' + escapeHtml(info.rawText || '[无内容]') + '</pre>' +
+                    '</div>';
+            });
+            content.innerHTML = html;
+        }
+
+        // ==================== 高铁票汇总表格 ====================
+        // 渲染高铁票汇总表格（只显示高铁票，不包含机票）
+        function renderTrainTickets() {
+            const section = document.getElementById('trainTicketsSection');
+            const tbody = document.getElementById('trainTicketsTableBody');
+            const countSpan = document.getElementById('trainTicketCount');
+
+            // 过滤高铁票（isTrain为true且不是机票类型）
+            const trainTickets = invoiceData.filter(function(inv) { 
+                return inv.isTrain && inv.type !== '机票'; 
+            });
+
+            countSpan.textContent = '(共 ' + trainTickets.length + ' 张)';
+
+            let html = '';
+            trainTickets.forEach(function(inv, idx) {
+                // 重复行标记
+                let rowClass = '';
+                if (inv.isDuplicate) {
+                    rowClass = ' class="duplicate-row"';
+                }
+
+                const statusHtml = inv.isDuplicate
+                    ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">重复</span>'
+                    : '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">正常</span>';
+
+                html += '<tr' + rowClass + '>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-center">' + (idx + 1) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.employee) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs text-blue-600">' + escapeHtml(inv.invoiceNumber || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.date || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right font-medium text-green-600">' + formatMoney(inv.ticketPrice || 0) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[150px] truncate" title="' + escapeHtml(cleanCompanyName(inv.buyer)) + '">' + escapeHtml(cleanCompanyName(inv.buyer) || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.departure || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.arrival || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.trainDate || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + statusHtml + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // ==================== 机票汇总表格 ====================
+        // 渲染机票汇总表格
+        function renderAirlineTickets() {
+            const section = document.getElementById('airlineTicketsSection');
+            const tbody = document.getElementById('airlineTicketsTableBody');
+            const countSpan = document.getElementById('airlineTicketCount');
+
+            // 过滤机票（isTrain为true且类型是机票）
+            const airlineTickets = invoiceData.filter(function(inv) { 
+                return inv.isTrain && inv.type === '机票'; 
+            });
+
+            countSpan.textContent = '(共 ' + airlineTickets.length + ' 张)';
+
+            let html = '';
+            airlineTickets.forEach(function(inv, idx) {
+                // 重复行标记
+                let rowClass = '';
+                if (inv.isDuplicate) {
+                    rowClass = ' class="duplicate-row"';
+                }
+
+                const statusHtml = inv.isDuplicate
+                    ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">重复</span>'
+                    : '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">正常</span>';
+
+                html += '<tr' + rowClass + '>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-center">' + (idx + 1) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.employee) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs text-blue-600">' + escapeHtml(inv.invoiceNumber || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.date || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.trainNo || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.departure || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + escapeHtml(inv.arrival || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-right font-medium text-green-600">' + formatMoney(inv.total || inv.amount || 0) + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap text-xs max-w-[150px] truncate" title="' + escapeHtml(cleanCompanyName(inv.buyer)) + '">' + escapeHtml(cleanCompanyName(inv.buyer) || '-') + '</td>' +
+                    '<td class="px-3 py-2 whitespace-nowrap">' + statusHtml + '</td>' +
+                    '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        // 统一报销金额口径：高铁票按票价，机票和普通发票按价税合计
+        function getReimbursementAmount(inv) {
+            if (!inv) return 0;
+            if (inv.type === '高铁票') {
+                return Number(inv.ticketPrice || inv.amount || 0);
+            }
+            return Number(inv.total || inv.amount || 0);
+        }
+
+        // ==================== 表格排序 ====================
+        function sortTable(field) {
+            if (currentSort.field === field) {
+                currentSort.asc = !currentSort.asc;
+            } else {
+                currentSort.field = field;
+                currentSort.asc = true;
+            }
+            // 更新排序箭头样式
+            document.querySelectorAll('.sort-arrow').forEach(function(el) { el.classList.remove('active'); });
+            const arrow = document.getElementById('sort-' + field);
+            if (arrow) arrow.classList.add('active');
+            renderInvoiceTable();
+        }
+
+        // ==================== 标签页切换 ====================
+        function switchTab(tabName) {
+            // 隐藏所有标签内容
+            document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.add('hidden'); });
+            // 移除所有标签按钮激活状态
+            document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+
+            // 显示对应标签
+            if (tabName === 'invoices') {
+                document.getElementById('tabInvoices').classList.remove('hidden');
+                document.querySelectorAll('.tab-btn')[0].classList.add('active');
+            } else if (tabName === 'stats') {
+                document.getElementById('tabStats').classList.remove('hidden');
+                document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            } else if (tabName === 'duplicates') {
+                document.getElementById('tabDuplicates').classList.remove('hidden');
+                document.querySelectorAll('.tab-btn')[2].classList.add('active');
+            }
+        }
+
+        // ==================== 导出Excel ====================
+        function exportExcel() {
+            if (invoiceData.length === 0) {
+                showToast('没有数据可导出', 'error');
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+
+            // 工作表1：发票明细
+            const detailData = invoiceData.map(function(inv) {
+                return {
+                    '序号': inv.index,
+                    '员工姓名': inv.employee,
+                    '发票类型': inv.type,
+                    '发票号码': inv.invoiceNumber,
+                    '开票日期': inv.date,
+                    '购买方': cleanCompanyName(inv.buyer),
+                    '销售方': cleanCompanyName(inv.seller),
+                    '商品名称': inv.goodsName,
+                    '金额': inv.amount,
+                    '税额': inv.tax,
+                    '价税合计': getReimbursementAmount(inv),
+                    '是否高铁票': inv.isTrain ? '是' : '否',
+                    '车次': inv.trainNo,
+                    '出发站': inv.departure,
+                    '到达站': inv.arrival
+                };
+            });
+            const ws1 = XLSX.utils.json_to_sheet(detailData);
+            // 设置列宽
+            ws1['!cols'] = [
+                { wch: 6 },   // 序号
+                { wch: 10 },  // 员工姓名
+                { wch: 10 },  // 发票类型
+                { wch: 14 },  // 发票号码
+                { wch: 12 },  // 开票日期
+                { wch: 25 },  // 购买方
+                { wch: 25 },  // 销售方
+                { wch: 30 },  // 商品名称
+                { wch: 12 },  // 金额
+                { wch: 10 },  // 税额
+                { wch: 12 },  // 价税合计
+                { wch: 10 },  // 是否高铁票
+                { wch: 8 },   // 车次
+                { wch: 10 },  // 出发站
+                { wch: 10 }   // 到达站
+            ];
+            XLSX.utils.book_append_sheet(wb, ws1, '发票明细');
+
+            // 工作表2：员工统计
+            const statsMap = {};
+            invoiceData.forEach(function(inv) {
+                if (!statsMap[inv.employee]) {
+                    statsMap[inv.employee] = { name: inv.employee, total: 0, amount: 0, trainCount: 0, trainAmount: 0, normalCount: 0, normalAmount: 0 };
+                }
+                statsMap[inv.employee].total++;
+                statsMap[inv.employee].amount += getReimbursementAmount(inv);
+                if (inv.isTrain) {
+                    statsMap[inv.employee].trainCount++;
+                    statsMap[inv.employee].trainAmount += getReimbursementAmount(inv);
+                } else {
+                    statsMap[inv.employee].normalCount++;
+                    statsMap[inv.employee].normalAmount += getReimbursementAmount(inv);
+                }
+            });
+            const statsData = Object.values(statsMap).map(function(s) {
+                return {
+                    '员工姓名': s.name,
+                    '发票总数': s.total,
+                    '报销总金额': Math.round(s.amount * 100) / 100,
+                    '高铁票/机票数量': s.trainCount,
+                    '高铁票/机票金额': Math.round(s.trainAmount * 100) / 100,
+                    '普通发票数量': s.normalCount,
+                    '普通发票金额': Math.round(s.normalAmount * 100) / 100
+                };
+            });
+            const ws2 = XLSX.utils.json_to_sheet(statsData);
+            ws2['!cols'] = [
+                { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 14 }
+            ];
+            XLSX.utils.book_append_sheet(wb, ws2, '员工统计');
+
+            // 工作表3：重复发票预警
+            const dupData = invoiceData.filter(function(inv) { return inv.isDuplicate; }).map(function(inv, idx) {
+                return {
+                    '序号': idx + 1,
+                    '员工姓名': inv.employee,
+                    '发票类型': inv.type,
+                    '发票代码/车次': inv.isTrain ? inv.trainNo : inv.invoiceCode,
+                    '发票号码/座位': inv.isTrain ? inv.seat : inv.invoiceNumber,
+                    '日期': inv.date,
+                    '金额': getReimbursementAmount(inv),
+                    '重复来源': inv.duplicateSource
+                };
+            });
+            const ws3 = XLSX.utils.json_to_sheet(dupData);
+            ws3['!cols'] = [
+                { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }
+            ];
+            XLSX.utils.book_append_sheet(wb, ws3, '重复发票预警');
+
+            // 生成文件名
+            const now = new Date();
+            const dateStr = now.getFullYear() +
+                String(now.getMonth() + 1).padStart(2, '0') +
+                String(now.getDate()).padStart(2, '0') + '_' +
+                String(now.getHours()).padStart(2, '0') +
+                String(now.getMinutes()).padStart(2, '0');
+            const fileName = '发票报表_' + dateStr + '.xlsx';
+
+            // 下载
+            XLSX.writeFile(wb, fileName);
+            showToast('Excel报表已导出', 'success');
+        }
+
+        // ==================== 下载重命名发票 ====================
+        async function downloadRenamedFiles() {
+            if (invoiceData.length === 0) {
+                showToast('没有数据可下载', 'error');
+                return;
+            }
+
+            // 逐个下载重命名后的文件
+            for (let i = 0; i < invoiceData.length; i++) {
+                const inv = invoiceData[i];
+                if (!inv.fileData) continue;
+
+                // 生成新文件名：发票日期-购买方公司名-销售方公司名-发票金额.pdf
+                let newName = (inv.date || '未知日期') + '-' +
+                    (cleanCompanyName(inv.buyer) || '未知购买方') + '-' +
+                    (cleanCompanyName(inv.seller) || '未知销售方') + '-' +
+                    getReimbursementAmount(inv).toFixed(2) + '.pdf';
+
+                // 清理文件名中的非法字符
+                newName = newName.replace(/[\\/:*?"<>|]/g, '_');
+
+                // 创建下载链接
+                const url = URL.createObjectURL(inv.fileData);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = newName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                // 间隔下载避免浏览器拦截
+                await sleep(300);
+            }
+            showToast('已下载 ' + invoiceData.length + ' 个重命名发票文件', 'success');
+        }
+
+        // ==================== 重命名原始文件（使用 File System Access API）====================
+        async function renameOriginalFiles() {
+            if (invoiceData.length === 0) {
+                showToast('没有数据可重命名', 'error');
+                return;
+            }
+
+            // 检查浏览器是否支持 File System Access API
+            if (!('showDirectoryPicker' in window)) {
+                showToast('您的浏览器不支持直接修改文件，请使用下载功能', 'error');
+                return;
+            }
+
+            try {
+                showToast('请选择包含发票文件的文件夹...', 'info');
+                
+                // 请求用户选择文件夹
+                const dirHandle = await window.showDirectoryPicker();
+                let renamedCount = 0;
+                let skippedCount = 0;
+                let keptCount = 0;
+                
+                // 跟踪已重命名的发票号码，避免重复重命名
+                const renamedInvoiceNumbers = new Set();
+
+                // 遍历文件夹中的文件
+                for await (const entry of dirHandle.values()) {
+                    if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf')) {
+                        // 查找匹配的发票数据（通过原始文件名匹配）
+                        const inv = invoiceData.find(i => i.fileName === entry.name);
+                        
+                        if (inv) {
+                            // 检查是否为重复发票
+                            if (inv.isDuplicate) {
+                                // 如果是重复发票，检查是否已经重命名过相同发票号码的文件
+                                if (renamedInvoiceNumbers.has(inv.invoiceNumber)) {
+                                    // 已经重命名过相同发票号码的文件，保留原名
+                                    console.log('重复发票保留原名:', entry.name, '发票号码:', inv.invoiceNumber);
+                                    keptCount++;
+                                    continue;
+                                }
+                            }
+                            
+                            // 生成新文件名：发票日期-购买方公司名-销售方公司名-发票金额.pdf
+                            let newName = (inv.date || '未知日期') + '-' +
+                                (cleanCompanyName(inv.buyer) || '未知购买方') + '-' +
+                                (cleanCompanyName(inv.seller) || '未知销售方') + '-' +
+                                getReimbursementAmount(inv).toFixed(2) + '.pdf';
+                            newName = newName.replace(/[\\/:*?"<>|]/g, '_');
+
+                            try {
+                                // 重命名文件
+                                await entry.move(newName);
+                                renamedCount++;
+                                // 记录已重命名的发票号码
+                                if (inv.invoiceNumber) {
+                                    renamedInvoiceNumbers.add(inv.invoiceNumber);
+                                }
+                                console.log('重命名:', entry.name, '->', newName);
+                            } catch (e) {
+                                console.error('重命名失败:', entry.name, e);
+                                skippedCount++;
+                            }
+                        }
+                    }
+                }
+
+                let msg = '';
+                if (renamedCount > 0) msg += `成功重命名 ${renamedCount} 个文件`;
+                if (keptCount > 0) msg += (msg ? '，' : '') + `${keptCount} 个重复发票保留原名`;
+                if (skippedCount > 0) msg += (msg ? '，' : '') + `${skippedCount} 个失败`;
+                
+                if (renamedCount > 0 || keptCount > 0) {
+                    showToast(msg, 'success');
+                } else {
+                    showToast('未找到匹配的文件，请确保选择了正确的文件夹', 'warning');
+                }
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    showToast('已取消选择文件夹', 'info');
+                } else {
+                    console.error('重命名文件失败:', e);
+                    showToast('重命名文件失败: ' + e.message, 'error');
+                }
+            }
+        }
+
+        // ==================== 清空所有数据 ====================
+        function clearAll() {
+            invoiceData = [];
+            pdfFiles = [];
+            historyInvoices = [];
+            debugInfo = [];
+            document.getElementById('employeeName').value = '';
+            renderFileList();
+            renderInvoiceTable();
+            renderStats();
+            renderDuplicates();
+            updateSummaryCards();
+            renderDebugPanel();
+            renderNormalInvoices();
+            renderTrainTickets();
+            renderAirlineTickets();
+            renderBuyerSummary();
+            document.getElementById('btnExport').disabled = true;
+            document.getElementById('btnDownload').disabled = true;
+            document.getElementById('btnRename').disabled = true;
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('historyInfo').classList.add('hidden');
+            showToast('已清空所有数据', 'success');
+        }
+
+        // ==================== 工具函数 ====================
+        // HTML转义
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+        
+        // 清理公司名（去掉空格）
+        function cleanCompanyName(name) {
+            if (!name) return '';
+            return name.replace(/\s+/g, ''); // 去掉所有空格
+        }
+
+        // 金额格式化
+        function formatMoney(num) {
+            if (num === 0 || isNaN(num)) return '¥0.00';
+            return '¥' + num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        // 延时函数
+        function sleep(ms) {
+            return new Promise(function(resolve) { setTimeout(resolve, ms); });
+        }
+
+        // Toast 通知
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
+            const colors = {
+                success: 'bg-green-100 border-green-300 text-green-800',
+                error: 'bg-red-100 border-red-300 text-red-800',
+                info: 'bg-blue-100 border-blue-300 text-blue-800',
+                warning: 'bg-yellow-100 border-yellow-300 text-yellow-800'
+            };
+            const icons = {
+                success: '&#10003;',
+                error: '&#10007;',
+                info: '&#8505;',
+                warning: '&#9888;'
+            };
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + (colors[type] || colors.info) + ' border rounded-lg px-4 py-3 text-sm shadow-lg flex items-center gap-2';
+            toast.innerHTML = '<span class="text-base">' + (icons[type] || icons.info) + '</span> ' + escapeHtml(message);
+            container.appendChild(toast);
+            // 3秒后自动移除
+            setTimeout(function() {
+                if (toast.parentNode) toast.parentNode.removeChild(toast);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

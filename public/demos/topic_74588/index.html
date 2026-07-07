@@ -1,0 +1,2339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeskMotion AI · 基于视觉大模型的桌面运动分析系统</title>
+<meta name="description" content="DeskMotion AI 是基于视觉大模型的桌面运动分析系统，提供实时姿态识别、动作分析、运动评估与个性化训练建议。">
+<style>
+/* ============================================
+   全局变量与基础重置
+   ============================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #0A0F1E;
+  --bg-secondary: #0F172A;
+  --bg-tertiary: #131C31;
+  --color-primary: #3B82F6;
+  --color-secondary: #06B6D4;
+  --color-accent: #8B5CF6;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --border-color: rgba(59, 130, 246, 0.18);
+  --glass-bg: rgba(15, 23, 42, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --max-width: 1200px;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow-glow: 0 0 40px rgba(59, 130, 246, 0.15);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.65;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  position: relative;
+}
+
+/* 全局网格背景 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.035) 1px, transparent 1px);
+  background-size: 52px 52px;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+}
+
+/* 顶部辉光 */
+body::after {
+  content: '';
+  position: fixed;
+  top: -300px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  height: 700px;
+  background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.18), rgba(6, 182, 212, 0.06) 40%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(20px);
+}
+
+main, nav, footer { position: relative; z-index: 1; }
+
+/* ============================================
+   通用容器与工具类
+   ============================================ */
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section {
+  padding: 100px 0;
+  position: relative;
+}
+
+.section-head {
+  text-align: center;
+  max-width: 720px;
+  margin: 0 auto 64px;
+}
+
+.section-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: var(--color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+.section-tag::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-secondary);
+  box-shadow: 0 0 8px var(--color-secondary);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.section-title {
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+  line-height: 1.2;
+}
+
+.section-title .grad {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.section-sub {
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+/* 玻璃卡片 */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* ============================================
+   导航栏
+   ============================================ */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 18px 0;
+  transition: all 0.35s ease;
+  background: transparent;
+}
+
+nav.scrolled {
+  background: rgba(10, 15, 30, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--glass-border);
+  padding: 12px 0;
+}
+
+.nav-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.logo-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  display: grid;
+  place-items: center;
+  position: relative;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.logo-mark::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid white;
+  border-radius: 50%;
+  position: relative;
+}
+
+.logo-mark::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: white;
+  border-radius: 50%;
+  top: 8px;
+  right: 8px;
+  box-shadow: 0 0 6px white;
+}
+
+.logo span { color: var(--text-secondary); font-weight: 500; }
+
+.nav-links {
+  display: flex;
+  gap: 32px;
+  list-style: none;
+}
+
+.nav-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+  position: relative;
+}
+
+.nav-links a:hover { color: var(--text-primary); }
+
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  transition: width 0.25s;
+}
+
+.nav-links a:hover::after { width: 100%; }
+
+.nav-cta {
+  padding: 9px 20px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.35);
+}
+
+.nav-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.5);
+}
+
+.nav-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+/* ============================================
+   Hero 区
+   ============================================ */
+#hero {
+  padding: 180px 0 100px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-bottom: 28px;
+  animation: fadeInUp 0.8s ease;
+}
+
+.hero-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 10px var(--success);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.hero-title {
+  font-size: clamp(38px, 7vw, 76px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin-bottom: 24px;
+  animation: fadeInUp 0.8s ease 0.1s both;
+}
+
+.hero-title .grad {
+  background: linear-gradient(135deg, #60A5FA 0%, var(--color-primary) 40%, var(--color-secondary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: inline-block;
+}
+
+.hero-slogan {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text-secondary);
+  max-width: 680px;
+  margin: 0 auto 44px;
+  line-height: 1.7;
+  animation: fadeInUp 0.8s ease 0.2s both;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 80px;
+  animation: fadeInUp 0.8s ease 0.3s both;
+}
+
+.btn {
+  padding: 14px 32px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.25s;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: white;
+  box-shadow: 0 8px 28px rgba(59, 130, 246, 0.4);
+}
+
+.btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 36px rgba(59, 130, 246, 0.55);
+}
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(59, 130, 246, 0.4);
+  transform: translateY(-3px);
+}
+
+/* 核心数据 */
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  max-width: 920px;
+  margin: 0 auto;
+  animation: fadeInUp 0.8s ease 0.4s both;
+}
+
+.stat-card {
+  padding: 28px 20px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+}
+
+.stat-num {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.stat-num .unit {
+  font-size: 0.5em;
+  -webkit-text-fill-color: var(--text-secondary);
+  margin-left: 2px;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+/* ============================================
+   痛点分析
+   ============================================ */
+.pain-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.pain-card {
+  padding: 32px 26px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s, border-color 0.3s;
+}
+
+.pain-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.pain-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100px;
+  height: 100px;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.1), transparent 70%);
+  border-radius: 50%;
+  transform: translate(40%, -40%);
+}
+
+.pain-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  margin-bottom: 18px;
+}
+
+.pain-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.pain-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.pain-tag {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ============================================
+   AI 能力展示
+   ============================================ */
+.cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 20px;
+}
+
+.cap-card {
+  padding: 30px 26px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s, border-color 0.3s;
+}
+
+.cap-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: var(--shadow-glow);
+}
+
+.cap-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.4s;
+}
+
+.cap-card:hover::before { transform: scaleX(1); }
+
+.cap-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(6, 182, 212, 0.15));
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.cap-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.cap-card:hover .cap-icon::after { opacity: 0.15; }
+
+.cap-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cap-card h3 .num {
+  font-size: 12px;
+  color: var(--color-secondary);
+  font-weight: 600;
+  font-family: "SF Mono", Monaco, monospace;
+}
+
+.cap-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin-bottom: 14px;
+}
+
+.cap-feats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cap-feats span {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+/* ============================================
+   交互演示区
+   ============================================ */
+#demo {
+  background: linear-gradient(180deg, transparent, rgba(15, 23, 42, 0.5) 30%, rgba(15, 23, 42, 0.5) 70%, transparent);
+}
+
+.demo-wrap {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 22px;
+  align-items: stretch;
+}
+
+/* 左侧摄像头画面 */
+.cam-panel {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  min-height: 520px;
+  background: #050912;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+}
+
+.cam-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 14px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 5;
+  background: linear-gradient(180deg, rgba(0,0,0,0.6), transparent);
+}
+
+.cam-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: "SF Mono", Monaco, monospace;
+}
+
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 10px var(--danger);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.cam-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: "SF Mono", Monaco, monospace;
+  display: flex;
+  gap: 14px;
+}
+
+.cam-meta span { display: flex; align-items: center; gap: 5px; }
+
+#skeletonCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+
+/* 摄像头取景框角标 */
+.viewfinder {
+  position: absolute;
+  inset: 50px 18px 18px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.viewfinder::before, .viewfinder::after,
+.viewfinder > span::before, .viewfinder > span::after {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: var(--color-secondary);
+  border-style: solid;
+  border-width: 0;
+  opacity: 0.7;
+}
+
+.viewfinder::before { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 6px; }
+.viewfinder::after { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 6px; }
+.viewfinder > span::before { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 6px; }
+.viewfinder > span::after { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 6px; }
+
+.cam-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 5;
+  background: linear-gradient(0deg, rgba(0,0,0,0.6), transparent);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: "SF Mono", Monaco, monospace;
+}
+
+.phase-pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: var(--color-secondary);
+  font-weight: 600;
+}
+
+/* 右侧分析面板 */
+.analysis-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-block {
+  padding: 18px 20px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-title h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title h4::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-secondary));
+  border-radius: 2px;
+}
+
+.panel-title .live {
+  font-size: 10px;
+  color: var(--success);
+  font-family: "SF Mono", Monaco, monospace;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.panel-title .live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* 关键点列表 */
+.kp-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  font-family: "SF Mono", Monaco, monospace;
+  font-size: 11px;
+}
+
+.kp-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(255,255,255,0.05);
+}
+
+.kp-item .name { color: var(--text-secondary); }
+.kp-item .coord { color: var(--color-secondary); }
+
+/* 关节角度 */
+.angles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.angle-cell {
+  text-align: center;
+  padding: 12px 8px;
+  background: rgba(59, 130, 246, 0.05);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+}
+
+.angle-cell .label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.angle-cell .val {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: "SF Mono", Monaco, monospace;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+
+.angle-cell .val .deg {
+  font-size: 12px;
+  -webkit-text-fill-color: var(--text-muted);
+  margin-left: 1px;
+}
+
+/* 评分进度条 */
+.scores { display: flex; flex-direction: column; gap: 12px; }
+
+.score-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 42px;
+  align-items: center;
+  gap: 12px;
+}
+
+.score-row .name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.score-bar {
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.score-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.score-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4));
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+.score-row .pct {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: "SF Mono", Monaco, monospace;
+  color: var(--color-secondary);
+  text-align: right;
+}
+
+/* AI 反馈 */
+.ai-feedback {
+  padding: 16px 18px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(6, 182, 212, 0.05));
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-feedback::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-secondary));
+}
+
+.ai-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-secondary);
+}
+
+.ai-head .typing {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 4px;
+}
+
+.ai-head .typing span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-secondary);
+  animation: typing 1.2s ease-in-out infinite;
+}
+
+.ai-head .typing span:nth-child(2) { animation-delay: 0.2s; }
+.ai-head .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+.ai-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 42px;
+}
+
+.ai-text .hl { color: var(--warning); font-weight: 600; }
+.ai-text .ok { color: var(--success); font-weight: 600; }
+
+/* ============================================
+   运动项目支持
+   ============================================ */
+.sports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.sport-card {
+  padding: 26px 18px;
+  text-align: center;
+  transition: transform 0.3s, border-color 0.3s;
+  cursor: pointer;
+}
+
+.sport-card:hover {
+  transform: translateY(-5px);
+  border-color: rgba(6, 182, 212, 0.4);
+}
+
+.sport-emoji {
+  font-size: 38px;
+  margin-bottom: 12px;
+  display: block;
+  filter: drop-shadow(0 4px 12px rgba(59, 130, 246, 0.3));
+  transition: transform 0.3s;
+}
+
+.sport-card:hover .sport-emoji { transform: scale(1.15); }
+
+.sport-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sport-en {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: "SF Mono", Monaco, monospace;
+  letter-spacing: 0.5px;
+}
+
+.sport-diff {
+  margin-top: 10px;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.sport-diff span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+}
+
+.sport-diff span.on { background: var(--color-secondary); }
+
+/* ============================================
+   应用场景
+   ============================================ */
+.scene-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.scene-card {
+  padding: 28px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s;
+}
+
+.scene-card:hover { transform: translateY(-4px); }
+
+.scene-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.4s;
+}
+
+.scene-card:hover::after { transform: scaleX(1); }
+
+.scene-icon {
+  font-size: 30px;
+  margin-bottom: 14px;
+  display: block;
+}
+
+.scene-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.scene-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.scene-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.scene-tags span {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(6, 182, 212, 0.08);
+  color: var(--color-secondary);
+}
+
+/* ============================================
+   商业模式
+   ============================================ */
+.biz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px;
+}
+
+.biz-card {
+  padding: 36px 30px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s;
+}
+
+.biz-card:hover { transform: translateY(-6px); }
+
+.biz-card.featured {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: var(--shadow-glow);
+}
+
+.biz-card.featured::before {
+  content: '推荐';
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.biz-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  letter-spacing: 0.5px;
+}
+
+.biz-card h3 {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.biz-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 22px;
+}
+
+.biz-price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.biz-price .amt {
+  font-size: 36px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.biz-price .per {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.biz-list { list-style: none; display: flex; flex-direction: column; gap: 11px; }
+
+.biz-list li {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.5;
+}
+
+.biz-list li::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.15);
+  flex-shrink: 0;
+  position: relative;
+  margin-top: 2px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310B981' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+  background-size: 10px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* ============================================
+   Footer
+   ============================================ */
+footer {
+  padding: 70px 0 30px;
+  border-top: 1px solid var(--glass-border);
+  background: rgba(5, 9, 18, 0.6);
+  margin-top: 60px;
+}
+
+.footer-top {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 40px;
+  margin-bottom: 50px;
+}
+
+.footer-brand .logo { margin-bottom: 16px; }
+
+.footer-brand p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  max-width: 320px;
+}
+
+.footer-col h5 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+
+.footer-col a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.footer-col a:hover { color: var(--color-secondary); }
+
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 26px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-bottom .social { display: flex; gap: 14px; }
+
+.footer-bottom .social a {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.footer-bottom .social a:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: var(--color-secondary);
+}
+
+/* ============================================
+   动画
+   ============================================ */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-30px); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes typing {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(100%); }
+}
+
+/* 滚动渐入 */
+.reveal {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal[data-delay="1"] { transition-delay: 0.1s; }
+.reveal[data-delay="2"] { transition-delay: 0.2s; }
+.reveal[data-delay="3"] { transition-delay: 0.3s; }
+.reveal[data-delay="4"] { transition-delay: 0.4s; }
+
+/* ============================================
+   响应式
+   ============================================ */
+@media (max-width: 960px) {
+  .demo-wrap { grid-template-columns: 1fr; }
+  .cam-panel { min-height: 420px; }
+  .footer-top { grid-template-columns: 1fr 1fr; gap: 30px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .nav-links { display: none; }
+  .nav-toggle { display: block; }
+  .section { padding: 70px 0; }
+  #hero { padding: 140px 0 70px; }
+  .hero-stats { gap: 12px; }
+  .stat-card { padding: 20px 12px; }
+  .footer-top { grid-template-columns: 1fr; }
+  .footer-bottom { flex-direction: column; text-align: center; }
+  .kp-list { grid-template-columns: 1fr; }
+  .angles-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 480px) {
+  .container { padding: 0 16px; }
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .btn { justify-content: center; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================
+     导航栏
+     ============================================ -->
+<nav id="navbar">
+  <div class="nav-inner">
+    <a href="#hero" class="logo">
+      <div class="logo-mark"></div>
+      DeskMotion <span>AI</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#pain">痛点分析</a></li>
+      <li><a href="#capabilities">AI 能力</a></li>
+      <li><a href="#demo">交互演示</a></li>
+      <li><a href="#sports">运动项目</a></li>
+      <li><a href="#scenarios">应用场景</a></li>
+      <li><a href="#business">商业模式</a></li>
+    </ul>
+    <a href="#demo" class="nav-cta">立即体验</a>
+    <button class="nav-toggle" aria-label="菜单">☰</button>
+  </div>
+</nav>
+
+<main>
+
+<!-- ============================================
+     Hero 区
+     ============================================ -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      TRAE AI 创造力大赛 · 学习工作赛道
+    </div>
+    <h1 class="hero-title">
+      让每一次动作<br>
+      <span class="grad">都被精准看见</span>
+    </h1>
+    <p class="hero-slogan">
+      DeskMotion AI 是基于视觉大模型的桌面运动分析系统。<br>
+      通过摄像头或上传视频，即可获得实时姿态识别、动作评估与个性化训练建议，<br>
+      让专业级运动分析触手可及。
+    </p>
+    <div class="hero-actions">
+      <a href="#demo" class="btn btn-primary">
+        ▶ 观看交互演示
+      </a>
+      <a href="#capabilities" class="btn btn-ghost">
+        了解 AI 能力 →
+      </a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-card glass">
+        <div class="stat-num">17<span class="unit">个</span></div>
+        <div class="stat-label">关键点姿态识别</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-num">≤30<span class="unit">ms</span></div>
+        <div class="stat-label">毫秒级实时反馈</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-num">50<span class="unit">+</span></div>
+        <div class="stat-label">支持运动动作</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-num">96<span class="unit">.8%</span></div>
+        <div class="stat-label">动作识别准确率</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     痛点分析
+     ============================================ -->
+<section id="pain" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">PAIN POINTS</span>
+      <h2 class="section-title">运动训练的<span class="grad">四大痛点</span></h2>
+      <p class="section-sub">专业运动分析长期被高门槛与高成本垄断，普通用户难以获得科学指导，错误动作正在悄悄伤害身体。</p>
+    </div>
+    <div class="pain-grid">
+      <div class="pain-card glass reveal" data-delay="1">
+        <div class="pain-icon">⚠️</div>
+        <h3>动作不标准致损伤</h3>
+        <p>深蹲膝盖内扣、硬拉弓背、俯卧撑塌腰……错误代偿动作长期累积，引发半月板磨损、腰椎间盘突出等不可逆损伤。</p>
+        <span class="pain-tag">损伤风险高</span>
+      </div>
+      <div class="pain-card glass reveal" data-delay="2">
+        <div class="pain-icon">💸</div>
+        <h3>教练指导费用昂贵</h3>
+        <p>专业私教单节课 300-800 元，康复指导更高达千元 hourly，长期跟随训练成本令大多数用户望而却步。</p>
+        <span class="pain-tag">经济门槛高</span>
+      </div>
+      <div class="pain-card glass reveal" data-delay="3">
+        <div class="pain-icon">🎬</div>
+        <h3>动捕设备价格高昂</h3>
+        <p>专业光学动捕系统动辄数十万，便携式 IMU 设备也需数千元，且需穿戴调试，无法随时随地开展训练。</p>
+        <span class="pain-tag">设备门槛高</span>
+      </div>
+      <div class="pain-card glass reveal" data-delay="4">
+        <div class="pain-icon">⏱️</div>
+        <h3>无法实时反馈纠正</h3>
+        <p>录制视频后回放只能事后复盘，训练当下无法感知动作偏差，错过最佳纠正时机，错误动作反复强化。</p>
+        <span class="pain-tag">反馈滞后</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     AI 能力展示
+     ============================================ -->
+<section id="capabilities" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">AI CAPABILITIES</span>
+      <h2 class="section-title">六大<span class="grad">AI 核心能力</span></h2>
+      <p class="section-sub">融合视觉大模型与运动生物力学，构建从感知、理解到决策的完整运动智能链路。</p>
+    </div>
+    <div class="cap-grid">
+      <div class="cap-card glass reveal" data-delay="1">
+        <div class="cap-icon">🦴</div>
+        <h3>姿态估计 <span class="num">01</span></h3>
+        <p>基于 COCO-17 关键点拓扑，实时检测头、躯干、四肢共 17 个关键点坐标，构建人体骨骼拓扑结构。</p>
+        <div class="cap-feats"><span>17 Keypoints</span><span>2D/3D 重建</span><span>多人检测</span></div>
+      </div>
+      <div class="cap-card glass reveal" data-delay="2">
+        <div class="cap-icon">🏃</div>
+        <h3>动作识别 <span class="num">02</span></h3>
+        <p>时空图卷积网络(ST-GCN)提取动作时序特征，精准分类深蹲、俯卧撑、硬拉等 50+ 标准运动动作。</p>
+        <div class="cap-feats"><span>ST-GCN</span><span>时序建模</span><span>50+ 动作</span></div>
+      </div>
+      <div class="cap-card glass reveal" data-delay="3">
+        <div class="cap-icon">📊</div>
+        <h3>运动评估 <span class="num">03</span></h3>
+        <p>多维度量化动作质量：标准度、动作幅度、运动节奏、身体稳定性，生成可视化评分与雷达图。</p>
+        <div class="cap-feats"><span>4 维评分</span><span>关节角度</span><span>ROM 分析</span></div>
+      </div>
+      <div class="cap-card glass reveal" data-delay="1">
+        <div class="cap-icon">🚨</div>
+        <h3>损伤预警 <span class="num">04</span></h3>
+        <p>实时监测代偿动作与危险姿态：膝盖内扣、脊柱超伸、骨盆前倾等，触达阈值立即告警，防患于未然。</p>
+        <div class="cap-feats"><span>代偿检测</span><span>阈值告警</span><span>风险分级</span></div>
+      </div>
+      <div class="cap-card glass reveal" data-delay="2">
+        <div class="cap-icon">🎯</div>
+        <h3>训练建议 <span class="num">05</span></h3>
+        <p>大模型结合评估结果生成个性化纠正方案，输出可执行的调整要点、辅助训练动作与负荷建议。</p>
+        <div class="cap-feats"><span>LLM 生成</span><span>个性化方案</span><span>辅助动作</span></div>
+      </div>
+      <div class="cap-card glass reveal" data-delay="3">
+        <div class="cap-icon">📈</div>
+        <h3>进度追踪 <span class="num">06</span></h3>
+        <p>完整记录训练历史，可视化呈现能力成长曲线，智能识别薄弱环节，动态调整下一阶段训练计划。</p>
+        <div class="cap-feats"><span>训练日志</span><span>成长曲线</span><span>计划调整</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     交互演示区（核心亮点）
+     ============================================ -->
+<section id="demo" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">LIVE DEMO</span>
+      <h2 class="section-title">实时<span class="grad">运动分析演示</span></h2>
+      <p class="section-sub">模拟桌面运动分析界面：左侧摄像头画面实时绘制 17 关键点骨骼，右侧 AI 分析面板同步输出关键点坐标、关节角度、动作评分与智能反馈。</p>
+    </div>
+
+    <div class="demo-wrap reveal">
+      <!-- 左侧：模拟摄像头画面 -->
+      <div class="cam-panel">
+        <div class="cam-header">
+          <div class="cam-status">
+            <span class="rec-dot"></span>
+            <span>REC · 摄像头实时画面</span>
+          </div>
+          <div class="cam-meta">
+            <span>● 1080p</span>
+            <span>● 30 FPS</span>
+          </div>
+        </div>
+        <canvas id="skeletonCanvas"></canvas>
+        <div class="viewfinder"><span></span></div>
+        <div class="cam-footer">
+          <span>当前动作：深蹲 Squat</span>
+          <span class="phase-pill" id="phasePill">下降阶段</span>
+        </div>
+      </div>
+
+      <!-- 右侧：实时分析面板 -->
+      <div class="analysis-panel">
+        <!-- 关键点坐标 -->
+        <div class="panel-block glass">
+          <div class="panel-title">
+            <h4>关键点坐标 / Keypoints</h4>
+            <span class="live">LIVE</span>
+          </div>
+          <div class="kp-list" id="kpList">
+            <!-- JS 动态填充 -->
+          </div>
+        </div>
+
+        <!-- 关节角度 -->
+        <div class="panel-block glass">
+          <div class="panel-title">
+            <h4>关节角度 / Joint Angles</h4>
+            <span class="live">LIVE</span>
+          </div>
+          <div class="angles-grid">
+            <div class="angle-cell">
+              <div class="label">左膝 L.Knee</div>
+              <div class="val" id="angleLKnee">—<span class="deg">°</span></div>
+            </div>
+            <div class="angle-cell">
+              <div class="label">右膝 R.Knee</div>
+              <div class="val" id="angleRKnee">—<span class="deg">°</span></div>
+            </div>
+            <div class="angle-cell">
+              <div class="label">髋角 Hip</div>
+              <div class="val" id="angleHip">—<span class="deg">°</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 动作评分 -->
+        <div class="panel-block glass">
+          <div class="panel-title">
+            <h4>动作评分 / Motion Score</h4>
+            <span class="live">LIVE</span>
+          </div>
+          <div class="scores">
+            <div class="score-row">
+              <span class="name">标准度</span>
+              <div class="score-bar"><div class="score-fill" id="scoreStd" style="width:0%"></div></div>
+              <span class="pct" id="scoreStdPct">0</span>
+            </div>
+            <div class="score-row">
+              <span class="name">动作幅度</span>
+              <div class="score-bar"><div class="score-fill" id="scoreRom" style="width:0%"></div></div>
+              <span class="pct" id="scoreRomPct">0</span>
+            </div>
+            <div class="score-row">
+              <span class="name">运动节奏</span>
+              <div class="score-bar"><div class="score-fill" id="scoreRhythm" style="width:0%"></div></div>
+              <span class="pct" id="scoreRhythmPct">0</span>
+            </div>
+            <div class="score-row">
+              <span class="name">稳定性</span>
+              <div class="score-bar"><div class="score-fill" id="scoreStab" style="width:0%"></div></div>
+              <span class="pct" id="scoreStabPct">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 反馈 -->
+        <div class="ai-feedback">
+          <div class="ai-head">
+            <span>🤖 AI 智能反馈</span>
+            <span class="typing"><span></span><span></span><span></span></span>
+          </div>
+          <div class="ai-text" id="aiText">正在分析动作…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     运动项目支持
+     ============================================ -->
+<section id="sports" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">SUPPORTED SPORTS</span>
+      <h2 class="section-title">支持<span class="grad">50+ 运动动作</span></h2>
+      <p class="section-sub">覆盖力量训练、徒手训练、功能性训练、康复训练四大门类，持续扩展运动动作库。</p>
+    </div>
+    <div class="sports-grid">
+      <div class="sport-card glass reveal" data-delay="1">
+        <span class="sport-emoji">🦵</span>
+        <div class="sport-name">深蹲</div>
+        <div class="sport-en">SQUAT</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="1">
+        <span class="sport-emoji">💪</span>
+        <div class="sport-name">俯卧撑</div>
+        <div class="sport-en">PUSH-UP</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="2">
+        <span class="sport-emoji">🏋️</span>
+        <div class="sport-name">硬拉</div>
+        <div class="sport-en">DEADLIFT</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="2">
+        <span class="sport-emoji">🧘</span>
+        <div class="sport-name">平板支撑</div>
+        <div class="sport-en">PLANK</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="3">
+        <span class="sport-emoji">🚶</span>
+        <div class="sport-name">弓步蹲</div>
+        <div class="sport-en">LUNGE</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="3">
+        <span class="sport-emoji">🆙</span>
+        <div class="sport-name">引体向上</div>
+        <div class="sport-en">PULL-UP</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="4">
+        <span class="sport-emoji">🤸</span>
+        <div class="sport-name">波比跳</div>
+        <div class="sport-en">BURPEE</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="4">
+        <span class="sport-emoji">🧎</span>
+        <div class="sport-name">臀桥</div>
+        <div class="sport-en">GLUTE BRIDGE</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="1">
+        <span class="sport-emoji">🤾</span>
+        <div class="sport-name">俄罗斯转体</div>
+        <div class="sport-en">RUSSIAN TWIST</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="2">
+        <span class="sport-emoji">🦵</span>
+        <div class="sport-name">侧弓步</div>
+        <div class="sport-en">SIDE LUNGE</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="3">
+        <span class="sport-emoji">🧗</span>
+        <div class="sport-name">登山跑</div>
+        <div class="sport-en">MOUNTAIN CLIMBER</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span></span><span></span></div>
+      </div>
+      <div class="sport-card glass reveal" data-delay="4">
+        <span class="sport-emoji">➕</span>
+        <div class="sport-name">更多动作</div>
+        <div class="sport-en">+40 MORE</div>
+        <div class="sport-diff"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     应用场景
+     ============================================ -->
+<section id="scenarios" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">USE CASES</span>
+      <h2 class="section-title">多元<span class="grad">应用场景</span></h2>
+      <p class="section-sub">从居家健身到专业运动队，DeskMotion AI 适配全场景运动分析需求。</p>
+    </div>
+    <div class="scene-grid">
+      <div class="scene-card glass reveal" data-delay="1">
+        <span class="scene-icon">🏠</span>
+        <h3>居家健身</h3>
+        <p>一台笔记本/摄像头即可开展科学训练，告别盲目跟练，每个动作都有专业反馈。</p>
+        <div class="scene-tags"><span>零器械</span><span>实时纠正</span><span>碎片化</span></div>
+      </div>
+      <div class="scene-card glass reveal" data-delay="2">
+        <span class="scene-icon">🎓</span>
+        <h3>体育教学</h3>
+        <p>体育课堂动作示范与考核数字化，学生动作自动评分，教师精准掌握学情。</p>
+        <div class="scene-tags"><span>考核量化</span><span>批量评估</span><span>教学留痕</span></div>
+      </div>
+      <div class="scene-card glass reveal" data-delay="3">
+        <span class="scene-icon">🏥</span>
+        <h3>康复训练</h3>
+        <p>术后康复与慢性疼痛管理，居家即可完成康复动作训练，治疗师远程监控进度。</p>
+        <div class="scene-tags"><span>远程监控</span><span>安全阈值</span><span>进度同步</span></div>
+      </div>
+      <div class="scene-card glass reveal" data-delay="4">
+        <span class="scene-icon">🏟️</span>
+        <h3>健身房</h3>
+        <p>智能训练区助力会员自主训练，降低教练依赖，提升训练效果与会员留存。</p>
+        <div class="scene-tags"><span>智能区</span><span>自助训练</span><span>数据看板</span></div>
+      </div>
+      <div class="scene-card glass reveal" data-delay="1">
+        <span class="scene-icon">🏆</span>
+        <h3>运动队</h3>
+        <p>专业队日常训练动作监测与负荷管理，识别技术短板，辅助教练制定训练计划。</p>
+        <div class="scene-tags"><span>负荷管理</span><span>技术分析</span><span>团队数据</span></div>
+      </div>
+      <div class="scene-card glass reveal" data-delay="2">
+        <span class="scene-icon">📱</span>
+        <h3>线上课程</h3>
+        <p>健身直播与录播课程增强互动，学员动作实时反馈，提升课程完课率与口碑。</p>
+        <div class="scene-tags"><span>直播互动</span><span>完课率</span><span>口碑</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================
+     商业模式
+     ============================================ -->
+<section id="business" class="section">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="section-tag">BUSINESS MODEL</span>
+      <h2 class="section-title">三层<span class="grad">商业模式</span></h2>
+      <p class="section-sub">B2C 个人会员 + B2B 健身房 SaaS + B2B 康复机构，覆盖个人到机构的完整价值链。</p>
+    </div>
+    <div class="biz-grid">
+      <div class="biz-card glass reveal" data-delay="1">
+        <span class="biz-tag">B2C · 个人会员</span>
+        <h3>Pro 会员</h3>
+        <div class="biz-sub">面向健身爱好者与运动训练人群</div>
+        <div class="biz-price">
+          <span class="amt">¥39</span>
+          <span class="per">/ 月</span>
+        </div>
+        <ul class="biz-list">
+          <li>无限次实时动作分析</li>
+          <li>50+ 运动动作全库访问</li>
+          <li>个性化训练计划生成</li>
+          <li>训练历史与成长曲线</li>
+          <li>损伤风险实时预警</li>
+        </ul>
+      </div>
+      <div class="biz-card glass featured reveal" data-delay="2">
+        <span class="biz-tag">B2B · 健身房 SaaS</span>
+        <h3>Studio 版</h3>
+        <div class="biz-sub">面向健身房、工作室、连锁机构</div>
+        <div class="biz-price">
+          <span class="amt">¥1,999</span>
+          <span class="per">/ 月 · 单店</span>
+        </div>
+        <ul class="biz-list">
+          <li>智能训练区授权（≤20 终端）</li>
+          <li>会员训练数据管理后台</li>
+          <li>教练辅助教学系统</li>
+          <li>门店运营数据看板</li>
+          <li>品牌定制与 API 接入</li>
+          <li>专属客户成功经理</li>
+        </ul>
+      </div>
+      <div class="biz-card glass reveal" data-delay="3">
+        <span class="biz-tag">B2B · 康复机构</span>
+        <h3>Rehab 版</h3>
+        <div class="biz-sub">面向康复中心、运动医学机构</div>
+        <div class="biz-price">
+          <span class="amt">面议</span>
+          <span class="per">/ 年</span>
+        </div>
+        <ul class="biz-list">
+          <li>康复处方动作库定制</li>
+          <li>患者居家训练远程监控</li>
+          <li>康复进度量化评估报告</li>
+          <li>符合医疗数据合规标准</li>
+          <li>治疗师协作工作台</li>
+          <li> HIS 系统对接支持</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================================
+     Footer
+     ============================================ -->
+<footer>
+  <div class="container">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <a href="#hero" class="logo">
+          <div class="logo-mark"></div>
+          DeskMotion <span>AI</span>
+        </a>
+        <p>基于视觉大模型的桌面运动分析系统，让专业级运动分析触手可及。致力于降低科学训练门槛，守护每一次运动的健康与安全。</p>
+      </div>
+      <div class="footer-col">
+        <h5>产品</h5>
+        <ul>
+          <li><a href="#capabilities">AI 能力</a></li>
+          <li><a href="#demo">交互演示</a></li>
+          <li><a href="#sports">运动项目</a></li>
+          <li><a href="#business">价格方案</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h5>解决方案</h5>
+        <ul>
+          <li><a href="#scenarios">居家健身</a></li>
+          <li><a href="#scenarios">体育教学</a></li>
+          <li><a href="#scenarios">康复训练</a></li>
+          <li><a href="#scenarios">健身房 SaaS</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h5>关于</h5>
+        <ul>
+          <li><a href="#">团队介绍</a></li>
+          <li><a href="#">技术博客</a></li>
+          <li><a href="#">加入我们</a></li>
+          <li><a href="#">联系我们</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 DeskMotion AI · TRAE AI 创造力大赛参赛作品 · 仅供演示</span>
+      <div class="social">
+        <a href="#" title="GitHub">⌥</a>
+        <a href="#" title="微信">✦</a>
+        <a href="#" title="邮箱">✉</a>
+        <a href="#" title="B站">▶</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============================================
+   DeskMotion AI - 交互演示核心逻辑
+   ============================================ */
+(function () {
+  'use strict';
+
+  /* ---------- 1. 导航栏滚动变色 ---------- */
+  const navbar = document.getElementById('navbar');
+  window.addEventListener('scroll', function () {
+    if (window.scrollY > 30) {
+      navbar.classList.add('scrolled');
+    } else {
+      navbar.classList.remove('scrolled');
+    }
+  }, { passive: true });
+
+  /* ---------- 2. 滚动渐入 ---------- */
+  const reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    reveals.forEach(function (el) { io.observe(el); });
+  } else {
+    reveals.forEach(function (el) { el.classList.add('in'); });
+  }
+
+  /* ---------- 3. 移动端菜单 ---------- */
+  const navToggle = document.querySelector('.nav-toggle');
+  const navLinks = document.querySelector('.nav-links');
+  if (navToggle) {
+    navToggle.addEventListener('click', function () {
+      if (navLinks.style.display === 'flex') {
+        navLinks.style.display = '';
+      } else {
+        navLinks.style.display = 'flex';
+        navLinks.style.flexDirection = 'column';
+        navLinks.style.position = 'absolute';
+        navLinks.style.top = '60px';
+        navLinks.style.right = '24px';
+        navLinks.style.background = 'rgba(15,23,42,0.95)';
+        navLinks.style.padding = '16px';
+        navLinks.style.borderRadius = '10px';
+        navLinks.style.border = '1px solid rgba(255,255,255,0.08)';
+      }
+    });
+  }
+
+  /* ============================================
+     4. Canvas 骨骼动画系统
+     ============================================ */
+  const canvas = document.getElementById('skeletonCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // COCO-17 关键点名称
+  const KP_NAMES = [
+    '鼻子', '左眼', '右眼', '左耳', '右耳',
+    '左肩', '右肩', '左肘', '右肘', '左腕', '右腕',
+    '左髋', '右髋', '左膝', '右膝', '左踝', '右踝'
+  ];
+
+  // 骨骼连接关系 [起点索引, 终点索引]
+  const BONES = [
+    [0, 1], [0, 2], [1, 3], [2, 4],          // 面部
+    [5, 6],                                   // 肩膀
+    [5, 7], [7, 9],                           // 左臂
+    [6, 8], [8, 10],                          // 右臂
+    [5, 11], [6, 12], [11, 12],               // 躯干
+    [11, 13], [13, 15],                       // 左腿
+    [12, 14], [14, 16]                        // 右腿
+  ];
+
+  let canvasW = 0, canvasH = 0;
+
+  // 自适应 Canvas 尺寸（高 DPI）
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, rect.width * dpr);
+    canvas.height = Math.max(1, rect.height * dpr);
+    canvasW = rect.width;
+    canvasH = rect.height;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  /* ---------- 计算深蹲姿态下 17 个关键点坐标 ---------- */
+  // phase: 0~1 表示一个深蹲周期
+  function getSkeleton(phase) {
+    // 深蹲深度：t=0/1 时为 0（站立），t=0.5 时为 1（最低点）
+    const depth = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+    // 手臂前抬幅度（随深蹲同步）
+    const armRaise = depth * 0.7;
+
+    // 中心点
+    const cx = canvasW / 2;
+    const cy = canvasH / 2 + 10; // 髋部中心略偏下
+
+    // 各部位位移量
+    const hipDrop = depth * 78;        // 髋部下降
+    const kneeSpread = depth * 16;     // 膝盖外展
+    const kneeDrop = depth * 22;       // 膝盖微降
+    const armY = armRaise * 70;        // 手臂上抬
+    const armX = armRaise * 22;        // 手臂前伸
+
+    // 站立基准坐标（相对 cx, cy）
+    const base = {
+      0: [0, -178],     // 鼻子
+      1: [-8, -184],    // 左眼
+      2: [8, -184],     // 右眼
+      3: [-18, -178],   // 左耳
+      4: [18, -178],    // 右耳
+      5: [-46, -128],   // 左肩
+      6: [46, -128],    // 右肩
+      7: [-56, -64],    // 左肘
+      8: [56, -64],     // 右肘
+      9: [-60, -2],     // 左腕
+      10: [60, -2],     // 右腕
+      11: [-30, 0],     // 左髋
+      12: [30, 0],      // 右髋
+      13: [-34, 86],    // 左膝
+      14: [34, 86],     // 右膝
+      15: [-38, 172],   // 左踝
+      16: [38, 172]     // 右踝
+    };
+
+    const pts = [];
+    for (let i = 0; i < 17; i++) {
+      const b = base[i];
+      let x = b[0], y = b[1];
+
+      // 上半身（头、肩、肘、腕、髋）随髋部下降
+      if (i <= 12) {
+        y += hipDrop;
+      }
+
+      // 手臂前抬（肘、腕）
+      if (i === 7) { x -= armX; y += armY * 0.5; }
+      if (i === 8) { x += armX; y += armY * 0.5; }
+      if (i === 9) { x -= armX * 1.6; y += armY; }
+      if (i === 10) { x += armX * 1.6; y += armY; }
+
+      // 膝盖外展微降
+      if (i === 13) { x -= kneeSpread; y += kneeDrop; }
+      if (i === 14) { x += kneeSpread; y += kneeDrop; }
+
+      // 髋部随深蹲略外展
+      if (i === 11) { x -= kneeSpread * 0.3; }
+      if (i === 12) { x += kneeSpread * 0.3; }
+
+      pts.push({ x: cx + x, y: cy + y });
+    }
+    return pts;
+  }
+
+  /* ---------- 计算关节角度（三点构成的角度，单位度） ---------- */
+  function jointAngle(a, b, c) {
+    const v1 = { x: a.x - b.x, y: a.y - b.y };
+    const v2 = { x: c.x - b.x, y: c.y - b.y };
+    const dot = v1.x * v2.x + v1.y * v2.y;
+    const m1 = Math.hypot(v1.x, v1.y);
+    const m2 = Math.hypot(v2.x, v2.y);
+    if (m1 === 0 || m2 === 0) return 0;
+    const cos = Math.max(-1, Math.min(1, dot / (m1 * m2)));
+    return Math.acos(cos) * 180 / Math.PI;
+  }
+
+  /* ---------- 绘制网格背景 ---------- */
+  function drawGrid() {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.06)';
+    ctx.lineWidth = 1;
+    const step = 36;
+    for (let x = 0; x < canvasW; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvasH);
+      ctx.stroke();
+    }
+    for (let y = 0; y < canvasH; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvasW, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ---------- 绘制地面 ---------- */
+  function drawFloor() {
+    const groundY = canvasH / 2 + 10 + 172 + 6;
+    ctx.save();
+    // 地面渐变
+    const grad = ctx.createLinearGradient(0, groundY, 0, canvasH);
+    grad.addColorStop(0, 'rgba(59, 130, 246, 0.18)');
+    grad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, groundY, canvasW, canvasH - groundY);
+    // 地面线
+    ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, groundY);
+    ctx.lineTo(canvasW, groundY);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------- 绘制扫描线 ---------- */
+  function drawScanline(t) {
+    const y = (t % 1) * canvasH;
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, y - 40, 0, y + 40);
+    grad.addColorStop(0, 'rgba(6, 182, 212, 0)');
+    grad.addColorStop(0.5, 'rgba(6, 182, 212, 0.18)');
+    grad.addColorStop(1, 'rgba(6, 182, 212, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y - 40, canvasW, 80);
+    ctx.strokeStyle = 'rgba(6, 182, 212, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvasW, y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------- 绘制骨骼 ---------- */
+  function drawSkeleton(pts) {
+    ctx.save();
+
+    // 骨骼连线（带辉光）
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // 外层辉光
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.25)';
+    ctx.lineWidth = 10;
+    BONES.forEach(function (b) {
+      const p1 = pts[b[0]], p2 = pts[b[1]];
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    });
+
+    // 主骨骼线（渐变）
+    BONES.forEach(function (b) {
+      const p1 = pts[b[0]], p2 = pts[b[1]];
+      const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+      grad.addColorStop(0, '#3B82F6');
+      grad.addColorStop(1, '#06B6D4');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    });
+
+    // 关键点
+    pts.forEach(function (p, i) {
+      // 头部特殊处理（画圆代表头）
+      if (i === 0) {
+        // 头部圆圈
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 6, 22, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 6, 26, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // 外辉光
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+      ctx.fill();
+
+      // 主点
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      const ptGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 4);
+      ptGrad.addColorStop(0, '#60A5FA');
+      ptGrad.addColorStop(1, '#06B6D4');
+      ctx.fillStyle = ptGrad;
+      ctx.fill();
+
+      // 高亮核心点
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#F8FAFC';
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  /* ---------- 绘制关键点标注（部分点） ---------- */
+  function drawLabels(pts) {
+    const labels = [
+      { idx: 0, text: 'head', dx: 32, dy: -18 },
+      { idx: 5, text: 'L.shoulder', dx: -28, dy: -10 },
+      { idx: 6, text: 'R.shoulder', dx: 18, dy: -10 },
+      { idx: 11, text: 'L.hip', dx: -28, dy: 4 },
+      { idx: 12, text: 'R.hip', dx: 18, dy: 4 },
+      { idx: 13, text: 'L.knee', dx: -30, dy: 4 },
+      { idx: 14, text: 'R.knee', dx: 18, dy: 4 },
+      { idx: 15, text: 'L.ankle', dx: -32, dy: 4 },
+      { idx: 16, text: 'R.ankle', dx: 18, dy: 4 }
+    ];
+    ctx.save();
+    ctx.font = '10px "SF Mono", Monaco, monospace';
+    labels.forEach(function (l) {
+      const p = pts[l.idx];
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.75)';
+      ctx.fillText(l.text, p.x + l.dx, p.y + l.dy);
+      // 引导线
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x + (l.dx > 0 ? 4 : -4), p.y + (l.dy > 0 ? 4 : -4));
+      ctx.lineTo(p.x + l.dx - (l.dx > 0 ? 2 : -2), p.y + l.dy + 2);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  /* ============================================
+     5. UI 实时更新
+     ============================================ */
+  const kpList = document.getElementById('kpList');
+  const angleLKneeEl = document.getElementById('angleLKnee');
+  const angleRKneeEl = document.getElementById('angleRKnee');
+  const angleHipEl = document.getElementById('angleHip');
+  const scoreStd = document.getElementById('scoreStd');
+  const scoreRom = document.getElementById('scoreRom');
+  const scoreRhythm = document.getElementById('scoreRhythm');
+  const scoreStab = document.getElementById('scoreStab');
+  const scoreStdPct = document.getElementById('scoreStdPct');
+  const scoreRomPct = document.getElementById('scoreRomPct');
+  const scoreRhythmPct = document.getElementById('scoreRhythmPct');
+  const scoreStabPct = document.getElementById('scoreStabPct');
+  const aiText = document.getElementById('aiText');
+  const phasePill = document.getElementById('phasePill');
+
+  // 渲染关键点列表（首次构建结构）
+  const displayKpIndices = [0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+  const kpEls = [];
+  displayKpIndices.forEach(function (idx) {
+    const item = document.createElement('div');
+    item.className = 'kp-item';
+    item.innerHTML = '<span class="name">' + KP_NAMES[idx] + '</span><span class="coord" data-coord>—</span>';
+    kpList.appendChild(item);
+    kpEls.push({ idx: idx, el: item.querySelector('[data-coord]') });
+  });
+
+  // AI 反馈文案库（按深蹲阶段）
+  const feedbacks = [
+    { phase: [0, 0.2], html: '准备阶段：核心收紧，双脚与肩同宽，脚尖微外展 <span class="ok">15-30°</span>。' },
+    { phase: [0.2, 0.4], html: '下降阶段：髋膝同步屈曲，重心后移，<span class="ok">保持躯干中立</span>。' },
+    { phase: [0.4, 0.55], html: '检测到 <span class="hl">膝盖轻微内扣</span>，建议主动将膝盖向外打开，与脚尖方向一致。' },
+    { phase: [0.55, 0.7], html: '底部阶段：下蹲深度 <span class="ok">达标</span>，大腿与地面平行，停留 1 秒。' },
+    { phase: [0.7, 0.85], html: '上升阶段：蹬地发力顺序正确，<span class="ok">髋部领先于肩部</span>，避免膝过伸。' },
+    { phase: [0.85, 1.0], html: '完成一次深蹲：动作评分 <span class="ok">92 分</span>，建议保持节奏，进入下一组。' }
+  ];
+
+  let lastFeedbackIdx = -1;
+
+  function updateUI(phase, depth, pts) {
+    // 关键点坐标
+    kpEls.forEach(function (k) {
+      const p = pts[k.idx];
+      const conf = (0.92 + Math.random() * 0.07).toFixed(2);
+      k.el.textContent = Math.round(p.x) + ',' + Math.round(p.y) + ' · ' + conf;
+    });
+
+    // 关节角度
+    const lk = jointAngle(pts[11], pts[13], pts[15]); // 左髋-左膝-左踝
+    const rk = jointAngle(pts[12], pts[14], pts[16]); // 右髋-右膝-右踝
+    const hip = jointAngle(pts[5], pts[11], pts[13]);  // 左肩-左髋-左膝
+    angleLKneeEl.innerHTML = Math.round(lk) + '<span class="deg">°</span>';
+    angleRKneeEl.innerHTML = Math.round(rk) + '<span class="deg">°</span>';
+    angleHipEl.innerHTML = Math.round(hip) + '<span class="deg">°</span>';
+
+    // 评分（随深度与随机抖动模拟实时分析）
+    const jitter = function (base) { return Math.max(60, Math.min(99, base + (Math.random() - 0.5) * 4)); };
+    const std = jitter(88 + depth * 6);
+    const rom = jitter(70 + depth * 22);
+    const rhythm = jitter(86 + (1 - Math.abs(depth - 0.5) * 2) * 8);
+    const stab = jitter(90 - depth * 4);
+    scoreStd.style.width = std.toFixed(0) + '%';
+    scoreRom.style.width = rom.toFixed(0) + '%';
+    scoreRhythm.style.width = rhythm.toFixed(0) + '%';
+    scoreStab.style.width = stab.toFixed(0) + '%';
+    scoreStdPct.textContent = std.toFixed(0);
+    scoreRomPct.textContent = rom.toFixed(0);
+    scoreRhythmPct.textContent = rhythm.toFixed(0);
+    scoreStabPct.textContent = stab.toFixed(0);
+
+    // 阶段标签
+    let phaseLabel = '站立准备';
+    if (phase > 0.15 && phase < 0.45) phaseLabel = '下降阶段';
+    else if (phase >= 0.45 && phase < 0.6) phaseLabel = '底部停留';
+    else if (phase >= 0.6 && phase < 0.9) phaseLabel = '上升阶段';
+    phasePill.textContent = phaseLabel;
+
+    // AI 反馈（按阶段切换，避免每帧更新）
+    let fbIdx = 0;
+    for (let i = 0; i < feedbacks.length; i++) {
+      if (phase >= feedbacks[i].phase[0] && phase < feedbacks[i].phase[1]) {
+        fbIdx = i;
+        break;
+      }
+    }
+    if (fbIdx !== lastFeedbackIdx) {
+      lastFeedbackIdx = fbIdx;
+      aiText.style.opacity = '0';
+      setTimeout(function () {
+        aiText.innerHTML = feedbacks[fbIdx].html;
+        aiText.style.opacity = '1';
+      }, 120);
+    }
+  }
+
+  /* ---------- 主动画循环 ---------- */
+  let startTime = performance.now();
+  const cycleDuration = 4200; // 单次深蹲周期 4.2 秒
+
+  function animate(now) {
+    const elapsed = (now - startTime) % cycleDuration;
+    const phase = elapsed / cycleDuration;
+
+    // 清屏
+    ctx.clearRect(0, 0, canvasW, canvasH);
+
+    // 绘制顺序：网格 → 地面 → 扫描线 → 骨骼 → 标注
+    drawGrid();
+    drawFloor();
+    drawScanline((now / 3200) % 1);
+
+    const pts = getSkeleton(phase);
+    drawSkeleton(pts);
+    drawLabels(pts);
+
+    // 更新右侧面板
+    const depth = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+    updateUI(phase, depth, pts);
+
+    requestAnimationFrame(animate);
+  }
+
+  // 启动动画
+  requestAnimationFrame(animate);
+
+  /* ---------- 平滑滚动锚点已由 CSS scroll-behavior 处理 ---------- */
+})();
+</script>
+</body>
+</html>

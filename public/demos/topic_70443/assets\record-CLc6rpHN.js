@@ -1,0 +1,1 @@
+import{r as e}from"./request-Cy_lUSX6.js";const t=r=>e.get("/records",{params:r}),c=r=>e.get(`/records/${r}`),d=r=>e.post("/records",r),n=(r,o)=>e.put(`/records/${r}`,o),a=r=>e.post(`/records/${r}/close`);export{c as a,a as b,d as c,t as g,n as u};

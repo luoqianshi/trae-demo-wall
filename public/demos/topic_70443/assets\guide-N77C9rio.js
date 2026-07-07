@@ -1,0 +1,1 @@
+import{r as t}from"./request-Cy_lUSX6.js";const u=e=>t.get("/guides",{params:{...e,_t:Date.now()}}),a=e=>t.get(`/guides/category/${e}`,{params:{_t:Date.now()}}),d=e=>t.post("/guides",e),o=(e,s)=>t.put(`/guides/${e}`,s),g=e=>t.delete(`/guides/${e}`);export{u as a,d as c,g as d,a as g,o as u};

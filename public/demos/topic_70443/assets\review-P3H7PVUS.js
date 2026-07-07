@@ -1,0 +1,1 @@
+import{r as t}from"./request-Cy_lUSX6.js";const o=e=>t.get("/reviews/pending",{params:e}),n=(e,r)=>t.post(`/reviews/${e}/approve`,r),p=(e,r)=>t.post(`/reviews/${e}/reject`,r);export{n as a,o as g,p as r};

@@ -1,0 +1,1 @@
+import{r as t}from"./request-Cy_lUSX6.js";const n=e=>t({url:"/verify-plans/pending",method:"get",params:e}),s=()=>t({url:"/verify-plans/stats",method:"get"}),a=e=>t({url:"/verify-plans/overdue",method:"get",params:e});export{n as a,a as b,s as g};

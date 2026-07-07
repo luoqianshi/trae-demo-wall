@@ -1,0 +1,2565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnergySmart · 家庭电量智能管理</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.5.0/dist/mqtt.min.js"></script>
+<style>
+:root {
+  /* 玻璃拟态背景：深蓝灰渐变 */
+  --bg-deep: #0E1530;
+  --bg-card: rgba(255, 255, 255, 0.06);
+  --bg-card-hover: rgba(255, 255, 255, 0.10);
+  --bg-glass-strong: rgba(255, 255, 255, 0.12);
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --border-subtle: rgba(255, 255, 255, 0.10);
+  --border-glow: rgba(255, 255, 255, 0.25);
+  /* 柔和强调色：蓝/紫/绿/橙 */
+  --accent: #5B9DF9;        /* 主色：柔和蓝 */
+  --accent-2: #A78BFA;      /* 辅色：柔和紫 */
+  --accent-dim: rgba(91, 157, 249, 0.18);
+  --accent-2-dim: rgba(167, 139, 250, 0.18);
+  --green: #34D399;
+  --green-dim: rgba(52, 211, 153, 0.18);
+  --orange: #FBBF24;
+  --orange-dim: rgba(251, 191, 36, 0.18);
+  --purple: #A78BFA;
+  --purple-dim: rgba(167, 139, 250, 0.18);
+  --yellow: #FBBF24;
+  --pink: #F472B6;
+  --text-primary: #F5F7FA;
+  --text-secondary: #B8C2D6;
+  --text-muted: #6B7896;
+  --font-tech: 'Inter', 'Noto Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Inter', 'Noto Sans SC', sans-serif;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 柔和阴影（玻璃拟态特征：分层阴影） */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.20), 0 2px 6px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.30), 0 8px 16px rgba(0, 0, 0, 0.18);
+  --shadow-glow: 0 0 0 1px rgba(255,255,255,0.08), 0 8px 32px rgba(91, 157, 249, 0.15);
+  /* 移除霓虹发光变量（保留兼容） */
+  --neon-glow-pink: 0 4px 16px rgba(91, 157, 249, 0.25);
+  --neon-glow-cyan: 0 4px 16px rgba(167, 139, 250, 0.25);
+  --neon-glow-green: 0 4px 16px rgba(52, 211, 153, 0.25);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  letter-spacing: 0.1px;
+}
+
+/* 玻璃拟态背景：彩色光斑 + 渐变（透过玻璃卡片可见） */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(91, 157, 249, 0.35) 0%, transparent 38%),
+    radial-gradient(circle at 88% 12%, rgba(167, 139, 250, 0.30) 0%, transparent 40%),
+    radial-gradient(circle at 75% 85%, rgba(52, 211, 153, 0.22) 0%, transparent 42%),
+    radial-gradient(circle at 20% 88%, rgba(244, 114, 182, 0.20) 0%, transparent 40%),
+    linear-gradient(160deg, #0E1530 0%, #131A3A 50%, #0E1530 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 移除扫描线与网格背景 */
+body::after { content: none; }
+
+.app { position: relative; z-index: 1; display: flex; min-height: 100vh; }
+
+/* Sidebar - 玻璃拟态 */
+.sidebar {
+  width: 240px; min-width: 240px;
+  background: rgba(20, 26, 50, 0.55);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex; flex-direction: column;
+  padding: 24px 0;
+  position: fixed; top: 0; left: 0; bottom: 0;
+  z-index: 100;
+  transition: transform var(--transition);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.20);
+}
+
+.sidebar-logo {
+  padding: 0 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+
+.sidebar-logo .logo-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-tech); font-size: 18px; font-weight: 800;
+  color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(91, 157, 249, 0.35);
+}
+
+.sidebar-logo h1 {
+  font-family: var(--font-tech); font-size: 15px; font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.nav-list { list-style: none; padding: 0 12px; flex: 1; }
+
+.nav-item { margin-bottom: 4px; }
+
+.nav-link {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px;
+  color: var(--text-secondary); text-decoration: none;
+  font-size: 14px; font-weight: 500;
+  font-family: var(--font-body);
+  transition: all var(--transition);
+  position: relative;
+  border-radius: 10px;
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-link.active {
+  color: var(--text-primary);
+  background: linear-gradient(90deg, rgba(91, 157, 249, 0.20) 0%, rgba(167, 139, 250, 0.10) 100%);
+  box-shadow: inset 3px 0 0 var(--accent), 0 4px 16px rgba(91, 157, 249, 0.15);
+}
+
+.nav-link.active::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 20px;
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+}
+
+.nav-icon { width: 20px; height: 20px; flex-shrink: 0; }
+
+.sidebar-footer {
+  padding: 16px 12px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); margin: 0 12px;
+}
+
+.system-status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--green);
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+
+.status-dot {
+  width: 8px; height: 8px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+}
+
+/* Main */
+.main { margin-left: 240px; flex: 1; padding: 32px; position: relative; z-index: 1; }
+
+.page { display: none; animation: pageIn 0.4s ease; }
+.page.active { display: block; }
+
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Page Header */
+.page-header { margin-bottom: 28px; position: relative; padding-left: 14px; }
+.page-header::before {
+  content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  border-radius: 3px;
+}
+.page-header h2 {
+  font-family: var(--font-tech); font-size: 24px; font-weight: 700;
+  letter-spacing: 0.5px; margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.page-header p {
+  color: var(--text-secondary); font-size: 13px;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+
+/* Cards - 玻璃拟态核心 */
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 20px; transition: all var(--transition);
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+.card:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 10px;
+}
+.card-header h3 {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  letter-spacing: 0.5px;
+  font-family: var(--font-body);
+}
+
+/* Overview Cards Grid */
+.overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+
+.overview-card { text-align: center; position: relative; }
+.overview-card .card-icon {
+  width: 48px; height: 48px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.overview-card .card-value {
+  font-family: var(--font-mono); font-size: 30px; font-weight: 700;
+  letter-spacing: 1px; margin-bottom: 4px;
+  transition: all 0.1s ease;
+  color: var(--accent);
+}
+.overview-card .card-label {
+  font-size: 12px; color: var(--text-secondary);
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.overview-card .card-sub {
+  font-size: 11px; color: var(--text-muted);
+  font-family: var(--font-mono); margin-top: 2px; letter-spacing: 0.3px;
+}
+
+/* Chart containers */
+.chart-wrap { position: relative; width: 100%; }
+.chart-wrap canvas { width: 100% !important; }
+
+/* Grid layouts */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+/* Device grid */
+.device-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+.device-card { text-align: center; cursor: pointer; position: relative; }
+.device-card .device-icon-wrap {
+  width: 56px; height: 56px;
+  margin: 0 auto 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  position: relative;
+  transition: all var(--transition);
+}
+.device-card:hover .device-icon-wrap {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.20);
+}
+.device-card .device-name {
+  font-size: 14px; font-weight: 600; margin-bottom: 4px;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.device-card .device-power {
+  font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+  color: var(--accent); margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.device-card .device-room {
+  font-size: 11px; color: var(--text-muted); margin-bottom: 12px;
+  font-family: var(--font-mono); letter-spacing: 0.3px;
+}
+.device-card .device-status {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px; font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* Toggle switch - 玻璃拟态 */
+.toggle { position: relative; display: inline-block; width: 46px; height: 24px; cursor: pointer; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle .slider {
+  position: absolute; inset: 0;
+  background: rgba(255, 255, 255, 0.08);
+  transition: var(--transition);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+}
+.toggle .slider::before {
+  content: ''; position: absolute; width: 18px; height: 18px;
+  left: 2px; top: 50%; transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.6);
+  transition: var(--transition);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+.toggle input:checked + .slider {
+  background: rgba(52, 211, 153, 0.30);
+  border-color: rgba(52, 211, 153, 0.5);
+}
+.toggle input:checked + .slider::before {
+  transform: translate(22px, -50%);
+  background: var(--green);
+  box-shadow: 0 2px 8px rgba(52, 211, 153, 0.5);
+}
+
+/* Buttons - 玻璃拟态 */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px;
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
+  cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06); color: var(--text-primary);
+  transition: all var(--transition); text-decoration: none;
+  letter-spacing: 0.3px;
+  border-radius: 10px;
+  position: relative;
+  backdrop-filter: blur(10px);
+}
+.btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: #fff; border: none;
+  box-shadow: 0 4px 14px rgba(91, 157, 249, 0.35);
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(91, 157, 249, 0.5);
+  filter: brightness(1.08);
+}
+.btn.active {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(91, 157, 249, 0.35);
+}
+
+/* Tags - 玻璃拟态 */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px; font-weight: 600;
+  font-family: var(--font-body);
+  letter-spacing: 0.3px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+}
+.tag-online { background: rgba(52, 211, 153, 0.15); color: var(--green); }
+.tag-offline { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+.tag-warning { background: rgba(251, 191, 36, 0.15); color: var(--orange); }
+
+/* Modal - 玻璃拟态 */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(14, 21, 48, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: rgba(20, 26, 50, 0.70);
+  backdrop-filter: blur(30px) saturate(160%);
+  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px; width: 90%; max-width: 600px; max-height: 80vh; overflow-y: auto;
+  animation: modalIn 0.3s ease;
+  position: relative;
+  box-shadow: var(--shadow-lg);
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+}
+.modal-header h3 {
+  font-family: var(--font-tech); font-size: 17px; font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
+}
+.modal-close {
+  width: 30px; height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05); color: var(--text-secondary);
+  cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--transition);
+  border-radius: 8px;
+}
+.modal-close:hover {
+  background: rgba(255, 80, 80, 0.2); color: #fff;
+  border-color: rgba(255, 80, 80, 0.4);
+}
+
+/* Chat - 玻璃拟态 */
+.chat-container { display: flex; flex-direction: column; height: 400px; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; gap: 12px; }
+.chat-msg {
+  max-width: 80%; padding: 12px 16px;
+  font-size: 13px; line-height: 1.6;
+  animation: msgIn 0.3s ease;
+  font-family: var(--font-body);
+  position: relative;
+  border-radius: 14px;
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-msg.user {
+  align-self: flex-end;
+  background: rgba(91, 157, 249, 0.18);
+  border: 1px solid rgba(91, 157, 249, 0.30);
+  color: var(--text-primary);
+}
+.chat-msg.ai {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--text-primary);
+}
+.chat-msg.ai::before {
+  content: ''; margin-right: 0;
+}
+.chat-input-wrap { display: flex; gap: 8px; margin-top: 12px; }
+.chat-input-wrap input {
+  flex: 1; padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-family: var(--font-body); font-size: 13px;
+  outline: none; transition: var(--transition);
+  border-radius: 12px;
+  letter-spacing: 0.3px;
+}
+.chat-input-wrap input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(91, 157, 249, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+}
+.chat-input-wrap input::placeholder { color: var(--text-muted); }
+
+/* Rule cards - 玻璃拟态 */
+.rule-card {
+  display: flex; align-items: center; gap: 16px; padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: var(--transition);
+  border-radius: 12px;
+}
+.rule-card:hover { background: rgba(255, 255, 255, 0.04); }
+.rule-icon {
+  width: 38px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.05);
+}
+.rule-info { flex: 1; }
+.rule-info h4 {
+  font-size: 14px; font-weight: 600; margin-bottom: 4px;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.rule-info p {
+  font-size: 12px; color: var(--text-muted);
+  font-family: var(--font-body); letter-spacing: 0.2px;
+}
+
+/* Suggestion cards - 玻璃拟态 */
+.suggestion-card {
+  padding: 16px;
+  border: 1px solid rgba(52, 211, 153, 0.30);
+  background: rgba(52, 211, 153, 0.06);
+  transition: var(--transition);
+  position: relative;
+  border-radius: 14px;
+}
+.suggestion-card::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+  background: var(--green);
+  border-radius: 14px 0 0 14px;
+}
+.suggestion-card:hover {
+  border-color: rgba(52, 211, 153, 0.5);
+  box-shadow: 0 8px 20px rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.10);
+}
+.suggestion-card .sug-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.suggestion-card .sug-header h4 {
+  font-size: 14px; font-weight: 600;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.suggestion-card .sug-desc {
+  font-size: 12px; color: var(--text-secondary);
+  line-height: 1.6; margin-bottom: 10px;
+  font-family: var(--font-body);
+}
+.suggestion-card .sug-saving {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--green);
+  letter-spacing: 0.3px; font-weight: 700;
+}
+
+/* Bill - 玻璃拟态 */
+.bill-highlight { text-align: center; padding: 28px; position: relative; }
+.bill-highlight .bill-amount {
+  font-family: var(--font-mono); font-size: 48px; font-weight: 700;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 1px;
+}
+.bill-highlight .bill-label {
+  color: var(--text-secondary); font-size: 12px; margin-top: 4px;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.bill-highlight .bill-change {
+  font-size: 12px; margin-top: 8px;
+  font-family: var(--font-mono); letter-spacing: 0.3px;
+}
+
+/* Progress bar - 玻璃拟态 */
+.progress-bar {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+.progress-bar .fill { height: 100%; transition: width 0.6s ease; border-radius: 4px; }
+.progress-bar .fill.accent { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.progress-bar .fill.green { background: var(--green); }
+.progress-bar .fill.orange { background: var(--orange); }
+
+/* Tier bar - 玻璃拟态 */
+.tier-bar {
+  display: flex; height: 36px;
+  overflow: hidden; margin: 12px 0;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+}
+.tier-bar .tier {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #fff;
+  transition: var(--transition);
+  font-family: var(--font-mono); letter-spacing: 0.3px;
+}
+.tier-bar .tier-1 { background: rgba(91, 157, 249, 0.5); }
+.tier-bar .tier-2 { background: rgba(167, 139, 250, 0.55); }
+.tier-bar .tier-3 { background: rgba(244, 114, 182, 0.6); }
+
+/* Bill history table - 玻璃拟态 */
+.bill-table { width: 100%; border-collapse: collapse; }
+.bill-table th, .bill-table td { padding: 12px 16px; text-align: left; font-size: 13px; }
+.bill-table th {
+  color: var(--text-secondary); font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  font-family: var(--font-body); letter-spacing: 0.3px;
+  font-size: 12px;
+}
+.bill-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono); letter-spacing: 0.3px;
+}
+.bill-table tr:hover td { background: rgba(255, 255, 255, 0.04); }
+.change-up { color: var(--orange); }
+.change-down { color: var(--green); }
+
+/* Peak alerts - 玻璃拟态 */
+.peak-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.peak-item:last-child { border-bottom: none; }
+.peak-time {
+  font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+  color: var(--orange); min-width: 70px;
+  letter-spacing: 0.3px;
+}
+.peak-info { flex: 1; }
+.peak-info .peak-label {
+  font-size: 13px; font-weight: 600;
+  font-family: var(--font-body); letter-spacing: 0.3px;
+}
+.peak-info .peak-detail {
+  font-size: 11px; color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* Mock device icons */
+.dev-icon { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Delete button on device card - 玻璃拟态 */
+.device-delete {
+  position: absolute; top: 10px; right: 10px;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-family: var(--font-body);
+  background: rgba(255, 80, 80, 0.15);
+  color: #ff8080;
+  border: 1px solid rgba(255, 80, 80, 0.30);
+  cursor: pointer;
+  transition: all var(--transition);
+  border-radius: 8px;
+  z-index: 5;
+  opacity: 0.7;
+}
+.device-delete:hover {
+  background: rgba(255, 80, 80, 0.3); color: #fff;
+  border-color: rgba(255, 80, 80, 0.6);
+  opacity: 1;
+}
+
+/* Icon picker - 玻璃拟态 */
+.icon-option {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  transition: all var(--transition);
+  border-radius: 10px;
+}
+.icon-option:hover {
+  border-color: var(--accent);
+  background: rgba(91, 157, 249, 0.10);
+  transform: scale(1.08);
+}
+.icon-option.selected {
+  border-color: var(--accent);
+  background: rgba(91, 157, 249, 0.20);
+  box-shadow: 0 0 0 2px rgba(91, 157, 249, 0.4);
+}
+
+/* Modal input focus */
+.modal input:focus, .modal select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(91, 157, 249, 0.18) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Scrollbar - 玻璃拟态 */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.30); }
+
+/* Selection */
+::selection { background: rgba(91, 157, 249, 0.4); color: #fff; }
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .overview-grid { grid-template-columns: repeat(2, 1fr); }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .device-grid { grid-template-columns: repeat(2, 1fr); }
+  .sidebar { transform: translateX(-100%); }
+  .main { margin-left: 0; }
+}
+
+@media (max-width: 768px) {
+  .overview-grid { grid-template-columns: 1fr; }
+  .device-grid { grid-template-columns: 1fr; }
+  .main { padding: 16px; }
+  .page-header h2 { font-size: 20px; }
+  .bill-highlight .bill-amount { font-size: 36px; }
+}
+
+/* Modal select styling */
+.modal select {
+  font-family: var(--font-body) !important;
+  letter-spacing: 0.3px;
+}
+.modal select option { background: #1A2342; color: var(--text-primary); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">E</div>
+      <h1>EnergySmart</h1>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item"><a href="#dashboard" class="nav-link active" data-page="dashboard">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        仪表盘
+      </a></li>
+      <li class="nav-item"><a href="#devices" class="nav-link" data-page="devices">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/></svg>
+        设备管理
+      </a></li>
+      <li class="nav-item"><a href="#analysis" class="nav-link" data-page="analysis">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        用电分析
+      </a></li>
+      <li class="nav-item"><a href="#ai" class="nav-link" data-page="ai">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        AI 节能中心
+      </a></li>
+      <li class="nav-item"><a href="#bill" class="nav-link" data-page="bill">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        电费账单
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="system-status">
+        <span class="status-dot"></span>
+        <span>SYS_ONLINE · 6 NODES</span>
+      </div>
+      <div id="mqttStatusIndicator" onclick="openMqttSettings()" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;padding:6px 10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);border-radius:8px;transition:all var(--transition)" title="点击配置 MQTT Broker">
+        <span class="mqtt-dot" style="width:6px;height:6px;background:var(--text-muted);border-radius:50%;flex-shrink:0"></span>
+        <span class="mqtt-text" style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:0.3px">MQTT: OFFLINE</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">⚙</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main" id="mainContent">
+    <!-- Dashboard Page -->
+    <section class="page active" id="page-dashboard">
+      <div class="page-header"><h2>仪表盘</h2><p>实时用电概览与智能建议</p></div>
+      <div class="overview-grid" id="overviewGrid"></div>
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>24小时功率曲线</h3><span style="font-size:11px;color:var(--green);font-family:var(--font-mono);letter-spacing:0.3px"><span style="display:inline-block;width:6px;height:6px;background:var(--green);border-radius:50%;margin-right:6px;animation:statusPulse 1.5s infinite"></span>LIVE</span></div><div class="chart-wrap"><canvas id="chartPower"></canvas></div></div>
+        <div class="card" id="suggestionsCard"></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-header"><h3>设备状态快照</h3></div><div class="device-grid" id="deviceSnapshot"></div></div>
+    </section>
+
+    <!-- Devices Page -->
+    <section class="page" id="page-devices">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div style="flex:1;min-width:200px">
+          <h2 style="margin:0">设备管理</h2>
+          <p>管理所有智能设备，查看详细用电数据</p>
+        </div>
+        <button class="btn btn-primary" onclick="showAddDeviceWizard()" style="padding:10px 18px">+ 添加设备</button>
+      </div>
+      <div class="device-grid" id="deviceList"></div>
+    </section>
+
+    <!-- Analysis Page -->
+    <section class="page" id="page-analysis">
+      <div class="page-header"><h2>用电分析</h2><p>深度分析用电趋势与峰值</p></div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>用电趋势</h3>
+          <div style="display:flex;gap:4px">
+            <button class="btn period-btn active" data-period="day" style="padding:6px 14px;font-size:12px">日</button>
+            <button class="btn period-btn" data-period="week" style="padding:6px 14px;font-size:12px">周</button>
+            <button class="btn period-btn" data-period="month" style="padding:6px 14px;font-size:12px">月</button>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><h3>分时段用电对比</h3></div><div class="chart-wrap" style="max-width:280px;margin:0 auto"><canvas id="chartPeriod"></canvas></div></div>
+        <div class="card"><div class="card-header"><h3>设备用电占比</h3></div><div class="chart-wrap" style="max-width:280px;margin:0 auto"><canvas id="chartDevicePie"></canvas></div></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-header"><h3>峰值分析</h3></div><div id="peakAnalysis"></div></div>
+    </section>
+
+    <!-- AI Page -->
+    <section class="page" id="page-ai">
+      <div class="page-header"><h2>AI 节能中心</h2><p>智能规则管理与 AI 助手对话</p></div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><h3>智能规则</h3><button class="btn" onclick="showRuleWizard()" style="padding:6px 14px;font-size:12px">+ 新建规则</button></div><div id="ruleList"></div></div>
+        <div class="card"><div class="card-header"><h3>AI 节能助手</h3></div><div class="chat-container" id="chatContainer"></div></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-header"><h3>节能方案推荐</h3></div><div class="grid-2" id="suggestionsList"></div></div>
+    </section>
+
+    <!-- Bill Page -->
+    <section class="page" id="page-bill">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div style="flex:1;min-width:200px">
+          <h2 style="margin:0">电费账单</h2>
+          <p>月度账单与阶梯电价分析</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="regionSelect" onchange="switchRegion(this.value)" style="padding:8px 12px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px;outline:none;cursor:pointer;text-transform:uppercase"></select>
+          <button class="btn" onclick="openTierEditor()" style="padding:8px 14px">编辑电价</button>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card bill-highlight" id="billHighlight"></div>
+        <div class="card"><div class="card-header"><h3>阶梯电价模拟</h3><span id="tierRegionLabel" style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:1px"></span></div><div id="tierSimulation"></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>账单历史</h3></div><table class="bill-table" id="billHistory"><thead><tr><th>月份</th><th>用电量(kWh)</th><th>电费(元)</th><th>环比变化</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+</div>
+
+<!-- Device Detail Modal -->
+<div class="modal-overlay" id="deviceModal">
+  <div class="modal">
+    <div class="modal-header"><h3 id="modalDeviceName">设备详情</h3><button class="modal-close" onclick="closeDeviceModal()">✕</button></div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+      <div id="modalDeviceIcon" style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10)"></div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--accent);text-shadow:none;letter-spacing:1px" id="modalPower">0 W</div>
+        <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:1px" id="modalRoom"></div>
+      </div>
+      <div style="margin-left:auto"><label class="toggle"><input type="checkbox" id="modalToggle" onchange="toggleDeviceFromModal()"><span class="slider"></span></label></div>
+    </div>
+    <div class="chart-wrap" style="margin-bottom:16px"><canvas id="chartDeviceDetail"></canvas></div>
+    <div class="grid-3">
+      <div style="text-align:center"><div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent);text-shadow:none;letter-spacing:1px" id="modalToday">0 kWh</div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);letter-spacing:1px;text-transform:uppercase">今日用电</div></div>
+      <div style="text-align:center"><div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--green);text-shadow:none;letter-spacing:1px" id="modalMonth">0 kWh</div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);letter-spacing:1px;text-transform:uppercase">本月用电</div></div>
+      <div style="text-align:center"><div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--text-primary);text-shadow:none;letter-spacing:1px" id="modalCost">¥0</div><div style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);letter-spacing:1px;text-transform:uppercase">本月电费</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Rule Wizard Modal -->
+<div class="modal-overlay" id="ruleWizardModal">
+  <div class="modal">
+    <div class="modal-header"><h3>创建智能规则</h3><button class="modal-close" onclick="closeRuleWizard()">✕</button></div>
+    <div id="ruleWizardContent">
+      <div style="margin-bottom:16px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">选择设备</label><select id="ruleDevice" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px"></select></div>
+      <div style="margin-bottom:16px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">触发条件</label><select id="ruleCondition" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px"><option value="peak">电价高峰时段 (8:00-22:00)</option><option value="night">深夜时段 (22:00-6:00)</option><option value="overLimit">功率超过额定值</option><option value="idle">设备待机超过30分钟</option></select></div>
+      <div style="margin-bottom:16px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">执行动作</label><select id="ruleAction" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px"><option value="off">关闭设备</option><option value="on">开启设备</option><option value="reduce">降低功率至50%</option></select></div>
+      <button class="btn btn-primary" onclick="createRule()" style="width:100%;justify-content:center">确认创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Device Modal -->
+<div class="modal-overlay" id="addDeviceModal">
+  <div class="modal">
+    <div class="modal-header"><h3>添加新设备</h3><button class="modal-close" onclick="closeAddDeviceWizard()">✕</button></div>
+    <div id="addDeviceContent">
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">设备名称</label>
+        <input type="text" id="newDeviceName" placeholder="例如：智能微波炉" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px;outline:none">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">设备类型</label>
+        <select id="newDeviceType" onchange="onTypeChange()" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px">
+          <option value="ac">空调</option>
+          <option value="heater">热水器</option>
+          <option value="fridge">冰箱</option>
+          <option value="washer">洗衣机</option>
+          <option value="tv">电视</option>
+          <option value="light">照明</option>
+          <option value="microwave">微波炉</option>
+          <option value="computer">电脑</option>
+          <option value="fan">风扇</option>
+          <option value="other">其他</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <div style="flex:1">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">额定功率(W)</label>
+          <input type="number" id="newDevicePower" value="800" min="1" max="9999" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px;outline:none">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">所在房间</label>
+          <select id="newDeviceRoom" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px">
+            <option value="客厅">客厅</option>
+            <option value="主卧">主卧</option>
+            <option value="次卧">次卧</option>
+            <option value="厨房">厨房</option>
+            <option value="卫生间">卫生间</option>
+            <option value="阳台">阳台</option>
+            <option value="书房">书房</option>
+            <option value="全屋">全屋</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">图标</label>
+        <div id="iconPicker" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      </div>
+
+      <!-- MQTT 配置区域 -->
+      <div style="margin-bottom:16px;padding:14px;border:1px dashed rgba(167,139,250,0.4);background:rgba(167,139,250,0.06);border-radius:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <label style="font-size:12px;font-weight:600;color:var(--purple);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase;text-shadow:none">MQTT 接入配置</label>
+          <label class="toggle" style="transform:scale(0.85)"><input type="checkbox" id="newDeviceMqttEnable" onchange="toggleMqttSection(this.checked)"><span class="slider"></span></label>
+        </div>
+        <div id="mqttConfigSection" style="display:none">
+          <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:10px;letter-spacing:0.5px;line-height:1.5">// 启用后，设备功率与状态将通过 MQTT 实时上报，不再使用模拟数据</div>
+          <div style="margin-bottom:10px">
+            <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary);font-family:var(--font-tech);letter-spacing:1px;text-transform:uppercase">遥测主题 (Topic)</label>
+            <input type="text" id="newDeviceTopic" placeholder="home/devices/dev-001/telemetry" style="width:100%;padding:8px 10px;border:1px solid rgba(167,139,250,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:6px;outline:none">
+          </div>
+          <div style="margin-bottom:10px">
+            <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px;color:var(--text-secondary);font-family:var(--font-tech);letter-spacing:1px;text-transform:uppercase">控制主题 (Command Topic)</label>
+            <input type="text" id="newDeviceCmdTopic" placeholder="home/devices/dev-001/command" style="width:100%;padding:8px 10px;border:1px solid rgba(167,139,250,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:6px;outline:none">
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin-top:8px;letter-spacing:0.5px;line-height:1.5">
+            预期消息格式(JSON):<br>
+            {"power":1500,"isOn":true,"isOnline":true}
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="createDevice()" style="width:100%;justify-content:center">确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- MQTT Broker Settings Modal -->
+<div class="modal-overlay" id="mqttSettingsModal">
+  <div class="modal">
+    <div class="modal-header"><h3>MQTT Broker 设置</h3><button class="modal-close" onclick="closeMqttSettings()">✕</button></div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">Broker WebSocket 地址</label>
+      <input type="text" id="mqttBrokerUrl" placeholder="ws://broker.emqx.io:8083/mqtt" value="ws://broker.emqx.io:8083/mqtt" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:8px;outline:none">
+      <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;letter-spacing:0.5px">// 浏览器需使用 WebSocket 协议(ws/wss)，非 tcp</div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div style="flex:1">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">用户名(可选)</label>
+        <input type="text" id="mqttUsername" placeholder="anonymous" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:8px;outline:none">
+      </div>
+      <div style="flex:1">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">密码(可选)</label>
+        <input type="password" id="mqttPassword" placeholder="" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:8px;outline:none">
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div style="flex:1">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">Client ID</label>
+        <input type="text" id="mqttClientId" placeholder="auto-generated" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:8px;outline:none">
+      </div>
+      <div style="flex:1">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">QoS 等级</label>
+        <select id="mqttQos" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:0.5px;border-radius:8px">
+          <option value="0">0 - 至多一次</option>
+          <option value="1" selected>1 - 至少一次</option>
+          <option value="2">2 - 只有一次</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px">
+      <button class="btn" onclick="closeMqttSettings()" style="flex:1;justify-content:center">取消</button>
+      <button class="btn btn-primary" onclick="saveMqttSettings()" style="flex:1;justify-content:center">保存并连接</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tier Price Editor Modal -->
+<div class="modal-overlay" id="tierEditorModal">
+  <div class="modal">
+    <div class="modal-header"><h3>阶梯电价设置</h3><button class="modal-close" onclick="closeTierEditor()">✕</button></div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">所在地区</label>
+      <select id="tierRegionSelect" onchange="loadRegionTiers(this.value)" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px"></select>
+      <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin-top:6px;letter-spacing:0.5px;line-height:1.5">// 数据来源：各省发改委公示电价（仅供参考）。请以当地供电局/95598公布为准。</div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">阶梯电价（可编辑）</label>
+      <div id="tierEditorRows" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;color:var(--text-primary);font-family:var(--font-tech);letter-spacing:2px;text-transform:uppercase">月度预算(元)</label>
+      <input type="number" id="tierBudgetInput" value="500" min="0" style="width:100%;padding:10px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);letter-spacing:1px;border-radius:8px;outline:none">
+    </div>
+    <div style="display:flex;gap:12px">
+      <button class="btn" onclick="resetTierToRegion()" style="flex:1;justify-content:center">重置为地区默认</button>
+      <button class="btn btn-primary" onclick="saveTierPrices()" style="flex:1;justify-content:center">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div class="modal-overlay" id="confirmDeleteModal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><h3>确认删除</h3><button class="modal-close" onclick="closeConfirmDelete()">✕</button></div>
+    <p style="color:var(--text-secondary);font-family:var(--font-mono);font-size:13px;line-height:1.6;margin-bottom:20px;letter-spacing:0.5px">即将删除设备 <span id="deleteDeviceName" style="color:var(--accent);text-shadow:none"></span>。此操作不可恢复，关联的智能规则也将一并移除。</p>
+    <div style="display:flex;gap:12px">
+      <button class="btn" onclick="closeConfirmDelete()" style="flex:1;justify-content:center">取消</button>
+      <button class="btn btn-primary" onclick="confirmDeleteDevice()" style="flex:1;justify-content:center;background:linear-gradient(135deg,var(--accent),var(--orange));border-color:var(--orange)">删除设备</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== MQTT BROKER GLOBAL CONFIG =====
+// 全局 MQTT Broker 配置（持久化到 localStorage）
+const DEFAULT_MQTT_CONFIG = {
+  brokerUrl: 'ws://broker.emqx.io:8083/mqtt',
+  username: '',
+  password: '',
+  clientId: 'energysmart_' + Math.random().toString(16).substr(2, 8),
+  qos: 1,
+  autoConnect: false,
+};
+
+// 从 localStorage 读取配置，合并默认值
+let mqttConfig = (() => {
+  try {
+    const saved = localStorage.getItem('energysmart_mqtt_config');
+    return saved ? { ...DEFAULT_MQTT_CONFIG, ...JSON.parse(saved) } : { ...DEFAULT_MQTT_CONFIG };
+  } catch (e) { return { ...DEFAULT_MQTT_CONFIG }; }
+})();
+
+// MQTT 客户端实例与连接状态
+let mqttClient = null;
+let mqttConnectionState = 'disconnected'; // disconnected | connecting | connected | error | reconnecting
+
+// ===== MQTT CLIENT MANAGER =====
+const MqttManager = {
+  // 连接 Broker
+  connect() {
+    if (mqttClient) {
+      try { mqttClient.end(true); } catch (e) {}
+      mqttClient = null;
+    }
+    if (!window.mqtt) {
+      console.warn('[MQTT] mqtt.js 未加载，跳过连接');
+      this.updateState('error');
+      return false;
+    }
+    if (!mqttConfig.brokerUrl) {
+      console.warn('[MQTT] 未配置 Broker 地址');
+      this.updateState('error');
+      return false;
+    }
+
+    this.updateState('connecting');
+    const options = {
+      clientId: mqttConfig.clientId,
+      clean: true,
+      reconnectPeriod: 5000,   // 自动重连间隔 5s
+      connectTimeout: 10000,   // 连接超时 10s
+    };
+    if (mqttConfig.username) options.username = mqttConfig.username;
+    if (mqttConfig.password) options.password = mqttConfig.password;
+
+    try {
+      mqttClient = mqtt.connect(mqttConfig.brokerUrl, options);
+    } catch (e) {
+      console.error('[MQTT] 连接异常:', e);
+      this.updateState('error');
+      return false;
+    }
+
+    // 连接成功
+    mqttClient.on('connect', () => {
+      console.log('[MQTT] 已连接 Broker:', mqttConfig.brokerUrl);
+      this.updateState('connected');
+      // 订阅所有设备的遥测主题
+      this.subscribeAllDevices();
+    });
+
+    // 收到消息
+    mqttClient.on('message', (topic, payload) => {
+      this.handleMessage(topic, payload.toString());
+    });
+
+    // 连接关闭
+    mqttClient.on('close', () => {
+      console.log('[MQTT] 连接关闭');
+      if (mqttConnectionState !== 'error') this.updateState('disconnected');
+    });
+
+    // 连接错误
+    mqttClient.on('error', (err) => {
+      console.error('[MQTT] 连接错误:', err);
+      this.updateState('error');
+    });
+
+    // 正在重连
+    mqttClient.on('reconnect', () => {
+      console.log('[MQTT] 正在重连...');
+      this.updateState('reconnecting');
+    });
+
+    return true;
+  },
+
+  // 断开连接
+  disconnect() {
+    if (mqttClient) {
+      try { mqttClient.end(true); } catch (e) {}
+      mqttClient = null;
+    }
+    this.updateState('disconnected');
+    // 断开后将所有 MQTT 设备标记为离线
+    devices.forEach(d => {
+      if (d.mqtt && d.mqtt.enabled) d.isOnline = false;
+    });
+    refreshAllUI();
+  },
+
+  // 订阅所有已启用 MQTT 的设备遥测主题
+  subscribeAllDevices() {
+    if (!mqttClient || !mqttClient.connected) return;
+    const topics = devices
+      .filter(d => d.mqtt && d.mqtt.enabled && d.mqtt.topic)
+      .map(d => ({ topic: d.mqtt.topic, qos: Number(mqttConfig.qos) }));
+    if (topics.length === 0) {
+      console.log('[MQTT] 暂无已启用 MQTT 的设备');
+      return;
+    }
+    topics.forEach(t => {
+      mqttClient.subscribe(t.topic, { qos: t.qos }, (err) => {
+        if (err) console.error('[MQTT] 订阅失败:', t.topic, err);
+        else console.log('[MQTT] 已订阅:', t.topic);
+      });
+    });
+  },
+
+  // 订阅单个设备主题（新增设备时调用）
+  subscribeDevice(device) {
+    if (!mqttClient || !mqttClient.connected) return;
+    if (!device.mqtt || !device.mqtt.enabled || !device.mqtt.topic) return;
+    mqttClient.subscribe(device.mqtt.topic, { qos: Number(mqttConfig.qos) }, (err) => {
+      if (err) console.error('[MQTT] 订阅失败:', device.mqtt.topic, err);
+      else console.log('[MQTT] 已订阅新设备:', device.mqtt.topic);
+    });
+  },
+
+  // 取消订阅（删除设备时调用）
+  unsubscribeDevice(device) {
+    if (!mqttClient || !mqttClient.connected) return;
+    if (!device.mqtt || !device.mqtt.topic) return;
+    mqttClient.unsubscribe(device.mqtt.topic, (err) => {
+      if (err) console.error('[MQTT] 取消订阅失败:', device.mqtt.topic, err);
+      else console.log('[MQTT] 已取消订阅:', device.mqtt.topic);
+    });
+  },
+
+  // 处理收到的 MQTT 消息
+  handleMessage(topic, payload) {
+    // 根据 topic 找到对应设备
+    const device = devices.find(d => d.mqtt && d.mqtt.topic === topic);
+    if (!device) return;
+
+    let data;
+    try {
+      data = JSON.parse(payload);
+    } catch (e) {
+      console.warn('[MQTT] 消息解析失败:', topic, payload);
+      return;
+    }
+
+    // 更新设备状态（兼容多种字段命名）
+    if (typeof data.power === 'number') device.currentPower = Math.max(0, Math.round(data.power));
+    if (typeof data.currentPower === 'number') device.currentPower = Math.max(0, Math.round(data.currentPower));
+    if (typeof data.isOn === 'boolean') device.isOn = data.isOn;
+    if (typeof data.state === 'string') device.isOn = (data.state === 'on' || data.state === 'ON');
+    if (typeof data.isOnline === 'boolean') device.isOnline = data.isOnline;
+    else device.isOnline = true; // 收到消息即视为在线
+
+    // 触发 UI 刷新（节流：避免高频消息导致渲染卡顿）
+    if (!this._refreshTimer) {
+      this._refreshTimer = setTimeout(() => {
+        this._refreshTimer = null;
+        refreshAllUI();
+        // 如果设备详情弹窗打开，同步更新
+        if (currentDeviceId) {
+          const d = devices.find(x => x.id === currentDeviceId);
+          if (d) {
+            const elPower = document.getElementById('modalPower');
+            if (elPower) elPower.textContent = d.currentPower + ' W';
+          }
+        }
+      }, 500);
+    }
+  },
+
+  // 发布控制指令到设备的 command topic
+  publishCommand(device, command) {
+    if (!mqttClient || !mqttClient.connected) {
+      console.warn('[MQTT] 未连接，无法发布指令');
+      return false;
+    }
+    if (!device.mqtt || !device.mqtt.cmdTopic) {
+      console.warn('[MQTT] 设备未配置 command topic:', device.name);
+      return false;
+    }
+    const payload = JSON.stringify(command);
+    mqttClient.publish(device.mqtt.cmdTopic, payload, { qos: Number(mqttConfig.qos) }, (err) => {
+      if (err) console.error('[MQTT] 发布指令失败:', err);
+      else console.log('[MQTT] 已发布指令:', device.mqtt.cmdTopic, payload);
+    });
+    return true;
+  },
+
+  // 更新连接状态并刷新 UI 指示器
+  updateState(state) {
+    mqttConnectionState = state;
+    const indicator = document.getElementById('mqttStatusIndicator');
+    if (indicator) {
+      const dot = indicator.querySelector('.mqtt-dot');
+      const text = indicator.querySelector('.mqtt-text');
+      const map = {
+        disconnected: { color: 'var(--text-muted)', label: 'OFFLINE', anim: 'none' },
+        connecting:   { color: 'var(--yellow)',    label: 'CONNECTING', anim: 'blink' },
+        connected:    { color: 'var(--green)',     label: 'ONLINE', anim: 'pulse' },
+        reconnecting: { color: 'var(--yellow)',    label: 'RECONNECT', anim: 'blink' },
+        error:        { color: 'var(--accent)',    label: 'ERROR', anim: 'blink' },
+      };
+      const cfg = map[state] || map.disconnected;
+      if (dot) {
+        dot.style.background = cfg.color;
+        dot.style.boxShadow = `0 0 8px ${cfg.color}`;
+      }
+      if (text) {
+        text.textContent = `MQTT: ${cfg.label}`;
+        text.style.color = cfg.color;
+        text.style.textShadow = `0 0 6px ${cfg.color}`;
+      }
+    }
+  },
+
+  // 持久化配置到 localStorage
+  saveConfig() {
+    try { localStorage.setItem('energysmart_mqtt_config', JSON.stringify(mqttConfig)); } catch (e) {}
+  },
+};
+
+// ===== DATA STORE =====
+const devices = [
+  { id: 'dev-001', name: '智能空调', type: 'ac', icon: '❄️', power: 1500, currentPower: 0, isOnline: true, isOn: false, room: '客厅', color: '#5B9DF9' },
+  { id: 'dev-002', name: '电热水器', type: 'heater', icon: '🔥', power: 2000, currentPower: 0, isOnline: true, isOn: false, room: '卫生间', color: '#F472B6' },
+  { id: 'dev-003', name: '冰箱', type: 'fridge', icon: '🧊', power: 150, currentPower: 120, isOnline: true, isOn: true, room: '厨房', color: '#34D399' },
+  { id: 'dev-004', name: '洗衣机', type: 'washer', icon: '🌀', power: 500, currentPower: 0, isOnline: true, isOn: false, room: '阳台', color: '#A78BFA' },
+  { id: 'dev-005', name: '电视', type: 'tv', icon: '📺', power: 200, currentPower: 0, isOnline: true, isOn: false, room: '客厅', color: '#FBBF24' },
+  { id: 'dev-006', name: '照明系统', type: 'light', icon: '💡', power: 300, currentPower: 180, isOnline: true, isOn: true, room: '全屋', color: '#FF6B35' },
+];
+
+const rules = [
+  { id: 'r1', name: '高峰关热水器', deviceId: 'dev-002', condition: '电价高峰时段', action: '关闭设备', enabled: true },
+  { id: 'r2', name: '深夜关灯', deviceId: 'dev-006', condition: '深夜时段', action: '关闭设备', enabled: true },
+  { id: 'r3', name: '待机关电视', deviceId: 'dev-005', condition: '待机超30分钟', action: '关闭设备', enabled: false },
+];
+
+// ===== TIER PRICING DATABASE =====
+// 内置主要省份/直辖市阶梯电价预设表
+// 数据来源：各省发改委公示电价（居民生活用电，1kV以下，单一制）
+// 注意：电价会随政策调整，建议用户通过供电局/95598核实后自定义
+const TIER_PRICE_DATABASE = {
+  // 北京：年阶梯
+  'beijing':    { name: '北京',   period: '年', tiers: [
+    { limit: 2760,    price: 0.4883, label: '第一阶梯' },
+    { limit: 4800,    price: 0.5383, label: '第二阶梯' },
+    { limit: Infinity,price: 0.7883, label: '第三阶梯' },
+  ]},
+  // 上海：年阶梯
+  'shanghai':   { name: '上海',   period: '年', tiers: [
+    { limit: 3120,    price: 0.617,  label: '第一阶梯' },
+    { limit: 4800,    price: 0.677,  label: '第二阶梯' },
+    { limit: Infinity,price: 0.917,  label: '第三阶梯' },
+  ]},
+  // 广东：月阶梯（深圳/广州）
+  'guangdong':  { name: '广东',   period: '月', tiers: [
+    { limit: 200,     price: 0.60,   label: '第一阶梯' },
+    { limit: 400,     price: 0.65,   label: '第二阶梯' },
+    { limit: Infinity,price: 0.90,   label: '第三阶梯' },
+  ]},
+  // 浙江：年阶梯
+  'zhejiang':   { name: '浙江',   period: '年', tiers: [
+    { limit: 2760,    price: 0.538,  label: '第一阶梯' },
+    { limit: 4800,    price: 0.588,  label: '第二阶梯' },
+    { limit: Infinity,price: 0.838,  label: '第三阶梯' },
+  ]},
+  // 江苏：月阶梯
+  'jiangsu':    { name: '江苏',   period: '月', tiers: [
+    { limit: 200,     price: 0.5283, label: '第一阶梯' },
+    { limit: 400,     price: 0.5783, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8283, label: '第三阶梯' },
+  ]},
+  // 山东：月阶梯
+  'shandong':   { name: '山东',   period: '月', tiers: [
+    { limit: 210,     price: 0.5469, label: '第一阶梯' },
+    { limit: 420,     price: 0.5969, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8469, label: '第三阶梯' },
+  ]},
+  // 四川：月阶梯
+  'sichuan':    { name: '四川',   period: '月', tiers: [
+    { limit: 180,     price: 0.5224, label: '第一阶梯' },
+    { limit: 400,     price: 0.5724, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8224, label: '第三阶梯' },
+  ]},
+  // 湖北：月阶梯
+  'hubei':      { name: '湖北',   period: '月', tiers: [
+    { limit: 200,     price: 0.5580, label: '第一阶梯' },
+    { limit: 400,     price: 0.6080, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8580, label: '第三阶梯' },
+  ]},
+  // 河南：月阶梯
+  'henan':      { name: '河南',   period: '月', tiers: [
+    { limit: 180,     price: 0.5280, label: '第一阶梯' },
+    { limit: 400,     price: 0.5780, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8280, label: '第三阶梯' },
+  ]},
+  // 湖南：月阶梯
+  'hunan':      { name: '湖南',   period: '月', tiers: [
+    { limit: 200,     price: 0.5880, label: '第一阶梯' },
+    { limit: 450,     price: 0.6380, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8880, label: '第三阶梯' },
+  ]},
+  // 河北：月阶梯（冀北）
+  'hebei':      { name: '河北',   period: '月', tiers: [
+    { limit: 240,     price: 0.5200, label: '第一阶梯' },
+    { limit: 400,     price: 0.5700, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8200, label: '第三阶梯' },
+  ]},
+  // 福建：月阶梯
+  'fujian':     { name: '福建',   period: '月', tiers: [
+    { limit: 200,     price: 0.4983, label: '第一阶梯' },
+    { limit: 400,     price: 0.5483, label: '第二阶梯' },
+    { limit: Infinity,price: 0.7983, label: '第三阶梯' },
+  ]},
+  // 安徽：月阶梯
+  'anhui':      { name: '安徽',   period: '月', tiers: [
+    { limit: 200,     price: 0.5653, label: '第一阶梯' },
+    { limit: 400,     price: 0.6153, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8653, label: '第三阶梯' },
+  ]},
+  // 重庆：月阶梯
+  'chongqing':  { name: '重庆',   period: '月', tiers: [
+    { limit: 200,     price: 0.5200, label: '第一阶梯' },
+    { limit: 400,     price: 0.5700, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8200, label: '第三阶梯' },
+  ]},
+  // 陕西：月阶梯
+  'shaanxi':    { name: '陕西',   period: '月', tiers: [
+    { limit: 180,     price: 0.4983, label: '第一阶梯' },
+    { limit: 400,     price: 0.5483, label: '第二阶梯' },
+    { limit: Infinity,price: 0.7983, label: '第三阶梯' },
+  ]},
+  // 辽宁：月阶梯
+  'liaoning':   { name: '辽宁',   period: '月', tiers: [
+    { limit: 180,     price: 0.5000, label: '第一阶梯' },
+    { limit: 400,     price: 0.5500, label: '第二阶梯' },
+    { limit: Infinity,price: 0.8000, label: '第三阶梯' },
+  ]},
+  // 自定义
+  'custom':     { name: '自定义', period: '月', tiers: [
+    { limit: 200,     price: 0.52,   label: '第一阶梯' },
+    { limit: 400,     price: 0.57,   label: '第二阶梯' },
+    { limit: Infinity,price: 0.82,   label: '第三阶梯' },
+  ]},
+};
+
+// 当前选中的地区（持久化到 localStorage）
+let currentRegion = (() => {
+  try { return localStorage.getItem('energysmart_region') || 'guangdong'; }
+  catch (e) { return 'guangdong'; }
+})();
+
+// 当前生效的阶梯电价（基于所选地区，可被用户自定义覆盖）
+let tierPrices = (() => {
+  try {
+    const custom = localStorage.getItem('energysmart_tier_prices');
+    if (custom) return JSON.parse(custom);
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(TIER_PRICE_DATABASE[currentRegion].tiers));
+})();
+
+// 月度预算（持久化）
+let monthlyBudget = (() => {
+  try { return parseFloat(localStorage.getItem('energysmart_budget')) || 500; }
+  catch (e) { return 500; }
+})();
+
+// 获取当前地区配置
+function getCurrentRegionConfig() {
+  return TIER_PRICE_DATABASE[currentRegion] || TIER_PRICE_DATABASE['custom'];
+}
+
+// 切换地区：加载该地区的预设电价
+function switchRegion(regionKey) {
+  if (!TIER_PRICE_DATABASE[regionKey]) return;
+  currentRegion = regionKey;
+  try { localStorage.setItem('energysmart_region', regionKey); } catch (e) {}
+  tierPrices = JSON.parse(JSON.stringify(TIER_PRICE_DATABASE[regionKey].tiers));
+  try { localStorage.setItem('energysmart_tier_prices', JSON.stringify(tierPrices)); } catch (e) {}
+  updateBillPage();
+}
+
+// 基于阶梯电价精确计算电费（支持累进/分档两种模式，这里采用分档：各档电量分别计价）
+function calculateTieredCost(usage) {
+  let cost = 0;
+  let remaining = usage;
+  let prevLimit = 0;
+  for (let i = 0; i < tierPrices.length && remaining > 0; i++) {
+    const tier = tierPrices[i];
+    const tierRange = (tier.limit === Infinity ? Infinity : tier.limit - prevLimit);
+    const usedInTier = Math.min(remaining, tierRange);
+    cost += usedInTier * tier.price;
+    remaining -= usedInTier;
+    prevLimit = tier.limit;
+  }
+  return +cost.toFixed(2);
+}
+
+// 获取当前阶梯编号（1-based）
+function getCurrentTier(usage) {
+  let tier = 1;
+  for (let i = 0; i < tierPrices.length; i++) {
+    if (usage > tierPrices[i].limit) tier = i + 1;
+    else break;
+  }
+  return tier;
+}
+
+// Generate historical data
+function genDailyData(days) {
+  const data = [];
+  let d = new Date(); d.setDate(d.getDate() - days + 1);
+  for (let i = 0; i < days; i++) {
+    const base = 12 + Math.sin(i / 7 * Math.PI) * 4 + (i % 5 === 0 ? 6 : 0);
+    data.push({ date: new Date(d), usage: +(base + Math.random() * 4).toFixed(1) });
+    d.setDate(d.getDate() + 1);
+  }
+  return data;
+}
+
+function genHourlyData() {
+  const data = [];
+  for (let i = 0; i < 24; i++) {
+    let base = 0.3;
+    if (i >= 6 && i < 9) base = 1.2;
+    if (i >= 11 && i < 13) base = 1.5;
+    if (i >= 18 && i < 22) base = 2.0;
+    data.push({ hour: i, usage: +(base + Math.random() * 0.6).toFixed(2) });
+  }
+  return data;
+}
+
+const dailyData = genDailyData(30);
+const hourlyData = genHourlyData();
+const weeklyData = genDailyData(7);
+const monthlyData = [
+  { month: '1月', usage: 320 }, { month: '2月', usage: 280 }, { month: '3月', usage: 260 },
+  { month: '4月', usage: 240 }, { month: '5月', usage: 310 }, { month: '6月', usage: 380 },
+  { month: '7月', usage: 420 }, { month: '8月', usage: 0 }, { month: '9月', usage: 0 },
+  { month: '10月', usage: 0 }, { month: '11月', usage: 0 }, { month: '12月', usage: 0 },
+];
+
+// ===== UTILS =====
+function formatNum(n) { return n.toFixed(1); }
+function formatMoney(n) { return '¥' + n.toFixed(2); }
+function rand(min, max) { return Math.random() * (max - min) + min; }
+
+// Calculate total power
+function getTotalPower() { return devices.reduce((s, d) => s + (d.isOn && d.isOnline ? d.currentPower : 0), 0); }
+function getTodayUsage() { return +(getTotalPower() * 24 / 1000).toFixed(1); }
+// 电费计算：使用当前阶梯电价（年阶梯地区按月折算近似）
+function getTodayCost() { return calculateTieredCost(getTodayUsage() * 30) / 30; }
+function getMonthUsage() { return dailyData.reduce((s, d) => s + d.usage, 0); }
+function getMonthCost() { return calculateTieredCost(getMonthUsage()); }
+
+// ===== SIMULATION =====
+function simulateDevices() {
+  devices.forEach(d => {
+    // MQTT 接入的设备：功率与状态由 MQTT 实时消息更新，跳过模拟
+    if (d.mqtt && d.mqtt.enabled) {
+      // 仅当 MQTT 未连接时，将设备标记为离线并清零功率
+      if (mqttConnectionState !== 'connected') {
+        d.isOnline = false;
+        d.currentPower = 0;
+      }
+      return;
+    }
+    // 非 MQTT 设备：保留原有模拟逻辑
+    if (!d.isOnline) { d.currentPower = 0; return; }
+    if (d.type === 'fridge') {
+      d.currentPower = +(d.power * (0.6 + Math.random() * 0.4)).toFixed(0);
+    } else if (d.type === 'light') {
+      d.currentPower = d.isOn ? +(d.power * (0.5 + Math.random() * 0.5)).toFixed(0) : 0;
+    } else if (d.isOn) {
+      d.currentPower = +(d.power * (0.7 + Math.random() * 0.3)).toFixed(0);
+    } else {
+      d.currentPower = +(Math.random() * 10).toFixed(0);
+    }
+  });
+}
+
+// ===== NAVIGATION =====
+document.querySelectorAll('.nav-link').forEach(link => {
+  link.addEventListener('click', function(e) {
+    e.preventDefault();
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    this.classList.add('active');
+    const page = this.dataset.page;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    if (page === 'analysis') updateAnalysisCharts();
+    if (page === 'bill') updateBillPage();
+    if (page === 'ai') updateAIPage();
+    if (page === 'devices') renderDeviceList();
+  });
+});
+
+// Handle hash on load
+function handleHash() {
+  const hash = window.location.hash.replace('#', '') || 'dashboard';
+  const link = document.querySelector(`[data-page="${hash}"]`);
+  if (link) link.click();
+}
+window.addEventListener('hashchange', handleHash);
+
+// ===== DASHBOARD =====
+function renderOverviewCards() {
+  const totalPower = getTotalPower();
+  const todayUsage = getTodayUsage();
+  const todayCost = getTodayCost();
+  const monthCost = getMonthCost();
+
+  document.getElementById('overviewGrid').innerHTML = `
+    <div class="card overview-card">
+      <div class="card-icon" style="background:var(--accent-dim)"><span style="font-size:20px">⚡</span></div>
+      <div class="card-value" id="valPower">${totalPower}</div>
+      <div class="card-label">实时总功率</div>
+      <div class="card-sub">W</div>
+    </div>
+    <div class="card overview-card">
+      <div class="card-icon" style="background:var(--green-dim)"><span style="font-size:20px">📊</span></div>
+      <div class="card-value" id="valToday">${todayUsage}</div>
+      <div class="card-label">今日用电量</div>
+      <div class="card-sub">kWh</div>
+    </div>
+    <div class="card overview-card">
+      <div class="card-icon" style="background:var(--purple-dim)"><span style="font-size:20px">💰</span></div>
+      <div class="card-value" id="valTodayCost">${todayCost}</div>
+      <div class="card-label">今日电费</div>
+      <div class="card-sub">元</div>
+    </div>
+    <div class="card overview-card">
+      <div class="card-icon" style="background:var(--orange-dim)"><span style="font-size:20px">📅</span></div>
+      <div class="card-value" id="valMonthCost">${monthCost.toFixed(2)}</div>
+      <div class="card-label">本月电费</div>
+      <div class="card-sub">元</div>
+    </div>
+  `;
+}
+
+function updateOverviewValues() {
+  const totalPower = getTotalPower();
+  const todayUsage = getTodayUsage();
+  const todayCost = getTodayCost();
+  const monthCost = getMonthCost();
+
+  const elPower = document.getElementById('valPower');
+  const elToday = document.getElementById('valToday');
+  const elTodayCost = document.getElementById('valTodayCost');
+  const elMonthCost = document.getElementById('valMonthCost');
+
+  if (elPower) elPower.textContent = totalPower;
+  if (elToday) elToday.textContent = todayUsage;
+  if (elTodayCost) elTodayCost.textContent = todayCost;
+  if (elMonthCost) elMonthCost.textContent = monthCost.toFixed(2);
+}
+
+function renderDeviceSnapshot() {
+  const grid = document.getElementById('deviceSnapshot');
+  grid.innerHTML = devices.map(d => `
+    <div class="card device-card" onclick="openDeviceDetail('${d.id}')">
+      <div class="device-icon-wrap" style="background:${d.color}22">${d.icon}</div>
+      <div class="device-name">${d.name}${d.mqtt && d.mqtt.enabled ? '<span style="font-size:9px;color:var(--purple);font-family:var(--font-mono);margin-left:4px;text-shadow:none">[MQTT]</span>' : ''}</div>
+      <div class="device-power">${d.currentPower} W</div>
+      <div class="device-room">${d.room}</div>
+      <div class="device-status">
+        <span class="tag ${d.isOnline ? 'tag-online' : 'tag-offline'}">${d.isOnline ? '● 在线' : '○ 离线'}</span>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" ${d.isOn ? 'checked' : ''} onchange="toggleDevice('${d.id}', this.checked)"><span class="slider"></span></label>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===== CHARTS =====
+let chartPower, chartTrend, chartPeriod, chartDevicePie, chartDeviceDetail;
+
+function createPowerChart() {
+  const ctx = document.getElementById('chartPower').getContext('2d');
+  const labels = Array.from({length: 24}, (_, i) => i + ':00');
+  const data = hourlyData.map(d => d.usage * 1000);
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+  gradient.addColorStop(0, 'rgba(244, 114, 182, 0.4)');
+  gradient.addColorStop(0.5, 'rgba(176, 38, 255, 0.15)');
+  gradient.addColorStop(1, 'rgba(91, 157, 249, 0.02)');
+
+  chartPower = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '功率 (W)',
+        data,
+        borderColor: '#F472B6',
+        backgroundColor: gradient,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 6,
+        pointHoverBackgroundColor: '#5B9DF9',
+        pointHoverBorderColor: '#F472B6',
+        pointHoverBorderWidth: 2,
+        borderWidth: 2.5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 12 }, grid: { color: 'rgba(255,0,110,0.08)' } },
+        y: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, callback: v => v + 'W' }, grid: { color: 'rgba(255,0,110,0.08)' } }
+      },
+      interaction: { intersect: false, mode: 'index' }
+    }
+  });
+}
+
+function updatePowerChart() {
+  if (!chartPower) return;
+  const now = new Date();
+  const currentHour = now.getHours();
+  const data = hourlyData.map((d, i) => {
+    if (i === currentHour) return getTotalPower();
+    return d.usage * 1000;
+  });
+  chartPower.data.datasets[0].data = data;
+  chartPower.update('none');
+}
+
+function createTrendChart() {
+  const ctx = document.getElementById('chartTrend').getContext('2d');
+  chartTrend = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dailyData.map(d => d.date.toLocaleDateString('zh', { month: 'short', day: 'numeric' })),
+      datasets: [{
+        label: '用电量 (kWh)',
+        data: dailyData.map(d => d.usage),
+        backgroundColor: dailyData.map(d => d.usage > 16 ? 'rgba(251, 191, 36, 0.7)' : 'rgba(91, 157, 249, 0.5)'),
+        borderColor: dailyData.map(d => d.usage > 16 ? '#FBBF24' : '#5B9DF9'),
+        borderWidth: 1,
+        borderRadius: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 15 }, grid: { display: false } },
+        y: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, callback: v => v + ' kWh' }, grid: { color: 'rgba(255,0,110,0.08)' } }
+      }
+    }
+  });
+}
+
+function updateTrendChart(period) {
+  if (!chartTrend) return;
+  let data, labels;
+  if (period === 'day') {
+    labels = hourlyData.map(d => d.hour + ':00');
+    data = hourlyData.map(d => d.usage * 24);
+  } else if (period === 'week') {
+    labels = weeklyData.map(d => d.date.toLocaleDateString('zh', { weekday: 'short' }));
+    data = weeklyData.map(d => d.usage);
+  } else {
+    labels = dailyData.map(d => d.date.toLocaleDateString('zh', { month: 'short', day: 'numeric' }));
+    data = dailyData.map(d => d.usage);
+  }
+  chartTrend.data.labels = labels;
+  chartTrend.data.datasets[0].data = data;
+  chartTrend.data.datasets[0].backgroundColor = data.map(d => d > 16 ? 'rgba(251, 191, 36, 0.7)' : 'rgba(91, 157, 249, 0.5)');
+  chartTrend.data.datasets[0].borderColor = data.map(d => d > 16 ? '#FBBF24' : '#5B9DF9');
+  chartTrend.update();
+}
+
+function createPeriodChart() {
+  const ctx = document.getElementById('chartPeriod').getContext('2d');
+  chartPeriod = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['峰时段 (8-22)', '平时段 (6-8,22-24)', '谷时段 (0-6)'],
+      datasets: [{
+        data: [18.5, 5.2, 2.8],
+        backgroundColor: ['rgba(244, 114, 182, 0.8)', 'rgba(91, 157, 249, 0.7)', 'rgba(52, 211, 153, 0.7)'],
+        borderColor: '#1A2342',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#B8A8D8', padding: 16, font: { size: 11, family: 'JetBrains Mono' }, usePointStyle: true, pointStyleWidth: 8 } }
+      }
+    }
+  });
+}
+
+function createDevicePieChart() {
+  const ctx = document.getElementById('chartDevicePie').getContext('2d');
+  chartDevicePie = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: devices.map(d => d.name),
+      datasets: [{
+        data: devices.map(d => d.power * (d.isOn ? 1 : 0.05) * rand(0.5, 1.5)),
+        backgroundColor: devices.map(d => d.color + 'CC'),
+        borderColor: '#1A2342',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#B8A8D8', padding: 12, font: { size: 10, family: 'JetBrains Mono' }, usePointStyle: true, pointStyleWidth: 8 } }
+      }
+    }
+  });
+}
+
+function updateDevicePieChart() {
+  if (!chartDevicePie) return;
+  // 同步 labels 与 backgroundColor，确保新增/删除设备后图表正确显示
+  chartDevicePie.data.labels = devices.map(d => d.name);
+  chartDevicePie.data.datasets[0].data = devices.map(d => d.currentPower || d.power * 0.02);
+  chartDevicePie.data.datasets[0].backgroundColor = devices.map(d => d.color + 'CC');
+  chartDevicePie.update('none');
+}
+
+function createDeviceDetailChart() {
+  const ctx = document.getElementById('chartDeviceDetail').getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+  gradient.addColorStop(0, 'rgba(91, 157, 249, 0.4)');
+  gradient.addColorStop(1, 'rgba(176, 38, 255, 0.02)');
+  chartDeviceDetail = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: Array.from({length: 24}, (_, i) => i + ':00'),
+      datasets: [{
+        label: '功率 (W)',
+        data: Array.from({length: 24}, () => rand(0, 500)),
+        borderColor: '#5B9DF9',
+        backgroundColor: gradient,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: '#F472B6',
+        borderWidth: 2.5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,240,255,0.08)' } },
+        y: { ticks: { color: '#A78BFA', font: { size: 10, family: 'JetBrains Mono' }, callback: v => v + 'W' }, grid: { color: 'rgba(0,240,255,0.08)' } }
+      }
+    }
+  });
+}
+
+function updateDeviceDetailChart(device) {
+  if (!chartDeviceDetail) return;
+  const data = Array.from({length: 24}, (_, i) => {
+    if (device.isOn) return device.power * (0.6 + Math.random() * 0.4);
+    if (device.type === 'fridge') return device.power * (0.5 + Math.random() * 0.5);
+    return rand(0, 15);
+  });
+  chartDeviceDetail.data.datasets[0].data = data;
+  chartDeviceDetail.update();
+}
+
+// ===== ANALYSIS PAGE =====
+function updateAnalysisCharts() {
+  if (!chartTrend) createTrendChart();
+  if (!chartPeriod) createPeriodChart();
+  if (!chartDevicePie) createDevicePieChart();
+  updateTrendChart('month');
+  updateDevicePieChart();
+  renderPeakAnalysis();
+}
+
+function renderPeakAnalysis() {
+  const peaks = [
+    { time: '19:30', label: '晚间用电高峰', detail: '空调+热水器+电视+照明同时开启，峰值功率 3850W', power: '3850W' },
+    { time: '12:15', label: '午间用电高峰', detail: '空调+厨房电器同时使用，峰值功率 2100W', power: '2100W' },
+    { time: '07:45', label: '早间用电高峰', detail: '热水器+照明系统启动，峰值功率 2450W', power: '2450W' },
+  ];
+  document.getElementById('peakAnalysis').innerHTML = peaks.map(p => `
+    <div class="peak-item">
+      <div class="peak-time">${p.time}</div>
+      <div class="peak-info">
+        <div class="peak-label">${p.label}</div>
+        <div class="peak-detail">${p.detail}</div>
+      </div>
+      <span class="tag tag-warning">${p.power}</span>
+    </div>
+  `).join('');
+}
+
+// ===== DEVICES PAGE =====
+function renderDeviceList() {
+  const grid = document.getElementById('deviceList');
+  grid.innerHTML = devices.map(d => `
+    <div class="card device-card" onclick="openDeviceDetail('${d.id}')">
+      <button class="device-delete" onclick="event.stopPropagation();askDeleteDevice('${d.id}')" title="删除设备">✕</button>
+      <div class="device-icon-wrap" style="background:${d.color}22;font-size:30px">${d.icon}</div>
+      <div class="device-name">${d.name}${d.mqtt && d.mqtt.enabled ? '<span style="font-size:9px;color:var(--purple);font-family:var(--font-mono);margin-left:4px;text-shadow:none">[MQTT]</span>' : ''}</div>
+      <div class="device-power">${d.currentPower} W</div>
+      <div class="device-room">${d.room} · ${d.power}W</div>
+      <div class="device-status">
+        <span class="tag ${d.isOnline ? 'tag-online' : 'tag-offline'}">${d.isOnline ? '● 在线' : '○ 离线'}</span>
+        <label class="toggle" onclick="event.stopPropagation()"><input type="checkbox" ${d.isOn ? 'checked' : ''} onchange="toggleDevice('${d.id}', this.checked)"><span class="slider"></span></label>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleDevice(id, on) {
+  const d = devices.find(d => d.id === id);
+  if (!d) return;
+  d.isOn = on;
+  // MQTT 设备：发布控制指令到 command topic
+  if (d.mqtt && d.mqtt.enabled && d.mqtt.cmdTopic) {
+    MqttManager.publishCommand(d, { command: on ? 'on' : 'off', isOn: on, timestamp: Date.now() });
+  } else {
+    // 非 MQTT 设备：本地立即更新功率
+    if (!on) d.currentPower = +(Math.random() * 10).toFixed(0);
+  }
+  refreshAllUI();
+}
+
+let currentDeviceId = null;
+function openDeviceDetail(id) {
+  currentDeviceId = id;
+  const d = devices.find(d => d.id === id);
+  if (!d) return;
+  document.getElementById('modalDeviceName').textContent = d.name;
+  document.getElementById('modalDeviceIcon').innerHTML = d.icon;
+  document.getElementById('modalDeviceIcon').style.background = d.color + '22';
+  document.getElementById('modalPower').textContent = d.currentPower + ' W';
+  document.getElementById('modalRoom').textContent = d.room + ' · 额定功率 ' + d.power + 'W';
+  document.getElementById('modalToggle').checked = d.isOn;
+  document.getElementById('modalToday').textContent = (d.currentPower * 24 / 1000).toFixed(1) + ' kWh';
+  document.getElementById('modalMonth').textContent = (d.currentPower * 720 / 1000).toFixed(1) + ' kWh';
+  document.getElementById('modalCost').textContent = formatMoney(d.currentPower * 720 / 1000 * 0.57);
+  document.getElementById('deviceModal').classList.add('show');
+  if (!chartDeviceDetail) createDeviceDetailChart();
+  updateDeviceDetailChart(d);
+}
+
+function closeDeviceModal() {
+  document.getElementById('deviceModal').classList.remove('show');
+  currentDeviceId = null;
+}
+
+function toggleDeviceFromModal() {
+  if (!currentDeviceId) return;
+  const d = devices.find(d => d.id === currentDeviceId);
+  if (!d) return;
+  d.isOn = document.getElementById('modalToggle').checked;
+  // MQTT 设备：发布控制指令
+  if (d.mqtt && d.mqtt.enabled && d.mqtt.cmdTopic) {
+    MqttManager.publishCommand(d, { command: d.isOn ? 'on' : 'off', isOn: d.isOn, timestamp: Date.now() });
+  } else {
+    if (!d.isOn) d.currentPower = +(Math.random() * 10).toFixed(0);
+  }
+  refreshAllUI();
+}
+
+// ===== ADD / DELETE DEVICE =====
+// 设备类型预设配置（图标、默认功率、默认颜色）
+const DEVICE_TYPE_PRESETS = {
+  ac:        { icons: ['❄️', '🌬️', '🌀'],  defaultPower: 1500, color: '#5B9DF9' },
+  heater:    { icons: ['🔥', '♨️', '🌡️'],  defaultPower: 2000, color: '#F472B6' },
+  fridge:    { icons: ['🧊', '📦', '❄️'],   defaultPower: 150,  color: '#34D399' },
+  washer:    { icons: ['🌀', '🧺', '🫧'],   defaultPower: 500,  color: '#A78BFA' },
+  tv:        { icons: ['📺', '🖥️', '🎬'],   defaultPower: 200,  color: '#FBBF24' },
+  light:     { icons: ['💡', '🔆', '✨'],   defaultPower: 300,  color: '#FF6B35' },
+  microwave: { icons: ['🍲', '🔥', '🍱'],   defaultPower: 800,  color: '#FF6B35' },
+  computer:  { icons: ['💻', '🖥️', '⌨️'],   defaultPower: 400,  color: '#5B9DF9' },
+  fan:       { icons: ['🌀', '💨', '🌬️'],   defaultPower: 60,   color: '#34D399' },
+  other:     { icons: ['🔌', '⚙️', '🛠️', '📦', '✨'], defaultPower: 100, color: '#A78BFA' },
+};
+
+// 备选颜色池（用户添加设备时循环分配）
+const COLOR_POOL = ['#5B9DF9', '#F472B6', '#34D399', '#A78BFA', '#FBBF24', '#FF6B35', '#FF69B4', '#00FF99'];
+
+let selectedIcon = '';
+let pendingDeleteId = null;
+
+function showAddDeviceWizard() {
+  document.getElementById('addDeviceModal').classList.add('show');
+  document.getElementById('newDeviceName').value = '';
+  document.getElementById('newDeviceType').value = 'ac';
+  document.getElementById('newDevicePower').value = 1500;
+  document.getElementById('newDeviceRoom').value = '客厅';
+  onTypeChange();
+  setTimeout(() => document.getElementById('newDeviceName').focus(), 100);
+}
+
+function closeAddDeviceWizard() {
+  document.getElementById('addDeviceModal').classList.remove('show');
+}
+
+// MQTT 配置区域显隐切换
+function toggleMqttSection(enabled) {
+  document.getElementById('mqttConfigSection').style.display = enabled ? 'block' : 'none';
+  // 启用时自动生成默认 topic 建议
+  if (enabled && !document.getElementById('newDeviceTopic').value) {
+    const name = document.getElementById('newDeviceName').value || 'device';
+    const id = 'dev-' + Date.now().toString().slice(-6);
+    document.getElementById('newDeviceTopic').value = `home/devices/${id}/telemetry`;
+    document.getElementById('newDeviceCmdTopic').value = `home/devices/${id}/command`;
+  }
+}
+
+// ===== MQTT BROKER SETTINGS =====
+function openMqttSettings() {
+  // 填充当前配置到表单
+  document.getElementById('mqttBrokerUrl').value = mqttConfig.brokerUrl || '';
+  document.getElementById('mqttUsername').value = mqttConfig.username || '';
+  document.getElementById('mqttPassword').value = mqttConfig.password || '';
+  document.getElementById('mqttClientId').value = mqttConfig.clientId || '';
+  document.getElementById('mqttQos').value = String(mqttConfig.qos ?? 1);
+  document.getElementById('mqttSettingsModal').classList.add('show');
+}
+
+function closeMqttSettings() {
+  document.getElementById('mqttSettingsModal').classList.remove('show');
+}
+
+function saveMqttSettings() {
+  mqttConfig.brokerUrl = document.getElementById('mqttBrokerUrl').value.trim();
+  mqttConfig.username = document.getElementById('mqttUsername').value.trim();
+  mqttConfig.password = document.getElementById('mqttPassword').value;
+  const clientId = document.getElementById('mqttClientId').value.trim();
+  mqttConfig.clientId = clientId || ('energysmart_' + Math.random().toString(16).substr(2, 8));
+  mqttConfig.qos = parseInt(document.getElementById('mqttQos').value);
+  MqttManager.saveConfig();
+  closeMqttSettings();
+  // 保存后立即尝试连接
+  if (mqttConfig.brokerUrl) {
+    MqttManager.connect();
+  }
+}
+
+
+// 类型切换时更新图标选项和默认功率
+function onTypeChange() {
+  const type = document.getElementById('newDeviceType').value;
+  const preset = DEVICE_TYPE_PRESETS[type] || DEVICE_TYPE_PRESETS.other;
+  document.getElementById('newDevicePower').value = preset.defaultPower;
+
+  const picker = document.getElementById('iconPicker');
+  picker.innerHTML = preset.icons.map((icon, i) => `
+    <div class="icon-option ${i === 0 ? 'selected' : ''}" onclick="selectIcon(this, '${icon}')">${icon}</div>
+  `).join('');
+  selectedIcon = preset.icons[0];
+}
+
+function selectIcon(el, icon) {
+  document.querySelectorAll('#iconPicker .icon-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedIcon = icon;
+}
+
+function createDevice() {
+  const name = document.getElementById('newDeviceName').value.trim();
+  const type = document.getElementById('newDeviceType').value;
+  const power = parseInt(document.getElementById('newDevicePower').value);
+  const room = document.getElementById('newDeviceRoom').value;
+
+  if (!name) {
+    flashInputError('newDeviceName');
+    return;
+  }
+  if (!power || power < 1) {
+    flashInputError('newDevicePower');
+    return;
+  }
+
+  // 读取 MQTT 配置
+  const mqttEnabled = document.getElementById('newDeviceMqttEnable').checked;
+  const topic = document.getElementById('newDeviceTopic').value.trim();
+  const cmdTopic = document.getElementById('newDeviceCmdTopic').value.trim();
+  if (mqttEnabled && !topic) {
+    flashInputError('newDeviceTopic');
+    return;
+  }
+
+  const preset = DEVICE_TYPE_PRESETS[type] || DEVICE_TYPE_PRESETS.other;
+  const icon = selectedIcon || preset.icons[0];
+  // 颜色按当前设备数量循环分配
+  const color = COLOR_POOL[devices.length % COLOR_POOL.length];
+
+  const newDevice = {
+    id: 'dev-' + Date.now(),
+    name: name,
+    type: type,
+    icon: icon,
+    power: power,
+    currentPower: 0,
+    isOnline: mqttEnabled ? false : true,  // MQTT 设备等收到消息后才在线
+    isOn: false,
+    room: room,
+    color: color,
+    // MQTT 接入配置
+    mqtt: mqttEnabled ? {
+      enabled: true,
+      topic: topic,
+      cmdTopic: cmdTopic || topic.replace('/telemetry', '/command'),
+    } : { enabled: false },
+  };
+
+  devices.push(newDevice);
+  simulateDevices();
+  closeAddDeviceWizard();
+  refreshAllUI();
+  updateSystemStatus();
+  // 如果是 MQTT 设备且已连接，立即订阅
+  if (mqttEnabled) MqttManager.subscribeDevice(newDevice);
+}
+
+// 输入校验失败时的闪烁反馈
+function flashInputError(inputId) {
+  const el = document.getElementById(inputId);
+  el.style.borderColor = 'var(--orange)';
+  el.style.boxShadow = '0 0 12px var(--orange)';
+  el.focus();
+  setTimeout(() => {
+    el.style.borderColor = '';
+    el.style.boxShadow = '';
+  }, 1500);
+}
+
+function askDeleteDevice(id) {
+  const d = devices.find(d => d.id === id);
+  if (!d) return;
+  pendingDeleteId = id;
+  document.getElementById('deleteDeviceName').textContent = d.name;
+  document.getElementById('confirmDeleteModal').classList.add('show');
+}
+
+function closeConfirmDelete() {
+  document.getElementById('confirmDeleteModal').classList.remove('show');
+  pendingDeleteId = null;
+}
+
+function confirmDeleteDevice() {
+  if (!pendingDeleteId) return;
+  const idx = devices.findIndex(d => d.id === pendingDeleteId);
+  if (idx === -1) { closeConfirmDelete(); return; }
+
+  const device = devices[idx];
+  // 关闭该设备的详情弹窗（如果开着）
+  if (currentDeviceId === pendingDeleteId) closeDeviceModal();
+  // 移除关联的规则
+  for (let i = rules.length - 1; i >= 0; i--) {
+    if (rules[i].deviceId === pendingDeleteId) rules.splice(i, 1);
+  }
+  // 取消 MQTT 订阅
+  if (device.mqtt && device.mqtt.enabled) {
+    MqttManager.unsubscribeDevice(device);
+  }
+  devices.splice(idx, 1);
+
+  closeConfirmDelete();
+  refreshAllUI();
+  updateSystemStatus();
+  // 如果 AI 页规则列表已渲染，刷新一次
+  if (document.getElementById('page-ai').classList.contains('active')) renderRuleList();
+}
+
+// 更新侧边栏系统状态文字
+function updateSystemStatus() {
+  const onlineCount = devices.filter(d => d.isOnline).length;
+  const statusEl = document.querySelector('.sidebar-footer .system-status span:last-child');
+  if (statusEl) statusEl.textContent = `SYS_ONLINE · ${onlineCount} NODES`;
+}
+
+// ===== AI PAGE =====
+function updateAIPage() {
+  renderRuleList();
+  renderSuggestionsList();
+  if (!document.getElementById('chatContainer').querySelector('.chat-messages')) {
+    initChat();
+  }
+}
+
+function renderRuleList() {
+  const container = document.getElementById('ruleList');
+  container.innerHTML = rules.map(r => {
+    const d = devices.find(d => d.id === r.deviceId);
+    return `
+      <div class="rule-card" style="border-bottom:1px solid var(--border-subtle)">
+        <div class="rule-icon" style="background:${r.enabled ? 'var(--green-dim)' : 'rgba(255,255,255,0.05)'}">${r.enabled ? '✅' : '⏸'}</div>
+        <div class="rule-info">
+          <h4>${r.name}</h4>
+          <p>${d ? d.name : ''} · ${r.condition} → ${r.action}</p>
+        </div>
+        <label class="toggle"><input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)"><span class="slider"></span></label>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleRule(id, enabled) {
+  const r = rules.find(r => r.id === id);
+  if (r) r.enabled = enabled;
+  renderRuleList();
+}
+
+function showRuleWizard() {
+  document.getElementById('ruleWizardModal').classList.add('show');
+  const sel = document.getElementById('ruleDevice');
+  sel.innerHTML = devices.map(d => `<option value="${d.id}">${d.name} (${d.room})</option>`).join('');
+}
+
+function closeRuleWizard() {
+  document.getElementById('ruleWizardModal').classList.remove('show');
+}
+
+function createRule() {
+  const deviceId = document.getElementById('ruleDevice').value;
+  const condition = document.getElementById('ruleCondition').selectedOptions[0].text;
+  const action = document.getElementById('ruleAction').selectedOptions[0].text;
+  const d = devices.find(d => d.id === deviceId);
+  rules.push({
+    id: 'r' + (rules.length + 1),
+    name: `${condition.split('(')[0].trim()}${action.split('设备')[0]}`,
+    deviceId, condition, action,
+    enabled: true,
+  });
+  closeRuleWizard();
+  renderRuleList();
+}
+
+function initChat() {
+  const container = document.getElementById('chatContainer');
+  container.innerHTML = `
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg ai">你好！我是 EnergySmart AI 节能助手。我可以帮你分析用电情况、设置自动化规则、推荐节能方案。试试问我："怎么节省电费？"</div>
+    </div>
+    <div class="chat-input-wrap">
+      <input type="text" id="chatInput" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn btn-primary" onclick="sendChat()" style="padding:10px 16px">发送</button>
+    </div>
+  `;
+}
+
+function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const messages = document.getElementById('chatMessages');
+  messages.innerHTML += `<div class="chat-msg user">${msg}</div>`;
+  input.value = '';
+
+  setTimeout(() => {
+    const replies = {
+      '省电': '根据当前用电分析，建议您：1) 将热水器设置在电价低谷时段（22:00-6:00）加热；2) 空调温度设定在26°C，每调高1°C可节省约6%电量；3) 关闭不必要的待机设备，预计每月可节省 ¥45-80。',
+      '电费': `当前本月预估电费为 ¥${getMonthCost().toFixed(2)}，相比上月变化约 +8.5%。按照当前趋势，月底可能达到 ¥${(getMonthCost() * 1.3).toFixed(2)}。建议开启节能模式。`,
+      '规则': '我已为你配置了3条智能规则：高峰关热水器、深夜关灯、待机关电视。你还可以说"设置晚上10点后关闭所有非必要设备"来创建新规则。',
+      '空调': '智能空调当前功耗较高，建议：1) 设置定时关闭（如凌晨2点）；2) 配合风扇使用可降低空调负荷；3) 定期清洁滤网可提升效率约10%。',
+      '热水器': '电热水器是家庭用电大户，当前功率2000W。建议改为夜间谷时段加热，预计每月可节省 ¥35-50。',
+      '分析': `过去30天用电趋势显示，最高日用电量出现在 ${dailyData.sort((a, b) => b.usage - a.usage)[0].date.toLocaleDateString('zh', { month: 'long', day: 'numeric' })}，当日用电 ${dailyData.sort((a, b) => b.usage - a.usage)[0].usage} kWh。主要耗电来自空调和热水器。`,
+    };
+
+    let reply = '好的，让我分析一下你的问题... ';
+    const lower = msg.toLowerCase();
+    for (const [key, val] of Object.entries(replies)) {
+      if (lower.includes(key)) { reply = val; break; }
+    }
+    if (reply === '好的，让我分析一下你的问题... ') {
+      reply = '我理解你的需求。建议你查看"用电分析"页面了解详细的用电趋势，或在"AI节能中心"配置自动化规则来优化用电。你也可以尝试问我："怎么省电"、"电费预估"、"空调怎么省电"等。';
+    }
+
+    messages.innerHTML += `<div class="chat-msg ai">${reply}</div>`;
+    messages.scrollTop = messages.scrollHeight;
+  }, 800);
+}
+
+function renderSuggestionsList() {
+  const container = document.getElementById('suggestionsList');
+  const suggestions = [
+    { title: '热水器谷时加热', desc: '将热水器加热时间调整为夜间22:00-6:00谷时段，充分利用低价电。', saving: '月省 ¥35-50' },
+    { title: '空调智能调温', desc: 'AI 根据室内外温差自动调节空调温度，保持舒适的同时降低能耗。', saving: '月省 ¥60-90' },
+    { title: '待机设备自动断电', desc: '检测到设备待机超过30分钟自动切断电源，消除待机功耗。', saving: '月省 ¥15-25' },
+    { title: '照明智能感应', desc: '根据室内光线和人员活动自动调节照明亮度和开关状态。', saving: '月省 ¥10-20' },
+  ];
+  container.innerHTML = suggestions.map(s => `
+    <div class="suggestion-card">
+      <div class="sug-header"><span style="font-size:20px">💡</span><h4>${s.title}</h4></div>
+      <div class="sug-desc">${s.desc}</div>
+      <div class="sug-saving">预估 ${s.saving}</div>
+    </div>
+  `).join('');
+}
+
+// ===== BILL PAGE =====
+function updateBillPage() {
+  const monthUsage = getMonthUsage();
+  const monthCost = calculateTieredCost(monthUsage);
+  const prevMonthCost = calculateTieredCost(monthUsage * 0.92);
+  const change = ((monthCost - prevMonthCost) / prevMonthCost * 100).toFixed(1);
+  const regionConfig = getCurrentRegionConfig();
+
+  // 填充地区选择器
+  const regionSelect = document.getElementById('regionSelect');
+  if (regionSelect && regionSelect.options.length === 0) {
+    regionSelect.innerHTML = Object.entries(TIER_PRICE_DATABASE)
+      .map(([key, val]) => `<option value="${key}">${val.name}(${val.period}阶梯)</option>`)
+      .join('');
+    regionSelect.value = currentRegion;
+  }
+
+  // 地区标签
+  const tierRegionLabel = document.getElementById('tierRegionLabel');
+  if (tierRegionLabel) {
+    tierRegionLabel.textContent = `// ${regionConfig.name} · ${regionConfig.period}阶梯`;
+  }
+
+  document.getElementById('billHighlight').innerHTML = `
+    <div class="bill-amount">${formatMoney(monthCost)}</div>
+    <div class="bill-label">本月预估电费</div>
+    <div class="bill-change"><span class="${change > 0 ? 'change-up' : 'change-down'}">${change > 0 ? '↑' : '↓'} ${Math.abs(change)}%</span> 环比上月</div>
+    <div style="margin-top:20px;text-align:left">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>预算使用</span><span style="color:var(--accent)">${formatMoney(monthCost)} / ${formatMoney(monthlyBudget)}</span></div>
+      <div class="progress-bar"><div class="fill ${monthCost / monthlyBudget > 0.8 ? 'orange' : 'accent'}" style="width:${Math.min(monthCost / monthlyBudget * 100, 100)}%"></div></div>
+      ${monthCost > monthlyBudget ? '<div style="margin-top:6px;font-size:11px;color:var(--accent);font-family:var(--font-mono);letter-spacing:0.5px">⚠ 已超出预算</div>' : ''}
+    </div>
+  `;
+
+  // 阶梯电价模拟（动态渲染各档）
+  const tier = getCurrentTier(monthUsage);
+  const tiers = tierPrices;
+  // 计算每档宽度比例（基于 limit）
+  const maxLimit = tiers[tiers.length - 1].limit === Infinity
+    ? (tiers[tiers.length - 2] ? tiers[tiers.length - 2].limit * 1.5 : 600)
+    : tiers[tiers.length - 1].limit;
+  const widths = tiers.map(t => {
+    if (t.limit === Infinity) return 34;
+    return Math.max(15, Math.round(t.limit / maxLimit * 100));
+  });
+  // 归一化
+  const wSum = widths.reduce((a, b) => a + b, 0);
+  widths.forEach((w, i) => widths[i] = Math.round(w / wSum * 100));
+
+  const tierBarHtml = tiers.map((t, i) => {
+    const prev = i === 0 ? 0 : tiers[i - 1].limit;
+    const label = t.limit === Infinity
+      ? `>${prev} kWh<br>¥${t.price}`
+      : i === 0
+        ? `≤${t.limit} kWh<br>¥${t.price}`
+        : `${prev}-${t.limit}<br>¥${t.price}`;
+    return `<div class="tier tier-${i+1}" style="width:${widths[i]}%">${label}</div>`;
+  }).join('');
+
+  document.getElementById('tierSimulation').innerHTML = `
+    <div class="tier-bar">${tierBarHtml}</div>
+    <div style="text-align:center;margin-top:12px">
+      <span style="font-size:13px;color:var(--text-secondary)">当前位于：</span>
+      <span class="tag ${tier >= 3 ? 'tag-warning' : 'tag-online'}">${tiers[tier-1].label}</span>
+      <span style="font-size:13px;color:var(--text-secondary)"> · 已用 ${formatNum(monthUsage)} kWh</span>
+    </div>
+    ${tier < tiers.length
+      ? `<div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text-muted);font-family:var(--font-mono)">距离下一阶梯还有 ${formatNum(tiers[tier-1].limit - monthUsage)} kWh · 超出后单价 ¥${tiers[tier].price}/kWh</div>`
+      : '<div style="text-align:center;margin-top:8px;font-size:12px;color:var(--orange);font-family:var(--font-mono)">⚠ 已进入最高阶梯，电价 ¥'+tiers[tiers.length-1].price+'/kWh</div>'
+    }
+    <div style="margin-top:12px;padding:10px;border:1px dashed var(--purple);background:rgba(255,255,255,0.05);font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);line-height:1.6">
+      <div style="color:var(--purple);margin-bottom:4px">[电费明细]</div>
+      ${tiers.map((t, i) => {
+        const prev = i === 0 ? 0 : tiers[i-1].limit;
+        const used = i === 0
+          ? Math.min(monthUsage, t.limit)
+          : t.limit === Infinity
+            ? Math.max(0, monthUsage - prev)
+            : Math.min(t.limit - prev, Math.max(0, monthUsage - prev));
+        if (used <= 0) return '';
+        return `<div>${t.label}: ${formatNum(used)} kWh × ¥${t.price} = <span style="color:var(--text-primary)">¥${(used * t.price).toFixed(2)}</span></div>`;
+      }).join('')}
+      <div style="margin-top:6px;color:var(--accent);border-top:1px solid rgba(255,0,110,0.2);padding-top:6px">合计: ¥${monthCost.toFixed(2)}</div>
+    </div>
+  `;
+
+  // Bill history（使用动态电价重算）
+  const tbody = document.querySelector('#billHistory tbody');
+  const historyMonths = ['6月', '5月', '4月', '3月', '2月', '1月'];
+  const historyUsage = [380, 310, 240, 260, 280, 320];
+  tbody.innerHTML = historyMonths.map((m, i) => {
+    const cost = calculateTieredCost(historyUsage[i]);
+    const prevCost = calculateTieredCost(historyUsage[i + 1] || historyUsage[i]);
+    const ch = ((cost - prevCost) / prevCost * 100).toFixed(1);
+    return `<tr>
+      <td>2026年${m}</td>
+      <td>${historyUsage[i]} kWh</td>
+      <td>${formatMoney(cost)}</td>
+      <td><span class="${ch > 0 ? 'change-up' : 'change-down'}">${ch > 0 ? '↑' : '↓'}${Math.abs(ch)}%</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ===== TIER PRICE EDITOR =====
+function openTierEditor() {
+  // 填充地区下拉
+  const sel = document.getElementById('tierRegionSelect');
+  if (sel.options.length === 0) {
+    sel.innerHTML = Object.entries(TIER_PRICE_DATABASE)
+      .map(([key, val]) => `<option value="${key}">${val.name}(${val.period}阶梯)</option>`)
+      .join('');
+  }
+  sel.value = currentRegion;
+  // 填充预算
+  document.getElementById('tierBudgetInput').value = monthlyBudget;
+  // 渲染当前阶梯行
+  renderTierEditorRows(tierPrices);
+  document.getElementById('tierEditorModal').classList.add('show');
+}
+
+function closeTierEditor() {
+  document.getElementById('tierEditorModal').classList.remove('show');
+}
+
+// 渲染阶梯编辑行
+function renderTierEditorRows(tiers) {
+  const container = document.getElementById('tierEditorRows');
+  container.innerHTML = tiers.map((t, i) => {
+    const isLast = i === tiers.length - 1;
+    const limitVal = isLast ? '' : t.limit;
+    const limitPlaceholder = isLast ? '∞ (无上限)' : `上限(kWh)`;
+    return `
+      <div style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02)">
+        <span style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono);min-width:60px;letter-spacing:1px">${t.label}</span>
+        <input type="number" data-tier-idx="${i}" data-field="limit" value="${limitVal}" placeholder="${limitPlaceholder}" ${isLast ? 'disabled style="opacity:0.4"' : ''} style="flex:1;padding:6px 8px;border:1px solid rgba(91,157,249,0.4);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);border-radius:6px;outline:none">
+        <span style="color:var(--text-muted);font-size:11px">kWh</span>
+        <span style="color:var(--text-muted)">·</span>
+        <span style="color:var(--accent)">¥</span>
+        <input type="number" data-tier-idx="${i}" data-field="price" value="${t.price}" step="0.0001" min="0" style="width:90px;padding:6px 8px;border:1px solid var(--accent);background:rgba(255,255,255,0.05);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);border-radius:6px;outline:none">
+        <span style="color:var(--text-muted);font-size:11px">/kWh</span>
+      </div>
+    `;
+  }).join('');
+}
+
+// 切换地区时加载该地区预设电价到编辑器
+function loadRegionTiers(regionKey) {
+  if (!TIER_PRICE_DATABASE[regionKey]) return;
+  renderTierEditorRows(TIER_PRICE_DATABASE[regionKey].tiers);
+}
+
+// 重置为当前选中地区的默认电价
+function resetTierToRegion() {
+  const regionKey = document.getElementById('tierRegionSelect').value;
+  if (!TIER_PRICE_DATABASE[regionKey]) return;
+  renderTierEditorRows(TIER_PRICE_DATABASE[regionKey].tiers);
+}
+
+// 保存阶梯电价
+function saveTierPrices() {
+  const regionKey = document.getElementById('tierRegionSelect').value;
+  const rows = document.querySelectorAll('#tierEditorRows > div');
+  const newTiers = [];
+  rows.forEach((row, i) => {
+    const limitInput = row.querySelector('[data-field="limit"]');
+    const priceInput = row.querySelector('[data-field="price"]');
+    const isLast = i === rows.length - 1;
+    const limit = isLast ? Infinity : (parseInt(limitInput.value) || 0);
+    const price = parseFloat(priceInput.value) || 0;
+    newTiers.push({
+      limit: limit,
+      price: price,
+      label: TIER_PRICE_DATABASE[regionKey].tiers[i].label,
+    });
+  });
+  // 简单校验：除最后一档外，limit 应递增
+  for (let i = 1; i < newTiers.length - 1; i++) {
+    if (newTiers[i].limit <= newTiers[i-1].limit) {
+      alert('阶梯上限必须递增：第' + (i+1) + '档上限应大于第' + i + '档');
+      return;
+    }
+  }
+  // 保存预算
+  monthlyBudget = parseFloat(document.getElementById('tierBudgetInput').value) || 500;
+  try {
+    localStorage.setItem('energysmart_budget', String(monthlyBudget));
+  } catch (e) {}
+
+  // 切换地区
+  currentRegion = regionKey;
+  try {
+    localStorage.setItem('energysmart_region', regionKey);
+  } catch (e) {}
+  // 同步地区下拉
+  const regionSelect = document.getElementById('regionSelect');
+  if (regionSelect) regionSelect.value = regionKey;
+
+  tierPrices = newTiers;
+  try {
+    localStorage.setItem('energysmart_tier_prices', JSON.stringify(tierPrices));
+  } catch (e) {}
+
+  closeTierEditor();
+  updateBillPage();
+  // 同步刷新总览卡片中的电费
+  renderOverviewCards();
+}
+
+// ===== REFRESH =====
+function refreshAllUI() {
+  renderOverviewCards();
+  renderDeviceSnapshot();
+  renderDeviceList();
+  updateOverviewValues();
+  updatePowerChart();
+  updateDevicePieChart();
+  if (document.getElementById('page-devices').classList.contains('active')) renderDeviceList();
+}
+
+// ===== INIT =====
+function init() {
+  simulateDevices();
+  renderOverviewCards();
+  renderDeviceSnapshot();
+  renderDeviceList();
+  renderPeakAnalysis();
+  handleHash();
+
+  // Charts
+  setTimeout(() => {
+    createPowerChart();
+    if (document.getElementById('page-analysis').classList.contains('active')) {
+      updateAnalysisCharts();
+    }
+  }, 200);
+
+  // Period buttons
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+      updateTrendChart(this.dataset.period);
+    });
+  });
+
+  // Modal overlay click to close
+  document.getElementById('deviceModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDeviceModal();
+  });
+  document.getElementById('ruleWizardModal').addEventListener('click', function(e) {
+    if (e.target === this) closeRuleWizard();
+  });
+  document.getElementById('addDeviceModal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddDeviceWizard();
+  });
+  document.getElementById('confirmDeleteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeConfirmDelete();
+  });
+  document.getElementById('mqttSettingsModal').addEventListener('click', function(e) {
+    if (e.target === this) closeMqttSettings();
+  });
+  document.getElementById('tierEditorModal').addEventListener('click', function(e) {
+    if (e.target === this) closeTierEditor();
+  });
+  // 初始化 MQTT 状态显示
+  MqttManager.updateState('disconnected');
+  // 如果配置了 autoConnect，自动连接
+  if (mqttConfig.autoConnect && mqttConfig.brokerUrl) {
+    MqttManager.connect();
+  }
+
+  // Real-time update tick
+  setInterval(() => {
+    simulateDevices();
+    updateOverviewValues();
+    updatePowerChart();
+    if (document.getElementById('page-devices').classList.contains('active')) renderDeviceList();
+    if (document.getElementById('page-dashboard').classList.contains('active')) {
+      renderOverviewCards();
+      renderDeviceSnapshot();
+    }
+    if (currentDeviceId) {
+      const d = devices.find(d => d.id === currentDeviceId);
+      if (d) {
+        document.getElementById('modalPower').textContent = d.currentPower + ' W';
+        document.getElementById('modalToday').textContent = (d.currentPower * 24 / 1000).toFixed(1) + ' kWh';
+        document.getElementById('modalMonth').textContent = (d.currentPower * 720 / 1000).toFixed(1) + ' kWh';
+        document.getElementById('modalCost').textContent = formatMoney(d.currentPower * 720 / 1000 * 0.57);
+      }
+    }
+  }, 3000);
+
+  // Dashboard suggestions
+  document.getElementById('suggestionsCard').innerHTML = `
+    <div class="card-header"><h3>AI 节能建议</h3></div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="suggestion-card">
+        <div class="sug-header"><span style="font-size:18px">💡</span><h4>热水器建议谷时加热</h4></div>
+        <div class="sug-desc">当前热水器在峰时段运行，建议调整为夜间谷时段（22:00-6:00）。</div>
+        <div class="sug-saving">预估月省 ¥35-50</div>
+      </div>
+      <div class="suggestion-card">
+        <div class="sug-header"><span style="font-size:18px">🌡️</span><h4>空调温度建议调至26°C</h4></div>
+        <div class="sug-desc">每调高1°C可节省约6%电量，当前设置偏低。</div>
+        <div class="sug-saving">预估月省 ¥60-90</div>
+      </div>
+    </div>
+  `;
+}
+
+// Start
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
