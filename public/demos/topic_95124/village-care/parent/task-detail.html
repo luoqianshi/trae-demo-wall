@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>任务详情 - 村里有人</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<div class="phone-frame">
+  <div class="phone-notch"></div>
+
+  <div class="screen">
+    <div class="status-bar"></div>
+    <div class="nav-header">
+      <a href="tasks.html" class="nav-back" style="font-size:0.85rem;" onclick="window.location.href='tasks.html'">← 返回</a>
+      <h3>任务详情</h3>
+      <span></span>
+    </div>
+
+    <div class="screen-content" style="padding-top:16px;" id="detail-content"></div>
+
+    <div class="tab-bar">
+      <a href="home.html" class="tab-item">
+        <span class="tab-icon">🏠</span>
+        <span>首页</span>
+      </a>
+      <a href="tasks.html" class="tab-item active">
+        <span class="tab-icon">📋</span>
+        <span>任务</span>
+      </a>
+      <a href="messages.html" class="tab-item">
+        <span class="tab-icon">💬</span>
+        <span>消息</span>
+      </a>
+      <a href="profile.html" class="tab-item">
+        <span class="tab-icon">👤</span>
+        <span>我的</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div id="modal-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:300;align-items:center;justify-content:center;">
+    <div id="modal-content" style="background:#fff;border-radius:20px;width:320px;overflow:hidden;transform:scale(0.95);transition:transform 0.2s;">
+      <div id="modal-header" style="padding:20px 20px 0;font-weight:700;font-size:1.1rem;text-align:center;"></div>
+      <div id="modal-body" style="padding:16px 20px;"></div>
+      <div id="modal-footer" style="padding:12px 20px 20px;display:flex;gap:10px;"></div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/data.js"></script>
+<script>
+(function() {
+  setCurrentUser('parent1');
+  const urlParams = new URLSearchParams(window.location.search);
+  const taskId = parseInt(urlParams.get('id'));
+  const task = getTaskById(taskId);
+  const container = document.getElementById('detail-content');
+
+  if (!task) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">❓</div><p>任务不存在</p></div>';
+    return;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  function showModal(header, body, footer) {
+    const overlay = document.getElementById('modal-overlay');
+    const content = document.getElementById('modal-content');
+    document.getElementById('modal-header').innerHTML = header;
+    document.getElementById('modal-body').innerHTML = body;
+    document.getElementById('modal-footer').innerHTML = footer;
+    overlay.style.display = 'flex';
+    setTimeout(() => content.style.transform = 'scale(1)', 10);
+  }
+
+  function hideModal() {
+    const overlay = document.getElementById('modal-overlay');
+    const content = document.getElementById('modal-content');
+    content.style.transform = 'scale(0.95)';
+    setTimeout(() => overlay.style.display = 'none', 200);
+  }
+
+  // 构建操作按钮
+  let actionArea = '';
+  if (task.status === 'pending') {
+    actionArea = `
+      <div style="display:flex;gap:10px;margin-bottom:10px;">
+        <a href="edit-task.html?id=${task.id}" class="btn btn-secondary" style="flex:1;text-align:center;text-decoration:none;">✏️ 编辑</a>
+        <button class="btn btn-outline" style="flex:1;color:var(--red);border-color:var(--red);" onclick="deleteCurrentTask()">🗑️ 删除</button>
+      </div>
+      <div class="card" style="text-align:center;">
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:14px;">系统正在为您匹配附近的跑腿人...</p>
+        <button class="btn btn-outline btn-block" onclick="showToast('已提醒平台加速匹配')">提醒匹配</button>
+      </div>`;
+  } else if (task.status === 'ongoing') {
+    actionArea = `
+      <div class="card" style="text-align:center;">
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:10px;">跑腿人 ${task.runnerName} 正在处理中</p>
+        <a href="message-detail.html?with=${task.runnerId}" class="btn btn-secondary btn-block">💬 联系跑腿人</a>
+      </div>`;
+  } else if (task.status === 'delivering') {
+    actionArea = `
+      <div class="card" style="border-color:var(--accent);background:rgba(194,113,58,0.04);">
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:4px;">跑腿人 ${task.runnerName} 已完成服务</p>
+        <p style="font-size:1rem;font-weight:700;margin-bottom:14px;">请确认服务并支付 ¥${task.budget}</p>
+        <button class="btn btn-primary btn-block" onclick="confirmAndPay()">✅ 确认完成并支付</button>
+      </div>`;
+  } else if (task.status === 'done') {
+    const settlement = getSettlementByTaskId(task.id);
+    let settlementArea = '';
+    if (settlement) {
+      settlementArea = `
+        <div class="card">
+          <div class="card-title">💰 结算详情</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:0.85rem;color:var(--muted);">任务金额</span>
+            <span style="font-size:0.95rem;font-weight:700;">¥${settlement.amount}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:0.85rem;color:var(--muted);">平台服务费（5%）</span>
+            <span style="font-size:0.9rem;color:var(--muted);">-¥${settlement.platformFee}</span>
+          </div>
+          <div style="height:1px;background:var(--rule);margin:10px 0;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:0.9rem;font-weight:700;">跑腿人收入</span>
+            <span style="font-size:1.1rem;font-weight:800;color:var(--accent2);">¥${settlement.runnerIncome}</span>
+          </div>
+        </div>`;
+    }
+    actionArea = `
+      ${settlementArea}
+      <div class="card">
+        <div class="card-title">⭐ 评价跑腿人 · ${task.runnerName || ''}</div>
+        <div class="stars" style="margin-bottom:14px;" id="star-rating">
+          <span class="star active" onclick="rate(0)">★</span>
+          <span class="star active" onclick="rate(1)">★</span>
+          <span class="star active" onclick="rate(2)">★</span>
+          <span class="star active" onclick="rate(3)">★</span>
+          <span class="star active" onclick="rate(4)">★</span>
+        </div>
+        <textarea class="form-textarea" style="min-height:70px;margin-bottom:10px;" placeholder="写下您的评价，帮助其他用户了解这位跑腿人..."></textarea>
+        <button class="btn btn-secondary btn-block btn-sm" onclick="showToast('评价已提交，感谢您的反馈！')">提交评价</button>
+      </div>`;
+  }
+
+  // 构建照片区
+  let photoArea = '';
+  if (task.photos && task.photos.length > 0) {
+    photoArea = `
+      <div class="card">
+        <div class="card-title">📷 过程记录 (${task.photos.length}张)</div>
+        <div class="photo-grid">
+          ${task.photos.map(p => `<div class="photo-thumb">${p}</div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  // 构建语音区
+  let voiceArea = '';
+  if (task.voice) {
+    voiceArea = `
+      <div class="card">
+        <div class="card-title">🎵 语音反馈</div>
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:10px;">"${task.voice.text}"</p>
+        <div class="voice-player">
+          <button class="play-btn" onclick="showToast('播放语音...')">▶</button>
+          <div class="voice-wave">
+            ${Array(12).fill(0).map(() => `<span style="height:${8+Math.random()*14}px"></span>`).join('')}
+          </div>
+          <span class="voice-time">${task.voice.duration}</span>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = `
+    <div class="detail-hero">
+      <div class="status-icon">${task.typeIcon}</div>
+      <h2>${task.title}</h2>
+      <span class="status-badge status-${task.status === 'delivering' ? 'ongoing' : task.status}">${task.statusLabel}</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 任务信息</div>
+      <div style="display:grid;grid-template-columns:70px 1fr;gap:10px 14px;font-size:0.88rem;">
+        <span style="color:var(--muted);">任务类型</span>
+        <span style="font-weight:600;">${task.typeIcon} ${task.typeLabel}</span>
+        <span style="color:var(--muted);">服务对象</span>
+        <span style="font-weight:600;">${task.elderAvatar} ${task.elderName}</span>
+        <span style="color:var(--muted);">服务地址</span>
+        <span>${task.address}</span>
+        <span style="color:var(--muted);">预算金额</span>
+        <span style="font-weight:700;color:var(--accent);">¥${task.budget}</span>
+        <span style="color:var(--muted);">跑腿人</span>
+        <span>${task.runnerName ? task.runnerAvatar + ' ' + task.runnerName : '待分配'}</span>
+        <span style="color:var(--muted);">发布时间</span>
+        <span>${task.createdAt}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📍 任务进度</div>
+      <div class="timeline">
+        ${task.timeline.map(item => `
+          <div class="timeline-item ${item.done ? 'done' : 'pending'}">
+            <h5>${item.title}</h5>
+            <p>${item.desc}</p>
+            <div class="time">${item.time}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    ${photoArea}
+    ${voiceArea}
+    ${actionArea}
+
+    <!-- 异常处理入口 -->
+    <div class="card" style="background:rgba(192,57,43,0.03);border-color:rgba(192,57,43,0.15);margin-top:16px;">
+      <div class="card-title" style="color:var(--red);">⚠️ 异常处理</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button onclick="handleTimeout()" class="btn btn-outline" style="color:var(--red);border-color:var(--red);font-size:0.85rem;padding:12px;">⏰ 超时提醒</button>
+        <button onclick="handleRefund()" class="btn btn-outline" style="color:#e67e22;border-color:#e67e22;font-size:0.85rem;padding:12px;">💰 取消退款</button>
+        <button onclick="handleDispute()" class="btn btn-outline" style="color:#8e44ad;border-color:#8e44ad;font-size:0.85rem;padding:12px;grid-column:1/-1;">⚖️ 纠纷申诉</button>
+      </div>
+    </div>
+  `;
+
+  window.deleteCurrentTask = function() {
+    showModal(
+      '🗑️ 删除任务',
+      `
+        <div style="text-align:center;padding:16px 0;">
+          <div style="font-size:2.5rem;margin-bottom:12px;">⚠️</div>
+          <div style="font-size:0.9rem;color:var(--muted);line-height:1.6;">
+            确定要删除这个任务吗？<br>删除后无法恢复。
+          </div>
+        </div>
+      `,
+      `
+        <button class="btn btn-outline btn-block" onclick="hideModal()">取消</button>
+        <button class="btn btn-red btn-block" onclick="confirmDelete()">确认删除</button>
+      `
+    );
+  };
+
+  window.confirmDelete = function() {
+    hideModal();
+    if (deleteTask(taskId)) {
+      showToast('任务已删除');
+      setTimeout(() => window.location.href = 'tasks.html', 600);
+    }
+  };
+
+  window.confirmAndPay = function() {
+    showModal(
+      '✅ 确认支付',
+      `
+        <div style="text-align:center;padding:16px 0;">
+          <div style="font-size:2.5rem;margin-bottom:12px;">💰</div>
+          <div style="font-size:0.9rem;color:var(--muted);margin-bottom:8px;">确认服务已完成，并支付</div>
+          <div style="font-size:1.5rem;font-weight:800;color:var(--accent);">¥${task.budget}</div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-top:8px;">支付后资金将转入跑腿人账户</div>
+        </div>
+      `,
+      `
+        <button class="btn btn-outline btn-block" onclick="hideModal()">取消</button>
+        <button class="btn btn-green btn-block" onclick="confirmPayment()">确认支付</button>
+      `
+    );
+  };
+
+  window.confirmPayment = function() {
+    hideModal();
+    const settlement = parentConfirmAndPay(taskId);
+    if (settlement) {
+      showToast(`支付成功，跑腿人收入 ¥${settlement.runnerIncome}`);
+      setTimeout(() => window.location.reload(), 800);
+    }
+  };
+
+  window.rate = function(idx) {
+    const stars = document.querySelectorAll('#star-rating .star');
+    stars.forEach((s, i) => s.classList.toggle('active', i <= idx));
+  };
+
+  window.showToast = showToast;
+
+  window.handleTimeout = function() {
+    showModal(
+      '⏰ 超时提醒',
+      `
+        <div style="padding:16px 0;">
+          <div style="font-size:0.88rem;color:var(--muted);line-height:1.6;margin-bottom:12px;">
+            当前任务已超过预计完成时间，系统将自动提醒跑腿人加快进度，并通知客服介入跟进。
+          </div>
+          <div style="background:rgba(243,156,18,0.1);border-radius:10px;padding:12px;font-size:0.8rem;color:#d68910;">
+            ⚠️ 若超时超过2小时，系统将自动触发退款流程
+          </div>
+        </div>
+      `,
+      `
+        <button class="btn btn-primary btn-block" onclick="confirmTimeout()">发送提醒</button>
+      `
+    );
+  };
+
+  window.confirmTimeout = function() {
+    hideModal();
+    showToast('已发送超时提醒，客服将跟进处理');
+  };
+
+  window.handleRefund = function() {
+    showModal(
+      '💰 取消退款',
+      `
+        <div style="padding:16px 0;">
+          <div style="font-size:0.88rem;color:var(--muted);line-height:1.6;margin-bottom:12px;">
+            请选择取消原因：
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="radio" name="refund-reason" value="no-response" checked> 跑腿人未响应</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="radio" name="refund-reason" value="wrong-service"> 服务内容不符</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="radio" name="refund-reason" value="emergency"> 紧急情况取消</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="radio" name="refund-reason" value="other"> 其他原因</label>
+          </div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:12px;">
+            取消后款项将在24小时内原路退回
+          </div>
+        </div>
+      `,
+      `
+        <button class="btn btn-outline btn-block" onclick="hideModal()">取消</button>
+        <button class="btn btn-red btn-block" onclick="confirmRefund()">确认取消退款</button>
+      `
+    );
+  };
+
+  window.confirmRefund = function() {
+    hideModal();
+    showToast('退款申请已提交，款项将在24小时内退回');
+  };
+
+  window.handleDispute = function() {
+    showModal(
+      '⚖️ 纠纷申诉',
+      `
+        <div style="padding:16px 0;">
+          <div style="font-size:0.88rem;color:var(--muted);line-height:1.6;margin-bottom:12px;">
+            请描述纠纷情况，平台客服将在2小时内介入处理：
+          </div>
+          <textarea style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--rule);background:var(--bg);font-size:0.85rem;resize:none;height:100px;" placeholder="请详细描述问题情况..."></textarea>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:12px;">
+            📌 建议上传相关证据图片
+          </div>
+        </div>
+      `,
+      `
+        <button class="btn btn-outline btn-block" onclick="hideModal()">取消</button>
+        <button class="btn btn-primary btn-block" onclick="confirmDispute()">提交申诉</button>
+      `
+    );
+  };
+
+  window.confirmDispute = function() {
+    hideModal();
+    showToast('申诉已提交，客服将在2小时内联系您');
+  };
+})();
+</script>
+
+</body>
+</html>

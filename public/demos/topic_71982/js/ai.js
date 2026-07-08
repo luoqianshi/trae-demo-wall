@@ -5,7 +5,7 @@
 const AI = {
   // DeepSeek API配置
   // TODO: 请将以下配置替换为你的真实API密钥
-  API_KEY: 'sk-69a1ab4bee0d4815bf6a8963864269ec',
+  API_KEY: 'sk-YOUR_API_KEY_HERE',
   BASE_URL: 'https://api.deepseek.com/v1/chat/completions',
   MODEL: 'deepseek-chat',
 

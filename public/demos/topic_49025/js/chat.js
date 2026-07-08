@@ -70,13 +70,13 @@ clearImageBtn && clearImageBtn.addEventListener('click', () => {
       id: 'builtin-deepseek',
       name: 'DeepSeek V4 Pro（内置）',
       baseUrl: 'https://api.deepseek.com',
-      apiKey: 'sk-c7768cbbeb094f4883f03b27a5041bbc',
+      apiKey: 'sk-YOUR_API_KEY_HERE',
       model: 'deepseek-v4-pro'
     }];
     needSave = true;
   } else {
     // 检查是否已有内置 API，如果有但模型名过时则更新
-    var builtin = cfg.llm.find(function(a) { return a.id === 'builtin-deepseek' || a.apiKey === 'sk-c7768cbbeb094f4883f03b27a5041bbc'; });
+    var builtin = cfg.llm.find(function(a) { return a.id === 'builtin-deepseek' || a.apiKey === 'sk-YOUR_API_KEY_HERE'; });
     if (builtin && builtin.model !== 'deepseek-v4-pro') {
       builtin.model = 'deepseek-v4-pro';
       builtin.name = 'DeepSeek V4 Pro（内置）';
@@ -88,7 +88,7 @@ clearImageBtn && clearImageBtn.addEventListener('click', () => {
         id: 'builtin-deepseek',
         name: 'DeepSeek V4 Pro（内置）',
         baseUrl: 'https://api.deepseek.com',
-        apiKey: 'sk-c7768cbbeb094f4883f03b27a5041bbc',
+        apiKey: 'sk-YOUR_API_KEY_HERE',
         model: 'deepseek-v4-pro'
       });
       needSave = true;
@@ -724,7 +724,7 @@ const ChatEngine = {
       api = llmApis.find(function(a) { return a.baseUrl && a.apiKey && a.model; });
     } catch(e) {}
     if (!api) {
-      api = { baseUrl: 'https://api.deepseek.com', apiKey: 'sk-c7768cbbeb094f4883f03b27a5041bbc', model: 'deepseek-v4-pro' };
+      api = { baseUrl: 'https://api.deepseek.com', apiKey: 'sk-YOUR_API_KEY_HERE', model: 'deepseek-v4-pro' };
     }
 
     // 取最近 40 条对话作为分析素材
@@ -841,7 +841,7 @@ const ChatEngine = {
     if (!activeApi) {
       activeApi = {
         baseUrl: 'https://api.deepseek.com',
-        apiKey: 'sk-c7768cbbeb094f4883f03b27a5041bbc',
+        apiKey: 'sk-YOUR_API_KEY_HERE',
         model: 'deepseek-v4-pro',
       };
     }
@@ -2206,7 +2206,7 @@ async function _generateGreeting() {
     api = llmApis.find(function(a) { return a.baseUrl && a.apiKey && a.model; });
   } catch(e) {}
   if (!api) {
-    api = { baseUrl: 'https://api.deepseek.com', apiKey: 'sk-c7768cbbeb094f4883f03b27a5041bbc', model: 'deepseek-v4-pro' };
+    api = { baseUrl: 'https://api.deepseek.com', apiKey: 'sk-YOUR_API_KEY_HERE', model: 'deepseek-v4-pro' };
   }
 
   var now = new Date();

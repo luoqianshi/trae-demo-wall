@@ -3,7 +3,7 @@
    Agnes 2.0 Flash (文本) + Agnes Image 2.1 Flash (图像)
    ============================================ */
 
-const API_KEY = 'sk-nZKhw8NtksykhpXnKuNHUYxB7OXCPjaNbueIaZIC0M9RyMxJ';
+const API_KEY = 'sk-YOUR_API_KEY_HERE';
 
 function _combineSignals(externalSignal, timeoutMs) {
   if (!externalSignal) return AbortSignal.timeout(timeoutMs);
