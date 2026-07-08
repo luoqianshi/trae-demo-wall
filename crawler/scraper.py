@@ -19,8 +19,7 @@ from filter import (
     extract_attachment_links,
     extract_screenshots,
 )
-from downloader import download_file
-from extractor import extract_zip
+from processor import process_project
 
 BASE_URL = "https://forum.trae.cn/c/38-category/40-category/40"
 API_URL = f"{BASE_URL}.json"
@@ -74,89 +73,6 @@ def parse_topic_detail(data: dict, topic_id: int) -> dict:
         'external_links': external_links,
         'attachments': attachments,
         'screenshots': screenshots,
-    }
-
-
-def process_project(topic: dict, detail: dict) -> dict | None:
-    topic_id = topic['id']
-    title = topic.get('title', '')
-    tags = [t.get('name', '') for t in topic.get('tags', [])]
-    external_links = detail.get('external_links', [])
-    attachments = detail.get('attachments', [])
-
-    demo_url = None
-    local_path = None
-    project_type = None
-
-    for link in external_links:
-        if any(d in link for d in ['github.io', 'vercel.app', 'netlify.app', 'pages.dev', 'surge.sh']):
-            demo_url = link
-            project_type = 'external'
-            break
-
-    if not demo_url and attachments:
-        for att in attachments:
-            if att['type'] == 'zip':
-                try:
-                    zip_path = os.path.join(DEMOS_DIR, f"topic_{topic_id}.zip")
-                    extract_dir = os.path.join(DEMOS_DIR, f"topic_{topic_id}")
-                    download_file(att['url'], zip_path)
-                    extract_zip(zip_path, extract_dir)
-                    if os.path.exists(os.path.join(extract_dir, 'index.html')):
-                        local_path = f"./demos/topic_{topic_id}/index.html"
-                        project_type = 'local'
-                    elif os.path.exists(os.path.join(extract_dir, 'main.html')):
-                        local_path = f"./demos/topic_{topic_id}/main.html"
-                        project_type = 'local'
-                    else:
-                        for root, dirs, files in os.walk(extract_dir):
-                            for f in files:
-                                if f.endswith('.html'):
-                                    local_path = f"./demos/topic_{topic_id}/{f}"
-                                    project_type = 'local'
-                                    break
-                            if local_path:
-                                break
-                    if os.path.exists(zip_path):
-                        os.remove(zip_path)
-                except Exception as e:
-                    print(f"  [WARN] 下载/解压失败 topic_{topic_id}: {e}")
-                break
-            elif att['type'] == 'html':
-                try:
-                    html_dir = os.path.join(DEMOS_DIR, f"topic_{topic_id}")
-                    os.makedirs(html_dir, exist_ok=True)
-                    html_path = os.path.join(html_dir, 'index.html')
-                    download_file(att['url'], html_path)
-                    local_path = f"./demos/topic_{topic_id}/index.html"
-                    project_type = 'local'
-                except Exception as e:
-                    print(f"  [WARN] 下载 HTML 失败 topic_{topic_id}: {e}")
-                break
-
-    if not demo_url and not local_path:
-        return None
-
-    thumbnail = topic.get('image_url', None)
-    screenshots = detail.get('screenshots', [])
-    if not thumbnail and screenshots:
-        thumbnail = screenshots[0]
-
-    return {
-        'id': f"topic_{topic_id}",
-        'forumUrl': f"https://forum.trae.cn/t/topic/{topic_id}",
-        'title': title,
-        'author': detail.get('author', 'unknown'),
-        'description': detail.get('description', ''),
-        'tags': tags,
-        'views': topic.get('views', 0),
-        'likes': topic.get('like_count', 0),
-        'createdAt': topic.get('created_at', ''),
-        'type': project_type,
-        'demoUrl': demo_url,
-        'localPath': local_path,
-        'thumbnail': thumbnail,
-        'screenshots': screenshots[:5],
     }
 
 

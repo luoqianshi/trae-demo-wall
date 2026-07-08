@@ -9,6 +9,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from filter import EMBEDDABLE_DOMAINS
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'data')
 PAGES_DIR = os.path.join(DATA_DIR, 'pages')
 INDEX_PATH = os.path.join(DATA_DIR, 'index.json')
@@ -49,9 +52,8 @@ def clean_url(url):
     # 移除末尾全角分号（及 URL 编码形式）
     url = url.replace('％3B', '').replace('%EF%BC%9B', '').rstrip('；;')
     
-    # HTTP → HTTPS（仅 github.io / netlify.app / vercel.app）
-    https_hosts = ['github.io', 'netlify.app', 'vercel.app', 'pages.dev', 'surge.sh']
-    for host in https_hosts:
+    # HTTP → HTTPS（仅可嵌入托管域名，避免对裸 IP/自部署服务强制升级导致不可达）
+    for host in EMBEDDABLE_DOMAINS:
         if host in url and url.startswith('http://'):
             url = 'https://' + url[len('http://'):]
             break
