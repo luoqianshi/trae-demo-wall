@@ -12,6 +12,10 @@ EXTERNAL_DOMAINS = [
     'pages.dev', 'surge.sh', 'herokuapp.com', 'feishu.cn',
 ]
 
+MINIPROGRAM_KEYWORDS = [
+    '微信小程序', '小程序', '扫码体验', '扫码',
+]
+
 
 def is_web_project(title: str, excerpt: str, cooked_html: str) -> bool:
     """判断帖子是否为网页/前端类型作品"""
@@ -22,6 +26,20 @@ def is_web_project(title: str, excerpt: str, cooked_html: str) -> bool:
     if cooked_html:
         for domain in EXTERNAL_DOMAINS:
             if domain in cooked_html.lower():
+                return True
+    return False
+
+
+def is_miniprogram_project(title: str, excerpt: str, cooked_html: str = '') -> bool:
+    """判断帖子是否为微信小程序类型作品"""
+    text = f"{title} {excerpt}".lower()
+    for kw in MINIPROGRAM_KEYWORDS:
+        if kw in text:
+            return True
+    if cooked_html:
+        text_html = cooked_html.lower()
+        for kw in MINIPROGRAM_KEYWORDS:
+            if kw in text_html:
                 return True
     return False
 

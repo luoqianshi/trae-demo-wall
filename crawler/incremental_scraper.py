@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from filter import (
     is_web_project,
+    is_miniprogram_project,
     extract_external_links,
     extract_attachment_links,
     extract_screenshots,
@@ -169,6 +170,36 @@ def process_project(topic: dict, detail: dict) -> dict | None:
                 break
 
     if not demo_url and not local_path:
+        # 检查是否为微信小程序类型
+        cooked_html = ''
+        screenshots = detail.get('screenshots', [])
+        # 从 description 中间接判断（description 是 cooked 的纯文本）
+        description = detail.get('description', '')
+        if is_miniprogram_project(title, topic.get('excerpt', ''), description):
+            # 尝试找到二维码图片（通常是帖子中较小的方形图片）
+            qr_code = None
+            for img in screenshots:
+                # 二维码图片通常是 jpeg 格式且尺寸较小
+                if any(ext in img.lower() for ext in ['.jpeg', '.jpg', '.png']):
+                    qr_code = img
+                    break
+            return {
+                'id': f"topic_{topic_id}",
+                'forumUrl': f"https://forum.trae.cn/t/topic/{topic_id}",
+                'title': title,
+                'author': detail.get('author', 'unknown'),
+                'description': detail.get('description', ''),
+                'tags': tags,
+                'views': topic.get('views', 0),
+                'likes': topic.get('like_count', 0),
+                'createdAt': topic.get('created_at', ''),
+                'type': 'miniprogram',
+                'demoUrl': None,
+                'localPath': None,
+                'qrCode': qr_code or (screenshots[0] if screenshots else None),
+                'thumbnail': qr_code or (screenshots[0] if screenshots else None),
+                'screenshots': screenshots[:5],
+            }
         return None
 
     thumbnail = topic.get('image_url', None)
@@ -223,13 +254,22 @@ def main():
     print("\n[Step 1] 遍历论坛帖子列表，查找新作品 + 同步浏览量/点赞数...")
     all_topics = []
     page = 0
+    consecutive_errors = 0
+    max_consecutive_errors = 5
     while True:
         print(f"  获取第 {page + 1} 页...")
         try:
             data = fetch_topic_list(page)
+            consecutive_errors = 0
         except Exception as e:
-            print(f"  [ERROR] 获取第 {page + 1} 页失败: {e}")
-            break
+            consecutive_errors += 1
+            print(f"  [WARN] 获取第 {page + 1} 页失败: {e}")
+            if consecutive_errors >= max_consecutive_errors:
+                print(f"  [ERROR] 连续 {max_consecutive_errors} 页失败，停止扫描")
+                break
+            page += 1
+            time.sleep(2)
+            continue
         topics = parse_topic_list(data)
         if not topics:
             break
@@ -257,9 +297,11 @@ def main():
 
     print(f"  共获取 {len(all_topics)} 个帖子，{len(changed_project_ids)} 个项目浏览量/点赞数变化")
 
-    # Step 2: 筛选出是 web 类型且不在已有集合中的帖子
-    print("\n[Step 2] 筛选新的网页/前端作品...")
-    new_web_topics = []
+    # Step 2: 筛选出不在已有集合中的帖子，分两阶段检测
+    print("\n[Step 2] 筛选新的网页/前端作品（两阶段过滤）...")
+    new_web_topics = []       # 一阶段命中：标题/摘要含关键词
+    new_candidate_topics = []  # 二阶段候选：标题/摘要未命中，需获取详情检查 cooked_html
+
     for topic in all_topics:
         topic_id = f"topic_{topic['id']}"
         if topic_id in existing_ids:
@@ -268,14 +310,45 @@ def main():
         excerpt = topic.get('excerpt', '')
         if is_web_project(title, excerpt, ''):
             new_web_topics.append(topic)
+        else:
+            new_candidate_topics.append(topic)
 
-    print(f"  发现 {len(new_web_topics)} 个新的候选帖子")
+    print(f"  一阶段命中: {len(new_web_topics)} 个（标题/摘要含 Web 关键词）")
+    print(f"  二阶段候选: {len(new_candidate_topics)} 个（需获取详情检查正文链接）")
+
+    # Step 2.5: 对二阶段候选项获取详情，检查 cooked_html 中的外部链接和附件
+    newly_found = []
+    for i, topic in enumerate(new_candidate_topics):
+        topic_id_num = topic['id']
+        title = topic.get('title', '')
+        print(f"  [二阶段 {i + 1}/{len(new_candidate_topics)}] 检查: {title[:50]}...")
+        try:
+            detail_data = fetch_topic_detail(topic_id_num)
+            posts = detail_data.get('post_stream', {}).get('posts', [])
+            cooked = posts[0].get('cooked', '') if posts else ''
+            excerpt = topic.get('excerpt', '')
+            if is_web_project(title, excerpt, cooked):
+                # 二阶段命中：存入 detail 供 Step 3 复用
+                topic['_cached_detail_data'] = detail_data
+                newly_found.append(topic)
+                print(f"    -> 二阶段命中（正文含 Web 链接/附件）")
+            elif is_miniprogram_project(title, excerpt, cooked):
+                topic['_cached_detail_data'] = detail_data
+                newly_found.append(topic)
+                print(f"    -> 二阶段命中（微信小程序）")
+        except Exception as e:
+            print(f"    [SKIP] {e}")
+        time.sleep(DELAY)
+
+    new_web_topics.extend(newly_found)
+    print(f"  二阶段新增命中: {len(newly_found)} 个")
+    print(f"  最终候选帖子: {len(new_web_topics)} 个")
 
     if not new_web_topics and not changed_project_ids:
         print("\n  没有新作品，浏览量/点赞数无变化，无需更新。")
         return
 
-    # Step 3: 获取详情并处理新作品
+    # Step 3: 获取详情并处理新作品（复用二阶段已获取的详情）
     print(f"\n[Step 3] 获取详情并处理 {len(new_web_topics)} 个新作品...")
     new_projects = []
     for i, topic in enumerate(new_web_topics):
@@ -284,7 +357,12 @@ def main():
         print(f"  [{i + 1}/{len(new_web_topics)}] 处理: {title[:50]}...")
 
         try:
-            detail_data = fetch_topic_detail(topic_id)
+            # 复用二阶段已获取的详情数据
+            if '_cached_detail_data' in topic:
+                detail_data = topic['_cached_detail_data']
+            else:
+                detail_data = fetch_topic_detail(topic_id)
+                time.sleep(DELAY)
             detail = parse_topic_detail(detail_data, topic_id)
             if not detail:
                 continue
