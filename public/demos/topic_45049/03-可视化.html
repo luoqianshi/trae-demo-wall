@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>农业种养殖分析 · 4/5 产业可视化</title>
+<link rel="stylesheet" href="assets/common.css"/>
+<style>
+.badge-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.badge-row span{font-size:11px;padding:3px 10px;border-radius:10px;background:#F8FAF7;color:#2E7D32;cursor:pointer;border:1px solid #ECECEC;}
+.badge-row span.on{background:#2E7D32;color:#fff;border-color:#2E7D32;}
+</style>
+</head>
+<body>
+<div class="nav-top">
+  <a style="font-size:12px;color:#7F8C8D;text-decoration:none;" href="02-预核评分.html">← 上一页</a>
+  <div class="title">📊 产业可视化 · 4/5</div>
+  <a style="font-size:12px;color:#2E7D32;text-decoration:none;" href="04-价格品种.html">下一页 →</a>
+</div>
+<div class="page">
+  <div class="header">
+    <h1>近 5 年产业指标<span class="badge">折线+柱状+同比</span></h1>
+    <p>近 5 年关键指标年度数值与同比变化 · 精确展示趋势</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">位置 / 品种 / 范围</div>
+    <div class="row">
+      <div class="flex-1"><label class="field">省份</label><select id="sp"></select></div>
+      <div class="flex-1"><label class="field">城市</label><select id="sc"></select></div>
+    </div>
+    <div class="row">
+      <div class="flex-1"><label class="field">区县</label><select id="sd"></select></div>
+      <div class="flex-1"><label class="field">品种</label><select id="spr"></select></div>
+    </div>
+    <div class="row">
+      <div class="flex-1"><label class="field">图表类型</label>
+        <select id="chartType">
+          <option value="line">折线图</option>
+          <option value="bar">柱状图（+同比）</option>
+        </select>
+      </div>
+      <div class="flex-1"><label class="field">年份范围</label>
+        <select id="yrRange">
+          <option value="3">近 3 年</option>
+          <option value="4">近 4 年</option>
+          <option value="5" selected>近 5 年</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:10px;"><button class="btn btn-primary" onclick="refresh()">🔎 刷新图表与表格</button></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">指标选择</div>
+    <div class="badge-row" id="metricBadges"></div>
+    <div style="margin-top:8px;font-size:12px;color:#7F8C8D;">点击切换指标；可重复点击切换图表类型</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">趋势图 <span id="chartSub" style="font-weight:400;color:#7F8C8D;font-size:12px;margin-left:4px;"></span></div>
+    <div class="chart-wrapper"><canvas id="chLine"></canvas></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">年度数据表（数值 + 同比）</div>
+    <table class="table" id="tbl"></table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">导航</div>
+    <div class="row" style="gap:8px;">
+      <a class="btn btn-secondary" style="text-decoration:none;text-align:center;flex:1;" href="02-预核评分.html">← 上一页</a>
+      <a class="btn btn-primary" style="text-decoration:none;text-align:center;" href="04-价格品种.html">查看品种价格 →</a>
+    </div>
+  </div>
+
+  <div class="pager">
+    <div class="d"></div><div class="d"></div><div class="d"></div><div class="d active"></div><div class="d"></div>
+  </div>
+  <div class="footer">共 5 页 · 当前 4/5 产业可视化</div>
+</div>
+
+<script src="assets/common.js"></script>
+<script>
+(function(){
+  const U=AgrUtils;
+  const sp=document.getElementById('sp'),sc=document.getElementById('sc'),sd=document.getElementById('sd'),spr=document.getElementById('spr');
+  let currentMetrics=null,currentMetricKey=null;
+
+  function init(){
+    sp.innerHTML=Object.keys(U.LOC_MAP).map(p=>`<option>${p}</option>`).join('');
+    sp.addEventListener('change',()=>{syncC();syncD();});
+    sc.addEventListener('change',syncD);
+    sp.addEventListener('change',()=>{syncC();syncD();syncP();});
+    sc.addEventListener('change',syncP);
+    spr.addEventListener('change',()=>{renderMetricBadges();refresh();});
+    syncC();syncD();syncP();renderMetricBadges();
+  }
+  function syncC(){sc.innerHTML=(U.LOC_MAP[sp.value]||[]).map(c=>`<option>${c}</option>`).join('');}
+  function syncD(){sd.innerHTML=(U.DIST_MAP[sc.value]||['默认区县']).map(d=>`<option>${d}</option>`).join('');}
+  function syncP(){spr.innerHTML=[...U.PLANTING,...U.BREEDING].map(n=>`<option>${n}</option>`).join('');}
+
+  function renderMetricBadges(){
+    const isPlanting=U.PLANTING.includes(spr.value);
+    const ms=isPlanting?U.PLANTING_METRICS:U.BREEDING_METRICS;
+    const wrap=document.getElementById('metricBadges');
+    wrap.innerHTML=ms.map(m=>`<span data-k="${m.key}" class="on">${m.label}</span>`).join('');
+    wrap.querySelectorAll('span').forEach(el=>el.addEventListener('click',()=>{
+      wrap.querySelectorAll('span').forEach(x=>x.classList.remove('on'));
+      el.classList.add('on');
+      currentMetricKey=el.dataset.k;
+      refresh();
+    }));
+    currentMetricKey=ms[0].key;
+  }
+
+  function drawChart(canvas, data, years, metric, type){
+    const ctx=canvas.getContext('2d');
+    const W=canvas.width=Math.min(600,document.querySelector('.section').clientWidth-36);
+    const H=240;
+    canvas.width=W*2;canvas.height=H*2;
+    canvas.style.height=H+'px';
+    canvas.style.width=W+'px';
+    ctx.scale(2,2);
+    ctx.clearRect(0,0,W,H);
+
+    const L=44,R=56,T=24,B=30;
+    const max=Math.max(...data.map(Math.abs))*1.1||1;
+    const baseY=H-B;
+    ctx.strokeStyle='#ECECEC';
+    ctx.lineWidth=1;
+    for(let i=0;i<=4;i++){
+      const y=T+(H-T-B)*i/4;
+      ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(W-R,y);ctx.stroke();
+    }
+
+    if(type==='line'){
+      ctx.strokeStyle='#2E7D32';ctx.lineWidth=2;
+      ctx.beginPath();
+      data.forEach((v,i)=>{
+        const x=L+(W-L-R)*i/Math.max(years.length-1,1);
+        const y=H-B-(H-T-B)*(v/(max*2)+0.5);
+        if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+      });
+      ctx.stroke();
+      ctx.fillStyle='#2E7D32';
+      data.forEach((v,i)=>{
+        const x=L+(W-L-R)*i/Math.max(years.length-1,1);
+        const y=H-B-(H-T-B)*(v/(max*2)+0.5);
+        ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#2C3E2E';
+        ctx.font='10px sans-serif';ctx.textAlign='center';
+        ctx.fillText(v.toFixed(1),x,y-8);
+        ctx.fillStyle='#2E7D32';
+      });
+    }else{
+      const maxYoy=Math.max(...data.map(v=>Math.abs(v)))*1.1||10;
+      const bw=(W-L-R)/Math.max(data.length,1)*0.55;
+      data.forEach((v,i)=>{
+        const cx=L+(W-L-R)*(i+0.5)/data.length;
+        const h=(H-T-B)*Math.min(Math.abs(v)/maxYoy,1);
+        const y=v>=0?baseY-h:baseY;
+        ctx.fillStyle=v>=0?'#2E7D32':'#F57C00';
+        ctx.fillRect(cx-bw/2,y,bw,h||2);
+        ctx.fillStyle='#2C3E2E';ctx.font='10px sans-serif';ctx.textAlign='center';
+        ctx.fillText((v>=0?'+':'-')+Math.abs(v).toFixed(2)+'%',cx,y-4);
+      });
+      ctx.strokeStyle='#BDBDBD';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(L,baseY);ctx.lineTo(W-R,baseY);ctx.stroke();
+    }
+
+    ctx.fillStyle='#7F8C8D';ctx.font='11px sans-serif';ctx.textAlign='center';
+    years.forEach((y,i)=>{
+      const x=L+(W-L-R)*i/Math.max(years.length-1,1);
+      ctx.fillText(String(y).slice(2),x,H-8);
+    });
+
+    ctx.fillStyle='#2C3E2E';ctx.font='11px sans-serif';ctx.textAlign='left';
+    ctx.save();
+    ctx.translate(12,H/2);ctx.rotate(-Math.PI/2);
+    ctx.fillText(type==='line'?metric.label+' '+metric.unit:'同比%',0,0);
+    ctx.restore();
+  }
+
+  function buildTable(metrics, years, yearsSlice){
+    const tbody=[];
+    let head='<tr><th class="metric">指标</th>';
+    yearsSlice.forEach(y=>{
+      head+=`<th class="year-head">${y}年<br/>数值<span style="color:#7F8C8D">· 同比</span></th>`;
+    });
+    head+='</tr>';
+    tbody.push(head);
+    metrics.forEach(m=>{
+      const row=yearsSlice.map((y,idx)=>{
+        const yoyKey=m.key+'Yoy';
+        const v=y[m.key];
+        const yoy=y[yoyKey];
+        let yoyHtml='';
+        if(idx>0){
+          const cls=yoy>0?'up':yoy<0?'down':'flat';
+          const sym=yoy>0?'+':'';
+          yoyHtml=`<span class="yoy-cell ${cls}">${sym}${yoy.toFixed(2)}%</span>`;
+        }
+        return`<td class="val-cell">${v.toFixed(m.unit==='%'?1:0)}${m.unit?(' '+m.unit):''} ${yoyHtml||''}</td>`;
+      });
+      tbody.push(`<tr><td class="metric-cell">${m.label}</td>${row.join('')}</tr>`);
+    });
+    return tbody.join('');
+  }
+
+  window.refresh=function(){
+    const bu=U.BUILD_METRICS(sp.value,sc.value,sd.value,spr.value);
+    currentMetrics=bu;
+    const range=parseInt(document.getElementById('yrRange').value,10);
+    const yearsSlice=bu.years.slice(Math.max(0,bu.years.length-range));
+    const type=document.getElementById('chartType').value;
+
+    const canvas=document.getElementById('chLine');
+    const metric=(bu.keys.find(k=>k.key===currentMetricKey)||bu.keys[0]);
+    const data=yearsSlice.map((y,i)=>{
+      if(i===0)return 0;
+      const pv=yearsSlice[i-1][metric.key],cv=y[metric.key];
+      if(pv===0)return 0;
+      return Math.round(((cv-pv)/pv)*10000)/100;
+    }).slice(1);
+    const plotYears=yearsSlice.slice(1);
+    document.getElementById('chartSub').textContent=
+      `${bu.businessType==='planting'?'种植':'养殖'} · ${spr.value} · ${yearsSlice[0].year}—${yearsSlice[yearsSlice.length-1].year}年`;
+    drawChart(canvas,data,plotYears,metric,type);
+
+    document.getElementById('tbl').innerHTML=buildTable(bu.keys,bu.years,yearsSlice);
+  };
+
+  function loadFromHash(){
+    const hash=location.hash.replace(/^#p=/,'');
+    if(hash){
+      const parts=hash.split('/').map(decodeURIComponent);
+      if(parts.length>=4){
+        const [p,c,d,n]=parts;
+        if(U.LOC_MAP[p]){
+          sp.value=p;syncC();if((U.LOC_MAP[p]||[]).includes(c)){sc.value=c;syncD();}
+          if((U.DIST_MAP[sc.value]||[]).includes(d))sd.value=d;
+          if(U.ALL_PRODS.includes(n))spr.value=n;
+          renderMetricBadges();setTimeout(refresh,40);
+        }
+      }
+    }
+  }
+  init();loadFromHash();
+})();
+</script>
+</body>
+</html>

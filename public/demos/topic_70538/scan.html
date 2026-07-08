@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>果果帮 · 拍照识别</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+    background: #ede8e1;
+    margin: 0; padding: 0;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .phone {
+    width: 390px; height: 780px;
+    background: #ede8e1;
+    border-radius: 50px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.18), 0 0 0 12px #1a1a1a, 0 0 0 14px #2a2a2a;
+    overflow: hidden; position: relative;
+  }
+  .notch {
+    width: 120px; height: 32px; background: #1a1a1a;
+    border-radius: 0 0 20px 20px;
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    z-index: 50;
+  }
+  .corner {
+    position: absolute; width: 30px; height: 30px;
+    border: 2.5px solid #7a4a36; border-radius: 4px;
+  }
+  .corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; border-top-left-radius: 10px; }
+  .corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; border-top-right-radius: 10px; }
+  .corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; border-bottom-left-radius: 10px; }
+  .corner.br { bottom: 0; right: 0; border-left: none; border-top: none; border-bottom-right-radius: 10px; }
+  @keyframes scan { 0%, 100% { top: 8%; } 50% { top: 88%; } }
+  .scan-line {
+    position: absolute; left: 8%; right: 8%; height: 2px;
+    background: linear-gradient(90deg, transparent, #7a4a36, transparent);
+    box-shadow: 0 0 14px rgba(122,74,54,0.6);
+    animation: scan 2.4s ease-in-out infinite;
+  }
+  .viewfinder {
+    background: radial-gradient(circle at 30% 30%, #f5f0e6 0%, #ede8e1 40%, #e3dccf 100%);
+  }
+  .corner-soft {
+    background: #ffffff; border: 1px solid #e8e2d4;
+  }
+  .nav-back {
+    position: absolute; top: 20px; left: 20px; z-index: 60;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255,255,255,0.85); backdrop-filter: blur(10px);
+    display: flex; align-items: center; justify-content: center;
+    color: #3a2a20; font-size: 14px; text-decoration: none;
+  }
+  /* —— 识别引擎选择弹窗 —— */
+  .modal-overlay {
+    position: absolute; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(4px);
+    display: flex; align-items: flex-end; justify-content: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .modal-overlay.show {
+    opacity: 1; pointer-events: auto;
+  }
+  .modal-sheet {
+    width: 100%; background: #fff;
+    border-radius: 24px 24px 0 0;
+    padding: 28px 24px 36px;
+    transform: translateY(100%);
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .modal-overlay.show .modal-sheet {
+    transform: translateY(0);
+  }
+  .modal-handle {
+    width: 36px; height: 4px; border-radius: 2px;
+    background: #d8cfc0; margin: 0 auto 20px;
+  }
+  .engine-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: 16px;
+    border: 1.5px solid #f1ece4; background: #faf8f5;
+    cursor: pointer; transition: all 0.2s ease;
+    margin-bottom: 10px;
+  }
+  .engine-card:hover, .engine-card:active {
+    border-color: #7a4a36; background: #f5f0e6;
+  }
+  .engine-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  .engine-card .engine-name {
+    font-size: 14px; font-weight: 600; color: #2a1e16;
+  }
+  .engine-card .engine-desc {
+    font-size: 10px; color: #b8a797; margin-top: 2px; letter-spacing: 0.03em;
+  }
+  .engine-tag {
+    margin-left: auto; font-size: 9px; color: #fff;
+    background: #7a4a36; border-radius: 6px;
+    padding: 2px 8px; letter-spacing: 0.05em; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+  <a class="nav-back" href="paimomo.html">←</a>
+  <!-- 隐藏的文件选择器 -->
+  <input type="file" id="albumInput" accept="image/*" style="display:none;" />
+  <div class="phone">
+    <div class="notch"></div>
+
+    <!-- 米色取景区 -->
+    <div class="viewfinder absolute top-14 left-4 right-4 bottom-32 rounded-[28px] overflow-hidden">
+      <div class="absolute inset-0 rounded-[28px] border border-[#d8cfc0]"></div>
+
+      <!-- 桃桃角色（被识别水果） -->
+      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[55%] w-44 h-44">
+        <img src="../picture/peach.png" class="w-full h-full object-contain" />
+      </div>
+
+      <!-- 取景框 -->
+      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="scan-line" style="top: 8%;"></div>
+      </div>
+
+      <!-- 取景框下方说明 -->
+      <div class="absolute top-[68%] left-0 right-0 text-center">
+        <p class="text-[10px] text-[#7a4a36] tracking-[0.15em]">把水果对准取景框</p>
+        <p class="text-[9px] text-[#b8a797] tracking-wider mt-1">保持稳定 · 1-2 秒</p>
+      </div>
+
+      <!-- 图像质量提示（左上） -->
+      <div class="absolute top-3 left-3 flex flex-col gap-1.5">
+        <div class="corner-soft rounded-full px-2.5 py-1 flex items-center gap-1.5">
+          <span class="text-[10px] leading-none">☑️</span>
+          <span class="text-[9px] text-[#3a2a20] tracking-wider">图片清晰</span>
+        </div>
+        <div class="corner-soft rounded-full px-2.5 py-1 flex items-center gap-1.5">
+          <span class="text-[10px] leading-none">☑️</span>
+          <span class="text-[9px] text-[#3a2a20] tracking-wider">光线明亮</span>
+        </div>
+      </div>
+      <!-- 警示提示（右上） -->
+      <div class="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
+        <div class="rounded-full px-2.5 py-1 flex items-center gap-1.5" style="background: rgba(168,107,58,0.12); border: 1px solid rgba(168,107,58,0.3);">
+          <span class="text-[10px] leading-none">✖️</span>
+          <span class="text-[9px] text-[#a86b3a] tracking-wider">严重反光</span>
+        </div>
+        <div class="rounded-full px-2.5 py-1 flex items-center gap-1.5" style="background: rgba(168,107,58,0.12); border: 1px solid rgba(168,107,58,0.3);">
+          <span class="text-[10px] leading-none">✖️</span>
+          <span class="text-[9px] text-[#a86b3a] tracking-wider">存在遮挡</span>
+        </div>
+      </div>
+
+      <!-- 识别状态（左下） -->
+      <div class="absolute bottom-3 left-3 corner-soft rounded-full px-2.5 py-1 flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#3f8a6b]"></span>
+        <span class="text-[9px] text-[#3a2a20] tracking-wider">AI 识别中</span>
+      </div>
+    </div>
+
+    <!-- 底部控制区 -->
+    <div class="absolute bottom-0 left-0 right-0 z-20 pb-8 pt-6 px-8 bg-[#ede8e1]">
+      <div class="flex justify-between items-center">
+        <button id="albumBtn" class="flex flex-col items-center gap-1.5">
+          <div class="w-11 h-11 rounded-full bg-white border border-[#e8e2d4] flex items-center justify-center">
+            <span class="text-base">🖼</span>
+          </div>
+          <span class="text-[10px] text-[#6b574a] tracking-wider">相册</span>
+        </button>
+        <!-- 拍完跳到分析态 -->
+        <a href="scan-loading.html" id="shootBtn" class="flex flex-col items-center gap-1.5">
+          <div class="w-16 h-16 rounded-full bg-[#7a4a36] flex items-center justify-center shadow-lg">
+            <div class="w-12 h-12 rounded-full border-2 border-[#ede8e1] flex items-center justify-center">
+              <div class="w-2 h-2 rounded-full bg-[#ede8e1]"></div>
+            </div>
+          </div>
+          <span class="text-[10px] text-[#3a2a20] tracking-wider font-medium">轻点拍照</span>
+        </a>
+        <button class="flex flex-col items-center gap-1.5">
+          <div class="w-11 h-11 rounded-full bg-white border border-[#e8e2d4] flex items-center justify-center">
+            <span class="text-base">⚡</span>
+          </div>
+          <span class="text-[10px] text-[#6b574a] tracking-wider">闪光</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 识别引擎选择弹窗 -->
+    <div class="modal-overlay" id="engineModal">
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3 class="text-[15px] text-[#2a1e16] font-semibold tracking-wide mb-1">选择识别模型</h3>
+        <p class="text-[10px] text-[#b8a797] tracking-wider mb-5">测试版 · 选择识别模型</p>
+
+        <div class="mb-4">
+          <p class="text-[10px] text-[#7a4a36] font-medium mb-3">📦 豆包模型</p>
+          <div class="engine-card" data-model="doubao-seed-2-0-pro-260215">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #dd6b20, #ed8936);">🚀</div>
+            <div>
+              <div class="engine-name">doubao-seed-2-0-pro-260215</div>
+              <div class="engine-desc">更强能力 · 高精度识别</div>
+            </div>
+            <span class="engine-tag">推荐</span>
+          </div>
+
+          <div class="engine-card" data-model="doubao-seed-2-0-lite-260428">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #dd6b20, #f6ad55);">⚡</div>
+            <div>
+              <div class="engine-name">doubao-seed-2-0-lite-260428</div>
+              <div class="engine-desc">轻量快速 · 均衡性价比</div>
+            </div>
+            <span class="engine-tag" style="background: #38a169;">新版升级</span>
+          </div>
+
+          <div class="engine-card" data-model="doubao-seed-2-0-mini-260428">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #718096, #a0aec0);">💨</div>
+            <div>
+              <div class="engine-name">doubao-seed-2-0-mini-260428</div>
+              <div class="engine-desc">极速响应 · 成本低</div>
+            </div>
+            <span class="engine-tag" style="background: #718096;">轻量</span>
+          </div>
+
+          <div class="engine-card" data-model="doubao-seed-2-0-code-preview-260215">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #805ad5, #b794f4);">💻</div>
+            <div>
+              <div class="engine-name">doubao-seed-2-0-code-preview-260215</div>
+              <div class="engine-desc">模型上新 · 代码场景优化</div>
+            </div>
+            <span class="engine-tag" style="background: #805ad5;">模型上新</span>
+          </div>
+        </div>
+
+        <div>
+          <p class="text-[10px] text-[#7a4a36] font-medium mb-3">☁️ 千问模型</p>
+          <div class="engine-card" data-model="qwen3.7-plus">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #00b4d8, #90e0ef);">🌊</div>
+            <div>
+              <div class="engine-name">qwen3.7-plus</div>
+              <div class="engine-desc">阿里千问 · 多模态支持</div>
+            </div>
+            <span class="engine-tag">推荐</span>
+          </div>
+
+          <div class="engine-card" data-model="qwen3.6-flash">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #48cae4, #caf0f8);">⚡</div>
+            <div>
+              <div class="engine-name">qwen3.6-flash</div>
+              <div class="engine-desc">高速推理 · 响应极快</div>
+            </div>
+            <span class="engine-tag" style="background: #00b4d8;">极速</span>
+          </div>
+
+          <div class="engine-card" data-model="qwen3.5-omni-plus">
+            <div class="engine-icon" style="background: linear-gradient(135deg, #7400b8, #c792ea);">🌈</div>
+            <div>
+              <div class="engine-name">qwen3.5-omni-plus</div>
+              <div class="engine-desc">全模态 · 图文理解</div>
+            </div>
+            <span class="engine-tag" style="background: #7400b8;">全能</span>
+          </div>
+        </div>
+
+        <button id="modalCancel" class="w-full mt-3 h-10 rounded-full bg-[#f1ece4] text-[#6b574a] text-[12px] tracking-wider">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var _pendingImage = null; // 暂存选中的图片 base64
+
+    // 弹出引擎选择弹窗
+    function showEngineModal() {
+      document.getElementById('engineModal').classList.add('show');
+    }
+    function hideEngineModal() {
+      document.getElementById('engineModal').classList.remove('show');
+    }
+
+    // 相册按钮 → 弹出电脑文件选择器
+    document.getElementById('albumBtn').addEventListener('click', function() {
+      document.getElementById('albumInput').click();
+    });
+
+    // 选择文件后 → 暂存图片 → 弹出引擎选择弹窗
+    document.getElementById('albumInput').addEventListener('change', function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        _pendingImage = ev.target.result;
+        showEngineModal();
+      };
+      reader.readAsDataURL(file);
+      // 重置 input，允许再次选同一文件
+      e.target.value = '';
+    });
+
+    // 拍照按钮也走文件选择器（原型演示用，真机才用相机）
+    document.getElementById('shootBtn').addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('albumInput').click();
+    });
+
+    // 后端 API 地址
+    var API_BASE = 'http://localhost:9528';
+
+    // 压缩图片：用 Canvas 缩放到 maxWidth，返回压缩后的 base64（含耗时记录）
+    function compressImage(imageBase64, maxWidth, quality) {
+      maxWidth = maxWidth || 800;
+      quality = quality || 0.8;
+      return new Promise(function(resolve) {
+        var t_start = performance.now();
+        var img = new Image();
+        img.onload = function() {
+          var t_decode = performance.now();
+          var w = img.width;
+          var h = img.height;
+          if (w <= maxWidth) {
+            resolve({
+              dataUrl: imageBase64,
+              width: w,
+              height: h,
+              compressed: false,
+              originalSizeKB: (imageBase64.length / 1024).toFixed(1),
+              compressedSizeKB: (imageBase64.length / 1024).toFixed(1),
+              timing: { decode: (t_decode - t_start).toFixed(0), draw: 0, encode: 0, total: ((performance.now() - t_start)).toFixed(0) }
+            });
+            return;
+          }
+          var ratio = maxWidth / w;
+          var canvas = document.createElement('canvas');
+          canvas.width = maxWidth;
+          canvas.height = Math.round(h * ratio);
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          var t_draw = performance.now();
+          var compressed = canvas.toDataURL('image/jpeg', quality);
+          var t_encode = performance.now();
+          resolve({
+            dataUrl: compressed,
+            width: canvas.width,
+            height: canvas.height,
+            originalWidth: w,
+            originalHeight: h,
+            compressed: true,
+            originalSizeKB: (imageBase64.length / 1024).toFixed(1),
+            compressedSizeKB: (compressed.length / 1024).toFixed(1),
+            timing: {
+              decode: (t_decode - t_start).toFixed(0),
+              draw: (t_draw - t_decode).toFixed(0),
+              encode: (t_encode - t_draw).toFixed(0),
+              total: (t_encode - t_start).toFixed(0)
+            }
+          });
+        };
+        img.onerror = function() {
+          resolve({
+            dataUrl: imageBase64,
+            width: 0,
+            height: 0,
+            compressed: false,
+            originalSizeKB: (imageBase64.length / 1024).toFixed(1),
+            compressedSizeKB: (imageBase64.length / 1024).toFixed(1),
+            timing: { decode: 0, draw: 0, encode: 0, total: 0 }
+          });
+        };
+        img.src = imageBase64;
+      });
+    }
+
+    // 点击引擎卡片 → 记录选择 → 直接跳转等待页面
+    document.querySelectorAll('.engine-card').forEach(function(card) {
+      card.addEventListener('click', function() {
+        var modelName = this.getAttribute('data-model');
+        if (_pendingImage) {
+          localStorage.setItem('scanImagePath', _pendingImage);
+        }
+        localStorage.setItem('scanEngine', 'doubao');
+        localStorage.setItem('scanModel', modelName);
+        hideEngineModal();
+        // 直接跳转等待页面，由等待页面调用API
+        window.location.href = 'scan-loading.html';
+      });
+    });
+
+    // 调用识别 API（豆包模型）
+    function callAPI(imageBase64, modelName) {
+      var engineName = modelName || 'doubao-seed-2-0-pro-260215';
+      var T0 = performance.now();
+
+      // 先压缩图片，再发请求
+      compressImage(imageBase64, 800, 0.8).then(function(compressed) {
+        console.log('[API] 📤 请求地址: ' + API_BASE + '/api/chat');
+        console.log('[API] 🏷️ 模型: ' + engineName);
+        console.log('[API] 📦 图片: ' + compressed.originalSizeKB + 'KB' + (compressed.compressed ? ' → ' + compressed.compressedSizeKB + 'KB' : ''));
+
+        var promptText = '请识别图片中的水果，并评估其品质。要求返回JSON格式，包含水果名称、评分(光泽度、新鲜度、色泽、形状、成熟度、综合)、评分理由。';
+        var requestBody = JSON.stringify({ text: promptText, images: [compressed.dataUrl], model: modelName });
+
+        console.log('[API] ⏳ 发送 HTTP POST...');
+
+        fetch(API_BASE + '/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody
+        })
+        .then(function(res) {
+          console.log('[API] 📥 HTTP ' + res.status);
+          if (!res.ok) console.warn('[API] ⚠️ HTTP 错误! 状态码: ' + res.status);
+          return { res: res, textPromise: res.text() };
+        })
+        .then(function(o) {
+          return o.textPromise.then(function(text) {
+            console.log('[API] 📥 响应体: ' + text.length + ' 字符');
+
+            var data;
+            try {
+              data = JSON.parse(text);
+              console.log('[API] ✅ 外层JSON解析成功');
+            } catch(e) {
+              console.error('[API] ❌ JSON解析失败:', e.message);
+              showError('服务器返回了非JSON内容');
+              return;
+            }
+
+            if (!data.content) {
+              showError('content为空');
+              return;
+            }
+
+            var content = data.content;
+            var resultData;
+            try {
+              resultData = JSON.parse(content);
+            } catch(e) {
+              var jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                try { resultData = JSON.parse(jsonMatch[1] || jsonMatch[0]); } catch(e2) {
+                  resultData = { rawText: content };
+                }
+              } else {
+                resultData = { rawText: content };
+              }
+            }
+
+            var fruits = resultData.fruits || [];
+            var firstFruit = fruits[0] || {};
+            console.log('[API] 🍉 识别到 ' + fruits.length + ' 个水果');
+
+            var scanResult = {
+              success: true,
+              engine: 'doubao',
+              model: modelName,
+              fruits: fruits,
+              scores: firstFruit.scores || {},
+              fruitName: firstFruit.category || resultData.fruitName || '',
+              enName: firstFruit.enName || resultData.enName || '',
+              reason: firstFruit.reason || resultData.reason || '',
+              final_score: firstFruit.final_score || resultData.final_score || 0,
+              elapsed_sec: data.elapsed_sec || 0,
+              content: content
+            };
+
+            localStorage.setItem('scanResult', JSON.stringify(scanResult));
+            localStorage.setItem('scanImagePath', compressed.dataUrl);
+
+            var totalSec = ((performance.now() - T0) / 1000).toFixed(1);
+            localStorage.setItem('scanTotalTime', totalSec);
+
+            // 直接跳转到 loading 页
+            window.location.href = 'scan-loading.html';
+          });
+        })
+        .catch(function(err) {
+          console.warn('[API] 异常:', err);
+          var errMsg = err.message || err.toString();
+          if (errMsg.indexOf('Failed to fetch') !== -1 || errMsg.indexOf('NetworkError') !== -1) {
+            showError('无法连接到服务器 (localhost:9528)！请确认:\n1. doubao_api_server.py 已启动\n2. 终端执行: python3 ~/script/doubao_api_server.py');
+          } else {
+            showError(engineName + ' API 调用异常: ' + errMsg);
+          }
+        });
+
+      }); // end compressImage.then()
+    }
+
+    // 显示错误弹窗（不静默跳走）
+    function showError(msg) {
+      localStorage.removeItem('scanResult');
+
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:300;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML = '<div style="background:#fff;border-radius:20px;padding:28px 24px;max-width:320px;text-align:center;">' +
+        '<div style="font-size:32px;margin-bottom:12px;">❌</div>' +
+        '<div style="font-size:14px;font-weight:600;color:#2a1e16;margin-bottom:8px;">识别失败</div>' +
+        '<div style="font-size:11px;color:#6b574a;line-height:1.6;white-space:pre-wrap;text-align:left;background:#faf8f5;border-radius:10px;padding:10px 12px;margin-bottom:16px;font-family:monospace;">' + msg + '</div>' +
+        '<button id="errorOk" style="width:100%;height:40px;border-radius:20px;background:#7a4a36;color:#fff;font-size:13px;border:none;cursor:pointer;letter-spacing:0.1em;">知道了</button>' +
+        '</div>';
+      document.body.appendChild(overlay);
+
+      document.getElementById('errorOk').addEventListener('click', function() {
+        overlay.remove();
+      });
+    }
+
+    // 取消按钮
+    document.getElementById('modalCancel').addEventListener('click', function() {
+      _pendingImage = null;
+      hideEngineModal();
+    });
+
+    // 点击遮罩关闭
+    document.getElementById('engineModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        _pendingImage = null;
+        hideEngineModal();
+      }
+    });
+  </script>
+</body>
+</html>

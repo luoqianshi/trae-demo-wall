@@ -1,0 +1,125 @@
+package web
+
+const indexHTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRAEcoin 预测市场</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #e2e8f0; min-height: 100vh; padding: 20px; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  header { text-align: center; padding: 24px 0 32px; }
+  header h1 { font-size: 2rem; background: linear-gradient(90deg, #38bdf8, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header p { color: #94a3b8; margin-top: 8px; font-size: 0.95rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: rgba(30, 41, 59, 0.8); border: 1px solid #334155; border-radius: 12px; padding: 20px; backdrop-filter: blur(8px); }
+  .card h2 { font-size: 1.1rem; color: #38bdf8; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .field { margin-bottom: 12px; }
+  label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9rem; }
+  input:focus, select:focus { outline: none; border-color: #38bdf8; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; transition: all .15s; }
+  .btn-primary { background: linear-gradient(90deg, #0ea5e9, #6366f1); color: #fff; }
+  .btn-primary:hover { opacity: .9; transform: translateY(-1px); }
+  .btn-sm { padding: 4px 10px; font-size: 0.8rem; background: #334155; color: #e2e8f0; }
+  .btn-sm:hover { background: #475569; }
+  .btn-yes { background: #059669; color: #fff; }
+  .btn-no { background: #dc2626; color: #fff; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .info { font-size: 0.85rem; color: #cbd5e1; line-height: 1.6; }
+  .info b { color: #f1f5f9; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .tag-open { background: #064e3b; color: #34d399; }
+  .tag-yes { background: #064e3b; color: #34d399; }
+  .tag-no { background: #450a0a; color: #f87171; }
+  .market-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+  .market-item .q { font-size: 1rem; font-weight: 600; margin-bottom: 8px; }
+  .market-item .meta { font-size: 0.78rem; color: #64748b; margin-bottom: 8px; word-break: break-all; }
+  .market-item .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  pre { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; font-size: 0.8rem; max-height: 200px; overflow: auto; color: #94a3b8; }
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 18px; border-radius: 8px; color: #fff; font-size: 0.9rem; opacity: 0; transition: opacity .25s; z-index: 1000; }
+  .toast.show { opacity: 1; }
+  .toast-ok { background: #059669; }
+  .toast-err { background: #dc2626; }
+  .addr-list { display: flex; flex-direction: column; gap: 6px; }
+  .addr-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: #0f172a; border-radius: 4px; font-size: 0.82rem; }
+  .addr-item code { color: #38bdf8; word-break: break-all; }
+  .empty { color: #64748b; font-style: italic; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>TRAEcoin 预测市场 Demo</h1>
+    <p>基于 UTXO 模型的本地区块链预测市场 · Polymarket 简化实现</p>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>钱包</h2>
+      <div class="row" style="margin-bottom:12px;">
+        <button class="btn-primary" onclick="createWallet()">创建钱包</button>
+        <button class="btn-sm" onclick="listWallets()">刷新列表</button>
+      </div>
+      <div class="field">
+        <label>查询余额</label>
+        <div class="row">
+          <input id="balAddr" placeholder="钱包地址">
+          <button class="btn-sm" onclick="getBalance()">查询</button>
+        </div>
+      </div>
+      <div id="balanceBox" class="info" style="margin-bottom:10px;"></div>
+      <div id="addrList" class="addr-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>创建市场</h2>
+      <div class="field">
+        <label>问题（如：BTC 明年破 10万？）</label>
+        <input id="mkQuestion" placeholder="市场问题">
+      </div>
+      <div class="field">
+        <label>截止时间戳（秒，留空=7天后）</label>
+        <input id="mkDeadline" placeholder="自动计算">
+      </div>
+      <div class="field">
+        <label>创建者地址</label>
+        <input id="mkCreator" placeholder="选择下方钱包地址">
+      </div>
+      <button class="btn-primary" onclick="createMarket()">创建市场</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <h2>预测市场列表 <button class="btn-sm" onclick="listMarkets()" style="float:right;">刷新</button></h2>
+    <div id="marketList"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+function toast(msg, ok=true){ const t=document.getElementById('toast'); t.textContent=msg; t.className='toast show '+(ok?'toast-ok':'toast-err'); setTimeout(()=>t.className='toast',3000); }
+async function api(path, opts){ try{ const r=await fetch(path, opts); const j=await r.json(); if(!r.ok) throw new Error(j.error||'请求失败'); return j; }catch(e){ toast(e.message, false); throw e; } }
+
+async function createWallet(){ const j=await api('/api/wallet/create',{method:'POST'}); toast('钱包已创建: '+j.address.slice(0,12)+'...'); listWallets(); }
+async function listWallets(){ const j=await api('/api/wallet/list'); const box=document.getElementById('addrList'); box.innerHTML=''; if(!j.addresses.length){ box.innerHTML='<div class="empty">暂无钱包</div>'; return; } j.addresses.forEach(a=>{ const d=document.createElement('div'); d.className='addr-item'; d.innerHTML='<code>'+a+'</code><button class="btn-sm" onclick="copyAddr(\''+a+'\')">复制</button>'; box.appendChild(d); }); }
+function copyAddr(a){ navigator.clipboard.writeText(a); toast('已复制'); }
+async function getBalance(){ const a=document.getElementById('balAddr').value.trim(); if(!a){ toast('请输入地址',false); return; } const j=await api('/api/balance?address='+encodeURIComponent(a)); document.getElementById('balanceBox').innerHTML='余额: <b>'+j.balance+'</b> Token'; }
+
+async function createMarket(){ const q=document.getElementById('mkQuestion').value.trim(); let dl=document.getElementById('mkDeadline').value.trim(); const c=document.getElementById('mkCreator').value.trim(); if(!q||!c){ toast('问题和创建者必填',false); return; } if(!dl) dl=Math.floor(Date.now()/1000)+7*86400; const j=await api('/api/market/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,deadline:Number(dl),creator:c})}); toast('市场创建成功'); listMarkets(); }
+
+async function listMarkets(){ const j=await api('/api/markets'); const box=document.getElementById('marketList'); box.innerHTML=''; if(!j.markets.length){ box.innerHTML='<div class="empty">暂无市场，请先创建</div>'; return; } j.markets.forEach(m=>{ const d=document.createElement('div'); d.className='market-item'; let status='<span class="tag tag-open">进行中</span>'; let actions=''; if(m.resolved){ status='<span class="tag '+(m.result===0?'tag-yes':'tag-no')+'">已结算: '+m.resultLabel+'</span>'; } else { actions='<input id="buy_'+m.id+'" placeholder="买入者地址" style="flex:1;"><input id="amt_'+m.id+'" type="number" placeholder="数量" style="width:80px;"><button class="btn-yes btn-sm" onclick="buyShares(\''+m.id+'\',0)">买YES</button><button class="btn-no btn-sm" onclick="buyShares(\''+m.id+'\',1)">买NO</button><button class="btn-sm" onclick="resolveMarket(\''+m.id+'\')">结算</button>'; } d.innerHTML='<div class="q">'+m.question+'</div><div class="meta">ID: '+m.id+'<br>创建者: '+m.creator+'<br>截止: '+new Date(m.deadline*1000).toLocaleString()+'</div><div style="margin-bottom:8px;">'+status+'</div><div class="actions">'+actions+'</div>'; box.appendChild(d); }); }
+
+async function buyShares(id, outcome){ const from=document.getElementById('buy_'+id).value.trim(); const amt=document.getElementById('amt_'+id).value.trim(); if(!from||!amt){ toast('请填写买入者地址和数量',false); return; } await api('/api/market/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:from,marketID:id,outcome:outcome,amount:Number(amt)})}); toast('买入成功'); listMarkets(); }
+async function resolveMarket(id){ const creator=prompt('输入创建者地址以结算:'); if(!creator) return; const res=prompt('结算结果 (0=YES, 1=NO):','0'); if(res!=='0'&&res!=='1'){ toast('结果必须是 0 或 1',false); return; } await api('/api/market/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({creator:creator,marketID:id,result:Number(res)})}); toast('结算成功'); listMarkets(); }
+
+listWallets(); listMarkets();
+</script>
+</body>
+</html>`

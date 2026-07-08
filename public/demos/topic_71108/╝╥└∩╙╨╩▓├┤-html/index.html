@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>家里有什么</title>
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <!-- 8 个 CSS 模块 -->
+  <link rel="stylesheet" href="./css/tokens.css">
+  <link rel="stylesheet" href="./css/components.css">
+  <link rel="stylesheet" href="./css/layout.css">
+  <link rel="stylesheet" href="./css/home.css">
+  <link rel="stylesheet" href="./css/list.css">
+  <link rel="stylesheet" href="./css/stats.css">
+  <link rel="stylesheet" href="./css/detail.css">
+  <link rel="stylesheet" href="./css/ai-drawer.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ===== Header ===== -->
+    <div class="app-header">
+      <div class="app-title-row">
+        <div class="app-title">家里有<span class="accent">什么</span></div>
+        <div class="header-actions">
+          <div class="header-btn-wrap" @click="onReminderClick">
+            <div class="header-btn">🔔<div v-if="reminderCount > 0" class="bell-badge">{{ reminderCount > 99 ? '99+' : reminderCount }}</div></div>
+            <div class="header-btn-label">提醒</div>
+          </div>
+          <div class="header-btn-wrap" @click="toggleAddMenu">
+            <div class="header-btn">➕</div>
+            <div class="header-btn-label">添加</div>
+          </div>
+          <div class="header-btn-wrap" @click="onShare">
+            <div class="header-btn">🔗</div>
+            <div class="header-btn-label">分享</div>
+          </div>
+        </div>
+      </div>
+      <!-- 提醒面板 -->
+      <div v-if="state.reminderPanelVisible" class="reminder-panel-overlay" @click="state.reminderPanelVisible = false">
+        <div class="reminder-panel" @click.stop>
+          <div class="reminder-panel-header">
+            <div class="reminder-panel-title">待处理提醒</div>
+            <div class="reminder-panel-close" @click="state.reminderPanelVisible = false">✕</div>
+          </div>
+          <div v-if="reminderItems.expiryItems.length > 0" class="reminder-panel-item" @click="goToReminderList('expiry')">
+            <span class="reminder-panel-icon">⏰</span>
+            <span class="reminder-panel-text">{{ reminderItems.expiryItems.length }} 件物品即将到期</span>
+            <span class="reminder-panel-arrow">›</span>
+          </div>
+          <div v-if="reminderItems.borrowItems.length > 0" class="reminder-panel-item" @click="goToReminderList('borrow')">
+            <span class="reminder-panel-icon">📤</span>
+            <span class="reminder-panel-text">{{ reminderItems.borrowItems.length }} 件物品借出中</span>
+            <span class="reminder-panel-arrow">›</span>
+          </div>
+          <div v-if="reminderItems.expiryItems.length === 0 && reminderItems.borrowItems.length === 0" class="reminder-panel-item">
+            <span class="reminder-panel-icon">✅</span>
+            <span class="reminder-panel-text">暂无待处理提醒</span>
+          </div>
+          <div class="reminder-panel-footer" @click="goToReminderList('')">
+            <span class="reminder-panel-footer-text">查看全部物品 ›</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 页面主体 ===== -->
+    <div class="page-body">
+      <!-- 首页 -->
+      <div v-show="state.currentPage === 'home'" class="page-section">
+        <div v-if="favoriteItems.length > 0" class="home-section">
+          <div class="home-section-header"><div class="home-section-title">⭐ 收藏物品</div><div class="home-section-count">{{ favoriteItems.length }} 件</div></div>
+          <div class="horizontal-scroll">
+            <div v-for="item in favoriteItems" :key="item.id" class="mini-card" @click="goToDetail(item.id)">
+              <div class="mini-card-icon">{{ item.emoji || '📦' }}</div>
+              <div class="mini-card-name">{{ item.name }}</div>
+            </div>
+          </div>
+        </div>
+        <div v-if="reminderCount > 0" class="home-section">
+          <div class="home-section-header"><div class="home-section-title">⚠️ 需要关注</div><div class="home-section-count">{{ reminderCount }} 项</div></div>
+          <div class="alert-cards">
+            <div v-if="reminderItems.expiryItems.length > 0" class="alert-card expiry" @click="onReminderClick"><span class="alert-icon">⏰</span><span class="alert-text">{{ reminderItems.expiryItems.length }} 件临期</span></div>
+            <div v-if="reminderItems.borrowItems.length > 0" class="alert-card borrow" @click="onReminderClick"><span class="alert-icon">📤</span><span class="alert-text">{{ reminderItems.borrowItems.length }} 件借出中</span></div>
+          </div>
+        </div>
+        <div v-if="recentItems.length > 0" class="home-section">
+          <div class="home-section-header"><div class="home-section-title">🕐 最近添加</div></div>
+          <div class="horizontal-scroll">
+            <div v-for="item in recentItems" :key="item.id" class="mini-card" @click="goToDetail(item.id)">
+              <div class="mini-card-icon">{{ item.emoji || '📦' }}</div>
+              <div class="mini-card-name">{{ item.name }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="home-section">
+          <div class="home-section-header"><div class="home-section-title">📂 分类概览</div><div class="home-section-link" @click="state.currentPage = 'list'">查看全部 ›</div></div>
+          <div class="category-grid">
+            <div v-for="cat in categorySummary" :key="cat.value" class="cat-summary-card" @click="goToListWithCategory(cat.value)">
+              <div class="cat-summary-icon">{{ cat.emoji }}</div>
+              <div class="cat-summary-label">{{ cat.label }}</div>
+              <div class="cat-summary-count">{{ cat.count }} 件</div>
+            </div>
+          </div>
+        </div>
+        <div class="tip-banner"><span class="tip-icon">💡</span><span>点击物品可查看详情 / 编辑 / 标记借出</span></div>
+      </div>
+
+      <!-- 清单页 -->
+      <div v-show="state.currentPage === 'list'" class="page-section">
+        <div v-if="state.reminderFilter" class="reminder-filter-banner">
+          <span>{{ state.reminderFilter === 'expiry' ? '⏰ 正在查看临期/过期物品' : '📤 正在查看借出物品' }}</span>
+          <span class="reminder-filter-close" @click="clearReminderFilter">✕ 关闭筛选</span>
+        </div>
+        <div class="search-bar">
+          <input v-model="state.listSearchKeyword" placeholder="搜索物品..." @focus="state.showSearchHistory = true">
+          <div v-if="state.listSearchKeyword" class="search-clear" @click="state.listSearchKeyword = ''">×</div>
+        </div>
+        <div v-if="state.showSearchHistory && state.searchHistory.length > 0" class="search-history">
+          <span class="history-label">最近</span>
+          <div class="history-scroll"><div class="history-tags">
+            <div v-for="kw in state.searchHistory" :key="kw" class="history-tag" @click="state.listSearchKeyword = kw; state.showSearchHistory = false">{{ kw }}</div>
+            <div class="history-clear" @click="state.searchHistory = []; storage.saveSearchHistory([])">清空</div>
+          </div></div>
+        </div>
+        <div v-if="allTags.length > 0" class="tag-filter-bar">
+          <div class="tag-scroll"><div class="tag-list">
+            <div class="tag-chip" :class="{active: state.filterTag === ''}" @click="state.filterTag = ''">全部</div>
+            <div v-for="tag in allTags" :key="tag" class="tag-chip" :class="{active: state.filterTag === tag}" @click="state.filterTag = tag">#{{ tag }}</div>
+          </div></div>
+        </div>
+        <div class="list-view-tabs">
+          <div class="view-tab" :class="{active: state.listViewMode === 'category'}" @click="state.listViewMode = 'category'">按分类</div>
+          <div class="view-tab" :class="{active: state.listViewMode === 'location'}" @click="state.listViewMode = 'location'">按位置</div>
+        </div>
+        <div v-if="state.listViewMode === 'category'" class="category-tabs">
+          <div v-for="cat in categories" :key="cat.value" class="cat-tab" :class="{active: state.filterCategory === cat.value}" @click="state.filterCategory = cat.value">{{ cat.emoji }} {{ cat.label }}</div>
+        </div>
+        <div v-if="state.listViewMode === 'category'">
+          <div v-for="cat in listCategoryGroups" :key="cat.value" class="list-group">
+            <div class="list-group-title">{{ cat.emoji }} {{ cat.label }}({{ cat.items.length }})</div>
+            <div v-for="item in cat.items" :key="item.id" class="item-card" @click="goToDetail(item.id)">
+              <div class="item-card-emoji">{{ item.emoji || '📦' }}</div>
+              <div class="item-card-info">
+                <div class="item-card-name">{{ item.name }} <span v-if="item.borrowed" class="borrow-badge">借出</span></div>
+                <div class="item-card-location">📍 {{ item.location || '未分类' }}</div>
+              </div>
+              <div class="item-card-right">
+                <div class="item-card-qty">{{ item.qty }}{{ item.unit }}</div>
+                <div v-if="item.expiry" class="expiry-pill" :class="getExpiryInfo(item.expiry).cls">{{ getExpiryInfo(item.expiry).text }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="listCategoryGroups.length === 0" class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无物品</div></div>
+        </div>
+        <div v-if="state.listViewMode === 'location'">
+          <div v-if="Object.keys(groupedItems).length === 0" class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无物品</div></div>
+          <div v-for="(items, place) in groupedItems" :key="place" class="list-group">
+            <div class="list-group-title">📍 {{ place }}</div>
+            <div v-for="item in items" :key="item.id" class="item-card" @click="goToDetail(item.id)">
+              <div class="item-card-emoji">{{ item.emoji || '📦' }}</div>
+              <div class="item-card-info">
+                <div class="item-card-name">{{ item.name }} <span v-if="item.borrowed" class="borrow-badge">借出</span></div>
+                <div class="item-card-location">📍 {{ item.location || '未分类' }}</div>
+              </div>
+              <div class="item-card-right">
+                <div class="item-card-qty">{{ item.qty }}{{ item.unit }}</div>
+                <div v-if="item.expiry" class="expiry-pill" :class="getExpiryInfo(item.expiry).cls">{{ getExpiryInfo(item.expiry).text }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 统计页 -->
+      <div v-show="state.currentPage === 'stats'" class="page-section">
+        <div class="stats-hero">
+          <div class="stats-hero-emoji">{{ healthSummary.emoji }}</div>
+          <div class="stats-hero-text">{{ healthSummary.text }}</div>
+          <div v-if="addedThisMonth > 0" class="stats-hero-sub">本月新增 {{ addedThisMonth }} 件</div>
+        </div>
+        <div class="stats-metrics">
+          <div class="metric-card"><div class="metric-value">{{ stats.total }}</div><div class="metric-label">共 {{ stats.total }} 类物品,合计 {{ totalQty }} 件</div></div>
+          <div class="metric-card" :class="{'metric-warn': stats.nearExpired > 0}" @click="stats.nearExpired > 0 && goToReminderList('expiry')"><div class="metric-value">{{ stats.nearExpired > 0 ? stats.nearExpired + ' 件即将过期' : '✅ 暂无临期物品' }}</div><div class="metric-label">临期预警</div></div>
+          <div class="metric-card" :class="{'metric-warn': stats.borrowed > 0}" @click="stats.borrowed > 0 && goToReminderList('borrow')"><div class="metric-value">{{ stats.borrowed > 0 ? stats.borrowed + ' 件物品借出中' : '✅ 无借出物品' }}</div><div class="metric-label">借出状态</div></div>
+        </div>
+        <div class="stats-section">
+          <div class="section-title">📊 分类分布</div>
+          <div v-for="cat in categoryList" :key="cat.name" class="category-row">
+            <span class="cat-emoji">{{ cat.emoji }}</span><span class="cat-name">{{ cat.label }}</span>
+            <div class="cat-bar-track"><div class="cat-bar-fill" :style="{width: cat.percent + '%', background: cat.color}"></div></div>
+            <span class="cat-count">{{ cat.count }} 件</span>
+          </div>
+        </div>
+        <div class="stats-section">
+          <div class="section-title">⏰ 保质期状态</div>
+          <div v-if="expiryStats.expired > 0 || expiryStats.expiring7 > 0 || expiryStats.expiring30 > 0" class="expiry-cards">
+            <div v-if="expiryStats.expired > 0" class="expiry-action-card expired" @click="goToReminderList('expiry')"><span class="expiry-action-icon">🚨</span><span class="expiry-action-text">{{ expiryStats.expired }} 件已过期</span><span class="expiry-action-link">查看详情 ›</span></div>
+            <div v-if="expiryStats.expiring7 > 0" class="expiry-action-card expiring7" @click="goToReminderList('expiry')"><span class="expiry-action-icon">⚠️</span><span class="expiry-action-text">{{ expiryStats.expiring7 }} 件 7 天内到期</span><span class="expiry-action-link">查看详情 ›</span></div>
+            <div v-if="expiryStats.expiring30 > 0" class="expiry-action-card expiring30" @click="goToReminderList('expiry')"><span class="expiry-action-icon">⏰</span><span class="expiry-action-text">{{ expiryStats.expiring30 }} 件 30 天内到期</span><span class="expiry-action-link">查看详情 ›</span></div>
+          </div>
+          <div v-else class="expiry-safe-card">✅ 所有物品均在保质期内</div>
+        </div>
+        <div v-if="locationList.length > 0" class="stats-section">
+          <div class="section-title">📍 存放位置 TOP 5</div>
+          <div v-for="(loc, idx) in locationList" :key="loc.name" class="location-rank-item">
+            <div class="loc-rank-num">{{ idx + 1 }}</div><div class="loc-rank-name">{{ loc.name }}</div><div class="loc-rank-count">{{ loc.count }} 件</div>
+          </div>
+        </div>
+        <div v-if="topUsedItems.length > 0" class="stats-section">
+          <div class="section-title">🔥 高频使用</div>
+          <div v-for="(item, idx) in topUsedItems" :key="item.id" class="top-used-item" @click="goToDetail(item.id)">
+            <div class="top-used-rank">{{ idx + 1 }}</div><span style="font-size:18px">{{ item.emoji || '📦' }}</span><div class="top-used-name">{{ item.name }}</div><div class="top-used-count">{{ item.use_count || 0 }} 次</div>
+          </div>
+        </div>
+        <div class="stats-section">
+          <div class="section-title">📥 数据管理</div>
+          <div class="stats-date-range">
+            <input type="date" v-model="state.statsDateRange.start" class="stats-date-input">
+            <input type="date" v-model="state.statsDateRange.end" class="stats-date-input">
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="ui-btn outline" style="flex:1" @click="exportJSON">📦 导出 JSON</button>
+            <button class="ui-btn outline" style="flex:1" @click="exportCSV">📊 导出 CSV</button>
+          </div>
+          <button class="ui-btn ghost block" style="margin-top:8px" @click="importInput && importInput.click()">📥 导入 JSON</button>
+          <input ref="importInput" type="file" accept=".json" style="display:none" @change="importJSON">
+        </div>
+      </div>
+
+      <!-- 我的页 -->
+      <div v-show="state.currentPage === 'profile'" class="page-section">
+        <div class="profile-header">
+          <div class="profile-avatar">{{ profileMember.avatar || '😊' }}</div>
+          <div><div class="profile-name">{{ profileMember.name || '我' }}</div><div class="profile-role">{{ profileMember.role === 'admin' ? '管理员' : '成员' }} · {{ state.members.length }} 位成员</div></div>
+        </div>
+        <div class="menu-list">
+          <div class="menu-item" @click="state.overlayPage = 'family'"><span class="menu-icon">👨‍👩‍👦</span><span class="menu-label">家庭成员管理</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'borrowRecords'"><span class="menu-icon">📋</span><span class="menu-label">借出记录</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'shopping'"><span class="menu-icon">🛒</span><span class="menu-label">购物清单</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'categories'"><span class="menu-icon">📂</span><span class="menu-label">分类管理</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'locations'"><span class="menu-icon">📍</span><span class="menu-label">位置管理</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'aiSettings'"><span class="menu-icon">🤖</span><span class="menu-label">AI 设置</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'reminder'"><span class="menu-icon">🔔</span><span class="menu-label">提醒设置</span><span class="menu-arrow">›</span></div>
+          <div class="menu-item" @click="state.overlayPage = 'about'"><span class="menu-icon">ℹ️</span><span class="menu-label">关于</span><span class="menu-arrow">›</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 底部导航 ===== -->
+    <div class="bottom-nav">
+      <div v-for="tab in navItems" :key="tab.key" class="nav-item" :class="{active: state.currentPage === tab.key}" @click="state.currentPage = tab.key">
+        <div class="nav-icon">{{ tab.icon }}</div><div class="nav-label">{{ tab.label }}</div>
+      </div>
+    </div>
+
+    <!-- AI 悬浮按钮 -->
+    <div class="ai-fab" :class="{recording: state.isRecording}" @click="state.aiDrawerVisible = true">🤖</div>
+
+    <!-- ===== 详情页 ===== -->
+    <div v-if="state.overlayPage === 'detail'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">物品详情</div></div>
+      <div class="overlay-body">
+        <div v-if="!detailItem" class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">物品不存在</div></div>
+        <template v-else>
+          <div class="detail-card">
+            <div class="detail-emoji">{{ detailItem.emoji || '📦' }}</div>
+            <div class="detail-name">{{ detailItem.name }} <span class="detail-fav" @click="toggleFavorite(detailItem)">{{ detailItem.favorite ? '★' : '☆' }}</span></div>
+            <div class="detail-location">📍 {{ detailItem.location || '未分类' }}</div>
+            <div class="detail-info-grid">
+              <div class="detail-info-item"><div class="detail-info-label">数量</div><div class="detail-info-value">{{ detailItem.qty }} {{ detailItem.unit }}</div></div>
+              <div class="detail-info-item" v-if="detailItem.expiry"><div class="detail-info-label">保质期</div><div class="detail-info-value" :class="getExpiryInfo(detailItem.expiry).cls === 'danger' ? 'danger' : (getExpiryInfo(detailItem.expiry).cls === 'warning' ? 'warning' : '')">{{ getExpiryInfo(detailItem.expiry).text }}</div></div>
+              <div class="detail-info-item"><div class="detail-info-label">分类</div><div class="detail-info-value">{{ getCategoryLabel(detailItem.category) }}</div></div>
+              <div class="detail-info-item"><div class="detail-info-label">借出状态</div><div class="detail-info-value" :class="detailItem.borrowed ? 'warning' : ''">{{ detailItem.borrowed ? '借出(' + detailItem.borrower + ')' : '在家' }}</div></div>
+            </div>
+            <div v-if="detailItem.notes" class="detail-notes">{{ detailItem.notes }}</div>
+            <div v-if="detailItem.tags && detailItem.tags.length" class="tag-chips" style="justify-content:center">
+              <span v-for="tag in detailItem.tags" :key="tag" class="tag-item">#{{ tag }}</span>
+            </div>
+          </div>
+          <div class="detail-actions">
+            <button class="ui-btn solid block lg" @click="goToEdit(detailItem.id)">✏️ 编辑</button>
+            <button v-if="!detailItem.borrowed" class="ui-btn outline block lg" @click="state.borrowDialog = {visible: true, item: detailItem, borrower: ''}">📤 借出</button>
+            <button v-else class="ui-btn outline block lg" @click="returnItem(detailItem)">📥 归还</button>
+            <button class="ui-btn ghost block lg" @click="recordUse(detailItem)">📝 记录使用</button>
+            <button class="ui-btn danger block lg" @click="confirmDelete(detailItem)">🗑️ 删除</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ===== 编辑页 ===== -->
+    <div v-if="state.overlayPage === 'edit'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = 'detail'">‹</div><div class="overlay-title">{{ state.editMode === 'edit' ? '编辑物品' : '添加物品' }}</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group"><label class="form-label">名称 *</label><input v-model="state.editForm.name" class="form-input" placeholder="物品名称"></div>
+          <div class="form-group"><label class="form-label">图标</label><div class="emoji-picker">
+            <div v-for="e in emojiList" :key="e" class="emoji-option" :class="{selected: state.editForm.emoji === e}" @click="state.editForm.emoji = e">{{ e }}</div>
+          </div></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">数量</label><input v-model.number="state.editForm.qty" type="number" min="1" class="form-input"></div>
+            <div class="form-group"><label class="form-label">单位</label><input v-model="state.editForm.unit" class="form-input" placeholder="个"></div>
+          </div>
+          <div class="form-group"><label class="form-label">存放位置</label><input v-model="state.editForm.location" class="form-input" placeholder="如:冰箱 › 冷藏室" list="location-list"><datalist id="location-list"><option v-for="loc in locationSuggestions" :key="loc" :value="loc"></option></datalist></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">分类</label><select v-model="state.editForm.category" class="form-select"><option v-for="cat in categories.filter(c => c.value !== 'all')" :key="cat.value" :value="cat.value">{{ cat.emoji }} {{ cat.label }}</option></select></div>
+            <div class="form-group"><label class="form-label">保质期</label><input v-model="state.editForm.expiry" type="date" class="form-input"></div>
+          </div>
+          <div class="form-group"><label class="form-label">备注</label><textarea v-model="state.editForm.notes" class="form-textarea" placeholder="备注信息"></textarea></div>
+          <div class="form-group"><label class="form-label">标签</label><input v-model="state.tagInput" class="form-input" placeholder="输入标签后回车" @keydown.enter.prevent="addTag"><div v-if="state.editForm.tags && state.editForm.tags.length" class="tag-chips"><span v-for="tag in state.editForm.tags" :key="tag" class="tag-item">#{{ tag }} <span class="tag-remove" @click="removeTag(tag)">×</span></span></div></div>
+          <div class="form-group"><label class="form-label">收藏</label><div class="emoji-picker"><div class="emoji-option" :class="{selected: !state.editForm.favorite}" @click="state.editForm.favorite = false">☆</div><div class="emoji-option" :class="{selected: state.editForm.favorite}" @click="state.editForm.favorite = true">★</div></div></div>
+        </div>
+        <button class="ui-btn solid block lg" @click="saveItem">💾 保存</button>
+      </div>
+    </div>
+
+    <!-- ===== AI 设置 ===== -->
+    <div v-if="state.overlayPage === 'aiSettings'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">AI 设置</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group"><label class="form-label">AI 服务商</label><select v-model="state.aiConfig.provider" class="form-select"><option value="deepseek">🐋 DeepSeek</option><option value="openai">🟢 OpenAI</option><option value="glm">✨ 智谱 GLM</option><option value="minimax">🔮 Minimax</option><option value="qwen">🚀 通义千问</option></select></div>
+          <div class="form-group"><label class="form-label">API Key</label><input v-model="state.aiConfig.apiKey" type="password" class="form-input" placeholder="sk-..."></div>
+          <div class="form-group"><label class="form-label">Base URL</label><input v-model="state.aiConfig.baseUrl" class="form-input" placeholder="https://api.openai.com/v1"></div>
+          <div class="form-group"><label class="form-label">模型名称</label><input v-model="state.aiConfig.model" class="form-input" placeholder="gpt-4o-mini"></div>
+          <div class="form-group"><label class="form-label">Temperature: {{ state.aiConfig.temperature }}</label><input v-model.number="state.aiConfig.temperature" type="range" min="0" max="2" step="0.1" style="width:100%"></div>
+          <div class="form-group"><label class="form-label">Max Tokens: {{ state.aiConfig.maxTokens }}</label><input v-model.number="state.aiConfig.maxTokens" type="range" min="100" max="4096" step="128" style="width:100%"></div>
+          <div class="form-group"><label class="form-label"><input type="checkbox" v-model="state.aiConfig.mockEnabled"> 强制 Mock 模式(无 API Key 也能体验)</label></div>
+          <div style="display:flex; gap:8px;"><button class="ui-btn outline" style="flex:1" @click="testAIConnection">🔌 测试连接</button><button class="ui-btn solid" style="flex:1" @click="saveAIConfigFn">💾 保存</button></div>
+          <div v-if="state.aiTestResult" style="margin-top:12px; padding:10px; background:var(--bg-page); border-radius:var(--radius-md); font-size:13px;">{{ state.aiTestResult }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 借出记录 ===== -->
+    <div v-if="state.overlayPage === 'borrowRecords'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">借出记录</div></div>
+      <div class="overlay-body">
+        <div class="list-view-tabs" style="margin-bottom:16px">
+          <div class="view-tab" :class="{active: state.borrowFilter === 'all'}" @click="state.borrowFilter = 'all'">全部</div>
+          <div class="view-tab" :class="{active: state.borrowFilter === 'borrowed'}" @click="state.borrowFilter = 'borrowed'">借出中</div>
+          <div class="view-tab" :class="{active: state.borrowFilter === 'returned'}" @click="state.borrowFilter = 'returned'">已归还</div>
+        </div>
+        <div v-for="item in filteredBorrowItems" :key="item.id" class="item-card">
+          <div class="item-card-emoji">{{ item.emoji || '📦' }}</div>
+          <div class="item-card-info"><div class="item-card-name">{{ item.name }}</div><div class="item-card-location">📤 {{ item.borrower }} · {{ formatDateTime(item.borrowDate) }}</div></div>
+          <div class="item-card-right"><button v-if="item.borrowed" class="ui-btn outline" style="height:32px; font-size:12px" @click="returnItem(item)">归还</button><span v-else class="expiry-pill good">已归还</span></div>
+        </div>
+        <div v-if="filteredBorrowItems.length === 0" class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无借出记录</div></div>
+      </div>
+    </div>
+
+    <!-- ===== 家庭成员 ===== -->
+    <div v-if="state.overlayPage === 'family'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">家庭成员</div></div>
+      <div class="overlay-body">
+        <div v-for="(m, idx) in state.members" :key="m.id" class="item-card">
+          <div class="item-card-emoji">{{ m.avatar || '😊' }}</div>
+          <div class="item-card-info"><div class="item-card-name">{{ m.name }}</div><div class="item-card-location">{{ m.role === 'admin' ? '管理员' : '成员' }}</div></div>
+          <div class="item-card-right"><button class="ui-btn text" style="font-size:13px" @click="editMember(idx)">✏️</button><button v-if="state.members.length > 1" class="ui-btn text" style="font-size:13px; color:var(--color-danger)" @click="deleteMember(idx)">🗑️</button></div>
+        </div>
+        <button class="ui-btn solid block lg" style="margin-top:16px" @click="goToMemberAdd">➕ 添加成员</button>
+      </div>
+    </div>
+
+    <!-- ===== 成员编辑页（新增,替换 prompt）===== -->
+    <div v-if="state.overlayPage === 'memberEdit'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = 'family'">‹</div><div class="overlay-title">{{ state.memberEditMode === 'edit' ? '编辑成员' : '添加成员' }}</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group">
+            <label class="form-label">头像</label>
+            <div class="emoji-picker">
+              <div v-for="a in avatarOptions" :key="a" class="emoji-option" :class="{selected: state.memberEditForm.avatar === a}" @click="state.memberEditForm.avatar = a">{{ a }}</div>
+            </div>
+          </div>
+          <div class="form-group"><label class="form-label">姓名 *</label><input v-model="state.memberEditForm.name" class="form-input" placeholder="成员姓名"></div>
+          <div class="form-group"><label class="form-label">角色</label><select v-model="state.memberEditForm.role" class="form-select"><option value="admin">管理员</option><option value="member">成员</option></select></div>
+          <button class="ui-btn solid block lg" @click="saveMember">💾 保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 分类管理页（新增）===== -->
+    <div v-if="state.overlayPage === 'categories'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">分类管理</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group">
+            <label class="form-label">新增分类</label>
+            <div class="form-row">
+              <select v-model="state.categoryInput.emoji" class="form-select" style="max-width:80px">
+                <option v-for="e in ['📦','🍎','🧴','💊','🔧','🧻','🛒','🍳','🧂','🔋']" :key="e" :value="e">{{ e }}</option>
+              </select>
+              <input v-model="state.categoryInput.name" class="form-input" placeholder="分类名称" @keydown.enter="addCategory">
+            </div>
+            <button class="ui-btn solid block" style="margin-top:8px" @click="addCategory">➕ 添加</button>
+          </div>
+        </div>
+        <div class="form-card">
+          <div v-for="(c, idx) in state.customCategories" :key="idx" class="item-card">
+            <div class="item-card-emoji">{{ c.emoji }}</div>
+            <div class="item-card-info"><div class="item-card-name">{{ c.name }}</div></div>
+            <button class="ui-btn text" style="color:var(--color-danger); font-size:18px" @click="deleteCategory(idx)">🗑️</button>
+          </div>
+          <div v-if="state.customCategories.length === 0" class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">暂无自定义分类</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 位置管理页（新增）===== -->
+    <div v-if="state.overlayPage === 'locations'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">位置管理</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group">
+            <label class="form-label">新增位置</label>
+            <div class="form-row">
+              <input v-model="state.locationInput" class="form-input" placeholder="如:冰箱 › 冷藏室" @keydown.enter="addLocation">
+              <button class="ui-btn solid" style="flex-shrink:0" @click="addLocation">➕</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-card">
+          <div v-for="(loc, idx) in state.customLocations" :key="idx" class="item-card">
+            <div class="item-card-emoji">📍</div>
+            <div class="item-card-info"><div class="item-card-name">{{ loc }}</div></div>
+            <button class="ui-btn text" style="color:var(--color-danger); font-size:18px" @click="deleteLocation(idx)">🗑️</button>
+          </div>
+          <div v-if="state.customLocations.length === 0" class="empty-state"><div class="empty-icon">📍</div><div class="empty-text">暂无自定义位置</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 提醒设置 ===== -->
+    <div v-if="state.overlayPage === 'reminder'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">提醒设置</div></div>
+      <div class="overlay-body">
+        <div class="form-card">
+          <div class="form-group"><label class="form-label"><input type="checkbox" v-model="state.appConfig.reminder.expiryEnabled"> ⏰ 过期提醒</label></div>
+          <div class="form-group"><label class="form-label">提前天数</label><input v-model.number="state.appConfig.reminder.expiryDays" type="number" min="1" max="90" class="form-input"></div>
+          <div class="form-group"><label class="form-label"><input type="checkbox" v-model="state.appConfig.reminder.borrowEnabled"> 📤 借出超期提醒</label></div>
+          <div class="form-group"><label class="form-label">超期天数</label><input v-model.number="state.appConfig.reminder.borrowDays" type="number" min="1" max="365" class="form-input"></div>
+          <button class="ui-btn solid block lg" @click="saveReminderConfig">💾 保存设置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 购物清单 ===== -->
+    <div v-if="state.overlayPage === 'shopping'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">购物清单</div></div>
+      <div class="overlay-body">
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px; padding:0 4px;">库存不足的物品(数量 ≤ {{ state.appConfig.lowStockThreshold }})</p>
+        <div v-if="lowStockItems.length === 0" class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">库存充足</div></div>
+        <div v-for="item in lowStockItems" :key="item.id" class="item-card">
+          <div class="item-card-emoji">{{ item.emoji || '📦' }}</div>
+          <div class="item-card-info"><div class="item-card-name">{{ item.name }}</div><div class="item-card-location">剩余 {{ item.qty }} {{ item.unit }} · 📍 {{ item.location }}</div></div>
+          <button class="ui-btn outline" style="height:32px; font-size:13px" @click="restock(item)">+1</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 关于 ===== -->
+    <div v-if="state.overlayPage === 'about'" class="overlay-page">
+      <div class="overlay-header"><div class="overlay-back" @click="state.overlayPage = null">‹</div><div class="overlay-title">关于</div></div>
+      <div class="overlay-body" style="text-align:center">
+        <div style="font-size:64px; margin:24px 0 8px">🏠</div>
+        <div style="font-size:22px; font-weight:700; margin-bottom:4px">家里有什么</div>
+        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:24px">版本 1.0.0-html-demo</div>
+        <div class="form-card" style="text-align:left">
+          <div style="font-size:15px; font-weight:600; margin-bottom:10px">功能简介</div>
+          <div style="font-size:13px; color:var(--text-secondary); line-height:2">📦 家庭物品管理 · 增删改查<br>🤖 AI 智能助手 · 语音/图片/文本<br>📊 统计分析 · 六维仪表盘<br>🔔 智能提醒 · 临期/借出/系统通知<br>👨‍👩‍👦 家庭共享 · 多成员协作<br>📂 分类与位置自定义管理</div>
+        </div>
+        <div class="form-card" style="text-align:left; margin-top:12px">
+          <div style="font-size:15px; font-weight:600; margin-bottom:10px">技术栈</div>
+          <div style="font-size:13px; color:var(--text-secondary); line-height:2">Vue 3 CDN + 模块化多文件<br>localStorage 本地持久化<br>Web Speech API · Notification API<br>原生 fetch SSE 流式响应</div>
+        </div>
+        <div style="font-size:12px; color:var(--text-tertiary); margin-top:24px">© 2026 HomeStash · 用 TRAE 开发</div>
+      </div>
+    </div>
+
+    <!-- ===== AI 抽屉 ===== -->
+    <transition name="fade"><div v-if="state.aiDrawerVisible" class="ai-drawer-overlay" @click="state.aiDrawerVisible = false"></div></transition>
+    <div v-if="state.aiDrawerVisible" class="ai-drawer">
+      <div class="ai-drawer-handle"></div>
+      <div class="ai-drawer-header">
+        <div class="ai-drawer-title">🤖 AI 助手</div>
+        <div class="ai-mode-tag" :class="{real: isRealAIEnabled}">{{ isRealAIEnabled ? state.aiConfig.model : '本地模拟' }}</div>
+        <div class="ai-drawer-action" @click="state.aiMessages = []; storage.saveChatHistory([])">🗑️</div>
+        <div class="ai-drawer-action" @click="state.aiDrawerVisible = false">✕</div>
+      </div>
+      <div class="ai-messages" ref="aiMessagesRef">
+        <div v-for="(msg, idx) in state.aiMessages" :key="idx" class="message-row">
+          <div class="message-avatar" :class="msg.role">{{ msg.role === 'user' ? '我' : (msg.role === 'system' ? '⚙️' : '🤖') }}</div>
+          <div class="message-content">
+            <div class="message-bubble" :class="msg.role">{{ msg.content }}</div>
+            <div v-if="msg.items && msg.items.length" class="message-related">
+              <div v-for="item in msg.items" :key="item.id" class="related-item-card" @click="goToDetail(item.id); state.aiDrawerVisible = false"><span class="related-emoji">{{ item.emoji || '📦' }}</span><span class="related-name">{{ item.name }}</span></div>
+            </div>
+          </div>
+        </div>
+        <div v-if="state.aiThinking" class="message-row"><div class="message-avatar ai">🤖</div><div class="message-content"><div class="message-bubble ai"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div></div></div>
+      </div>
+      <div class="ai-input-area">
+        <div class="ai-toolbar">
+          <div class="ai-tool-btn" :class="{active: state.isRecording}" @click="toggleVoice">🎤</div>
+          <div class="ai-tool-btn" @click="pickImage">📷</div>
+        </div>
+        <div v-if="state.isRecording" class="ai-hint">正在听,点击 🎤 结束</div>
+        <div class="ai-input-row">
+          <textarea v-model="state.aiInput" class="ai-input" placeholder="对我说:新增 2 瓶可乐在冰箱" @keydown.enter.prevent="sendAIMessage" rows="1"></textarea>
+          <button class="ai-send-btn" :disabled="!state.aiInput.trim() || state.aiThinking" @click="sendAIMessage">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Toast ===== -->
+    <transition name="fade"><div v-if="state.toast.visible" class="toast"><span v-if="state.toast.icon">{{ state.toast.icon }} </span>{{ state.toast.text }}</div></transition>
+
+    <!-- ===== Modal ===== -->
+    <transition name="fade"><div v-if="state.modal.visible" class="modal-overlay" @click="state.modal.visible = false"><div class="modal-content" @click.stop><div class="modal-title">{{ state.modal.title }}</div><div class="modal-body">{{ state.modal.content }}</div><div class="modal-actions"><button class="ui-btn ghost" @click="state.modal.visible = false">取消</button><button class="ui-btn danger" @click="state.modal.onConfirm && state.modal.onConfirm(); state.modal.visible = false">确认</button></div></div></div></transition>
+
+    <!-- ===== ActionSheet ===== -->
+    <transition name="fade"><div v-if="state.actionSheet.visible" class="action-sheet-overlay" @click="state.actionSheet.visible = false"><div class="action-sheet" @click.stop><div v-for="(item, idx) in state.actionSheet.items" :key="idx" class="action-sheet-item" @click="item.handler && item.handler(); state.actionSheet.visible = false">{{ item.icon }} {{ item.text }}</div><div class="action-sheet-item action-sheet-cancel" @click="state.actionSheet.visible = false">取消</div></div></div></transition>
+
+    <!-- ===== 借出对话框 ===== -->
+    <transition name="fade"><div v-if="state.borrowDialog.visible" class="modal-overlay" @click="state.borrowDialog.visible = false"><div class="modal-content" @click.stop style="max-width:340px"><div class="modal-title">📤 借出物品</div><div style="margin: 16px 0"><div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px">借用人姓名 *</div><input v-model="state.borrowDialog.borrower" class="form-input" placeholder="借给谁?"></div><div class="modal-actions"><button class="ui-btn ghost" @click="state.borrowDialog.visible = false">取消</button><button class="ui-btn solid" @click="confirmBorrow">📤 借出</button></div></div></div></transition>
+  </div>
+
+  <!-- ===== 10 个 JS 模块,严格按依赖顺序 ===== -->
+  <script src="./js/constants.js"></script>
+  <script src="./js/helpers.js"></script>
+  <script src="./js/storage.js"></script>
+  <script src="./js/ai-mock.js"></script>
+  <script src="./js/ai-real.js"></script>
+  <script src="./js/ai-voice.js"></script>
+  <script src="./js/state.js"></script>
+  <script src="./js/computed.js"></script>
+  <script src="./js/methods.js"></script>
+  <script src="./js/main.js"></script>
+</body>
+</html>

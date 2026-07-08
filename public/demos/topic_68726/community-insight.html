@@ -1,0 +1,3201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社区洞察分析系统 - Community Insight Platform</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// ========== 内嵌 AI 模型 (transformers.js) ==========
+window.embeddedAIReady = false;
+window.embeddedAIError = '';
+window.loadLog = [];
+
+// 动态加载 transformers.js（多 CDN 回退，优先国内源）
+window.loadTransformersLib = function() {
+  return new Promise((resolve, reject) => {
+    if (window.transformers && window.transformers.pipeline) {
+      resolve(window.transformers);
+      return;
+    }
+    
+    // 优先使用国内 CDN，提高成功率
+    const cdnList = [
+      'https://registry.npmmirror.com/@xenova/transformers/2.17.2/files/dist/transformers.min.js',
+      'https://cdn.bootcdn.net/ajax/libs/transformers.js/2.17.2/transformers.min.js',
+      'https://unpkg.zhimg.com/@xenova/transformers@2.17.2/dist/transformers.min.js',
+      'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js',
+      'https://unpkg.com/@xenova/transformers@2.17.2/dist/transformers.min.js'
+    ];
+    
+    let cdnIdx = 0;
+    const tryLoad = () => {
+      if (cdnIdx >= cdnList.length) {
+        reject(new Error('所有CDN均加载失败。建议：1)检查网络代理设置 2)直接使用API大模型分析'));
+        return;
+      }
+      const url = cdnList[cdnIdx];
+      window.loadLog.push('尝试CDN: ' + url);
+      console.log('Loading from:', url);
+      
+      const script = document.createElement('script');
+      script.src = url;
+      script.crossOrigin = 'anonymous';
+      
+      script.onload = () => {
+        if (window.transformers && window.transformers.pipeline) {
+          window.loadLog.push('成功加载transformers.js');
+          resolve(window.transformers);
+        } else {
+          window.loadLog.push('CDN返回但window.transformers未定义');
+          cdnIdx++;
+          tryLoad();
+        }
+      };
+      
+      script.onerror = (e) => {
+        window.loadLog.push('CDN加载失败: ' + url);
+        console.warn('Failed:', url, e);
+        cdnIdx++;
+        tryLoad();
+      };
+      
+      document.head.appendChild(script);
+    };
+    tryLoad();
+  });
+};
+
+// 加载内嵌AI模型
+window.loadEmbeddedAI = async function(callback) {
+  try {
+    callback && callback({ status: 'loading', message: '步骤1: 加载AI引擎库...' });
+    
+    const lib = await window.loadTransformersLib();
+    const { pipeline, env } = lib;
+    
+    // 关键配置：使用国内HuggingFace镜像
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+    
+    // 设置模型下载镜像（国内可访问）
+    if (lib.env && lib.env.remoteHost) {
+      lib.env.remoteHost = 'https://hf-mirror.com';  // 国内HuggingFace镜像
+    }
+    
+    callback && callback({ status: 'loading', message: '步骤2: 加载轻量模型(~25MB)...' });
+    
+    // 只加载一个最小的情感分析模型，减少下载量和失败概率
+    try {
+      window.embeddedSentiment = await pipeline(
+        'sentiment-analysis', 
+        'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
+        { progress_callback: (p) => {
+          if (p && p.status === 'downloading') {
+            const pct = p.progress ? Math.round(p.progress) : '?';
+            callback && callback({ status: 'loading', message: `下载模型: ${pct}%` });
+          }
+        }}
+      );
+      window.loadLog.push('情感模型加载成功');
+    } catch(e1) {
+      window.loadLog.push('情感模型失败: ' + e1.message);
+      // 不再尝试加载更多模型，直接标记为部分成功
+      window.embeddedAIReady = 'partial';
+      window.embeddedAIError = '模型下载受限，建议使用API大模型分析';
+      callback && callback({ status: 'error', message: '模型下载失败: ' + e1.message });
+      return false;
+    }
+    
+    window.embeddedAIReady = true;
+    callback && callback({ status: 'ready', message: '内嵌AI已就绪' });
+    return true;
+    
+  } catch(e) {
+    window.embeddedAIError = e.message;
+    window.loadLog.push('整体失败: ' + e.message);
+    callback && callback({ status: 'error', message: e.message });
+    return false;
+  }
+};
+
+// 运行内嵌AI分析（简化版，只做情感分析）
+window.runEmbeddedAI = async function(text) {
+  if (!window.embeddedAIReady || !window.embeddedSentiment) return null;
+  try {
+    const sentiment = await window.embeddedSentiment(text);
+    // 简化分类：基于情感结果推断风险倾向
+    let riskTrend = 'stable';
+    let riskAdjust = 0;
+    if (sentiment && sentiment[0]) {
+      const s = sentiment[0];
+      if (s.label === 'NEGATIVE') {
+        riskAdjust = s.score * 20; // 负面情绪加分
+        riskTrend = 'up';
+      } else if (s.label === 'POSITIVE') {
+        riskAdjust = -s.score * 10; // 正面情绪减分
+        riskTrend = 'down';
+      }
+    }
+    return { sentiment, riskAdjust, riskTrend };
+  } catch(e) {
+    console.error('EmbeddedAI run error:', e);
+    return null;
+  }
+};
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Noto Sans SC', sans-serif; }
+  .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+  .card-hover { transition: all 0.3s ease; }
+  .card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+  .risk-high { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); }
+  .risk-medium { background: linear-gradient(135deg, #ffa502, #ff7f50); }
+  .risk-low { background: linear-gradient(135deg, #ffd93d, #f0c929); }
+  .risk-safe { background: linear-gradient(135deg, #6bcb77, #4ade80); }
+  .pulse-dot { animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.2); }
+  }
+  .fade-in { animation: fadeIn 0.5s ease-in-out; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .slide-in { animation: slideIn 0.4s ease-out; }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .typing-effect { overflow: hidden; border-right: 2px solid #667eea; white-space: nowrap; animation: typing 2s steps(40, end), blink 0.75s step-end infinite; }
+  @keyframes typing { from { width: 0; } to { width: 100%; } }
+  @keyframes blink { from, to { border-color: transparent; } 50% { border-color: #667eea; } }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #a1a1a1; }
+  .tag-badge { transition: all 0.2s ease; }
+  .tag-badge:hover { transform: scale(1.05); }
+  .progress-bar { transition: width 1s ease-in-out; }
+  .glow { box-shadow: 0 0 20px rgba(102, 126, 234, 0.4); }
+  .modal-overlay { backdrop-filter: blur(4px); }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- 顶部导航栏 -->
+<nav class="gradient-bg text-white shadow-lg sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold">社区洞察分析系统</h1>
+          <p class="text-xs text-white/70">Community Insight Platform v2.0</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-4">
+        <div class="hidden md:flex items-center space-x-2 bg-white/10 rounded-lg px-4 py-2">
+          <span class="pulse-dot w-2 h-2 bg-green-400 rounded-full"></span>
+          <span class="text-sm">实时数据同步中</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center text-sm font-medium">王</div>
+          <span class="text-sm hidden sm:inline">王社工</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- 主导航标签 -->
+<div class="bg-white shadow-sm border-b">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex space-x-1 overflow-x-auto scrollbar-thin">
+      <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn px-6 py-4 text-sm font-medium border-b-2 border-purple-600 text-purple-600 whitespace-nowrap">
+        📊 总览仪表盘
+      </button>
+      <button onclick="switchTab('families')" id="tab-families" class="tab-btn px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
+        👨‍👩‍👧‍👦 家庭档案
+      </button>
+      <button onclick="switchTab('visits')" id="tab-visits" class="tab-btn px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
+        📝 走访记录
+      </button>
+      <button onclick="switchTab('analysis')" id="tab-analysis" class="tab-btn px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
+        🧠 智能分析
+      </button>
+      <button onclick="switchTab('resources')" id="tab-resources" class="tab-btn px-6 py-4 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
+        🤝 资源联动
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 主内容区域 -->
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+  <!-- ========== 仪表盘页面 ========== -->
+  <div id="page-dashboard" class="page-content fade-in">
+    <!-- 统计卡片 -->
+    <div id="statsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div class="stat-card bg-white rounded-2xl p-6 shadow-sm card-hover">
+        <div class="flex items-center justify-between mb-4">
+          <div class="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
+            <span class="text-2xl">🔴</span>
+          </div>
+          <span class="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-medium">↑ 12%</span>
+        </div>
+        <h3 class="text-3xl font-bold text-gray-800">23</h3>
+        <p class="text-sm text-gray-500 mt-1">高风险家庭</p>
+      </div>
+      <div class="stat-card bg-white rounded-2xl p-6 shadow-sm card-hover">
+        <div class="flex items-center justify-between mb-4">
+          <div class="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
+            <span class="text-2xl">🟠</span>
+          </div>
+          <span class="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-medium">↑ 5%</span>
+        </div>
+        <h3 class="text-3xl font-bold text-gray-800">47</h3>
+        <p class="text-sm text-gray-500 mt-1">中风险家庭</p>
+      </div>
+      <div class="stat-card bg-white rounded-2xl p-6 shadow-sm card-hover">
+        <div class="flex items-center justify-between mb-4">
+          <div class="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
+            <span class="text-2xl">🟡</span>
+          </div>
+          <span class="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-medium">↓ 8%</span>
+        </div>
+        <h3 class="text-3xl font-bold text-gray-800">89</h3>
+        <p class="text-sm text-gray-500 mt-1">低风险家庭</p>
+      </div>
+      <div class="stat-card bg-white rounded-2xl p-6 shadow-sm card-hover">
+        <div class="flex items-center justify-between mb-4">
+          <div class="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+            <span class="text-2xl">🟢</span>
+          </div>
+          <span class="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-medium">↑ 3%</span>
+        </div>
+        <h3 class="text-3xl font-bold text-gray-800">256</h3>
+        <p class="text-sm text-gray-500 mt-1">正常家庭</p>
+      </div>
+    </div>
+
+    <!-- 图表区域 -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <!-- 风险趋势图 -->
+      <div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg font-semibold text-gray-800">📈 风险等级趋势分析</h2>
+          <select class="text-sm border rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <option>最近30天</option>
+            <option>最近90天</option>
+            <option>最近半年</option>
+          </select>
+        </div>
+        <canvas id="trendChart" height="100"></canvas>
+      </div>
+
+      <!-- 风险分布饼图 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-800 mb-6">🥧 风险等级分布</h2>
+        <canvas id="pieChart" height="200"></canvas>
+        <div class="mt-4 space-y-2">
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex items-center space-x-2">
+              <div class="w-3 h-3 rounded-full bg-red-500"></div>
+              <span class="text-gray-600">高风险</span>
+            </div>
+            <span class="font-medium text-gray-800">23户 (5.4%)</span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex items-center space-x-2">
+              <div class="w-3 h-3 rounded-full bg-orange-500"></div>
+              <span class="text-gray-600">中风险</span>
+            </div>
+            <span class="font-medium text-gray-800">47户 (11.1%)</span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex items-center space-x-2">
+              <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <span class="text-gray-600">低风险</span>
+            </div>
+            <span class="font-medium text-gray-800">89户 (21.0%)</span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex items-center space-x-2">
+              <div class="w-3 h-3 rounded-full bg-green-500"></div>
+              <span class="text-gray-600">正常</span>
+            </div>
+            <span class="font-medium text-gray-800">256户 (60.5%)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标签分布 & 近期动态 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 家庭标签分布 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-800 mb-6">🏷️ 家庭标签分布</h2>
+        <div class="space-y-4">
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">低保家庭</span>
+              <span class="font-medium text-gray-800">68户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-blue-500 h-2.5 rounded-full" style="width: 68%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">独居老人</span>
+              <span class="font-medium text-gray-800">52户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-purple-500 h-2.5 rounded-full" style="width: 52%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">残障家庭</span>
+              <span class="font-medium text-gray-800">34户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-pink-500 h-2.5 rounded-full" style="width: 34%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">留守儿童</span>
+              <span class="font-medium text-gray-800">28户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-orange-500 h-2.5 rounded-full" style="width: 28%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">重大疾病</span>
+              <span class="font-medium text-gray-800">21户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-red-500 h-2.5 rounded-full" style="width: 21%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span class="text-gray-700">单亲家庭</span>
+              <span class="font-medium text-gray-800">45户</span>
+            </div>
+            <div class="w-full bg-gray-100 rounded-full h-2.5">
+              <div class="progress-bar bg-teal-500 h-2.5 rounded-full" style="width: 45%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 近期动态 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-lg font-semibold text-gray-800">🔔 近期动态</h2>
+          <button class="text-sm text-purple-600 hover:text-purple-700 font-medium">查看全部</button>
+        </div>
+        <div class="space-y-4 max-h-80 overflow-y-auto scrollbar-thin">
+          <div class="flex space-x-3 p-3 rounded-xl hover:bg-gray-50 transition cursor-pointer" onclick="showFamilyDetail(0)">
+            <div class="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+              <span class="text-lg">⚠️</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800">张桂英家庭风险等级升级</p>
+              <p class="text-xs text-gray-500 mt-1">由中风险升级为高风险 - 医疗支出突增</p>
+              <p class="text-xs text-gray-400 mt-1">2小时前</p>
+            </div>
+          </div>
+          <div class="flex space-x-3 p-3 rounded-xl hover:bg-gray-50 transition cursor-pointer" onclick="showFamilyDetail(1)">
+            <div class="flex-shrink-0 w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+              <span class="text-lg">✅</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800">李明家庭风险等级下降</p>
+              <p class="text-xs text-gray-500 mt-1">由低风险转为正常 - 就业帮扶成功</p>
+              <p class="text-xs text-gray-400 mt-1">5小时前</p>
+            </div>
+          </div>
+          <div class="flex space-x-3 p-3 rounded-xl hover:bg-gray-50 transition cursor-pointer" onclick="switchTab('visits')">
+            <div class="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+              <span class="text-lg">📝</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800">新增走访记录</p>
+              <p class="text-xs text-gray-500 mt-1">王社工完成对陈志强家庭的走访</p>
+              <p class="text-xs text-gray-400 mt-1">今天 14:30</p>
+            </div>
+          </div>
+          <div class="flex space-x-3 p-3 rounded-xl hover:bg-gray-50 transition cursor-pointer" onclick="switchTab('resources')">
+            <div class="flex-shrink-0 w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+              <span class="text-lg">🤝</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800">资源匹配成功</p>
+              <p class="text-xs text-gray-500 mt-1">为刘奶奶匹配居家养老服务资源</p>
+              <p class="text-xs text-gray-400 mt-1">昨天 16:20</p>
+            </div>
+          </div>
+          <div class="flex space-x-3 p-3 rounded-xl hover:bg-gray-50 transition">
+            <div class="flex-shrink-0 w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+              <span class="text-lg">🏷️</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800">自动标签更新</p>
+              <p class="text-xs text-gray-500 mt-1">智能分析为12户家庭更新了标签</p>
+              <p class="text-xs text-gray-400 mt-1">昨天 09:15</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 家庭档案页面 ========== -->
+  <div id="page-families" class="page-content hidden">
+    <div class="bg-white rounded-2xl p-6 shadow-sm mb-6">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div class="flex-1">
+          <h2 class="text-xl font-bold text-gray-800 mb-2">👨‍👩‍👧‍👦 家庭档案管理</h2>
+          <p class="text-sm text-gray-500">共 415 户家庭，点击卡片查看详情</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <div class="relative">
+            <input type="text" id="familySearch" placeholder="搜索家庭..." oninput="filterFamilies()" 
+              class="pl-10 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 w-full md:w-64">
+            <svg class="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+          <select id="riskFilter" onchange="filterFamilies()" class="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <option value="">全部风险等级</option>
+            <option value="high">高风险</option>
+            <option value="medium">中风险</option>
+            <option value="low">低风险</option>
+            <option value="safe">正常</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="familyGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- 家庭卡片将通过JS动态生成 -->
+    </div>
+  </div>
+
+  <!-- ========== 走访记录页面 ========== -->
+  <div id="page-visits" class="page-content hidden">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+      <div>
+        <h2 class="text-xl font-bold text-gray-800">📝 走访记录管理</h2>
+        <p class="text-sm text-gray-500 mt-1">记录走访信息，智能分析自动更新风险等级</p>
+      </div>
+      <button onclick="openVisitModal()" class="gradient-bg text-white px-6 py-2.5 rounded-xl font-medium hover:opacity-90 transition flex items-center space-x-2 shadow-lg">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        <span>新增走访</span>
+      </button>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- 走访列表 -->
+      <div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">近期走访</h3>
+        <div id="visitList" class="space-y-4 max-h-[600px] overflow-y-auto scrollbar-thin">
+          <!-- 走访记录将通过JS动态生成 -->
+        </div>
+      </div>
+
+      <!-- 走访统计 -->
+      <div class="space-y-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm">
+          <h3 class="text-lg font-semibold text-gray-800 mb-4">📊 本月统计</h3>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between p-3 bg-purple-50 rounded-xl">
+              <span class="text-sm text-gray-600">走访总数</span>
+              <span class="text-xl font-bold text-purple-600">128</span>
+            </div>
+            <div class="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
+              <span class="text-sm text-gray-600">计划完成率</span>
+              <span class="text-xl font-bold text-blue-600">87%</span>
+            </div>
+            <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl">
+              <span class="text-sm text-gray-600">问题解决率</span>
+              <span class="text-xl font-bold text-green-600">76%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl p-6 shadow-sm">
+          <h3 class="text-lg font-semibold text-gray-800 mb-4">📅 待办走访</h3>
+          <div class="space-y-3">
+            <div class="p-3 border border-orange-200 bg-orange-50 rounded-xl">
+              <p class="text-sm font-medium text-gray-800">赵晓梅家 - 季度回访</p>
+              <p class="text-xs text-gray-500 mt-1">明天 09:00 | 高优先级</p>
+            </div>
+            <div class="p-3 border border-gray-200 rounded-xl">
+              <p class="text-sm font-medium text-gray-800">孙大爷家 - 健康检查</p>
+              <p class="text-xs text-gray-500 mt-1">后天 14:00 | 中优先级</p>
+            </div>
+            <div class="p-3 border border-gray-200 rounded-xl">
+              <p class="text-sm font-medium text-gray-800">周丽家 - 新户登记</p>
+              <p class="text-xs text-gray-500 mt-1">周五 10:00 | 正常</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 智能分析页面 ========== -->
+  <div id="page-analysis" class="page-content hidden">
+    <div class="mb-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-gray-800">🧠 智能语义分析</h2>
+          <p class="text-sm text-gray-500 mt-1">基于走访记录和历史数据，结合 AI 大模型智能生成处置建议</p>
+        </div>
+        <!-- AI API 配置状态 -->
+        <div id="aiStatusBox" class="flex items-center space-x-3 px-4 py-2 rounded-xl bg-gray-100">
+          <div id="aiStatusIcon" class="w-3 h-3 rounded-full bg-gray-400"></div>
+          <span id="aiStatusText" class="text-sm text-gray-600">AI API 未配置</span>
+          <button id="aiConfigBtn" onclick="openAIConfigModal()" class="text-xs bg-purple-500 text-white px-3 py-1.5 rounded-lg hover:bg-purple-600 transition">
+            配置 AI
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- AI 配置提示条 -->
+    <div id="aiConfigBanner" class="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <span class="text-2xl">🤖</span>
+          <div>
+            <p class="text-sm font-medium text-gray-800">接入真正 AI 大模型，实现智能语义分析</p>
+            <p class="text-xs text-gray-500 mt-1">支持 DeepSeek、OpenAI、通义千问、智谱 AI 等，配置您的 API Key 即可使用</p>
+          </div>
+        </div>
+        <button onclick="openAIConfigModal()" class="text-sm bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition shadow">
+          配置 API Key
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 语义分析输入区 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">📝 输入走访内容</h3>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">选择家庭</label>
+          <select id="analysisFamily" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <option value="0">张桂英 - 高风险</option>
+            <option value="1">李明 - 正常</option>
+            <option value="2">王建国 - 中风险</option>
+            <option value="3">刘淑芬 - 低风险</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">走访记录内容</label>
+          <textarea id="visitContent" rows="8" placeholder="请输入走访记录内容，AI 将深度分析并给出专业处置建议..."
+            class="w-full border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"></textarea>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <span class="text-xs text-gray-500">快捷模板：</span>
+          <button onclick="fillTemplate(1)" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition">常规探访</button>
+          <button onclick="fillTemplate(2)" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition">医疗相关</button>
+          <button onclick="fillTemplate(3)" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition">经济困难</button>
+          <button onclick="fillTemplate(4)" class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition">心理问题</button>
+        </div>
+        
+        <!-- 分析模式选择 -->
+        <div class="mb-4 p-3 bg-gray-50 rounded-xl">
+          <label class="block text-sm font-medium text-gray-700 mb-2">分析模式</label>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <label class="cursor-pointer">
+              <input type="radio" name="analysisMode" value="rule" class="hidden peer" checked>
+              <span class="block text-center px-3 py-2 border-2 rounded-lg text-xs peer-checked:bg-blue-100 peer-checked:border-blue-500 peer-checked:text-blue-700 transition">
+                ⚡ 规则分析（本地快速）
+              </span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="analysisMode" value="embedded" class="hidden peer" disabled id="embeddedModeRadio">
+              <span class="block text-center px-3 py-2 border-2 rounded-lg text-xs peer-checked:bg-cyan-100 peer-checked:border-cyan-500 peer-checked:text-cyan-700 transition peer-disabled:opacity-50 peer-disabled:cursor-not-allowed">
+                🧠 内嵌AI（浏览器本地）
+              </span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="analysisMode" value="api" class="hidden peer" disabled id="apiModeRadio">
+              <span class="block text-center px-3 py-2 border-2 rounded-lg text-xs peer-checked:bg-purple-100 peer-checked:border-purple-500 peer-checked:text-purple-700 transition peer-disabled:opacity-50 peer-disabled:cursor-not-allowed">
+                🤖 API大模型（深度）
+              </span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="analysisMode" value="hybrid" class="hidden peer" disabled id="hybridModeRadio">
+              <span class="block text-center px-3 py-2 border-2 rounded-lg text-xs peer-checked:bg-green-100 peer-checked:border-green-500 peer-checked:text-green-700 transition peer-disabled:opacity-50 peer-disabled:cursor-not-allowed">
+                🔄 混合分析（综合）
+              </span>
+            </label>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button id="loadEmbeddedBtn" onclick="loadEmbeddedAIUI()" class="text-xs bg-cyan-500 text-white px-3 py-1.5 rounded-full hover:bg-cyan-600 transition">
+              加载内嵌AI
+            </button>
+            <button id="configAPIBtn" onclick="openAIConfigModal()" class="text-xs bg-purple-500 text-white px-3 py-1.5 rounded-full hover:bg-purple-600 transition">
+              配置API
+            </button>
+          </div>
+          <p id="analysisModeHint" class="text-xs text-gray-500 mt-2">⚡规则分析随时可用 | 🧠内嵌AI需加载模型(~50MB) | 🤖API需配置Key | 🔄混合=规则+AI</p>
+        </div>
+        
+        <button onclick="runAnalysis()" class="w-full gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg flex items-center justify-center space-x-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+          <span>开始智能分析</span>
+        </button>
+      </div>
+
+      <!-- 分析结果区 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">🔍 分析结果</h3>
+        <div id="analysisResult" class="space-y-4">
+          <div class="text-center py-12 text-gray-400">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+            <p>请输入走访内容并点击"开始智能分析"</p>
+            <p class="text-sm mt-2">系统将自动识别关键信息并生成建议</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 历史分析记录 -->
+    <div class="mt-6 bg-white rounded-2xl p-6 shadow-sm">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">📋 历史分析记录</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="p-4 border border-gray-200 rounded-xl hover:shadow-md transition cursor-pointer" onclick="loadAnalysisHistory(1)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-gray-800">张桂英</span>
+            <span class="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full">高风险</span>
+          </div>
+          <p class="text-xs text-gray-500 line-clamp-2">老人近期病情加重，医疗费用大幅增加，子女长期在外无人照料...</p>
+          <p class="text-xs text-gray-400 mt-2">2024-01-15 14:30</p>
+        </div>
+        <div class="p-4 border border-gray-200 rounded-xl hover:shadow-md transition cursor-pointer" onclick="loadAnalysisHistory(2)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-gray-800">王建国</span>
+            <span class="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full">中风险</span>
+          </div>
+          <p class="text-xs text-gray-500 line-clamp-2">失业三个月，家庭经济压力大，孩子学费待缴，有就业意愿...</p>
+          <p class="text-xs text-gray-400 mt-2">2024-01-14 10:15</p>
+        </div>
+        <div class="p-4 border border-gray-200 rounded-xl hover:shadow-md transition cursor-pointer" onclick="loadAnalysisHistory(3)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-gray-800">刘淑芬</span>
+            <span class="text-xs bg-yellow-100 text-yellow-600 px-2 py-1 rounded-full">低风险</span>
+          </div>
+          <p class="text-xs text-gray-500 line-clamp-2">独居老人，身体尚可，但情绪低落，社交活动少，需关注心理状态...</p>
+          <p class="text-xs text-gray-400 mt-2">2024-01-13 16:00</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 资源联动页面 ========== -->
+  <div id="page-resources" class="page-content hidden">
+    <div class="mb-6">
+      <h2 class="text-xl font-bold text-gray-800">🤝 资源联动中心</h2>
+      <p class="text-sm text-gray-500 mt-1">智能匹配需求与资源，精准帮扶困难家庭</p>
+    </div>
+
+    <!-- 资源概览 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <div class="text-3xl mb-2">🏥</div>
+        <div class="text-2xl font-bold text-gray-800">28</div>
+        <div class="text-xs text-gray-500">医疗资源</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <div class="text-3xl mb-2">💼</div>
+        <div class="text-2xl font-bold text-gray-800">45</div>
+        <div class="text-xs text-gray-500">就业资源</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <div class="text-3xl mb-2">🎓</div>
+        <div class="text-2xl font-bold text-gray-800">32</div>
+        <div class="text-xs text-gray-500">教育资源</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <div class="text-3xl mb-2">❤️</div>
+        <div class="text-2xl font-bold text-gray-800">56</div>
+        <div class="text-xs text-gray-500">社工服务</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- 智能匹配 -->
+      <div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-lg font-semibold text-gray-800">🎯 智能资源匹配</h3>
+          <button onclick="runResourceMatch()" class="text-sm gradient-bg text-white px-4 py-2 rounded-lg font-medium hover:opacity-90 transition">
+            一键匹配
+          </button>
+        </div>
+        <div id="resourceMatchList" class="space-y-4">
+          <div class="p-4 bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-xl">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="flex items-center space-x-2 mb-2">
+                  <span class="font-semibold text-gray-800">张桂英</span>
+                  <span class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">紧急</span>
+                </div>
+                <p class="text-sm text-gray-600 mb-3">需求：居家护理、医疗救助、心理慰藉</p>
+                <div class="flex flex-wrap gap-2">
+                  <span class="tag-badge text-xs bg-white border border-red-300 text-red-600 px-3 py-1 rounded-full cursor-pointer">🏥 社区医院 - 上门问诊</span>
+                  <span class="tag-badge text-xs bg-white border border-purple-300 text-purple-600 px-3 py-1 rounded-full cursor-pointer">❤️ 居家养老服务</span>
+                  <span class="tag-badge text-xs bg-white border border-blue-300 text-blue-600 px-3 py-1 rounded-full cursor-pointer">💊 药品援助项目</span>
+                </div>
+              </div>
+              <button onclick="applyResource('张桂英')" class="text-sm bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition flex-shrink-0">
+                申请对接
+              </button>
+            </div>
+          </div>
+          <div class="p-4 bg-gradient-to-r from-orange-50 to-yellow-50 border border-orange-200 rounded-xl">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="flex items-center space-x-2 mb-2">
+                  <span class="font-semibold text-gray-800">王建国</span>
+                  <span class="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full">高优</span>
+                </div>
+                <p class="text-sm text-gray-600 mb-3">需求：就业帮扶、技能培训、子女教育</p>
+                <div class="flex flex-wrap gap-2">
+                  <span class="tag-badge text-xs bg-white border border-orange-300 text-orange-600 px-3 py-1 rounded-full cursor-pointer">💼 再就业培训中心</span>
+                  <span class="tag-badge text-xs bg-white border border-green-300 text-green-600 px-3 py-1 rounded-full cursor-pointer">🎓 助学基金</span>
+                  <span class="tag-badge text-xs bg-white border border-blue-300 text-blue-600 px-3 py-1 rounded-full cursor-pointer">🏭 企业岗位推荐</span>
+                </div>
+              </div>
+              <button onclick="applyResource('王建国')" class="text-sm bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition flex-shrink-0">
+                申请对接
+              </button>
+            </div>
+          </div>
+          <div class="p-4 bg-gradient-to-r from-yellow-50 to-green-50 border border-yellow-200 rounded-xl">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="flex items-center space-x-2 mb-2">
+                  <span class="font-semibold text-gray-800">刘淑芬</span>
+                  <span class="text-xs bg-yellow-500 text-white px-2 py-0.5 rounded-full">常规</span>
+                </div>
+                <p class="text-sm text-gray-600 mb-3">需求：社交活动、健康监测、陪伴服务</p>
+                <div class="flex flex-wrap gap-2">
+                  <span class="tag-badge text-xs bg-white border border-yellow-300 text-yellow-600 px-3 py-1 rounded-full cursor-pointer">🎨 老年大学课程</span>
+                  <span class="tag-badge text-xs bg-white border border-teal-300 text-teal-600 px-3 py-1 rounded-full cursor-pointer">🏃 社区健身活动</span>
+                  <span class="tag-badge text-xs bg-white border border-pink-300 text-pink-600 px-3 py-1 rounded-full cursor-pointer">👥 志愿者陪伴</span>
+                </div>
+              </div>
+              <button onclick="applyResource('刘淑芬')" class="text-sm bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition flex-shrink-0">
+                申请对接
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 资源库 -->
+      <div class="bg-white rounded-2xl p-6 shadow-sm">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">📦 资源库</h3>
+        <div class="space-y-3 max-h-[500px] overflow-y-auto scrollbar-thin">
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>🏥</span>
+              <span class="font-medium text-sm text-gray-800">社区卫生服务中心</span>
+            </div>
+            <p class="text-xs text-gray-500">提供上门问诊、健康检查、慢病管理</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-green-600">● 可对接</span>
+              <span class="text-xs text-gray-400">剩余名额: 15</span>
+            </div>
+          </div>
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>💼</span>
+              <span class="font-medium text-sm text-gray-800">职业技能培训学校</span>
+            </div>
+            <p class="text-xs text-gray-500">免费技能培训，推荐就业岗位</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-green-600">● 可对接</span>
+              <span class="text-xs text-gray-400">剩余名额: 30</span>
+            </div>
+          </div>
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>❤️</span>
+              <span class="font-medium text-sm text-gray-800">居家养老服务中心</span>
+            </div>
+            <p class="text-xs text-gray-500">生活照料、康复护理、精神慰藉</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-yellow-600">● 紧张</span>
+              <span class="text-xs text-gray-400">剩余名额: 5</span>
+            </div>
+          </div>
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>🎓</span>
+              <span class="font-medium text-sm text-gray-800">希望工程助学基金</span>
+            </div>
+            <p class="text-xs text-gray-500">为困难家庭学生提供学费资助</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-green-600">● 可对接</span>
+              <span class="text-xs text-gray-400">剩余名额: 20</span>
+            </div>
+          </div>
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>👥</span>
+              <span class="font-medium text-sm text-gray-800">志愿者协会</span>
+            </div>
+            <p class="text-xs text-gray-500">提供陪伴、家政、心理支持等服务</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-green-600">● 可对接</span>
+              <span class="text-xs text-gray-400">剩余名额: 充足</span>
+            </div>
+          </div>
+          <div class="p-3 border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition cursor-pointer">
+            <div class="flex items-center space-x-2 mb-1">
+              <span>💊</span>
+              <span class="font-medium text-sm text-gray-800">药品援助项目</span>
+            </div>
+            <p class="text-xs text-gray-500">为慢病患者提供低价药品援助</p>
+            <div class="flex items-center justify-between mt-2">
+              <span class="text-xs text-green-600">● 可对接</span>
+              <span class="text-xs text-gray-400">剩余名额: 25</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ===== 家庭详情弹窗 ===== -->
+<div id="familyModal" class="fixed inset-0 bg-black/50 modal-overlay z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div id="familyModalContent">
+      <!-- 内容通过JS动态生成 -->
+    </div>
+  </div>
+</div>
+
+<!-- ===== 新增走访弹窗 ===== -->
+<div id="visitModal" class="fixed inset-0 bg-black/50 modal-overlay z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-xl font-bold text-gray-800">📝 新增走访记录</h3>
+        <button onclick="closeVisitModal()" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">走访家庭 *</label>
+          <select id="newVisitFamily" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <option value="0">张桂英 - 高风险家庭</option>
+            <option value="1">李明 - 正常家庭</option>
+            <option value="2">王建国 - 中风险家庭</option>
+            <option value="3">刘淑芬 - 低风险家庭</option>
+            <option value="4">陈志强 - 正常家庭</option>
+            <option value="5">赵晓梅 - 高风险家庭</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">走访日期 *</label>
+          <input type="date" id="newVisitDate" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">走访类型</label>
+          <div class="flex flex-wrap gap-2">
+            <label class="cursor-pointer">
+              <input type="radio" name="visitType" value="regular" class="hidden peer">
+              <span class="px-4 py-2 border rounded-lg text-sm peer-checked:bg-purple-100 peer-checked:border-purple-500 peer-checked:text-purple-700 transition">常规探访</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="visitType" value="special" class="hidden peer" checked>
+              <span class="px-4 py-2 border rounded-lg text-sm peer-checked:bg-purple-100 peer-checked:border-purple-500 peer-checked:text-purple-700 transition">专项走访</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="visitType" value="emergency" class="hidden peer">
+              <span class="px-4 py-2 border rounded-lg text-sm peer-checked:bg-purple-100 peer-checked:border-purple-500 peer-checked:text-purple-700 transition">紧急介入</span>
+            </label>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">走访内容 *</label>
+          <textarea id="newVisitContent" rows="5" placeholder="请详细记录走访情况..."
+            class="w-full border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">发现的问题</label>
+          <div class="flex flex-wrap gap-2">
+            <label class="cursor-pointer">
+              <input type="checkbox" class="hidden peer" value="economic">
+              <span class="px-3 py-1.5 border rounded-full text-xs peer-checked:bg-red-100 peer-checked:border-red-400 peer-checked:text-red-700 transition">💰 经济困难</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="checkbox" class="hidden peer" value="medical">
+              <span class="px-3 py-1.5 border rounded-full text-xs peer-checked:bg-orange-100 peer-checked:border-orange-400 peer-checked:text-orange-700 transition">🏥 医疗健康</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="checkbox" class="hidden peer" value="education">
+              <span class="px-3 py-1.5 border rounded-full text-xs peer-checked:bg-blue-100 peer-checked:border-blue-400 peer-checked:text-blue-700 transition">🎓 教育问题</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="checkbox" class="hidden peer" value="psychological">
+              <span class="px-3 py-1.5 border rounded-full text-xs peer-checked:bg-purple-100 peer-checked:border-purple-400 peer-checked:text-purple-700 transition">🧠 心理问题</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="checkbox" class="hidden peer" value="social">
+              <span class="px-3 py-1.5 border rounded-full text-xs peer-checked:bg-green-100 peer-checked:border-green-400 peer-checked:text-green-700 transition">👥 社交隔离</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="flex space-x-3 mt-6">
+        <button onclick="closeVisitModal()" class="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition">
+          取消
+        </button>
+        <button onclick="submitVisit()" class="flex-1 gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg">
+          提交并智能分析
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Toast 通知 ===== -->
+<div id="toast" class="fixed top-24 right-6 z-50 hidden" style="min-width:280px;">
+  <div class="bg-gradient-to-r from-gray-800 to-gray-700 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center space-x-3 border border-gray-600">
+    <span id="toastIcon" style="font-size:24px;">✅</span>
+    <span id="toastMessage" style="font-size:14px;font-weight:500;">操作成功</span>
+  </div>
+</div>
+
+<!-- ===== AI API 配置弹窗 ===== -->
+<div id="aiConfigModal" class="fixed inset-0 bg-black/50 modal-overlay z-50 hidden items-center justify-center p-4">
+  <div class="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-bold text-gray-800">🤖 AI 大模型配置</h3>
+          <p class="text-sm text-gray-500 mt-1">配置 API Key 接入真正的 AI 大模型</p>
+        </div>
+        <button onclick="closeAIConfigModal()" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      
+      <!-- AI 服务商选择 -->
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-3">选择 AI 服务商</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="cursor-pointer">
+            <input type="radio" name="aiProvider" value="deepseek" class="hidden peer" checked>
+            <div class="p-3 border-2 rounded-xl peer-checked:border-purple-500 peer-checked:bg-purple-50 transition">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">🔮</span>
+                <div>
+                  <p class="font-medium text-gray-800">DeepSeek</p>
+                  <p class="text-xs text-gray-500">性价比高，中文能力强</p>
+                </div>
+              </div>
+            </div>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="aiProvider" value="openai" class="hidden peer">
+            <div class="p-3 border-2 rounded-xl peer-checked:border-purple-500 peer-checked:bg-purple-50 transition">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">🌟</span>
+                <div>
+                  <p class="font-medium text-gray-800">OpenAI</p>
+                  <p class="text-xs text-gray-500">GPT-4，全球领先</p>
+                </div>
+              </div>
+            </div>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="aiProvider" value="qwen" class="hidden peer">
+            <div class="p-3 border-2 rounded-xl peer-checked:border-purple-500 peer-checked:bg-purple-50 transition">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">🦄</span>
+                <div>
+                  <p class="font-medium text-gray-800">通义千问</p>
+                  <p class="text-xs text-gray-500">阿里云，免费额度多</p>
+                </div>
+              </div>
+            </div>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="aiProvider" value="zhipu" class="hidden peer">
+            <div class="p-3 border-2 rounded-xl peer-checked:border-purple-500 peer-checked:bg-purple-50 transition">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">🧪</span>
+                <div>
+                  <p class="font-medium text-gray-800">智谱 AI</p>
+                  <p class="text-xs text-gray-500">GLM-4，国产优秀</p>
+                </div>
+              </div>
+            </div>
+          </label>
+        </div>
+      </div>
+      
+      <!-- API Key 输入 -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+        <input type="password" id="apiKeyInput" placeholder="输入您的 API Key..."
+          class="w-full border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+        <p class="text-xs text-gray-500 mt-2">
+          <span id="apiKeyHint">DeepSeek API Key 格式：sk-xxxxxxxxxxxxxxxx</span>
+        </p>
+      </div>
+      
+      <!-- API Base URL（可选） -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">API Base URL（可选，用于代理或自定义端点）</label>
+        <input type="text" id="apiBaseUrlInput" placeholder="默认使用官方 API 地址..."
+          class="w-full border rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+        <p id="apiBaseUrlHint" class="text-xs text-gray-500 mt-2">DeepSeek 默认：https://api.deepseek.com</p>
+      </div>
+      
+      <!-- 模型选择 -->
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">选择模型</label>
+        <select id="modelSelect" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+          <option value="deepseek-chat">DeepSeek Chat（推荐）</option>
+          <option value="deepseek-reasoner">DeepSeek Reasoner（深度推理）</option>
+          <option value="gpt-4o">GPT-4o（OpenAI）</option>
+          <option value="gpt-4o-mini">GPT-4o-mini（OpenAI 经济版）</option>
+          <option value="qwen-turbo">通义千问 Turbo</option>
+          <option value="qwen-plus">通义千问 Plus</option>
+          <option value="glm-4">GLM-4（智谱）</option>
+          <option value="glm-4-flash">GLM-4-Flash（智谱快速版）</option>
+        </select>
+      </div>
+      
+      <!-- 安全提示 -->
+      <div class="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
+        <div class="flex items-start space-x-2">
+          <span class="text-yellow-500">⚠️</span>
+          <div class="text-xs text-yellow-700">
+            <p class="font-medium">安全提示</p>
+            <p class="mt-1">• API Key 仅存储在本地浏览器，不会上传到任何服务器</p>
+            <p>• 请勿在公共电脑上保存 API Key</p>
+            <p>• 建议定期更换 API Key 以确保安全</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 如何获取 API Key -->
+      <div class="mb-6 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <p class="text-sm font-medium text-blue-800 mb-2">💡 如何获取 API Key？</p>
+        <div id="apiKeyGuide" class="text-xs text-blue-700 space-y-1">
+          <p>• DeepSeek：<a href="https://platform.deepseek.com" target="_blank" class="underline">platform.deepseek.com</a> 注册即可获取</p>
+          <p>• OpenAI：<a href="https://platform.openai.com" target="_blank" class="underline">platform.openai.com</a> 需要海外账号</p>
+          <p>• 通义千问：<a href="https://dashscope.console.aliyun.com" target="_blank" class="underline">dashscope.console.aliyun.com</a></p>
+          <p>• 智谱 AI：<a href="https://open.bigmodel.cn" target="_blank" class="underline">open.bigmodel.cn</a></p>
+        </div>
+      </div>
+      
+      <!-- 操作按钮 -->
+      <div class="flex space-x-3">
+        <button onclick="closeAIConfigModal()" class="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition">
+          取消
+        </button>
+        <button onclick="testAIConnection()" class="flex-1 border border-purple-500 text-purple-600 py-3 rounded-xl font-medium hover:bg-purple-50 transition">
+          测试连接
+        </button>
+        <button onclick="saveAIConfig()" class="flex-1 gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg">
+          保存配置
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== 数据模型 ==========
+const families = [
+  {
+    id: 1, name: '张桂英', risk: 'high', riskText: '高风险',
+    tags: ['独居老人', '重大疾病', '低保家庭', '医疗支出高'],
+    members: 1, address: '幸福小区3栋201室',
+    contact: '138****5678', socialWorker: '王社工',
+    lastVisit: '2024-01-15', visitCount: 28,
+    trend: 'up',
+    description: '78岁独居老人，患有糖尿病、高血压等多种慢性疾病，近期病情加重，医疗费用大幅增加。子女长期在外地工作，每年回家一两次。老人行动不便，日常生活较为困难。',
+    history: [
+      { date: '2024-01-15', event: '风险等级升级：中风险 → 高风险', type: 'risk-up' },
+      { date: '2024-01-10', event: '新增标签：医疗支出高', type: 'tag' },
+      { date: '2024-01-05', event: '完成第27次走访', type: 'visit' },
+      { date: '2023-12-20', event: '申请居家养老服务', type: 'resource' },
+      { date: '2023-12-01', event: '纳入低保家庭', type: 'tag' },
+    ]
+  },
+  {
+    id: 2, name: '李明', risk: 'safe', riskText: '正常',
+    tags: ['就业帮扶成功', '单亲家庭', '稳定收入'],
+    members: 2, address: '阳光花园5栋304室',
+    contact: '139****1234', socialWorker: '李社工',
+    lastVisit: '2024-01-12', visitCount: 15,
+    trend: 'down',
+    description: '35岁单亲妈妈，有一个8岁儿子。之前因失业陷入经济困难，经过就业帮扶后成功入职本地企业，目前收入稳定，家庭状况良好。',
+    history: [
+      { date: '2024-01-12', event: '风险等级下降：低风险 → 正常', type: 'risk-down' },
+      { date: '2024-01-05', event: '就业满3个月，收入稳定', type: 'positive' },
+      { date: '2023-11-20', event: '完成就业培训并入职', type: 'resource' },
+      { date: '2023-10-15', event: '申请就业帮扶', type: 'visit' },
+    ]
+  },
+  {
+    id: 3, name: '王建国', risk: 'medium', riskText: '中风险',
+    tags: ['失业', '子女教育', '低保家庭', '有就业意愿'],
+    members: 4, address: '和平里小区7栋502室',
+    contact: '137****9876', socialWorker: '王社工',
+    lastVisit: '2024-01-14', visitCount: 12,
+    trend: 'stable',
+    description: '42岁，失业三个月，妻子打零工收入微薄。有两个孩子分别在读初中和小学，家庭经济压力较大。本人有就业意愿，缺乏技能。',
+    history: [
+      { date: '2024-01-14', event: '完成第12次走访', type: 'visit' },
+      { date: '2024-01-08', event: '新增标签：有就业意愿', type: 'tag' },
+      { date: '2023-12-25', event: '风险等级升级：低风险 → 中风险', type: 'risk-up' },
+      { date: '2023-12-15', event: '失业登记', type: 'tag' },
+    ]
+  },
+  {
+    id: 4, name: '刘淑芬', risk: 'low', riskText: '低风险',
+    tags: ['独居老人', '社交隔离', '情绪低落', '身体尚可'],
+    members: 1, address: '幸福小区1栋103室',
+    contact: '136****5432', socialWorker: '张社工',
+    lastVisit: '2024-01-13', visitCount: 20,
+    trend: 'stable',
+    description: '72岁独居老人，老伴两年前去世。身体状况尚可，能自理生活。但近期情绪低落，很少出门，社交活动极少，存在一定的心理孤独感。',
+    history: [
+      { date: '2024-01-13', event: '完成第20次走访', type: 'visit' },
+      { date: '2024-01-06', event: '建议参加老年大学活动', type: 'suggestion' },
+      { date: '2023-12-28', event: '新增标签：情绪低落', type: 'tag' },
+      { date: '2023-12-01', event: '季度评估：低风险', type: 'assessment' },
+    ]
+  },
+  {
+    id: 5, name: '陈志强', risk: 'safe', riskText: '正常',
+    tags: ['稳定家庭', '双职工', '子女优秀'],
+    members: 4, address: '阳光花园2栋601室',
+    contact: '135****8765', socialWorker: '李社工',
+    lastVisit: '2024-01-08', visitCount: 5,
+    trend: 'stable',
+    description: '典型的双职工家庭，夫妻二人都有稳定工作，收入中等偏上。有两个孩子，学习成绩优秀。家庭关系和睦，无明显困难。',
+    history: [
+      { date: '2024-01-08', event: '年度走访完成', type: 'visit' },
+      { date: '2023-06-15', event: '家庭评估：正常', type: 'assessment' },
+    ]
+  },
+  {
+    id: 6, name: '赵晓梅', risk: 'high', riskText: '高风险',
+    tags: ['残障家庭', '低保家庭', '重大疾病', '多重困难'],
+    members: 3, address: '和平里小区3栋405室',
+    contact: '134****3210', socialWorker: '王社工',
+    lastVisit: '2024-01-16', visitCount: 35,
+    trend: 'stable',
+    description: '丈夫因意外致残，丧失劳动能力。本人身体不好，需要照顾丈夫和上学的孩子。家庭主要依靠低保和亲戚接济，生活十分困难。',
+    history: [
+      { date: '2024-01-16', event: '完成第35次走访', type: 'visit' },
+      { date: '2024-01-10', event: '申请临时救助', type: 'resource' },
+      { date: '2023-12-20', event: '新增标签：多重困难', type: 'tag' },
+      { date: '2023-11-01', event: '持续高风险关注', type: 'assessment' },
+    ]
+  },
+];
+
+const visits = [
+  { id: 1, family: '张桂英', familyId: 0, date: '2024-01-15', time: '14:30', worker: '王社工', type: '专项走访', typeColor: 'orange',
+    content: '今日上门探访张桂英老人。老人近期血糖控制不佳，经常感到头晕乏力。由于行动不便，去医院检查很困难。老人提到最近医疗费用增加了不少，子女寄的钱不够用。精神状态也不太好，经常一个人发呆。',
+    issues: ['医疗健康', '经济困难', '心理问题'],
+    riskChange: '升级'
+  },
+  { id: 2, family: '王建国', familyId: 2, date: '2024-01-14', time: '10:15', worker: '王社工', type: '常规探访', typeColor: 'blue',
+    content: '走访王建国一家。王建国失业已经三个月，一直在找工作但不理想。妻子在超市打零工，收入不高。两个孩子的学费和生活费压力很大。王建国表示愿意参加技能培训，希望能找到稳定的工作。',
+    issues: ['经济困难', '教育问题'],
+    riskChange: '持平'
+  },
+  { id: 3, family: '刘淑芬', familyId: 3, date: '2024-01-13', time: '16:00', worker: '张社工', type: '常规探访', typeColor: 'blue',
+    content: '上门探访刘淑芬老人。老人身体还行，但精神状态不好。老伴走后一直不太适应，经常一个人在家看电视，很少出门。社区的老年活动也没参加过。建议老人多出去走走，参加一些社交活动。',
+    issues: ['心理问题', '社交隔离'],
+    riskChange: '持平'
+  },
+  { id: 4, family: '李明', familyId: 1, date: '2024-01-12', time: '09:30', worker: '李社工', type: '回访', typeColor: 'green',
+    content: '回访李明家庭。李明入职已经三个月了，工作稳定，收入也不错。孩子学习成绩也挺好。李明说现在生活有奔头了，非常感谢社区的帮助。家庭整体状况明显改善。',
+    issues: [],
+    riskChange: '下降'
+  },
+  { id: 5, family: '赵晓梅', familyId: 5, date: '2024-01-10', time: '11:00', worker: '王社工', type: '紧急介入', typeColor: 'red',
+    content: '赵晓梅打电话求助，说丈夫病情加重，需要送医但自己无力搀扶。紧急联系社区医院和志愿者，将其丈夫送往医院治疗。后续将帮助申请临时医疗救助。',
+    issues: ['医疗健康', '经济困难'],
+    riskChange: '持平'
+  },
+];
+
+// ========== 页面切换 ==========
+function switchTab(tabName) {
+  // 隐藏所有页面
+  document.querySelectorAll('.page-content').forEach(page => {
+    page.classList.add('hidden');
+    page.classList.remove('fade-in');
+  });
+  
+  // 重置所有标签样式
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('border-purple-600', 'text-purple-600');
+    btn.classList.add('border-transparent', 'text-gray-500');
+  });
+  
+  // 显示目标页面
+  const page = document.getElementById('page-' + tabName);
+  page.classList.remove('hidden');
+  setTimeout(() => page.classList.add('fade-in'), 10);
+  
+  // 高亮目标标签
+  const tab = document.getElementById('tab-' + tabName);
+  tab.classList.remove('border-transparent', 'text-gray-500');
+  tab.classList.add('border-purple-600', 'text-purple-600');
+}
+
+// ========== 家庭卡片渲染 ==========
+function renderFamilies(filteredFamilies = families) {
+  const grid = document.getElementById('familyGrid');
+  const riskColors = {
+    high: 'from-red-500 to-red-600',
+    medium: 'from-orange-500 to-orange-600',
+    low: 'from-yellow-500 to-yellow-600',
+    safe: 'from-green-500 to-green-600'
+  };
+  const riskBgColors = {
+    high: 'bg-red-100 text-red-700',
+    medium: 'bg-orange-100 text-orange-700',
+    low: 'bg-yellow-100 text-yellow-700',
+    safe: 'bg-green-100 text-green-700'
+  };
+  
+  grid.innerHTML = filteredFamilies.map((f, idx) => `
+    <div class="bg-white rounded-2xl shadow-sm overflow-hidden card-hover cursor-pointer" onclick="showFamilyDetail(${families.indexOf(f)})">
+      <div class="h-2 bg-gradient-to-r ${riskColors[f.risk]}"></div>
+      <div class="p-6">
+        <div class="flex items-start justify-between mb-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-12 h-12 bg-gradient-to-br ${riskColors[f.risk]} rounded-full flex items-center justify-center text-white text-lg font-bold">
+              ${f.name.charAt(0)}
+            </div>
+            <div>
+              <h3 class="font-semibold text-gray-800">${f.name}</h3>
+              <p class="text-xs text-gray-500">${f.members}口人 | ${f.socialWorker}</p>
+            </div>
+          </div>
+          <span class="text-xs px-2.5 py-1 rounded-full font-medium ${riskBgColors[f.risk]}">
+            ${f.riskText}
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mb-4">
+          ${f.tags.slice(0, 3).map(tag => `
+            <span class="tag-badge text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">${tag}</span>
+          `).join('')}
+          ${f.tags.length > 3 ? `<span class="text-xs text-gray-400">+${f.tags.length - 3}</span>` : ''}
+        </div>
+        <div class="flex items-center justify-between text-sm text-gray-500 pt-3 border-t border-gray-100">
+          <span>📍 ${f.address.split('区')[0]}区</span>
+          <span>📅 上次走访: ${f.lastVisit}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ========== 家庭筛选 ==========
+function filterFamilies() {
+  const search = document.getElementById('familySearch').value.toLowerCase();
+  const riskFilter = document.getElementById('riskFilter').value;
+  
+  let filtered = families.filter(f => {
+    const matchSearch = f.name.toLowerCase().includes(search) || 
+                       f.address.toLowerCase().includes(search) ||
+                       f.tags.some(t => t.toLowerCase().includes(search));
+    const matchRisk = !riskFilter || f.risk === riskFilter;
+    return matchSearch && matchRisk;
+  });
+  
+  renderFamilies(filtered);
+}
+
+// ========== 家庭详情弹窗 ==========
+function showFamilyDetail(index) {
+  const f = families[index];
+  const modal = document.getElementById('familyModal');
+  const content = document.getElementById('familyModalContent');
+  
+  const riskColors = {
+    high: 'from-red-500 to-red-600',
+    medium: 'from-orange-500 to-orange-600',
+    low: 'from-yellow-500 to-yellow-600',
+    safe: 'from-green-500 to-green-600'
+  };
+  const riskBgColors = {
+    high: 'bg-red-100 text-red-700',
+    medium: 'bg-orange-100 text-orange-700',
+    low: 'bg-yellow-100 text-yellow-700',
+    safe: 'bg-green-100 text-green-700'
+  };
+  
+  const trendIcons = {
+    up: '📈 上升中',
+    down: '📉 下降中',
+    stable: '➡️ 持平'
+  };
+  
+  content.innerHTML = `
+    <div class="h-3 bg-gradient-to-r ${riskColors[f.risk]}"></div>
+    <div class="p-6">
+      <div class="flex items-start justify-between mb-6">
+        <div class="flex items-center space-x-4">
+          <div class="w-16 h-16 bg-gradient-to-br ${riskColors[f.risk]} rounded-2xl flex items-center justify-center text-white text-2xl font-bold shadow-lg">
+            ${f.name.charAt(0)}
+          </div>
+          <div>
+            <h2 class="text-2xl font-bold text-gray-800">${f.name}家庭</h2>
+            <div class="flex items-center space-x-3 mt-1">
+              <span class="text-sm ${riskBgColors[f.risk]} px-3 py-1 rounded-full font-medium">${f.riskText}</span>
+              <span class="text-sm text-gray-500">${trendIcons[f.trend]}</span>
+            </div>
+          </div>
+        </div>
+        <button onclick="closeFamilyModal()" class="text-gray-400 hover:text-gray-600 p-2">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">家庭人口</p>
+          <p class="text-lg font-semibold text-gray-800">${f.members} 人</p>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">走访次数</p>
+          <p class="text-lg font-semibold text-gray-800">${f.visitCount} 次</p>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">负责社工</p>
+          <p class="text-lg font-semibold text-gray-800">${f.socialWorker}</p>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">最近走访</p>
+          <p class="text-lg font-semibold text-gray-800">${f.lastVisit}</p>
+        </div>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="font-semibold text-gray-800 mb-3">🏷️ 家庭标签</h3>
+        <div class="flex flex-wrap gap-2">
+          ${f.tags.map(tag => `
+            <span class="tag-badge px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm cursor-pointer">${tag}</span>
+          `).join('')}
+        </div>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="font-semibold text-gray-800 mb-3">📝 家庭情况</h3>
+        <p class="text-sm text-gray-600 leading-relaxed bg-gray-50 p-4 rounded-xl">${f.description}</p>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="font-semibold text-gray-800 mb-3">📞 联系信息</h3>
+        <div class="space-y-2 text-sm text-gray-600">
+          <p>📍 地址：${f.address}</p>
+          <p>📱 联系电话：${f.contact}</p>
+        </div>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="font-semibold text-gray-800 mb-3">📜 动态记录</h3>
+        <div class="space-y-3">
+          ${f.history.map(h => `
+            <div class="flex space-x-3">
+              <div class="flex flex-col items-center">
+                <div class="w-3 h-3 rounded-full ${h.type === 'risk-up' ? 'bg-red-500' : h.type === 'risk-down' ? 'bg-green-500' : h.type === 'tag' ? 'bg-purple-500' : h.type === 'resource' ? 'bg-blue-500' : 'bg-gray-400'}"></div>
+                <div class="w-0.5 flex-1 bg-gray-200"></div>
+              </div>
+              <div class="pb-3">
+                <p class="text-sm text-gray-800">${h.event}</p>
+                <p class="text-xs text-gray-400 mt-1">${h.date}</p>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      
+      <div class="flex space-x-3">
+        <button onclick="closeFamilyModal(); switchTab('visits'); openVisitModal();" class="flex-1 gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg">
+          📝 记录走访
+        </button>
+        <button onclick="closeFamilyModal(); switchTab('resources');" class="flex-1 border border-purple-500 text-purple-600 py-3 rounded-xl font-medium hover:bg-purple-50 transition">
+          🤝 资源匹配
+        </button>
+      </div>
+    </div>
+  `;
+  
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeFamilyModal() {
+  const modal = document.getElementById('familyModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+// ========== 走访记录渲染 ==========
+function renderVisits() {
+  const list = document.getElementById('visitList');
+  const typeColors = {
+    red: 'bg-red-100 text-red-700',
+    orange: 'bg-orange-100 text-orange-700',
+    blue: 'bg-blue-100 text-blue-700',
+    green: 'bg-green-100 text-green-700'
+  };
+  const riskColors = {
+    '升级': 'text-red-600 bg-red-50',
+    '下降': 'text-green-600 bg-green-50',
+    '持平': 'text-gray-500 bg-gray-50',
+    '待分析': 'text-blue-600 bg-blue-50'
+  };
+  
+  list.innerHTML = visits.map(v => `
+    <div class="p-4 border border-gray-200 rounded-xl hover:border-purple-300 transition cursor-pointer" onclick="showVisitDetail(${v.id})">
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+            <span class="font-medium text-purple-600">${v.family.charAt(0)}</span>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h4 class="font-medium text-gray-800">${v.family}</h4>
+              <span class="text-xs px-2 py-0.5 rounded-full ${typeColors[v.typeColor]}">${v.type}</span>
+            </div>
+            <p class="text-xs text-gray-500">${v.date} ${v.time} | ${v.worker}</p>
+          </div>
+        </div>
+        <span class="text-xs px-2 py-1 rounded-full font-medium ${riskColors[v.riskChange]}">
+          风险${v.riskChange}
+        </span>
+      </div>
+      <p class="text-sm text-gray-600 line-clamp-2 mb-3">${v.content}</p>
+      ${v.issues.length > 0 ? `
+        <div class="flex flex-wrap gap-1.5">
+          ${v.issues.map(issue => `
+            <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">${issue}</span>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+function showVisitDetail(visitId) {
+  const visit = visits.find(v => v.id === visitId);
+  if (!visit) return;
+  
+  const family = families.find(f => f.name === visit.family);
+  const typeColors = {
+    red: 'bg-red-100 text-red-700',
+    orange: 'bg-orange-100 text-orange-700',
+    blue: 'bg-blue-100 text-blue-700',
+    green: 'bg-green-100 text-green-700'
+  };
+  const riskColors = {
+    '升级': 'text-red-600 bg-red-50',
+    '下降': 'text-green-600 bg-green-50',
+    '持平': 'text-gray-500 bg-gray-50',
+    '待分析': 'text-blue-600 bg-blue-50'
+  };
+  
+  const modal = document.getElementById('familyModal');
+  const content = document.getElementById('familyModalContent');
+  
+  content.innerHTML = `
+    <div class="p-6">
+      <div class="flex items-start justify-between mb-6">
+        <div class="flex items-center space-x-4">
+          <div class="w-14 h-14 bg-purple-100 rounded-2xl flex items-center justify-center">
+            <span class="text-2xl font-medium text-purple-600">${visit.family.charAt(0)}</span>
+          </div>
+          <div>
+            <h2 class="text-xl font-bold text-gray-800">${visit.family} - 走访详情</h2>
+            <div class="flex items-center space-x-2 mt-1">
+              <span class="text-xs px-2 py-0.5 rounded-full ${typeColors[visit.typeColor]}">${visit.type}</span>
+              <span class="text-xs text-gray-500">${visit.date} ${visit.time}</span>
+            </div>
+          </div>
+        </div>
+        <button onclick="closeFamilyModal()" class="text-gray-400 hover:text-gray-600 p-2">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">走访社工</p>
+          <p class="text-lg font-semibold text-gray-800">${visit.worker}</p>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs text-gray-500 mb-1">风险变化</p>
+          <p class="text-lg font-semibold ${riskColors[visit.riskChange] || 'text-gray-600'} px-3 py-1 rounded-full inline-block">风险${visit.riskChange}</p>
+        </div>
+      </div>
+      
+      <div class="mb-6">
+        <h3 class="font-semibold text-gray-800 mb-3">📝 走访内容</h3>
+        <div class="text-sm text-gray-600 leading-relaxed bg-gray-50 p-4 rounded-xl whitespace-pre-wrap">${visit.content}</div>
+      </div>
+      
+      ${visit.issues && visit.issues.length > 0 ? `
+        <div class="mb-6">
+          <h3 class="font-semibold text-gray-800 mb-3">⚠️ 发现的问题</h3>
+          <div class="flex flex-wrap gap-2">
+            ${visit.issues.map(issue => `
+              <span class="tag-badge px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-sm">${issue}</span>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+      
+      ${family ? `
+        <div class="mb-6">
+          <h3 class="font-semibold text-gray-800 mb-3">📋 家庭当前状态</h3>
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-gray-500">当前风险等级</span>
+              <span class="font-medium ${family.risk === 'high' ? 'text-red-600' : family.risk === 'medium' ? 'text-orange-600' : family.risk === 'low' ? 'text-yellow-600' : 'text-green-600'}">${family.riskText}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-500">家庭标签</span>
+              <span class="font-medium text-gray-800">${family.tags.length} 个</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-500">累计走访次数</span>
+              <span class="font-medium text-gray-800">${family.visitCount} 次</span>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+      
+      <div class="flex space-x-3">
+        <button onclick="closeFamilyModal()" class="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-50 transition">
+          关闭
+        </button>
+        ${family ? `
+          <button onclick="closeFamilyModal(); showFamilyDetail(${families.indexOf(family)})" class="flex-1 gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg">
+            查看家庭档案
+          </button>
+        ` : ''}
+      </div>
+    </div>
+  `;
+  
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+// ========== 新增走访弹窗 ==========
+function openVisitModal() {
+  const modal = document.getElementById('visitModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.getElementById('newVisitDate').valueAsDate = new Date();
+}
+
+function closeVisitModal() {
+  const modal = document.getElementById('visitModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+let currentAnalysisResult = null;
+let currentAnalysisFamilyIdx = null;
+let aiAPIConfigured = false;
+
+// ========== AI API 配置信息 ==========
+const AI_PROVIDERS = {
+  deepseek: { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat' },
+  openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com', defaultModel: 'gpt-4o-mini' },
+  qwen: { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/api/v1', defaultModel: 'qwen-turbo' },
+  zhipu: { name: '智谱AI', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4-flash' }
+};
+
+// ========== AI 配置弹窗管理 ==========
+function openAIConfigModal() {
+  const modal = document.getElementById('aiConfigModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  loadSavedAIConfig();
+}
+
+function closeAIConfigModal() {
+  document.getElementById('aiConfigModal').classList.add('hidden');
+  document.getElementById('aiConfigModal').classList.remove('flex');
+}
+
+function loadSavedAIConfig() {
+  const saved = localStorage.getItem('aiAPIConfig');
+  if (saved) {
+    try {
+      const cfg = JSON.parse(saved);
+      document.getElementById('apiKeyInput').value = cfg.apiKey || '';
+      document.getElementById('apiBaseUrlInput').value = cfg.baseUrl || '';
+      document.getElementById('modelSelect').value = cfg.model || '';
+      const radio = document.querySelector('input[name="aiProvider"][value="' + cfg.provider + '"]');
+      if (radio) radio.checked = true;
+    } catch(e) {}
+  }
+}
+
+function saveAIConfig() {
+  const provider = document.querySelector('input[name="aiProvider"]:checked')?.value || 'deepseek';
+  const apiKey = document.getElementById('apiKeyInput').value.trim();
+  const baseUrl = document.getElementById('apiBaseUrlInput').value.trim();
+  const model = document.getElementById('modelSelect').value;
+  
+  if (!apiKey) { showToast('请输入 API Key', '⚠️'); return; }
+  
+  const cfg = { provider, apiKey, baseUrl: baseUrl || AI_PROVIDERS[provider].baseUrl, model: model || AI_PROVIDERS[provider].defaultModel };
+  localStorage.setItem('aiAPIConfig', JSON.stringify(cfg));
+  aiAPIConfigured = true;
+  updateAIStatusUI(true, AI_PROVIDERS[provider].name);
+  closeAIConfigModal();
+  showToast('AI 配置已保存！', '✅');
+}
+
+function testAIConnection() {
+  const provider = document.querySelector('input[name="aiProvider"]:checked')?.value || 'deepseek';
+  const apiKey = document.getElementById('apiKeyInput').value.trim();
+  const baseUrl = document.getElementById('apiBaseUrlInput').value.trim() || AI_PROVIDERS[provider].baseUrl;
+  const model = document.getElementById('modelSelect').value || AI_PROVIDERS[provider].defaultModel;
+  
+  if (!apiKey) { showToast('请输入 API Key', '⚠️'); return; }
+  showToast('正在测试连接...', '⏳');
+  
+  callAIAPI(provider, apiKey, baseUrl, model, '你好，请回复"连接成功"').then(res => {
+    if (res) showToast('连接成功！', '✅');
+    else showToast('连接失败', '❌');
+  }).catch(e => showToast('失败: ' + e.message, '❌'));
+}
+
+function updateAIStatusUI(configured, name) {
+  const icon = document.getElementById('aiStatusIcon');
+  const text = document.getElementById('aiStatusText');
+  const btn = document.getElementById('aiConfigBtn');
+  document.getElementById('aiModeRadio').disabled = !configured;
+  document.getElementById('hybridModeRadio').disabled = !configured;
+  if (configured) {
+    icon.className = 'w-3 h-3 rounded-full bg-green-500';
+    text.textContent = name + ' 已配置';
+    btn.textContent = '修改';
+  } else {
+    icon.className = 'w-3 h-3 rounded-full bg-gray-400';
+    text.textContent = 'AI 未配置';
+    btn.textContent = '配置 AI';
+  }
+}
+
+// ========== AI API 调用 ==========
+async function callAIAPI(provider, apiKey, baseUrl, model, message) {
+  const endpoints = {
+    deepseek: baseUrl + '/v1/chat/completions',
+    openai: baseUrl + '/v1/chat/completions',
+    qwen: baseUrl + '/services/aigc/text-generation/generation',
+    zhipu: baseUrl + '/chat/completions'
+  };
+  
+  const body = provider === 'qwen' 
+    ? { model, input: { messages: [{role:'user',content:message}] } }
+    : { model, messages: [{role:'user',content:message}], temperature: 0.7, max_tokens: 2000 };
+  
+  const res = await fetch(endpoints[provider], {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify(body)
+  });
+  
+  if (!res.ok) throw new Error('API错误 ' + res.status);
+  const data = await res.json();
+  return provider === 'qwen' ? data.output?.text : data.choices?.[0]?.message?.content;
+}
+
+// ========== 构建分析 Prompt ==========
+function buildAnalysisPrompt(content, family) {
+  return `你是社区工作专家，分析走访记录并返回JSON格式结果。
+
+家庭：${family.name}，风险：${family.riskText}，标签：${family.tags.join('、')}，走访${family.visitCount}次。
+
+走访内容：
+${content}
+
+返回JSON：
+{
+  "risk_assessment": { "score": 0-100, "level": "高风险/中风险/低风险/正常", "trend": "up/stable/down", "reason": "理由" },
+  "detected_issues": [{ "type": "medical/economic/psychological等", "severity": "critical/high/medium/low", "description": "描述" }],
+  "suggested_tags": ["标签"],
+  "disposal_suggestions": [{ "priority": "high/medium/low", "title": "标题", "description": "描述", "department": "部门", "timeline": "时限" }],
+  "ai_insight": "AI洞察建议"
+}`;
+}
+
+function parseAIResponse(response, ruleAnalysis) {
+  try {
+    const json = JSON.parse(response.match(/\{[\s\S]*\}/)[0]);
+    const score = Math.min(100, Math.max(0, ruleAnalysis.riskScore * 0.3 + (json.risk_assessment?.score || 50) * 0.7));
+    const level = score >= 70 ? 'high' : score >= 50 ? 'medium' : score >= 30 ? 'low' : 'safe';
+    return {
+      ...ruleAnalysis,
+      riskScore: score,
+      riskLevel: level,
+      riskText: level === 'high' ? '高风险' : level === 'medium' ? '中风险' : level === 'low' ? '低风险' : '正常',
+      trendDirection: json.risk_assessment?.trend || ruleAnalysis.trendDirection,
+      aiInsight: json.ai_insight || '',
+      aiResult: json,
+      analysisMode: 'ai_fusion'
+    };
+  } catch(e) {
+    return { ...ruleAnalysis, aiRawResponse: response, analysisMode: 'rule_fallback' };
+  }
+}
+
+function getIssueIcon(t) { return {medical:'🏥',economic:'💰',psychological:'🧠',social:'👥',education:'🎓'}[t] || '📋'; }
+function getIssueLabel(t) { return {medical:'医疗健康',economic:'经济状况',psychological:'心理状态'}[t] || '其他'; }
+function getIssueTag(t) { return {medical:'医疗健康',economic:'经济困难',psychological:'心理问题'}[t] || '其他'; }
+
+// ========== 内嵌 AI 加载 ==========
+let embeddedAIReady = false;
+async function loadEmbeddedAIUI() {
+  const btn = document.getElementById('loadEmbeddedBtn');
+  btn.textContent = '加载中...';
+  btn.disabled = true;
+  btn.className = 'text-xs bg-gray-400 text-white px-3 py-1.5 rounded-full cursor-not-allowed';
+  
+  // 显示加载进度区域
+  const hintEl = document.getElementById('analysisModeHint');
+  hintEl.innerHTML = '<span class="text-cyan-600">⏳ 正在加载内嵌AI，请勿关闭页面...</span>';
+  
+  let lastMessage = '';
+  const progressInterval = setInterval(() => {
+    if (lastMessage) hintEl.innerHTML = '<span class="text-cyan-600">⏳ ' + lastMessage + '</span>';
+  }, 500);
+  
+  const success = await window.loadEmbeddedAI(progress => {
+    if (progress.status === 'loading') {
+      lastMessage = progress.message;
+      hintEl.innerHTML = '<span class="text-cyan-600">⏳ ' + progress.message + '</span>';
+      btn.textContent = progress.message.substring(0, 6);
+    }
+  });
+  
+  clearInterval(progressInterval);
+  
+  if (success) {
+    embeddedAIReady = true;
+    btn.textContent = '✓ 已加载';
+    btn.className = 'text-xs bg-green-500 text-white px-3 py-1.5 rounded-full';
+    document.getElementById('embeddedModeRadio').disabled = false;
+    updateHybridAvailability();
+    hintEl.innerHTML = '<span class="text-green-600">✅ 内嵌AI已就绪，可使用内嵌AI分析和混合分析</span>';
+    showToast('内嵌AI加载成功！', '✅');
+  } else {
+    btn.textContent = '重新加载';
+    btn.className = 'text-xs bg-red-500 text-white px-3 py-1.5 rounded-full hover:bg-red-600 transition';
+    btn.disabled = false;
+    const errMsg = window.embeddedAIError || '未知错误';
+    hintEl.innerHTML = '<span class="text-red-600">❌ 加载失败: ' + errMsg + '</span><br><span class="text-gray-500 text-xs">可使用规则分析或API大模型分析</span>';
+    showToast('内嵌AI加载失败: ' + errMsg, '❌');
+  }
+}
+
+function updateHybridAvailability() {
+  const apiConfigured = localStorage.getItem('aiAPIConfig');
+  const hybridRadio = document.getElementById('hybridModeRadio');
+  if (embeddedAIReady && apiConfigured) {
+    hybridRadio.disabled = false;
+  }
+}
+
+// ========== 运行内嵌AI分析 ==========
+async function runEmbeddedAIAnalysis(content, family) {
+  const result = await window.runEmbeddedAI(content);
+  if (!result) return null;
+  
+  // 使用简化版返回结果
+  let riskScore = 30 + (result.riskAdjust || 0);
+  const riskTrend = result.riskTrend || 'stable';
+  
+  // 根据情感分析结果生成描述
+  let sentimentDesc = '';
+  if (result.sentiment && result.sentiment[0]) {
+    const s = result.sentiment[0];
+    sentimentDesc = s.label === 'NEGATIVE' 
+      ? `检测到负面情绪倾向(置信度${Math.round(s.score*100)}%)，可能存在潜在问题`
+      : `检测到正面情绪倾向(置信度${Math.round(s.score*100)}%)，状态相对稳定`;
+  }
+  
+  riskScore = Math.min(100, Math.max(0, riskScore));
+  const level = riskScore >= 70 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 30 ? 'low' : 'safe';
+  
+  return {
+    riskScore, 
+    riskLevel: level, 
+    riskText: level === 'high' ? '高风险' : level === 'medium' ? '中风险' : level === 'low' ? '低风险' : '正常',
+    trendDirection: riskTrend,
+    detectedIssues: [],
+    aiResult: result,
+    aiInsight: sentimentDesc,
+    analysisMode: 'embedded'
+  };
+}
+
+function submitVisit() {
+  const familyIdx = parseInt(document.getElementById('newVisitFamily').value);
+  const date = document.getElementById('newVisitDate').value;
+  const content = document.getElementById('newVisitContent').value;
+  const visitTypeEl = document.querySelector('input[name="visitType"]:checked');
+  const visitType = visitTypeEl ? visitTypeEl.value : 'special';
+  
+  const issueCheckboxes = document.querySelectorAll('input[type="checkbox"]:checked');
+  const issueLabels = [];
+  const issueMap = {
+    economic: '经济困难',
+    medical: '医疗健康',
+    education: '教育问题',
+    psychological: '心理问题',
+    social: '社交隔离'
+  };
+  issueCheckboxes.forEach(cb => {
+    if (issueMap[cb.value]) {
+      issueLabels.push(issueMap[cb.value]);
+    }
+  });
+  
+  if (!content.trim()) {
+    showToast('请填写走访内容', '⚠️');
+    return;
+  }
+  
+  const family = families[familyIdx];
+  const typeMap = {
+    regular: { name: '常规探访', color: 'blue' },
+    special: { name: '专项走访', color: 'orange' },
+    emergency: { name: '紧急介入', color: 'red' }
+  };
+  const typeInfo = typeMap[visitType] || typeMap.special;
+  
+  const now = new Date();
+  const timeStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  const dateStr = date || now.toISOString().split('T')[0];
+  
+  const newVisit = {
+    id: visits.length + 1,
+    family: family.name,
+    familyId: familyIdx,
+    date: dateStr,
+    time: timeStr,
+    worker: '王社工',
+    type: typeInfo.name,
+    typeColor: typeInfo.color,
+    content: content,
+    issues: issueLabels,
+    riskChange: '待分析'
+  };
+  
+  visits.unshift(newVisit);
+  
+  family.visitCount += 1;
+  family.lastVisit = dateStr;
+  
+  closeVisitModal();
+  showToast('走访记录已提交，正在智能分析...', '⏳');
+  
+  currentAnalysisFamilyIdx = familyIdx;
+  
+  setTimeout(() => {
+    const analysis = analyzeContent(content, family);
+    currentAnalysisResult = analysis;
+    
+    if (visits.length > 0 && visits[0].family === family.name) {
+      visits[0].riskChange = analysis.trendDirection === 'up' ? '升级' : analysis.trendDirection === 'down' ? '下降' : '持平';
+    }
+    
+    family.risk = analysis.riskLevel;
+    family.riskText = analysis.riskText;
+    family.trend = analysis.trendDirection;
+    
+    analysis.suggestedTags.forEach(tag => {
+      if (!family.tags.includes(tag)) {
+        family.tags.push(tag);
+      }
+    });
+    
+    const historyEvent = analysis.trendDirection === 'up' 
+      ? `风险等级变化：${analysis.riskChange}`
+      : `完成第${family.visitCount}次走访`;
+    const historyType = analysis.trendDirection === 'up' 
+      ? 'risk-up' 
+      : analysis.trendDirection === 'down' 
+      ? 'risk-down' 
+      : 'visit';
+    family.history.unshift({
+      date: dateStr,
+      event: historyEvent,
+      type: historyType
+    });
+    
+    renderFamilies();
+    renderVisits();
+    updateChartsRealtime(); // 实时更新图表
+    
+    showToast('智能分析完成，家庭档案已更新', '✅');
+    switchTab('analysis');
+    
+    document.getElementById('analysisFamily').value = familyIdx;
+    document.getElementById('visitContent').value = content;
+    
+    displayAnalysisResult(analysis, family);
+  }, 1500);
+}
+
+// ========== 智能语义分析 ==========
+function fillTemplate(type) {
+  const templates = {
+    1: '今日上门进行常规探访，家庭整体状况稳定，家庭成员身体健康，生活正常。询问了近期的生活情况和需求，暂无特殊困难。',
+    2: '走访了解到服务对象近期身体状况不佳，经常感到不适，需要长期服药控制。医疗费用支出较大，给家庭带来一定经济压力。行动不便，就医困难。',
+    3: '服务对象家庭经济困难，主要收入来源不稳定，日常生活开支紧张。子女教育费用、医疗费用等支出压力大，有强烈的改善意愿。',
+    4: '服务对象近期情绪低落，寡言少语，对很多事情都提不起兴趣。睡眠质量差，食欲不振。缺乏社交活动，经常一个人待着。'
+  };
+  document.getElementById('visitContent').value = templates[type];
+}
+
+async function runAnalysis() {
+  const content = document.getElementById('visitContent').value;
+  const familyIdx = parseInt(document.getElementById('analysisFamily').value);
+  const family = families[familyIdx];
+  const resultDiv = document.getElementById('analysisResult');
+  
+  const modeRadio = document.querySelector('input[name="analysisMode"]:checked');
+  const analysisMode = modeRadio ? modeRadio.value : 'rule';
+  
+  if (!content.trim()) {
+    showToast('请输入走访内容', '⚠️');
+    return;
+  }
+  
+  currentAnalysisFamilyIdx = familyIdx;
+  const ruleAnalysis = analyzeContent(content, family);
+  
+  // ⚡ 规则分析（本地快速）
+  if (analysisMode === 'rule') {
+    currentAnalysisResult = ruleAnalysis;
+    displayAnalysisResult(ruleAnalysis, family);
+    return;
+  }
+  
+  // 🧠 内嵌AI分析（浏览器本地）
+  if (analysisMode === 'embedded') {
+    if (!embeddedAIReady) {
+      showToast('请先加载内嵌AI模型', '⚠️');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+      return;
+    }
+    
+    resultDiv.innerHTML = '<div class="text-center py-8"><div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-cyan-500 border-t-transparent"></div><p class="mt-4 text-gray-600">🧠 内嵌AI正在分析...</p><p class="text-sm text-gray-400 mt-1">模型推理中，无需网络</p></div>';
+    
+    try {
+      const embeddedResult = await runEmbeddedAIAnalysis(content, family);
+      if (embeddedResult) {
+        const fusionResult = { ...ruleAnalysis, ...embeddedResult, analysisMode: 'embedded_fusion' };
+        currentAnalysisResult = fusionResult;
+        displayAnalysisResult(fusionResult, family);
+        showToast('内嵌AI分析完成！', '✅');
+      } else {
+        showToast('内嵌AI分析失败，使用规则分析', '⚠️');
+        currentAnalysisResult = ruleAnalysis;
+        displayAnalysisResult(ruleAnalysis, family);
+      }
+    } catch(e) {
+      showToast('分析出错: ' + e.message, '❌');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+    }
+    return;
+  }
+  
+  // 🤖 API大模型分析（深度）
+  if (analysisMode === 'api') {
+    const savedConfig = localStorage.getItem('aiAPIConfig');
+    if (!savedConfig) {
+      showToast('请先配置AI API Key', '⚠️');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+      return;
+    }
+    
+    const cfg = JSON.parse(savedConfig);
+    resultDiv.innerHTML = '<div class="text-center py-8"><div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent"></div><p class="mt-4 text-gray-600">🤖 ' + (AI_PROVIDERS[cfg.provider]?.name || 'AI') + ' 正在分析...</p><p class="text-sm text-gray-400 mt-1">这可能需要几秒钟</p></div>';
+    
+    try {
+      const prompt = buildAnalysisPrompt(content, family);
+      const aiResponse = await callAIAPI(cfg.provider, cfg.apiKey, cfg.baseUrl, cfg.model, prompt);
+      if (aiResponse) {
+        const fusionResult = parseAIResponse(aiResponse, ruleAnalysis);
+        currentAnalysisResult = fusionResult;
+        displayAnalysisResult(fusionResult, family);
+        showToast('API大模型分析完成！', '✅');
+      } else {
+        showToast('API未返回结果', '⚠️');
+        currentAnalysisResult = ruleAnalysis;
+        displayAnalysisResult(ruleAnalysis, family);
+      }
+    } catch(e) {
+      showToast('API分析出错: ' + e.message, '❌');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+    }
+    return;
+  }
+  
+  // 🔄 混合分析（规则 + 内嵌AI + API）
+  if (analysisMode === 'hybrid') {
+    const savedConfig = localStorage.getItem('aiAPIConfig');
+    if (!embeddedAIReady || !savedConfig) {
+      showToast('混合分析需同时加载内嵌AI和配置API', '⚠️');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+      return;
+    }
+    
+    resultDiv.innerHTML = '<div class="text-center py-8"><div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent"></div><p class="mt-4 text-gray-600">🔄 混合分析进行中...</p><p class="text-sm text-gray-400 mt-1">规则 + 内嵌AI + API大模型</p></div>';
+    
+    try {
+      const cfg = JSON.parse(savedConfig);
+      
+      // 并行执行内嵌AI和API分析
+      const [embeddedResult, apiResponse] = await Promise.all([
+        runEmbeddedAIAnalysis(content, family),
+        callAIAPI(cfg.provider, cfg.apiKey, cfg.baseUrl, cfg.model, buildAnalysisPrompt(content, family))
+      ]);
+      
+      // 融合三种分析结果
+      let fusionScore = ruleAnalysis.riskScore * 0.2;
+      if (embeddedResult) fusionScore += embeddedResult.riskScore * 0.3;
+      if (apiResponse) {
+        const apiParsed = parseAIResponse(apiResponse, ruleAnalysis);
+        fusionScore += apiParsed.riskScore * 0.5;
+      }
+      
+      fusionScore = Math.min(100, Math.max(0, fusionScore));
+      const level = fusionScore >= 70 ? 'high' : fusionScore >= 50 ? 'medium' : fusionScore >= 30 ? 'low' : 'safe';
+      
+      const hybridResult = {
+        ...ruleAnalysis,
+        riskScore: fusionScore,
+        riskLevel: level,
+        riskText: level === 'high' ? '高风险' : level === 'medium' ? '中风险' : level === 'low' ? '低风险' : '正常',
+        trendDirection: fusionScore > ruleAnalysis.riskScore ? 'up' : fusionScore < ruleAnalysis.riskScore ? 'down' : 'stable',
+        analysisMode: 'hybrid',
+        embeddedResult,
+        apiResult: apiResponse
+      };
+      
+      currentAnalysisResult = hybridResult;
+      displayAnalysisResult(hybridResult, family);
+      showToast('混合分析完成！三种方法综合评估', '✅');
+    } catch(e) {
+      showToast('混合分析出错: ' + e.message, '❌');
+      currentAnalysisResult = ruleAnalysis;
+      displayAnalysisResult(ruleAnalysis, family);
+    }
+  }
+}
+
+function displayAnalysisResult(analysis, family) {
+  const resultDiv = document.getElementById('analysisResult');
+  const rl = analysis.riskLevel || 'safe';
+  const rt = analysis.riskText || '正常';
+  const rs = analysis.riskScore || 0;
+  const td = analysis.trendDirection || 'stable';
+  const rc = analysis.riskChange || '首次分析';
+  
+  const riskColors = { high:'red', medium:'orange', low:'yellow', safe:'green' };
+  const c = riskColors[rl] || 'green';
+  
+  let html = '<div class="fade-in space-y-4">';
+  
+  // 风险评估
+  html += '<div class="p-4 rounded-xl bg-' + c + '-50 border border-' + c + '-200">';
+  html += '<div class="flex items-center justify-between mb-2">';
+  html += '<h4 class="font-semibold text-' + c + '-800">⚠️ 风险评估结果</h4>';
+  html += '<span class="text-sm font-bold text-' + c + '-600">' + rt + '</span>';
+  html += '</div>';
+  html += '<div class="w-full bg-white/50 rounded-full h-3 mb-2">';
+  html += '<div class="h-3 rounded-full bg-' + c + '-500 transition-all duration-1000" style="width:' + rs + '%"></div>';
+  html += '</div>';
+  html += '<div class="flex items-center justify-between text-sm text-' + c + '-700">';
+  html += '<span>风险指数：' + rs + '/100</span>';
+  html += '<span>' + (td === 'up' ? '📈' : td === 'down' ? '📉' : '➡️') + ' 较上次：' + rc + '</span>';
+  html += '</div></div>';
+  
+  // 严重预警
+  if (analysis.detectedIssues && analysis.detectedIssues.some(function(d) { return d.severity === 'critical'; })) {
+    html += '<div class="p-4 rounded-xl bg-red-100 border-2 border-red-400 animate-pulse">';
+    html += '<div class="flex items-center space-x-2 mb-2"><span class="text-2xl">🚨</span><h4 class="font-bold text-red-800">严重风险预警</h4></div>';
+    analysis.detectedIssues.forEach(function(d) {
+      if (d.severity === 'critical') {
+        html += '<div class="bg-white/60 rounded-lg p-2 mb-2">';
+        html += '<p class="text-sm font-medium text-red-800">' + (d.label || '') + '：检测到严重问题</p>';
+        if (d.matchedCritical && d.matchedCritical.length > 0) {
+          html += '<p class="text-xs text-red-600 mt-1">关键词：' + d.matchedCritical.join('、') + '</p>';
+        }
+        html += '</div>';
+      }
+    });
+    html += '<p class="text-xs text-red-700 mt-2 font-medium">系统已自动将风险等级提升至高风险，建议立即启动应急响应</p></div>';
+  }
+  
+  // 历史关联洞察
+  if (analysis.historicalInsights && analysis.historicalInsights.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">🔗 历史走访关联分析 <span class="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">智能对比</span></h4>';
+    html += '<div class="space-y-3">';
+    analysis.historicalInsights.forEach(function(insight) {
+      var ic = insight.type === 'warning' ? 'yellow' : insight.type === 'alert' ? 'red' : insight.type === 'positive' ? 'green' : 'blue';
+      html += '<div class="p-3 rounded-xl bg-' + ic + '-50 border border-' + ic + '-200">';
+      html += '<div class="flex items-center space-x-2 mb-2"><span class="text-lg">' + (insight.icon || '') + '</span><span class="font-medium text-sm text-' + ic + '-800">' + (insight.title || '') + '</span></div>';
+      html += '<p class="text-sm text-' + ic + '-700">' + (insight.content || '') + '</p>';
+      if (insight.suggestion) html += '<p class="text-xs text-' + ic + '-600 mt-2 bg-white/50 px-2 py-1 rounded">' + insight.suggestion + '</p>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+  
+  // AI 洞察
+  if (analysis.aiInsight) {
+    html += '<div class="p-4 rounded-xl bg-purple-50 border border-purple-200">';
+    html += '<h4 class="font-semibold text-purple-800 mb-2">🤖 AI 智能洞察</h4>';
+    html += '<p class="text-sm text-purple-700">' + analysis.aiInsight + '</p>';
+    if (analysis.analysisMode) {
+      html += '<p class="text-xs text-purple-500 mt-2">分析模式：' + analysis.analysisMode + '</p>';
+    }
+    html += '</div>';
+  }
+  
+  // 关键词提取
+  if (analysis.keywords && analysis.keywords.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">🔑 关键信息提取</h4><div class="space-y-2">';
+    analysis.keywords.forEach(function(k) {
+      html += '<div class="p-2 bg-gray-50 rounded-lg"><div class="flex items-center space-x-2">';
+      html += '<span class="text-lg">' + (k.icon || '') + '</span>';
+      html += '<span class="text-gray-600 text-sm">' + (k.label || '') + '：</span>';
+      html += '<span class="font-medium text-gray-800 text-sm">' + (k.value || '') + '</span>';
+      html += '</div>';
+      if (k.matched) html += '<p class="text-xs text-gray-500 mt-1 ml-7">匹配关键词：' + k.matched + '</p>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+  
+  // 自动标签建议
+  if (analysis.suggestedTags && analysis.suggestedTags.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">🏷️ 自动标签建议</h4><div class="flex flex-wrap gap-2">';
+    analysis.suggestedTags.forEach(function(tag) {
+      var isHist = analysis.historicalIssues && analysis.historicalIssues.indexOf(tag) >= 0;
+      html += '<span class="px-3 py-1.5 ' + (isHist ? 'bg-orange-100 text-orange-700 border border-orange-300' : 'bg-purple-100 text-purple-700') + ' rounded-full text-sm">';
+      html += (isHist ? '🔄 ' : '+ ') + tag + (isHist ? ' 已有' : ' 新增') + '</span>';
+    });
+    html += '</div></div>';
+  }
+  
+  // 基础处置建议
+  if (analysis.suggestions && analysis.suggestions.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">💡 基础处置建议</h4><div class="space-y-2">';
+    analysis.suggestions.forEach(function(s, i) {
+      var pc = s.priority === 'high' ? 'red' : s.priority === 'medium' ? 'orange' : 'purple';
+      html += '<div class="flex items-start space-x-3 p-3 ' + (s.isNew ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50') + ' rounded-xl">';
+      html += '<span class="flex-shrink-0 w-6 h-6 bg-' + pc + '-500 text-white rounded-full flex items-center justify-center text-xs font-bold">' + (i+1) + '</span>';
+      html += '<div class="flex-1"><div class="flex items-center space-x-2">';
+      html += '<p class="text-sm font-medium text-gray-800">' + (s.title || '') + '</p>';
+      if (s.isNew) html += '<span class="text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full">新发现</span>';
+      html += '</div>';
+      html += '<p class="text-xs text-gray-500 mt-1">' + (s.desc || '') + '</p>';
+      html += '<div class="flex items-center space-x-2 mt-2">';
+      html += '<span class="text-xs px-2 py-0.5 rounded-full bg-' + pc + '-100 text-' + pc + '-600">' + (s.priority === 'high' ? '紧急' : s.priority === 'medium' ? '重要' : '一般') + '</span>';
+      html += '<span class="text-xs text-gray-400">' + (s.department || '') + '</span>';
+      html += '</div></div></div>';
+    });
+    html += '</div></div>';
+  }
+  
+  // 个性化处置建议
+  if (analysis.personalizedSuggestions && analysis.personalizedSuggestions.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">🎯 个性化处置建议 <span class="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">基于历史定制</span></h4>';
+    html += '<div class="space-y-2">';
+    analysis.personalizedSuggestions.forEach(function(ps) {
+      var pc = ps.priority === 'high' ? 'red' : ps.priority === 'medium' ? 'orange' : 'gray';
+      html += '<div class="p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl">';
+      html += '<div class="flex items-center justify-between mb-2"><span class="font-medium text-sm text-purple-800">' + (ps.title || '') + '</span>';
+      html += '<span class="text-xs px-2 py-0.5 rounded-full bg-' + pc + '-100 text-' + pc + '-600">' + (ps.priority === 'high' ? '紧急' : ps.priority === 'medium' ? '重要' : '一般') + '</span></div>';
+      html += '<p class="text-sm text-gray-600">' + (ps.desc || '') + '</p>';
+      html += '<div class="flex flex-wrap gap-2 mt-2 text-xs text-gray-500">';
+      if (ps.department) html += '<span class="bg-white/50 px-2 py-1 rounded">' + ps.department + '</span>';
+      if (ps.nextVisit) html += '<span class="bg-blue-100 text-blue-600 px-2 py-1 rounded">' + ps.nextVisit + '</span>';
+      if (ps.frequency) html += '<span class="bg-green-100 text-green-600 px-2 py-1 rounded">' + ps.frequency + '</span>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+  
+  // 推荐资源
+  if (analysis.resources && analysis.resources.length > 0) {
+    html += '<div><h4 class="font-semibold text-gray-800 mb-3">🤝 推荐资源</h4><div class="space-y-2">';
+    analysis.resources.forEach(function(r) {
+      html += '<div class="flex items-center justify-between p-3 ' + (r.isNew ? 'border-2 border-green-300 bg-green-50' : 'border border-gray-200') + ' rounded-xl">';
+      html += '<div class="flex items-center space-x-3"><span class="text-xl">' + (r.icon || '') + '</span><div>';
+      html += '<p class="text-sm font-medium text-gray-800">' + (r.name || '') + '</p>';
+      html += '<p class="text-xs text-gray-500">' + (r.desc || '') + '</p>';
+      html += '</div></div>';
+      html += '<button onclick="applyResourceFromAnalysis(\'' + (r.name || '') + '\', \'' + (family.name || '') + '\')" class="text-xs ' + (r.isNew ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-500') + ' text-white px-3 py-1.5 rounded-lg transition">' + (r.isNew ? '申请' : '跟进') + '</button>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+  
+  // 分析摘要
+  html += '<div class="p-4 bg-gradient-to-r from-gray-100 to-gray-50 rounded-xl border border-gray-200">';
+  html += '<h4 class="font-semibold text-gray-800 mb-2">📊 分析摘要</h4>';
+  html += '<div class="grid grid-cols-3 gap-4 text-sm">';
+  html += '<div><p class="text-gray-500">历史走访次数</p><p class="font-bold text-gray-800">' + (analysis.familyVisitCount || 0) + ' 次</p></div>';
+  html += '<div><p class="text-gray-500">距上次走访</p><p class="font-bold text-gray-800">' + (analysis.lastVisitDays || 0) + ' 天</p></div>';
+  html += '<div><p class="text-gray-500">历史问题数</p><p class="font-bold text-gray-800">' + (analysis.historicalIssues ? analysis.historicalIssues.length : 0) + ' 项</p></div>';
+  html += '</div></div>';
+  
+  // 应用按钮
+  html += '<button onclick="applyAnalysisResult()" class="w-full gradient-bg text-white py-3 rounded-xl font-medium hover:opacity-90 transition shadow-lg">✅ 应用分析结果并更新档案</button>';
+  
+  html += '</div>';
+  
+  resultDiv.innerHTML = html;
+}
+
+// ========== 智能语义分析核心算法 ==========
+function analyzeContent(content, family) {
+  const keywords = [];
+  const tags = [];
+  const suggestions = [];
+  const resources = [];
+  const historicalInsights = []; // 历史关联分析
+  const personalizedSuggestions = []; // 个性化处置建议
+  let riskScore = 10; // 基础分统一从10开始，由内容分析决定最终分数
+  let trendDirection = 'stable'; // 趋势方向
+  let criticalAlert = null; // 严重预警（一票否决）
+  
+  // ===== 1. 获取该家庭的历史走访记录 =====
+  const familyHistoryVisits = visits.filter(v => v.family === family.name);
+  const historicalIssues = new Set();
+  const historicalResources = new Set();
+  
+  // 分析历史问题
+  familyHistoryVisits.forEach(v => {
+    if (v.issues) v.issues.forEach(issue => historicalIssues.add(issue));
+  });
+  
+  // 分析历史处置记录
+  family.history.forEach(h => {
+    if (h.type === 'resource') {
+      historicalResources.add(h.event);
+    }
+  });
+  
+  // ===== 2. 语义关键词识别（含严重程度分级） =====
+  const issuePatterns = {
+    medical: {
+      // 严重疾病关键词 - 匹配到任何一个直接高风险
+      criticalKeywords: ['白血病', '癌症', '肿瘤', '尿毒症', '肾衰竭', '肝衰竭', '心衰竭', '脑梗', '脑溢血', '中风', '晚期', '绝症', '病危', '重症', '昏迷', '抢救', 'ICU', '化疗', '放疗', '透析', '器官移植', '渐冻症', '帕金森', '阿尔茨海默', '老年痴呆', '精神病', '重度抑郁', '自杀倾向', '自残'],
+      // 一般医疗关键词
+      keywords: ['医疗', '病', '医院', '药', '健康', '身体', '治疗', '手术', '慢性', '血糖', '血压', '头晕', '疼痛', '发烧', '感染', '住院', '出院', '复查', '诊断', '病症', '不适', '乏力', '恶心', '呕吐', '咳嗽', '骨折', '康复', '护理', '卧床'],
+      icon: '🏥', label: '医疗健康', tag: '医疗健康'
+    },
+    economic: {
+      criticalKeywords: ['负债', '破产', '断供', '揭不开锅', '无力承担', '还不起', '高利贷', '债务'],
+      keywords: ['经济', '困难', '钱', '费用', '收入', '失业', '开支', '紧张', '不够', '压力', '低保', '救助', '学费', '生活费', '欠债', '借贷', '入不敷出', '贫困', '拮据'],
+      icon: '💰', label: '经济状况', tag: '经济困难'
+    },
+    employment: {
+      criticalKeywords: [],
+      keywords: ['失业', '工作', '就业', '找工作', '职业', '技能', '培训', '岗位', '入职', '下岗', '辞退', '裁员', '待业', '无业'],
+      icon: '💼', label: '就业状态', tag: '失业'
+    },
+    psychological: {
+      criticalKeywords: ['自杀', '自残', '轻生', '不想活', '厌世', '精神分裂', '重度抑郁', '暴力倾向'],
+      keywords: ['情绪', '心理', '低落', '孤独', '抑郁', '发呆', '焦虑', '失眠', '睡不着', '食欲', '精神', '适应', '烦躁', '哭泣', '消沉', '绝望', '无助', '害怕', '恐惧', '自闭'],
+      icon: '🧠', label: '心理状态', tag: '心理问题'
+    },
+    social: {
+      criticalKeywords: ['完全隔绝', '无人照管', '遗弃'],
+      keywords: ['独居', '一个人', '社交', '出门', '活动', '陪伴', '交流', '朋友', '邻居', '孤立', '封闭', '不来往'],
+      icon: '👥', label: '社交状况', tag: '社交隔离'
+    },
+    education: {
+      criticalKeywords: ['辍学', '失学'],
+      keywords: ['孩子', '教育', '学费', '上学', '学习', '学校', '成绩', '辅导', '退学', '留守儿童'],
+      icon: '🎓', label: '子女教育', tag: '子女教育'
+    },
+    disability: {
+      criticalKeywords: ['瘫痪', '植物人', '完全失能', '重度残疾'],
+      keywords: ['残疾', '残障', '行动不便', '轮椅', '失能', '瘫痪', '照顾', '视力障碍', '听力障碍', '智力障碍', '肢体残疾'],
+      icon: '♿', label: '残障情况', tag: '残障家庭'
+    },
+    housing: {
+      criticalKeywords: ['房屋倒塌', '无家可归', '流离失所'],
+      keywords: ['住房', '房子', '漏水', '危房', '搬迁', '租金', '居住', '拆迁', '违建', '拥挤'],
+      icon: '🏠', label: '住房状况', tag: '住房困难'
+    },
+    basicLiving: {
+      criticalKeywords: ['断水', '断电', '断粮', '挨饿', '受冻', '无家可归'],
+      keywords: ['吃饭', '温饱', '衣物', '取暖', '饮水', '食物', '生活必需', '照料', '无人照顾', '生活不能自理'],
+      icon: '🍚', label: '基本生活', tag: '基本生活困难'
+    }
+  };
+  
+  // ===== 3. 识别当前走访中的问题并对比历史 =====
+  const detectedIssues = [];
+  
+  for (const [issueType, pattern] of Object.entries(issuePatterns)) {
+    const matchedCritical = pattern.criticalKeywords.filter(kw => content.includes(kw));
+    const matchedNormal = pattern.keywords.filter(kw => content.includes(kw));
+    const matchedKeywords = [...matchedCritical, ...matchedNormal];
+    
+    if (matchedKeywords.length > 0) {
+      const isNewIssue = !historicalIssues.has(pattern.label);
+      const isRecurringIssue = historicalIssues.has(pattern.label);
+      
+      // 严重程度判定：优先看严重关键词
+      let severity;
+      if (matchedCritical.length > 0) {
+        severity = 'critical'; // 严重级别
+      } else if (matchedNormal.length >= 3) {
+        severity = 'high';
+      } else if (matchedNormal.length >= 2) {
+        severity = 'medium';
+      } else {
+        severity = 'low';
+      }
+      
+      // 检查历史记录中是否有该问题的演变
+      const historyTimeline = family.history.filter(h => 
+        h.event.includes(pattern.label) || h.event.includes(pattern.tag)
+      );
+      
+      detectedIssues.push({
+        type: issueType,
+        icon: pattern.icon,
+        label: pattern.label,
+        matchedKeywords,
+        matchedCritical,
+        tag: pattern.tag,
+        isNewIssue,
+        isRecurringIssue,
+        historyTimeline,
+        severity
+      });
+      
+      // 关键词展示
+      let valueText;
+      if (severity === 'critical') {
+        valueText = '严重问题，需紧急介入';
+      } else if (severity === 'high') {
+        valueText = '问题较为严重';
+      } else if (severity === 'medium') {
+        valueText = '存在一定问题';
+      } else {
+        valueText = '轻微迹象';
+      }
+      
+      keywords.push({
+        icon: pattern.icon,
+        label: pattern.label,
+        value: valueText,
+        matched: matchedKeywords.join('、'),
+        severity
+      });
+      
+      tags.push(pattern.tag);
+      
+      // ===== 风险评分计算（重构） =====
+      if (severity === 'critical') {
+        // 严重关键词直接拉到高风险区间
+        riskScore += 60;
+        trendDirection = 'up';
+        criticalAlert = {
+          type: issueType,
+          label: pattern.label,
+          keywords: matchedCritical
+        };
+      } else if (severity === 'high') {
+        riskScore += 30;
+        if (trendDirection !== 'up') trendDirection = 'up';
+      } else if (severity === 'medium') {
+        riskScore += 18;
+      } else {
+        riskScore += 8;
+      }
+      
+      // 多个问题叠加加重
+      if (detectedIssues.length >= 3) {
+        riskScore += 15;
+      } else if (detectedIssues.length >= 2) {
+        riskScore += 8;
+      }
+    }
+  }
+  
+  // ===== 3.5 严重预警一票否决机制 =====
+  if (criticalAlert) {
+    riskScore = Math.max(riskScore, 80); // 严重问题至少80分（高风险）
+  }
+  
+  // ===== 4. 生成历史关联洞察 =====
+  if (familyHistoryVisits.length > 0) {
+    // 最近一次走访的问题对比
+    const lastVisit = familyHistoryVisits[0];
+    const lastIssues = lastVisit.issues || [];
+    
+    // 新发现的问题
+    const newFoundIssues = detectedIssues.filter(d => 
+      !lastIssues.includes(d.label) && d.matchedKeywords.length > 0
+    );
+    
+    // 持续存在的问题
+    const persistentIssues = detectedIssues.filter(d => 
+      lastIssues.includes(d.label)
+    );
+    
+    // 可能改善的问题（历史有但当前没有）
+    const possiblyImproved = lastIssues.filter(issue => 
+      !detectedIssues.some(d => d.label === issue)
+    );
+    
+    if (newFoundIssues.length > 0) {
+      historicalInsights.push({
+        type: 'warning',
+        icon: '⚠️',
+        title: '新发现问题',
+        content: `本次走访新发现：${newFoundIssues.map(i => i.label).join('、')}`,
+        suggestion: '建议重点关注新问题的发展趋势，及时评估是否需要新增干预措施'
+      });
+    }
+    
+    if (persistentIssues.length > 0) {
+      historicalInsights.push({
+        type: 'alert',
+        icon: '🔄',
+        title: '持续性问题追踪',
+        content: `以下问题持续存在：${persistentIssues.map(i => i.label).join('、')}`,
+        timeline: `首次发现于${familyHistoryVisits[familyHistoryVisits.length - 1]?.date || '早期走访'}，已持续关注${familyHistoryVisits.length}次走访`,
+        suggestion: '建议评估现有干预措施效果，考虑调整处置策略或加强干预力度'
+      });
+    }
+    
+    if (possiblyImproved.length > 0) {
+      historicalInsights.push({
+        type: 'positive',
+        icon: '✅',
+        title: '改善迹象',
+        content: `以下问题可能有所改善：${possiblyImproved.join('、')}`,
+        suggestion: '继续保持现有帮扶措施，后续走访中验证改善是否稳定'
+      });
+      riskScore -= 5;
+      if (trendDirection !== 'up') trendDirection = 'down';
+    }
+    
+    // 历史处置措施效果分析
+    const appliedResources = family.history.filter(h => h.type === 'resource');
+    if (appliedResources.length > 0) {
+      historicalInsights.push({
+        type: 'info',
+        icon: '📋',
+        title: '历史帮扶措施回顾',
+        content: `已实施帮扶：${appliedResources.map(h => h.event).slice(0, 3).join('、')}`,
+        effectiveness: riskScore < 50 ? '帮扶措施取得一定效果' : '帮扶效果需进一步评估',
+        suggestion: riskScore >= 50 ? '建议复核帮扶措施执行情况，确保资源落实到位' : '建议继续保持帮扶支持'
+      });
+    }
+  }
+  
+  // ===== 5. 生成个性化处置建议 =====
+  detectedIssues.forEach(issue => {
+    let baseSuggestion = generateBaseSuggestion(issue.type, issue.severity);
+    
+    // 严重问题特殊处理
+    if (issue.severity === 'critical') {
+      baseSuggestion.title = `🚨 紧急：${baseSuggestion.title}`;
+      baseSuggestion.desc = `检测到严重关键词：${issue.matchedCritical.join('、')}。${baseSuggestion.desc}`;
+      baseSuggestion.priority = 'high';
+      
+      personalizedSuggestions.push({
+        title: `${issue.label}紧急干预方案`,
+        desc: `检测到严重风险信号，建议立即启动应急响应：1)24小时内上门或电话确认；2)启动多部门联动；3)必要时联系家属或监护人`,
+        priority: 'high',
+        department: getDepartment(issue.type),
+        urgency: '24小时内响应'
+      });
+    }
+    
+    // 根据历史情况个性化调整建议
+    if (issue.isRecurringIssue && issue.historyTimeline.length > 0) {
+      // 持续性问题 - 加强干预建议
+      baseSuggestion.title = `${baseSuggestion.title}（持续性问题，需加强干预）`;
+      baseSuggestion.desc = `该问题自${issue.historyTimeline[0]?.date || '早期'}持续至今。${baseSuggestion.desc}`;
+      if (issue.severity !== 'critical') {
+        baseSuggestion.priority = issue.severity === 'high' ? 'high' : 'medium';
+      }
+      
+      // 添加针对性策略
+      personalizedSuggestions.push({
+        title: `${issue.label}深化干预策略`,
+        desc: `问题已持续${issue.historyTimeline.length}次走访未见明显改善，建议：1)评估现有措施效果；2)升级帮扶级别；3)引入专业资源`,
+        priority: issue.severity === 'critical' || issue.severity === 'high' ? 'high' : 'medium',
+        department: getDepartment(issue.type),
+        relatedHistory: issue.historyTimeline.map(h => h.date).join('、')
+      });
+    } else if (issue.isNewIssue) {
+      // 新发现问题 - 快速响应建议
+      baseSuggestion.title = `${baseSuggestion.title}（新发现问题）`;
+      baseSuggestion.desc = `本次首次发现该问题。${baseSuggestion.desc}`;
+      baseSuggestion.isNew = true;
+      
+      if (issue.severity !== 'critical') {
+        personalizedSuggestions.push({
+          title: `${issue.label}早期干预`,
+          desc: '问题刚被发现，建议及时介入，防止问题恶化。制定针对性帮扶计划，设置随访周期',
+          priority: issue.severity === 'high' ? 'high' : 'medium',
+          department: getDepartment(issue.type),
+          nextVisit: '建议1周内回访跟进'
+        });
+      }
+    }
+    
+    suggestions.push(baseSuggestion);
+    
+    // 推荐相关资源
+    const relatedResources = getRelatedResources(issue.type, issue.severity, historicalResources);
+    resources.push(...relatedResources);
+  });
+  
+  // ===== 6. 基于家庭特征的个性化建议 =====
+  if (family.tags.includes('独居老人')) {
+    if (!detectedIssues.some(d => d.type === 'social')) {
+      personalizedSuggestions.push({
+        title: '独居老人关怀提醒',
+        desc: '虽然本次走访未发现明显社交问题，但作为独居老人，建议定期安排志愿者探访，预防孤独感产生',
+        priority: 'low',
+        department: '社会工作',
+        frequency: '建议每周至少1次探访或电话问候'
+      });
+    }
+  }
+  
+  if (family.tags.includes('重大疾病') && detectedIssues.some(d => d.type === 'medical')) {
+    const medicalIssue = detectedIssues.find(d => d.type === 'medical');
+    if (medicalIssue.severity === 'critical' || medicalIssue.severity === 'high') {
+      personalizedSuggestions.push({
+        title: '重大疾病紧急干预',
+        desc: `结合家庭历史重大疾病标签，当前医疗问题${medicalIssue.severity === 'critical' ? '极其严重' : '较为严重'}，建议立即启动医疗救助通道，联系专科医生`,
+        priority: 'high',
+        department: '医疗卫生',
+        urgency: medicalIssue.severity === 'critical' ? '立即响应' : '24小时内响应'
+      });
+    }
+  }
+  
+  // ===== 7. 计算风险等级和趋势 =====
+  const previousRiskScore = family.risk === 'high' ? 75 : family.risk === 'medium' ? 55 : family.risk === 'low' ? 35 : 20;
+  
+  if (riskScore > previousRiskScore + 10) {
+    trendDirection = 'up';
+  } else if (riskScore < previousRiskScore - 10) {
+    trendDirection = 'down';
+  }
+  
+  let riskLevel, riskText;
+  riskScore = Math.min(100, Math.max(0, riskScore));
+  
+  if (riskScore >= 70) {
+    riskLevel = 'high';
+    riskText = '高风险';
+  } else if (riskScore >= 50) {
+    riskLevel = 'medium';
+    riskText = '中风险';
+  } else if (riskScore >= 30) {
+    riskLevel = 'low';
+    riskText = '低风险';
+  } else {
+    riskLevel = 'safe';
+    riskText = '正常';
+  }
+  
+  const riskChange = trendDirection === 'up' 
+    ? `上升 ${(riskScore - previousRiskScore).toFixed(0)} 分` 
+    : trendDirection === 'down' 
+    ? `下降 ${(previousRiskScore - riskScore).toFixed(0)} 分` 
+    : '持平';
+  
+  // ===== 8. 默认处理 =====
+  if (suggestions.length === 0) {
+    suggestions.push({
+      title: '定期跟踪回访',
+      desc: '本次走访未发现突出问题，继续保持常规走访频率，关注家庭状况变化',
+      priority: 'low',
+      department: '社会工作'
+    });
+  }
+  
+  if (keywords.length === 0) {
+    keywords.push({ icon: '✅', label: '综合评估', value: '整体状况良好' });
+  }
+  
+  if (tags.length === 0) {
+    tags.push('稳定家庭');
+  }
+  
+  if (resources.length === 0) {
+    resources.push({ icon: '📞', name: '社工热线', desc: '24小时社工服务热线', isNew: false });
+  }
+  
+  return {
+    riskLevel,
+    riskText,
+    riskScore,
+    riskChange,
+    trendDirection,
+    keywords,
+    suggestedTags: tags,
+    suggestions,
+    personalizedSuggestions,
+    resources,
+    historicalInsights,
+    detectedIssues,
+    historicalIssues: Array.from(historicalIssues),
+    familyVisitCount: family.visitCount,
+    lastVisitDays: familyHistoryVisits.length > 0 ? calculateDaysDiff(familyHistoryVisits[0].date) : 0
+  };
+}
+
+// ===== 辅助函数 =====
+function generateBaseSuggestion(issueType, severity) {
+  const suggestionsMap = {
+    medical: {
+      title: '医疗帮扶介入',
+      desc: '联系社区卫生服务中心，安排上门问诊和健康检查，协助办理医疗救助申请',
+      department: '医疗卫生'
+    },
+    economic: {
+      title: '经济援助评估',
+      desc: '评估是否符合低保、临时救助等政策条件，协助准备申请材料',
+      department: '民政救助'
+    },
+    employment: {
+      title: '就业帮扶对接',
+      desc: '提供职业技能培训和就业岗位推荐，对接人力资源部门',
+      department: '人力资源'
+    },
+    psychological: {
+      title: '心理关怀介入',
+      desc: '安排心理咨询师进行心理疏导和情绪支持，定期跟踪心理状态变化',
+      department: '社会工作'
+    },
+    social: {
+      title: '社交融入支持',
+      desc: '鼓励参与社区活动，建立社交支持网络，安排志愿者定期探访',
+      department: '社区活动'
+    },
+    education: {
+      title: '教育帮扶对接',
+      desc: '联系教育部门，了解助学政策，协助申请教育资助',
+      department: '教育部门'
+    },
+    disability: {
+      title: '残障帮扶服务',
+      desc: '对接残联资源，申请辅助器具，安排康复训练',
+      department: '残联部门'
+    },
+    housing: {
+      title: '住房改善帮扶',
+      desc: '联系住建部门，评估住房安全，申请住房改造或搬迁支持',
+      department: '住建部门'
+    },
+    basicLiving: {
+      title: '基本生活保障',
+      desc: '紧急提供生活物资援助，协调民政部门落实基本生活保障',
+      department: '民政救助'
+    }
+  };
+  
+  const base = suggestionsMap[issueType] || {
+    title: '综合帮扶评估',
+    desc: '根据实际情况制定针对性帮扶方案',
+    department: '社会工作'
+  };
+  
+  return {
+    ...base,
+    priority: severity === 'critical' || severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'low'
+  };
+}
+
+function getDepartment(issueType) {
+  const deptMap = {
+    medical: '医疗卫生',
+    economic: '民政救助',
+    employment: '人力资源',
+    psychological: '社会工作',
+    social: '社区活动',
+    education: '教育部门',
+    disability: '残联部门',
+    housing: '住建部门',
+    basicLiving: '民政救助'
+  };
+  return deptMap[issueType] || '社会工作';
+}
+
+function getRelatedResources(issueType, severity, historicalResources) {
+  const allResources = {
+    medical: [
+      { icon: '🏥', name: '社区医院上门服务', desc: '免费上门问诊、慢病管理' },
+      { icon: '💊', name: '药品援助项目', desc: '低价药品援助' },
+      { icon: '🚑', name: '紧急医疗救助', desc: '重大疾病医疗费用减免' }
+    ],
+    economic: [
+      { icon: '💰', name: '临时救助金', desc: '一次性经济补助' },
+      { icon: '🏦', name: '低保政策申请', desc: '长期经济保障' },
+      { icon: '🎁', name: '节日慰问物资', desc: '生活物资援助' }
+    ],
+    employment: [
+      { icon: '💼', name: '职业技能培训', desc: '免费技能培训+就业推荐' },
+      { icon: '🏭', name: '企业岗位推荐', desc: '对接本地企业用工需求' },
+      { icon: '📝', name: '创业扶持政策', desc: '自主创业资金支持' }
+    ],
+    psychological: [
+      { icon: '🧠', name: '心理咨询服务', desc: '专业心理咨询师一对一辅导' },
+      { icon: '❤️', name: '情绪支持小组', desc: '同类型家庭互助交流' },
+      { icon: '📞', name: '心理热线', desc: '24小时心理援助热线' }
+    ],
+    social: [
+      { icon: '🎨', name: '老年大学课程', desc: '丰富精神文化生活' },
+      { icon: '👥', name: '志愿者陪伴', desc: '定期上门探访陪伴' },
+      { icon: '🏃', name: '社区健身活动', desc: '集体健身运动参与' }
+    ],
+    education: [
+      { icon: '🎓', name: '助学基金', desc: '困难家庭学生学费资助' },
+      { icon: '📚', name: '课后辅导服务', desc: '免费学习辅导' },
+      { icon: '📖', name: '学习物资捐赠', desc: '书本文具援助' }
+    ],
+    disability: [
+      { icon: '♿', name: '辅助器具申请', desc: '轮椅、助行器等' },
+      { icon: '🏥', name: '康复训练服务', desc: '专业康复指导' },
+      { icon: '🏠', name: '无障碍改造', desc: '家庭环境改造支持' }
+    ],
+    housing: [
+      { icon: '🏠', name: '危房改造项目', desc: '住房安全改造' },
+      { icon: '🏘️', name: '公租房申请', desc: '保障性住房' },
+      { icon: '🔧', name: '维修援助', desc: '房屋维修资金支持' }
+    ],
+    basicLiving: [
+      { icon: '🍚', name: '紧急食品援助', desc: '米面油等生活必需品' },
+      { icon: '🧥', name: '衣物捐赠', desc: '季节性衣物援助' },
+      { icon: '🔥', name: '取暖补贴', desc: '冬季取暖费用补助' }
+    ]
+  };
+  
+  const related = allResources[issueType] || [{ icon: '📞', name: '社工热线', desc: '24小时社工服务热线' }];
+  
+  // 标记已申请过的资源
+  return related.map(r => ({
+    ...r,
+    isNew: !historicalResources.has(r.name),
+    priority: severity
+  }));
+}
+
+function calculateDaysDiff(dateStr) {
+  const visitDate = new Date(dateStr);
+  const today = new Date();
+  return Math.floor((today - visitDate) / (1000 * 60 * 60 * 24));
+}
+
+function applyAnalysisResult() {
+  console.log('applyAnalysisResult called');
+  console.log('currentAnalysisResult:', currentAnalysisResult);
+  console.log('currentAnalysisFamilyIdx:', currentAnalysisFamilyIdx);
+  
+  var applyBtn = null;
+  var resultDiv = document.getElementById('analysisResult');
+  var buttons = resultDiv.querySelectorAll('button');
+  for (var i = 0; i < buttons.length; i++) {
+    if (buttons[i].textContent.indexOf('应用分析结果') >= 0) {
+      applyBtn = buttons[i];
+      break;
+    }
+  }
+  
+  if (!currentAnalysisResult || currentAnalysisFamilyIdx === null) {
+    showToast('请先进行智能分析', '⚠️');
+    console.error('Missing analysis data');
+    return;
+  }
+  
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = '⏳ 正在应用...';
+    applyBtn.style.opacity = '0.7';
+    applyBtn.style.cursor = 'not-allowed';
+  }
+  
+  const family = families[currentAnalysisFamilyIdx];
+  const analysis = currentAnalysisResult;
+  
+  console.log('Applying to family:', family.name);
+  console.log('Analysis risk:', analysis.riskLevel, analysis.riskText);
+  
+  family.risk = analysis.riskLevel;
+  family.riskText = analysis.riskText;
+  family.trend = analysis.trendDirection;
+  
+  let newTagCount = 0;
+  if (analysis.suggestedTags && Array.isArray(analysis.suggestedTags)) {
+    analysis.suggestedTags.forEach(tag => {
+      if (!family.tags.includes(tag)) {
+        family.tags.push(tag);
+        newTagCount++;
+      }
+    });
+  }
+  
+  const today = new Date().toISOString().split('T')[0];
+  family.lastVisit = today;
+  
+  const historyEntries = [];
+  if (analysis.trendDirection && analysis.trendDirection !== 'stable') {
+    historyEntries.push({
+      date: today,
+      event: `风险等级${analysis.trendDirection === 'up' ? '上升' : '下降'}：${analysis.riskChange || '智能分析'}`,
+      type: analysis.trendDirection === 'up' ? 'risk-up' : 'risk-down'
+    });
+  }
+  if (newTagCount > 0) {
+    historyEntries.push({
+      date: today,
+      event: `新增 ${newTagCount} 个家庭标签`,
+      type: 'tag'
+    });
+  }
+  historyEntries.push({
+    date: today,
+    event: '智能分析结果已应用',
+    type: 'assessment'
+  });
+  
+  historyEntries.forEach(entry => family.history.unshift(entry));
+  
+  renderFamilies();
+  renderVisits();
+  updateChartsRealtime();
+  
+  var successMsg = '✅ 分析结果已成功应用到家庭档案！';
+  if (newTagCount > 0) {
+    successMsg += '<br>📌 新增 ' + newTagCount + ' 个家庭标签';
+  }
+  successMsg += '<br>📊 风险等级已更新为：' + analysis.riskText;
+  successMsg += '<br><span style="font-size:12px;color:#6b7280;">（家庭档案、走访记录、风险图表均已同步更新）</span>';
+  
+  var successBox = document.createElement('div');
+  successBox.className = 'p-4 mb-4 bg-green-50 border-2 border-green-400 rounded-xl fade-in';
+  successBox.style.animation = 'fadeIn 0.5s ease-in-out';
+  successBox.innerHTML = '<div class="flex items-start space-x-3">' +
+    '<span class="text-3xl">🎉</span>' +
+    '<div class="flex-1">' +
+    '<h4 class="font-bold text-green-800 text-lg mb-1">应用成功！</h4>' +
+    '<p class="text-sm text-green-700" style="line-height:1.6;">' + successMsg + '</p>' +
+    '</div>' +
+    '</div>';
+  
+  resultDiv.insertBefore(successBox, resultDiv.firstChild);
+  
+  if (applyBtn) {
+    applyBtn.innerHTML = '✅ 已应用到档案';
+    applyBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+    applyBtn.style.cursor = 'default';
+  }
+  
+  showToast('分析结果已成功应用！', '🎉', 4000);
+  console.log('Analysis applied successfully');
+}
+
+// 从智能分析结果申请资源
+function applyResourceFromAnalysis(resourceName, familyName) {
+  console.log('applyResourceFromAnalysis:', resourceName, familyName);
+  showToast(`已为 ${familyName} 家庭提交「${resourceName}」资源申请`, '✅');
+}
+
+function loadAnalysisHistory(id) {
+  const templates = {
+    1: '老人近期病情加重，医疗费用大幅增加，子女长期在外无人照料，行动不便，日常生活困难，精神状态不佳。',
+    2: '失业三个月，家庭经济压力大，孩子学费待缴，有就业意愿，缺乏专业技能，妻子打零工收入微薄。',
+    3: '独居老人，身体尚可，但情绪低落，社交活动少，需关注心理状态，老伴去世后一直不适应。'
+  };
+  
+  document.getElementById('analysisFamily').value = id - 1;
+  document.getElementById('visitContent').value = templates[id] || '';
+  runAnalysis();
+}
+
+// ========== 资源联动 ==========
+function runResourceMatch() {
+  showToast('正在进行智能资源匹配...', '⏳');
+  setTimeout(() => {
+    showToast('匹配完成，发现 8 个可对接资源', '✅');
+  }, 1500);
+}
+
+function applyResource(familyName) {
+  showToast(`已为 ${familyName} 家庭提交资源申请`, '✅');
+}
+
+// ========== Toast 通知 ==========
+var toastTimer = null;
+function showToast(message, icon, duration) {
+  if (!icon) icon = '✅';
+  if (!duration) duration = 3000;
+  
+  const toast = document.getElementById('toast');
+  document.getElementById('toastMessage').textContent = message;
+  document.getElementById('toastIcon').textContent = icon;
+  
+  toast.classList.remove('hidden');
+  toast.classList.add('slide-in');
+  
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+  }
+  
+  toastTimer = setTimeout(() => {
+    toast.classList.add('hidden');
+    toast.classList.remove('slide-in');
+    toastTimer = null;
+  }, duration);
+}
+
+// ========== 图表全局实例 ==========
+let trendChartInstance = null;
+let pieChartInstance = null;
+
+// ========== 图表初始化 ==========
+function initCharts() {
+  // 计算当前风险分布
+  const riskCounts = { high: 0, medium: 0, low: 0, safe: 0 };
+  families.forEach(f => {
+    riskCounts[f.risk] = (riskCounts[f.risk] || 0) + 1;
+  });
+  
+  // 趋势图
+  const trendCtx = document.getElementById('trendChart').getContext('2d');
+  trendChartInstance = new Chart(trendCtx, {
+    type: 'line',
+    data: {
+      labels: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+      datasets: [
+        {
+          label: '高风险',
+          data: generateTrendData(riskCounts.high, 12),
+          borderColor: '#ef4444',
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          fill: true,
+          tension: 0.4
+        },
+        {
+          label: '中风险',
+          data: generateTrendData(riskCounts.medium, 12),
+          borderColor: '#f97316',
+          backgroundColor: 'rgba(249, 115, 22, 0.1)',
+          fill: true,
+          tension: 0.4
+        },
+        {
+          label: '低风险',
+          data: generateTrendData(riskCounts.low, 12),
+          borderColor: '#eab308',
+          backgroundColor: 'rgba(234, 179, 8, 0.1)',
+          fill: true,
+          tension: 0.4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, padding: 20 } } },
+      scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } }, x: { grid: { display: false } } }
+    }
+  });
+
+  // 饼图
+  const pieCtx = document.getElementById('pieChart').getContext('2d');
+  pieChartInstance = new Chart(pieCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['高风险', '中风险', '低风险', '正常'],
+      datasets: [{
+        data: [riskCounts.high, riskCounts.medium, riskCounts.low, riskCounts.safe],
+        backgroundColor: ['#ef4444', '#f97316', '#eab308', '#22c55e'],
+        borderWidth: 0,
+        hoverOffset: 10
+      }]
+    },
+    options: { responsive: true, cutout: '70%', plugins: { legend: { display: false } } }
+  });
+  
+  // 更新饼图下方的文字统计
+  updatePieChartLabels(riskCounts);
+}
+
+// 生成趋势数据（基于当前值模拟历史变化）
+function generateTrendData(currentValue, months) {
+  const data = [];
+  const base = currentValue * 0.7;
+  for (let i = 0; i < months; i++) {
+    const variation = Math.floor(Math.random() * 5) - 2;
+    data.push(Math.max(0, Math.floor(base + (currentValue - base) * (i / months) + variation)));
+  }
+  data[data.length - 1] = currentValue; // 最后一个月为当前实际值
+  return data;
+}
+
+// 更新饼图标签文字
+function updatePieChartLabels(counts) {
+  const total = counts.high + counts.medium + counts.low + counts.safe;
+  const labelsDiv = document.querySelector('#page-dashboard .mt-4.space-y-2');
+  if (labelsDiv) {
+    labelsDiv.innerHTML = `
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-red-500"></div><span class="text-gray-600">高风险</span></div>
+        <span class="font-medium text-gray-800">${counts.high}户 (${((counts.high/total)*100).toFixed(1)}%)</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-orange-500"></div><span class="text-gray-600">中风险</span></div>
+        <span class="font-medium text-gray-800">${counts.medium}户 (${((counts.medium/total)*100).toFixed(1)}%)</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-yellow-500"></div><span class="text-gray-600">低风险</span></div>
+        <span class="font-medium text-gray-800">${counts.low}户 (${((counts.low/total)*100).toFixed(1)}%)</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-green-500"></div><span class="text-gray-600">正常</span></div>
+        <span class="font-medium text-gray-800">${counts.safe}户 (${((counts.safe/total)*100).toFixed(1)}%)</span>
+      </div>
+    `;
+  }
+}
+
+// ========== 图表实时更新 ==========
+function updateChartsRealtime() {
+  // 计算当前风险分布
+  const riskCounts = { high: 0, medium: 0, low: 0, safe: 0 };
+  families.forEach(f => {
+    riskCounts[f.risk] = (riskCounts[f.risk] || 0) + 1;
+  });
+  
+  // 更新趋势图数据
+  if (trendChartInstance) {
+    trendChartInstance.data.datasets[0].data = generateTrendData(riskCounts.high, 12);
+    trendChartInstance.data.datasets[1].data = generateTrendData(riskCounts.medium, 12);
+    trendChartInstance.data.datasets[2].data = generateTrendData(riskCounts.low, 12);
+    trendChartInstance.update('active');
+  }
+  
+  // 更新饼图数据
+  if (pieChartInstance) {
+    pieChartInstance.data.datasets[0].data = [riskCounts.high, riskCounts.medium, riskCounts.low, riskCounts.safe];
+    pieChartInstance.update('active');
+  }
+  
+  // 更新饼图标签
+  updatePieChartLabels(riskCounts);
+  
+  // 更新仪表盘顶部统计卡片
+  updateDashboardStats(riskCounts);
+}
+
+// 更新仪表盘统计卡片
+function updateDashboardStats(counts) {
+  const cards = document.querySelectorAll('#statsGrid .stat-card');
+  if (cards.length >= 4) {
+    cards[0].querySelector('h3').textContent = counts.high;
+    cards[1].querySelector('h3').textContent = counts.medium;
+    cards[2].querySelector('h3').textContent = counts.low;
+    cards[3].querySelector('h3').textContent = counts.safe;
+  }
+}
+
+// ========== 点击弹窗外部关闭 ==========
+document.getElementById('familyModal').addEventListener('click', function(e) {
+  if (e.target === this) closeFamilyModal();
+});
+
+document.getElementById('visitModal').addEventListener('click', function(e) {
+  if (e.target === this) closeVisitModal();
+});
+
+// ========== 页面初始化 ==========
+document.addEventListener('DOMContentLoaded', function() {
+  renderFamilies();
+  renderVisits();
+  initCharts();
+});
+</script>
+
+</body>
+</html>

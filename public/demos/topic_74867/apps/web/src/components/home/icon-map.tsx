@@ -1,0 +1,60 @@
+'use client';
+
+import {
+  Heart,
+  ChefHat,
+  Wrench,
+  BookOpen,
+  HeartPulse,
+  Plane,
+  HandHeart,
+  Sprout,
+  Smile,
+  ShoppingCart,
+  PawPrint,
+  TrendingUp,
+  Globe,
+  MessageCircle,
+  Users,
+  Database,
+  Smartphone,
+  Watch,
+  Bot,
+  TreePine,
+  Calendar,
+  Brain,
+  Sparkles,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
+
+const iconMap: Record<string, LucideIcon> = {
+  Heart,
+  ChefHat,
+  Wrench,
+  BookOpen,
+  HeartPulse,
+  Plane,
+  HandHeart,
+  Sprout,
+  Smile,
+  ShoppingCart,
+  PawPrint,
+  TrendingUp,
+  Globe,
+  MessageCircle,
+  Users,
+  Database,
+  Smartphone,
+  Watch,
+  Bot,
+  TreePine,
+  Calendar,
+  Brain,
+  Sparkles,
+  Zap,
+};
+
+export function getIcon(name: string): LucideIcon {
+  return iconMap[name] ?? Sparkles;
+}
