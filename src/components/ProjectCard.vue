@@ -19,9 +19,9 @@
         class="w-full h-full object-cover"
       />
       <div v-if="project.type" class="absolute top-3 right-3 px-2.5 py-1 rounded-trae-pill text-[11px] font-medium glass-panel"
-        :class="project.type === 'external' ? 'text-trae-accent-glow' : 'text-blue-400'"
+        :class="typeBadgeClass"
       >
-        {{ project.type === 'external' ? '在线体验' : '本地预览' }}
+        {{ typeBadgeText }}
       </div>
     </div>
 
@@ -49,6 +49,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import studyImg from '@/assets/default-illustrations/study.svg'
 import entertainmentImg from '@/assets/default-illustrations/entertainment.svg'
 import serviceImg from '@/assets/default-illustrations/service.svg'
@@ -57,11 +58,26 @@ import hardwareImg from '@/assets/default-illustrations/hardware.svg'
 import generalImg from '@/assets/default-illustrations/general.svg'
 import { categorizeTag } from '@/utils/categoryMapper'
 
-defineProps({
+const props = defineProps({
   project: {
     type: Object,
     required: true,
   },
+})
+
+const typeBadgeText = computed(() => {
+  const t = props.project.type
+  if (t === 'external') return '在线体验'
+  if (t === 'local') return '本地预览'
+  if (t === 'miniprogram') return '小程序'
+  return t
+})
+
+const typeBadgeClass = computed(() => {
+  const t = props.project.type
+  if (t === 'external') return 'text-trae-accent-glow'
+  if (t === 'miniprogram') return 'text-green-400'
+  return 'text-blue-400'
 })
 
 const illustrationMap = {

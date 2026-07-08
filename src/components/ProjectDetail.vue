@@ -17,6 +17,19 @@
         sandbox="allow-scripts allow-same-origin allow-popups"
         loading="lazy"
       />
+      <div v-else-if="project.type === 'miniprogram' && project.qrCode" class="w-full aspect-video bg-trae-card grid place-items-center">
+        <div class="text-center">
+          <img :src="project.qrCode" alt="小程序二维码" class="w-48 h-48 mx-auto rounded-lg border border-trae-border object-cover" />
+          <p class="text-trae-text-secondary text-sm mt-4">请使用微信扫码体验</p>
+        </div>
+      </div>
+      <div v-else-if="project.type === 'miniprogram'" class="w-full aspect-video bg-trae-card grid place-items-center">
+        <div class="text-center">
+          <svg class="w-16 h-16 mx-auto text-trae-text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M12 12H8m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <p class="text-trae-text-secondary text-sm">微信小程序作品</p>
+          <p class="text-trae-text-muted text-xs mt-1">请查看原帖获取二维码</p>
+        </div>
+      </div>
       <div v-else class="w-full aspect-video bg-trae-card grid place-items-center">
         <p class="text-trae-text-muted">暂无可预览内容</p>
       </div>
@@ -43,6 +56,16 @@
       >
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
         在新窗口中打开
+      </a>
+      <a
+        v-if="project.type === 'miniprogram'"
+        :href="project.forumUrl"
+        target="_blank"
+        rel="noopener"
+        class="btn-secondary !py-2 !px-4 !text-xs"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+        查看原帖二维码
       </a>
     </div>
 
