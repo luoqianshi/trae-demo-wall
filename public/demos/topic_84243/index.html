@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原理图设计器 - Schematic Designer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg-primary:#0d1117;--bg-secondary:#161b22;--bg-tertiary:#21262d;--border:#30363d;--text-primary:#e0e0e0;--text-secondary:#8b949e;--accent:#00d4ff;--accent-dim:#1a3a4a;--danger:#ff4444;--warning:#ffaa00;--success:#3fb950;--font-mono:"Consolas","Courier New",monospace;--font-sans:"Segoe UI","Microsoft YaHei",sans-serif}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-sans)}
+#app{display:flex;flex-direction:column;height:100vh}
+#toolbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+#toolbar .brand{font-size:16px;font-weight:bold;color:var(--accent);margin-right:12px;white-space:nowrap}
+#toolbar .meta-title{font-size:12px;color:var(--text-secondary);margin-right:12px;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+#toolbar .separator{width:1px;height:24px;background:var(--border);margin:0 4px}
+.toolbar-btn{padding:5px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);cursor:pointer;font-size:12px;white-space:nowrap;transition:all 0.15s}
+.toolbar-btn:hover{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.toolbar-btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:bold}
+.toolbar-btn.primary:hover{background:#00e8ff}
+.toolbar-btn.danger{color:var(--danger)}
+.toolbar-btn.danger:hover{background:#2a1111;border-color:var(--danger)}
+#main-content{display:flex;flex:1;overflow:hidden}
+#left-panel{width:380px;min-width:300px;display:flex;flex-direction:column;background:var(--bg-secondary);border-right:1px solid var(--border);resize:horizontal;overflow:hidden}
+#panel-header{padding:8px 12px;font-size:12px;font-weight:bold;color:var(--text-secondary);background:var(--bg-tertiary);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+#code-editor{flex:1;width:100%;padding:12px;background:var(--bg-primary);color:var(--accent);border:none;resize:none;font-family:var(--font-mono);font-size:12px;line-height:1.5;tab-size:2;outline:none;overflow:auto}
+#code-editor::placeholder{color:var(--text-secondary);opacity:0.5}
+#status-bar{padding:6px 12px;font-size:11px;background:var(--bg-tertiary);border-top:1px solid var(--border);min-height:28px}
+#status-message{color:var(--text-secondary)}
+#status-message.success{color:var(--success)}
+#status-message.error{color:var(--danger)}
+#status-message.warning{color:var(--warning)}
+#right-panel{flex:1;position:relative;overflow:hidden;background:var(--bg-primary)}
+#schematic-canvas{width:100%;height:100%;display:block}
+#schematic-canvas svg{width:100%;height:100%}
+#component-panel{display:none;position:absolute;top:10px;right:10px;width:280px;max-height:70vh;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:100;overflow:hidden}
+#component-panel .panel-header{padding:10px 14px;font-size:13px;font-weight:bold;color:var(--accent);background:var(--bg-tertiary);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+#component-panel .panel-header .close-btn{cursor:pointer;color:var(--text-secondary);font-size:16px;padding:0 4px}
+#component-panel .panel-header .close-btn:hover{color:var(--danger)}
+#lcsc-search-wrap{padding:8px 12px;border-bottom:1px solid var(--border)}
+#lcsc-search{width:100%;padding:6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;outline:none}
+#lcsc-search:focus{border-color:var(--accent)}
+#lcsc-results{display:none;max-height:200px;overflow-y:auto;border-bottom:1px solid var(--border)}
+.lcsc-item{padding:6px 12px;font-size:11px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center}
+.lcsc-item:hover{background:var(--accent-dim)}
+.lcsc-code{color:var(--accent);font-family:var(--font-mono);font-weight:bold;min-width:60px}
+.lcsc-value{color:var(--text-primary);min-width:50px}
+.lcsc-desc{color:var(--text-secondary);font-size:10px}
+#component-list{max-height:400px;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px}
+.component-item{padding:8px 10px;font-size:11px;cursor:pointer;border-radius:4px;display:flex;align-items:center;gap:6px;transition:all 0.1s;color:var(--text-secondary)}
+.component-item:hover{background:var(--accent-dim);color:var(--accent)}
+.comp-icon{width:22px;height:18px;display:inline-flex;align-items:center;justify-content:center}.comp-icon svg{display:block}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-secondary)}
+@media(max-width:768px){#left-panel{width:100%;min-width:0}#main-content{flex-direction:column}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <span class="brand">原理图设计器</span>
+    <span class="meta-title" id="meta-title">Untitled</span>
+    <span class="separator"></span>
+    <button class="toolbar-btn" id="btn-sample" title="加载示例电路">示例</button>
+    <button class="toolbar-btn" id="btn-import" title="导入JSON文件 (Ctrl+O)">导入</button>
+    <input type="file" id="file-input" accept=".json" style="display:none">
+    <button class="toolbar-btn" id="btn-export-json" title="导出JSON (Ctrl+S)">导出JSON</button>
+    <button class="toolbar-btn" id="btn-export-svg" title="导出SVG矢量图">导出SVG</button>
+    <button class="toolbar-btn" id="btn-export-png" title="导出PNG图片">导出PNG</button>
+    <span class="separator"></span>
+    <button class="toolbar-btn primary" id="btn-render" title="渲染电路图 (Ctrl+Enter)">渲染</button>
+    <span class="separator"></span>
+    <button class="toolbar-btn" id="btn-zoom-in" title="放大">+</button>
+    <button class="toolbar-btn" id="btn-zoom-out" title="缩小">-</button>
+    <button class="toolbar-btn" id="btn-zoom-fit" title="适应窗口">适应</button>
+    <button class="toolbar-btn" id="btn-zoom-reset" title="重置视图 (Ctrl+0)">重置</button>
+    <span class="separator"></span>
+    <button class="toolbar-btn" id="btn-add-component" title="从元件库添加">添加元件</button>
+    <button class="toolbar-btn danger" id="btn-clear" title="清空画布">清空</button>
+  </div>
+  <div id="main-content">
+    <div id="left-panel">
+      <div id="panel-header"><span>JSON 电路描述代码</span><span style="font-size:10px;color:var(--text-secondary)">Ctrl+Enter 渲染</span></div>
+      <textarea id="code-editor" placeholder="在此粘贴或输入 JSON 电路代码..." spellcheck="false"></textarea>
+      <div id="status-bar"><span id="status-message">点击"示例"按钮加载示例电路</span></div>
+    </div>
+    <div id="right-panel">
+      <div id="schematic-canvas"></div>
+      <div id="component-panel">
+        <div class="panel-header"><span>元件库</span><span class="close-btn" id="btn-close-panel">X</span></div>
+        <div id="lcsc-search-wrap"><input type="text" id="lcsc-search" placeholder="搜索 LCSC 元件 (编号/型号/类型)..."></div>
+        <div id="lcsc-results"></div>
+        <div id="component-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// ================================================================
+// Native SVG Helper - zero dependencies, fully offline
+// ================================================================
+const SVGNS = 'http://www.w3.org/2000/svg';
+function $e(tag){return document.createElementNS(SVGNS,tag)}
+function $a(el,attrs){for(var k in attrs)el.setAttribute(k,attrs[k]);return el}
+function $g(parent,transform){var g=$e('g');if(transform)g.setAttribute('transform',transform);if(parent)parent.appendChild(g);return g}
+function $p(parent,d,stroke,fill){var p=$e('path');$a(p,{d:d,fill:fill||'none',stroke:stroke||'#00d4ff','stroke-width':'1.5'});parent.appendChild(p);return p}
+function $l(parent,x1,y1,x2,y2,stroke,sw){var l=$e('line');$a(l,{x1:x1,y1:y1,x2:x2,y2:y2,stroke:stroke||'#00d4ff','stroke-width':sw||'1.5'});parent.appendChild(l);return l}
+function $r(parent,x,y,w,h,fill,stroke,sw,rx){var r=$e('rect');$a(r,{x:x,y:y,width:w,height:h,fill:fill||'none',stroke:stroke||'#00d4ff','stroke-width':sw||'1.5'});if(rx)$a(r,{rx:rx,ry:rx});parent.appendChild(r);return r}
+function $c(parent,cx,cy,r,fill,stroke,sw){var c=$e('circle');$a(c,{cx:cx,cy:cy,r:r,fill:fill||'none',stroke:stroke||'#00d4ff','stroke-width':sw||'1.5'});parent.appendChild(c);return c}
+function $poly(parent,pts,fill,stroke,sw){var p=$e('polygon');$a(p,{points:pts,fill:fill||'none',stroke:stroke||'#00d4ff','stroke-width':sw||'1.5'});parent.appendChild(p);return p}
+function $t(parent,x,y,text,fill,size,weight,anchor){var t=$e('text');$a(t,{x:x,y:y,fill:fill||'#e0e0e0','font-size':size||'11','font-family':'Consolas,monospace','text-anchor':anchor||'middle','dominant-baseline':'central'});if(weight)$a(t,{'font-weight':weight});t.textContent=text;parent.appendChild(t);return t}
+// ================================================================
+// LCSC Component Library
+// ================================================================
+const LCSC_LIBRARY={"C17583":{type:"resistor",value:"10KΩ",desc:"0805 10KΩ ±1%",mfr:"UniOhm"},"C17414":{type:"resistor",value:"1KΩ",desc:"0805 1KΩ ±1%",mfr:"UniOhm"},"C17561":{type:"resistor",value:"100Ω",desc:"0805 100Ω ±1%",mfr:"UniOhm"},"C17408":{type:"resistor",value:"4.7KΩ",desc:"0805 4.7KΩ ±1%",mfr:"UniOhm"},"C17536":{type:"resistor",value:"100KΩ",desc:"0805 100KΩ ±1%",mfr:"UniOhm"},"C17415":{type:"resistor",value:"22Ω",desc:"0805 22Ω ±1%",mfr:"UniOhm"},"C17577":{type:"resistor",value:"1MΩ",desc:"0805 1MΩ ±1%",mfr:"UniOhm"},"C17513":{type:"resistor",value:"330Ω",desc:"0805 330Ω ±1%",mfr:"UniOhm"},"C17544":{type:"resistor",value:"220Ω",desc:"0805 220Ω ±1%",mfr:"UniOhm"},"C17674":{type:"resistor",value:"0Ω",desc:"0805 0Ω Jumper",mfr:"UniOhm"},"C17572":{type:"resistor",value:"2.2KΩ",desc:"0805 2.2KΩ ±1%",mfr:"UniOhm"},"C17511":{type:"resistor",value:"20KΩ",desc:"0805 20KΩ ±1%",mfr:"UniOhm"},"C17573":{type:"resistor",value:"47KΩ",desc:"0805 47KΩ ±1%",mfr:"UniOhm"},"C17512":{type:"resistor",value:"5.1KΩ",desc:"0805 5.1KΩ ±1%",mfr:"UniOhm"},"C17510":{type:"resistor",value:"68Ω",desc:"0805 68Ω ±1%",mfr:"UniOhm"},"C17571":{type:"resistor",value:"3.3KΩ",desc:"0805 3.3KΩ ±1%",mfr:"UniOhm"},"C15849":{type:"capacitor",value:"10μF",desc:"0805 10μF 16V X7R",mfr:"Samsung"},"C107204":{type:"capacitor",value:"100nF",desc:"0805 100nF 50V X7R",mfr:"Samsung"},"C30926":{type:"capacitor",value:"22pF",desc:"0805 22pF 50V NP0",mfr:"Samsung"},"C49678":{type:"capacitor",value:"1μF",desc:"0805 1μF 25V X7R",mfr:"Samsung"},"C1797":{type:"capacitor",value:"100μF",desc:"D6.3x7.7 100μF 25V Al",mfr:"Aishi"},"C7460":{type:"capacitor",value:"220μF",desc:"D8x12 220μF 25V Al",mfr:"Aishi"},"C1711":{type:"capacitor",value:"10μF",desc:"D5x11 10μF 50V Al",mfr:"Aishi"},"C12228":{type:"capacitor",value:"470μF",desc:"D10x16 470μF 25V Al",mfr:"Aishi"},"C1622":{type:"capacitor",value:"47μF",desc:"D6.3x7.7 47μF 25V Al",mfr:"Aishi"},"C1545":{type:"capacitor",value:"100nF",desc:"0805 100nF 50V X7R",mfr:"Samsung"},"C1530":{type:"capacitor",value:"10μF",desc:"0805 10μF 10V X5R",mfr:"Samsung"},"C1523":{type:"capacitor",value:"4.7μF",desc:"0805 4.7μF 25V X7R",mfr:"Samsung"},"C1526":{type:"capacitor",value:"0.1μF",desc:"0805 0.1μF 50V X7R",mfr:"Samsung"},"C4532":{type:"capacitor",value:"33pF",desc:"0805 33pF 50V NP0",mfr:"Samsung"},"C2286":{type:"led",value:"RED",desc:"0805 Red LED 20mA",mfr:"Everlight"},"C965555":{type:"led",value:"BLUE",desc:"0805 Blue LED 20mA",mfr:"Everlight"},"C965556":{type:"led",value:"GREEN",desc:"0805 Green LED 20mA",mfr:"Everlight"},"C965557":{type:"led",value:"YELLOW",desc:"0805 Yellow LED 20mA",mfr:"Everlight"},"C191023":{type:"diode",value:"1N4148",desc:"SOD-123 100V 150mA",mfr:"Diodes Inc"},"C5042":{type:"diode",value:"1N4007",desc:"SMA 1000V 1A",mfr:"Diodes Inc"},"C13287":{type:"zener_diode",value:"3.3V",desc:"SOD-123 3.3V 500mW",mfr:"Diodes Inc"},"C71228":{type:"zener_diode",value:"5.1V",desc:"SOD-123 5.1V 500mW",mfr:"Diodes Inc"},"C77866":{type:"schottky_diode",value:"SS14",desc:"SMA 40V 1A Schottky",mfr:"MDD"},"C6749":{type:"npn_transistor",value:"2N2222",desc:"SOT-23 NPN 40V 600mA",mfr:"CJ"},"C28705":{type:"npn_transistor",value:"2N3904",desc:"SOT-23 NPN 40V 200mA",mfr:"CJ"},"C29124":{type:"pnp_transistor",value:"2N3906",desc:"SOT-23 PNP 40V 200mA",mfr:"CJ"},"C2785":{type:"npn_transistor",value:"S8050",desc:"SOT-23 NPN 25V 500mA",mfr:"CJ"},"C2791":{type:"pnp_transistor",value:"S8550",desc:"SOT-23 PNP 25V 500mA",mfr:"CJ"},"C95779":{type:"n_mosfet",value:"AO3400",desc:"SOT-23 N-Ch 30V 5.8A",mfr:"AOS"},"C20917":{type:"p_mosfet",value:"AO3401",desc:"SOT-23 P-Ch -30V 4.2A",mfr:"AOS"},"C115273":{type:"n_mosfet",value:"SI2302",desc:"SOT-23 N-Ch 20V 3A",mfr:"VBsemi"},"C115274":{type:"p_mosfet",value:"SI2301",desc:"SOT-23 P-Ch -20V 2.8A",mfr:"VBsemi"},"C30035":{type:"n_mosfet",value:"2N7002",desc:"SOT-23 N-Ch 60V 300mA",mfr:"CJ"},"C5583":{type:"ic",value:"NE555",desc:"SOP-8 Timer IC",mfr:"TI",pins:8},"C91735":{type:"opamp",value:"LM358",desc:"SOP-8 Dual Op-Amp",mfr:"TI"},"C51752":{type:"ic",value:"ATmega328P",desc:"TQFP-32 MCU",mfr:"Microchip",pins:32},"C8313":{type:"ic",value:"AMS1117-3.3",desc:"SOT-223 LDO 3.3V",mfr:"AMS",pins:3},"C6186":{type:"ic",value:"AMS1117-5.0",desc:"SOT-223 LDO 5.0V",mfr:"AMS",pins:3},"C11079":{type:"ic",value:"CH340G",desc:"SOP-16 USB-UART",mfr:"WCH",pins:16},"C10528":{type:"ic",value:"MAX232",desc:"SOP-16 RS232",mfr:"Maxim",pins:16},"C14267":{type:"ic",value:"HT7333",desc:"SOT-89 LDO 3.3V",mfr:"Holtek",pins:3},"C10026":{type:"ic",value:"STM32F103C8T6",desc:"LQFP-48 MCU",mfr:"ST",pins:48},"C8307":{type:"ic",value:"ESP32-WROOM-32",desc:"WiFi/BT Module",mfr:"Espressif",pins:38},"C82899":{type:"ic",value:"ESP8266",desc:"WiFi Module",mfr:"Espressif",pins:16},"C114586":{type:"ic",value:"INA226",desc:"SOP-8 I2C Power Monitor",mfr:"TI",pins:8},"C7990":{type:"ic",value:"24C02",desc:"SOP-8 2Kbit EEPROM",mfr:"Atmel",pins:8},"C13389":{type:"ic",value:"DS18B20",desc:"TO-92 Temp Sensor",mfr:"Maxim",pins:3},"C13738":{type:"crystal",value:"16MHz",desc:"HC-49S 16MHz 20pF",mfr:"YXC"},"C13739":{type:"crystal",value:"8MHz",desc:"HC-49S 8MHz 20pF",mfr:"YXC"},"C13740":{type:"crystal",value:"12MHz",desc:"HC-49S 12MHz 20pF",mfr:"YXC"},"C13734":{type:"crystal",value:"32.768KHz",desc:"3215 32.768KHz 12.5pF",mfr:"YXC"},"C16047":{type:"pin_header",value:"1x4P",desc:"2.54mm Pin Header 1x4",mfr:"Boom",pins:4},"C16048":{type:"pin_header",value:"1x6P",desc:"2.54mm Pin Header 1x6",mfr:"Boom",pins:6},"C16049":{type:"pin_header",value:"1x8P",desc:"2.54mm Pin Header 1x8",mfr:"Boom",pins:8},"C15402":{type:"connector",value:"USB-B",desc:"USB Type-B Connector",mfr:"Jing"},"C3939":{type:"connector",value:"USB-C",desc:"USB Type-C 16P",mfr:"Jing",pins:16},"C16046":{type:"pin_header",value:"1x3P",desc:"2.54mm Pin Header 1x3",mfr:"Boom",pins:3},"C16045":{type:"pin_header",value:"1x2P",desc:"2.54mm Pin Header 1x2",mfr:"Boom",pins:2},"C17575":{type:"fuse",value:"500mA",desc:"0805 500mA PTC Fuse",mfr:"Bourns"},"C17576":{type:"fuse",value:"1A",desc:"0805 1A PTC Fuse",mfr:"Bourns"},"C1035":{type:"inductor",value:"10μH",desc:"CD54 10μH Power Inductor",mfr:"Sunlord"},"C1275":{type:"inductor",value:"100μH",desc:"CD54 100μH Power Inductor",mfr:"Sunlord"},"C1280":{type:"inductor",value:"22μH",desc:"CD54 22μH Power Inductor",mfr:"Sunlord"},"C1281":{type:"inductor",value:"47μH",desc:"CD54 47μH Power Inductor",mfr:"Sunlord"},"C77114":{type:"inductor",value:"4.7μH",desc:"CD43 4.7μH Power Inductor",mfr:"Sunlord"},"C9375":{type:"buzzer",value:"5V",desc:"Passive Buzzer 5V",mfr:"Kexin"},"C70374":{type:"battery",value:"CR2032",desc:"CR2032 Battery Holder",mfr:"Q&J"},"C31893":{type:"switch",value:"SPST",desc:"6x6mm Tact Switch",mfr:"Korean Hroparts"},"C3935":{type:"switch",value:"SPDT",desc:"SS-12D00 Slide Switch",mfr:"XKB"}};
+function lookupLCSC(c){var t=LCSC_LIBRARY[c];return t?Object.assign({},t,{lcsc:c}):null}
+function getComponentTypes(){var s='<svg viewBox="0 0 22 16" width="22" height="16">',e='</svg>',c='#00d4ff',f='fill="none"';
+return[{id:"resistor",name:"电阻 Resistor",icon:s+'<rect x="1" y="4" width="20" height="8" rx="1" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/>'+e},
+{id:"capacitor",name:"电容 Capacitor",icon:s+'<line x1="0" y1="8" x2="7" y2="8" stroke="'+c+'"/><line x1="7" y1="1" x2="7" y2="15" stroke="'+c+'" stroke-width="2.5"/><line x1="12" y1="1" x2="12" y2="15" stroke="'+c+'" stroke-width="2.5"/><line x1="12" y1="8" x2="20" y2="8" stroke="'+c+'"/>'+e},
+{id:"inductor",name:"电感 Inductor",icon:s+'<path d="M1,8 A3,3 0 0,1 5,8 A3,3 0 0,1 9,8 A3,3 0 0,1 13,8 A3,3 0 0,1 17,8 A3,3 0 0,1 21,8" stroke="'+c+'" '+f+' stroke-width="1.2"/>'+e},
+{id:"diode",name:"二极管 Diode",icon:s+'<line x1="1" y1="8" x2="8" y2="8" stroke="'+c+'"/><polygon points="8,2 16,8 8,14" fill="none" stroke="'+c+'" stroke-width="1.2"/><line x1="16" y1="2" x2="16" y2="14" stroke="'+c+'" stroke-width="1.5"/><line x1="16" y1="8" x2="21" y2="8" stroke="'+c+'"/>'+e},
+{id:"led",name:"LED",icon:s+'<line x1="1" y1="8" x2="8" y2="8" stroke="#ff4444"/><polygon points="8,2 16,8 8,14" fill="none" stroke="#ff4444" stroke-width="1.2"/><line x1="16" y1="2" x2="16" y2="14" stroke="#ff4444" stroke-width="1.5"/><line x1="18" y1="4" x2="21" y2="1" stroke="#ff4444" stroke-width="1"/><line x1="18" y1="12" x2="21" y2="15" stroke="#ff4444" stroke-width="1"/><line x1="16" y1="8" x2="21" y2="8" stroke="#ff4444"/>'+e},
+{id:"zener_diode",name:"稳压管 Zener",icon:s+'<line x1="1" y1="8" x2="8" y2="8" stroke="'+c+'"/><polygon points="8,2 16,8 8,14" fill="none" stroke="'+c+'" stroke-width="1.2"/><line x1="16" y1="2" x2="16" y2="6" stroke="'+c+'" stroke-width="1.5"/><polyline points="16,8 18,6" stroke="'+c+'" stroke-width="1.2"/><line x1="16" y1="14" x2="16" y2="10" stroke="'+c+'" stroke-width="1.5"/><line x1="16" y1="8" x2="21" y2="8" stroke="'+c+'"/>'+e},
+{id:"schottky_diode",name:"肖特基 Schottky",icon:s+'<line x1="1" y1="8" x2="8" y2="8" stroke="'+c+'"/><polygon points="8,2 16,8 8,14" fill="none" stroke="'+c+'" stroke-width="1.2"/><path d="M16,2 L16,6 C19,7 19,9 16,10 L16,14" stroke="'+c+'" '+f+' stroke-width="1.2"/><line x1="16" y1="8" x2="21" y2="8" stroke="'+c+'"/>'+e},
+{id:"npn_transistor",name:"NPN晶体管",icon:s+'<circle cx="11" cy="8" r="7" stroke="'+c+'" '+f+' stroke-width="1.2"/><line x1="11" y1="1" x2="11" y2="15" stroke="'+c+'"/><line x1="4" y1="8" x2="11" y2="8" stroke="'+c+'"/><polygon points="11,11 8,14 14,14" fill="none" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"pnp_transistor",name:"PNP晶体管",icon:s+'<circle cx="11" cy="8" r="7" stroke="'+c+'" '+f+' stroke-width="1.2"/><line x1="11" y1="1" x2="11" y2="15" stroke="'+c+'"/><line x1="4" y1="8" x2="11" y2="8" stroke="'+c+'"/><polygon points="11,14 8,11 14,11" fill="none" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"n_mosfet",name:"N-MOSFET",icon:s+'<circle cx="11" cy="8" r="7" stroke="'+c+'" '+f+' stroke-width="1.2"/><line x1="11" y1="1" x2="11" y2="15" stroke="'+c+'"/><line x1="4" y1="8" x2="11" y2="8" stroke="'+c+'"/><line x1="11" y1="6" x2="11" y2="10" stroke="#0d1117" stroke-width="3"/><polygon points="11,13 8,15 11,17" fill="none" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"p_mosfet",name:"P-MOSFET",icon:s+'<circle cx="11" cy="8" r="7" stroke="'+c+'" '+f+' stroke-width="1.2"/><line x1="11" y1="1" x2="11" y2="15" stroke="'+c+'"/><line x1="4" y1="8" x2="11" y2="8" stroke="'+c+'"/><line x1="11" y1="6" x2="11" y2="10" stroke="#0d1117" stroke-width="3"/><polygon points="11,3 8,1 11,-1" fill="none" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"opamp",name:"运放 Op-Amp",icon:s+'<polygon points="2,1 2,15 17,8" fill="none" stroke="'+c+'" stroke-width="1.2"/><text x="4" y="9" fill="'+c+'" font-size="6" font-family="sans-serif">+</text><text x="4" y="13" fill="'+c+'" font-size="7" font-family="sans-serif">&minus;</text>'+e},
+{id:"ic",name:"IC芯片",icon:s+'<rect x="2" y="2" width="18" height="12" rx="2" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/><circle cx="6" cy="2" r="2" fill="#0d1117" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"crystal",name:"晶振 Crystal",icon:s+'<rect x="2" y="4" width="14" height="8" rx="2" fill="#1a1a3e" stroke="'+c+'" stroke-width="1"/><line x1="6" y1="4" x2="6" y2="12" stroke="'+c+'"/><line x1="12" y1="4" x2="12" y2="12" stroke="'+c+'"/><line x1="0" y1="8" x2="2" y2="8" stroke="'+c+'"/><line x1="16" y1="8" x2="20" y2="8" stroke="'+c+'"/>'+e},
+{id:"vcc",name:"电源 VCC",icon:s+'<line x1="6" y1="12" x2="16" y2="12" stroke="#ff4444" stroke-width="1.5"/><text x="11" y="8" fill="#ff4444" font-size="7" font-family="sans-serif" text-anchor="middle" font-weight="bold">VCC</text><line x1="11" y1="12" x2="11" y2="16" stroke="#ff4444"/>'+e},
+{id:"gnd",name:"地 GND",icon:s+'<line x1="11" y1="0" x2="11" y2="8" stroke="'+c+'"/><line x1="1" y1="8" x2="21" y2="8" stroke="'+c+'"/><line x1="4" y1="11" x2="18" y2="11" stroke="'+c+'"/><line x1="7" y1="14" x2="15" y2="14" stroke="'+c+'"/>'+e},
+{id:"pin_header",name:"排针 Pin Header",icon:s+'<rect x="2" y="1" width="14" height="14" rx="2" fill="#1a1a3e" stroke="'+c+'" stroke-width="1"/><rect x="6" y="3" width="3" height="3" fill="'+c+'"/><rect x="6" y="8" width="3" height="3" fill="'+c+'"/>'+e},
+{id:"connector",name:"连接器 Connector",icon:s+'<polygon points="2,1 18,1 15,15 5,15" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/>'+e},
+{id:"fuse",name:"保险丝 Fuse",icon:s+'<rect x="2" y="4" width="14" height="8" rx="2" fill="#1a1a3e" stroke="#ffaa00" stroke-width="1"/><path d="M6,8 C8,5 10,11 12,8" fill="none" stroke="#ffaa00" stroke-width="1"/><line x1="0" y1="8" x2="2" y2="8" stroke="#ffaa00"/><line x1="16" y1="8" x2="20" y2="8" stroke="#ffaa00"/>'+e},
+{id:"battery",name:"电池 Battery",icon:s+'<line x1="0" y1="8" x2="4" y2="8" stroke="'+c+'"/><line x1="4" y1="3" x2="4" y2="13" stroke="#ff4444" stroke-width="2"/><line x1="8" y1="5" x2="8" y2="11" stroke="'+c+'" stroke-width="2"/><line x1="12" y1="3" x2="12" y2="13" stroke="#ff4444" stroke-width="2"/><line x1="16" y1="5" x2="16" y2="11" stroke="'+c+'" stroke-width="2"/><line x1="16" y1="8" x2="20" y2="8" stroke="'+c+'"/>'+e},
+{id:"switch",name:"开关 Switch",icon:s+'<circle cx="1" cy="8" r="2" fill="'+c+'"/><circle cx="19" cy="8" r="2" fill="'+c+'"/><line x1="1" y1="8" x2="13" y2="3" stroke="'+c+'"/>'+e},
+{id:"buzzer",name:"蜂鸣器 Buzzer",icon:s+'<circle cx="11" cy="8" r="7" fill="#1a1a3e" stroke="'+c+'" stroke-width="1"/><path d="M15,5 Q19,8 15,11" fill="none" stroke="'+c+'" stroke-width="1"/><path d="M17,3 Q22,8 17,13" fill="none" stroke="'+c+'" stroke-width="1"/><line x1="0" y1="8" x2="4" y2="8" stroke="'+c+'"/><line x1="18" y1="8" x2="20" y2="8" stroke="'+c+'"/>'+e},
+{id:"potentiometer",name:"电位器 Pot",icon:s+'<rect x="1" y="4" width="20" height="8" rx="1" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/><line x1="11" y1="12" x2="15" y2="15" stroke="'+c+'" stroke-width="1"/><polygon points="14,16 15,13 18,15" fill="'+c+'"/>'+e},
+{id:"transformer",name:"变压器 Transformer",icon:s+'<path d="M2,3 A2,2 0 0,1 4,3 A2,2 0 0,1 6,3 A2,2 0 0,1 6,7 A2,2 0 0,1 6,11 A2,2 0 0,1 4,11 A2,2 0 0,1 2,11" stroke="'+c+'" '+f+' stroke-width="1"/><path d="M16,3 A2,2 0 0,1 18,3 A2,2 0 0,1 20,3 A2,2 0 0,1 20,7 A2,2 0 0,1 20,11 A2,2 0 0,1 18,11 A2,2 0 0,1 16,11" stroke="'+c+'" '+f+' stroke-width="1"/><line x1="7" y1="1" x2="15" y2="1" stroke="#888" stroke-width="0.8"/><line x1="7" y1="14" x2="15" y2="14" stroke="#888" stroke-width="0.8"/>'+e},
+{id:"bridge_rectifier",name:"整流桥 Bridge",icon:s+'<polygon points="11,1 21,11 11,21 1,11" fill="none" stroke="'+c+'" stroke-width="1.2"/><path d="M7,9 L11,13 L7,17" fill="none" stroke="'+c+'" stroke-width="1"/><line x1="11" y1="13" x2="11" y2="17" stroke="'+c+'"/><path d="M15,5 L11,9 L15,13" fill="none" stroke="'+c+'" stroke-width="1"/><line x1="11" y1="9" x2="11" y2="5" stroke="'+c+'"/>'+e},
+{id:"antenna",name:"天线 Antenna",icon:s+'<line x1="11" y1="16" x2="11" y2="1" stroke="'+c+'"/><line x1="5" y1="4" x2="17" y2="4" stroke="'+c+'"/><line x1="6" y1="2" x2="16" y2="2" stroke="'+c+'"/>'+e},
+{id:"motor",name:"电机 Motor",icon:s+'<circle cx="11" cy="8" r="7" fill="none" stroke="'+c+'" stroke-width="1.2"/><text x="11" y="10" fill="'+c+'" font-size="10" font-family="sans-serif" text-anchor="middle" font-weight="bold">M</text>'+e},
+{id:"relay",name:"继电器 Relay",icon:s+'<rect x="2" y="1" width="14" height="14" rx="2" fill="#1a1a3e" stroke="'+c+'" stroke-width="1"/><line x1="8" y1="1" x2="8" y2="15" stroke="'+c+'"/><line x1="16" y1="4" x2="21" y2="4" stroke="'+c+'"/><circle cx="21" cy="4" r="1.5" fill="'+c+'"/><line x1="16" y1="12" x2="18" y2="5" stroke="'+c+'"/>'+e},
+{id:"microphone",name:"麦克风 Mic",icon:s+'<circle cx="11" cy="8" r="7" fill="none" stroke="'+c+'" stroke-width="1.2"/><rect x="9" y="4" width="4" height="8" rx="2" fill="'+c+'"/><line x1="11" y1="12" x2="11" y2="14" stroke="'+c+'"/><line x1="8" y1="14" x2="14" y2="14" stroke="'+c+'"/>'+e},
+{id:"speaker",name:"扬声器 Speaker",icon:s+'<rect x="4" y="3" width="8" height="10" rx="2" fill="none" stroke="'+c+'" stroke-width="1"/><path d="M14,5 Q17,8 14,11" fill="none" stroke="'+c+'" stroke-width="1"/><path d="M16,3 Q20,8 16,13" fill="none" stroke="'+c+'" stroke-width="1"/>'+e},
+{id:"photoresistor",name:"光敏电阻 LDR",icon:s+'<rect x="1" y="4" width="20" height="8" rx="1" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/><line x1="5" y1="-1" x2="7" y2="4" stroke="#ffaa00" stroke-width="1"/><line x1="5" y1="-1" x2="7" y2="-2" stroke="#ffaa00" stroke-width="1"/><line x1="17" y1="-1" x2="15" y2="4" stroke="#ffaa00" stroke-width="1"/><line x1="17" y1="-1" x2="15" y2="-2" stroke="#ffaa00" stroke-width="1"/>'+e},
+{id:"varistor",name:"压敏电阻 VDR",icon:s+'<rect x="1" y="4" width="20" height="8" rx="1" fill="#1a1a3e" stroke="'+c+'" stroke-width="1.2"/><line x1="6" y1="4" x2="16" y2="12" stroke="#ff4444" stroke-width="0.8"/><line x1="6" y1="12" x2="16" y2="4" stroke="#ff4444" stroke-width="0.8"/>'+e}]}
+function searchLCSC(e){var t=e.toLowerCase(),r=[];for(var[n,o]of Object.entries(LCSC_LIBRARY)){if(n.toLowerCase().includes(t)||o.value.toLowerCase().includes(t)||o.desc.toLowerCase().includes(t)||o.type.toLowerCase().includes(t))r.push(Object.assign({lcsc:n},o))}return r}
+</script>
+<script>
+// ================================================================
+// Symbol Definitions - 30+ component symbols (native SVG)
+// ================================================================
+const SYMBOLS={
+resistor:{name:"电阻",w:60,h:40,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$r(g,-24,-8,48,16,"#1a1a3e","#00d4ff","1.5");$l(g,-30,0,-24,0);$l(g,24,0,30,0)}},
+capacitor:{name:"电容",w:50,h:40,pins:[{pin:1,x:-25,y:0,name:"1"},{pin:2,x:25,y:0,name:"2"}],
+  draw(g){$l(g,-4,-15,-4,15,"#00d4ff","2");$l(g,4,-15,4,15,"#00d4ff","2");$l(g,-25,0,-4,0);$l(g,4,0,25,0)}},
+inductor:{name:"电感",w:60,h:40,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$p(g,"M-25,0 A5,5 0 0,1 -15,0 A5,5 0 0,1 -5,0 A5,5 0 0,1 5,0 A5,5 0 0,1 15,0 A5,5 0 0,1 25,0","#00d4ff")}},
+diode:{name:"二极管",w:50,h:40,pins:[{pin:1,x:-25,y:0,name:"A"},{pin:2,x:25,y:0,name:"K"}],
+  draw(g){$poly(g,"0,-12 18,0 0,12");$l(g,18,-12,18,12,"#00d4ff","2");$l(g,-25,0,0,0);$l(g,18,0,25,0)}},
+led:{name:"LED",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"A"},{pin:2,x:25,y:0,name:"K"}],
+  draw(g){$poly(g,"0,-12 18,0 0,12","none","#ff4444");$l(g,18,-12,18,12,"#ff4444","2");$l(g,22,-10,28,-16,"#ff4444","1.2");$l(g,22,10,28,16,"#ff4444","1.2");$l(g,-25,0,0,0,"#ff4444");$l(g,18,0,25,0,"#ff4444")}},
+zener_diode:{name:"稳压管",w:50,h:40,pins:[{pin:1,x:-25,y:0,name:"K"},{pin:2,x:25,y:0,name:"A"}],
+  draw(g){$poly(g,"0,-12 18,0 0,12");$l(g,18,-12,18,-2,"#00d4ff","2");$l(g,18,2,22,0,"#00d4ff","2");$l(g,18,12,18,2,"#00d4ff","2");$l(g,-25,0,0,0);$l(g,18,0,25,0)}},
+schottky_diode:{name:"肖特基",w:50,h:40,pins:[{pin:1,x:-25,y:0,name:"A"},{pin:2,x:25,y:0,name:"K"}],
+  draw(g){$poly(g,"0,-12 18,0 0,12");$p(g,"M18,-12 L18,-4 C22,-2 22,2 18,4 L18,12","#00d4ff","none");$l(g,-25,0,0,0);$l(g,18,0,25,0)}},
+npn_transistor:{name:"NPN晶体管",w:50,h:60,pins:[{pin:1,x:0,y:-30,name:"C"},{pin:2,x:-25,y:0,name:"B"},{pin:3,x:0,y:30,name:"E"}],
+  draw(g){$c(g,0,0,16);$l(g,0,-16,0,16);$l(g,-16,0,0,0);$p(g,"M0,8 L-6,14 L6,14 Z","#00d4ff","none");$l(g,0,-30,0,-16);$l(g,-25,0,-16,0);$l(g,0,16,0,30)}},
+pnp_transistor:{name:"PNP晶体管",w:50,h:60,pins:[{pin:1,x:0,y:-30,name:"E"},{pin:2,x:-25,y:0,name:"B"},{pin:3,x:0,y:30,name:"C"}],
+  draw(g){$c(g,0,0,16);$l(g,0,-16,0,16);$l(g,-16,0,0,0);$p(g,"M0,14 L-6,8 L6,8 Z","#00d4ff","none");$l(g,0,-30,0,-16);$l(g,-25,0,-16,0);$l(g,0,16,0,30)}},
+n_mosfet:{name:"N-MOSFET",w:50,h:60,pins:[{pin:1,x:0,y:-30,name:"D"},{pin:2,x:-25,y:0,name:"G"},{pin:3,x:0,y:30,name:"S"}],
+  draw(g){$c(g,0,0,16);$l(g,0,-16,0,16);$l(g,-16,0,0,0);$l(g,0,-4,0,4,"#1a1a2e","3");$p(g,"M0,12 L-6,15 L0,18","#00d4ff","none");$l(g,0,-30,0,-16);$l(g,-25,0,-16,0);$l(g,0,16,0,30)}},
+p_mosfet:{name:"P-MOSFET",w:50,h:60,pins:[{pin:1,x:0,y:-30,name:"S"},{pin:2,x:-25,y:0,name:"G"},{pin:3,x:0,y:30,name:"D"}],
+  draw(g){$c(g,0,0,16);$l(g,0,-16,0,16);$l(g,-16,0,0,0);$l(g,0,-4,0,4,"#1a1a2e","3");$p(g,"M0,-12 L-6,-9 L0,-6","#00d4ff","none");$l(g,0,-30,0,-16);$l(g,-25,0,-16,0);$l(g,0,16,0,30)}},
+opamp:{name:"运放",w:60,h:70,pins:[{pin:1,x:-30,y:-15,name:"+"},{pin:2,x:-30,y:15,name:"-"},{pin:3,x:30,y:0,name:"OUT"},{pin:4,x:0,y:-35,name:"V+"},{pin:5,x:0,y:35,name:"V-"}],
+  draw(g){$poly(g,"-30,-25 -30,25 25,0");$t(g,-28,-14,"+","#00d4ff",10,"bold");$t(g,-28,16,"-","#00d4ff",12,"bold")}},
+ic:{name:"IC芯片",w:80,h:100,pins:[],
+  getPins(c){var p=c.pins||8,h=Math.ceil(p/2),s=90/(h-1||1),r=[];for(var i=0;i<h;i++)r.push({pin:i+1,x:-40,y:-45+i*s,name:String(i+1)});for(var i=0;i<p-h;i++)r.push({pin:h+i+1,x:40,y:-45+i*s,name:String(h+i+1)});return r},
+  draw(g,x,y,r,m,c){var w=80,h=c&&c.pins?Math.max(60,Math.ceil((c.pins||8)/2)*18):100;$r(g,-w/2,-h/2,w,h,"#1a1a3e","#00d4ff","1.5",4);$c(g,-w/2+10,-h/2,4,"#1a1a2e","#00d4ff","1")}},
+crystal:{name:"晶振",w:60,h:30,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$r(g,-15,-10,30,20,"#1a1a3e","#00d4ff","1.5",2);$l(g,-8,-10,-8,10,"#00d4ff","1");$l(g,8,-10,8,10,"#00d4ff","1");$l(g,-30,0,-15,0);$l(g,15,0,30,0)}},
+vcc:{name:"VCC",w:30,h:30,pins:[{pin:1,x:0,y:0,name:"VCC"}],
+  draw(g){$l(g,-15,-10,15,-10,"#ff4444");$t(g,0,-15,"VCC","#ff4444",10,"bold")}},
+gnd:{name:"GND",w:30,h:30,pins:[{pin:1,x:0,y:-15,name:"GND"}],
+  draw(g){$l(g,0,-15,0,0);$l(g,-15,0,15,0);$l(g,-10,4,10,4);$l(g,-5,8,5,8)}},
+pin_header:{name:"排针",w:40,h:60,pins:[],
+  getPins(c){var p=c.pins||4,s=50/(p-1||1),r=[];for(var i=0;i<p;i++)r.push({pin:i+1,x:0,y:-25+i*s,name:String(i+1)});return r},
+  draw(g,x,y,r,m,c){var h=((c&&c.pins)||4)*14;$r(g,-15,-h/2,30,h,"#1a1a3e","#00d4ff","1.5",3);$r(g,-2,-h/2+5,4,4,"#00d4ff","#00d4ff","1")}},
+connector:{name:"连接器",w:40,h:40,pins:[{pin:1,x:-20,y:0,name:"1"},{pin:2,x:20,y:0,name:"2"}],
+  draw(g){$poly(g,"-20,-15 20,-15 15,15 -15,15","#1a1a3e")}},
+fuse:{name:"保险丝",w:60,h:20,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$r(g,-20,-7,40,14,"#1a1a3e","#ffaa00","1.5",2);$p(g,"M-15,0 C-10,-5 -5,5 0,0 C5,-5 10,5 15,0","#ffaa00","none");$l(g,-30,0,-20,0,"#ffaa00");$l(g,20,0,30,0,"#ffaa00")}},
+battery:{name:"电池",w:60,h:40,pins:[{pin:1,x:-30,y:0,name:"+"},{pin:2,x:30,y:0,name:"-"}],
+  draw(g){$l(g,-20,-12,-20,12,"#ff4444","2");$l(g,-12,-7,-12,7,"#00d4ff","2");$l(g,-4,-12,-4,12,"#ff4444","2");$l(g,4,-7,4,7,"#00d4ff","2");$l(g,12,-12,12,12,"#ff4444","2");$l(g,20,-7,20,7,"#00d4ff","2");$l(g,-30,0,-20,0);$l(g,20,0,30,0)}},
+switch_spst:{name:"开关",w:60,h:40,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$c(g,-25,0,3,"#00d4ff");$c(g,25,0,3,"#00d4ff");$l(g,-25,0,15,-15);$l(g,-30,0,-25,0);$l(g,25,0,30,0)}},
+buzzer:{name:"蜂鸣器",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"+"},{pin:2,x:25,y:0,name:"-"}],
+  draw(g){$c(g,0,0,18,"#1a1a3e");$p(g,"M8,-8 Q16,0 8,8","#00d4ff","none");$p(g,"M12,-12 Q22,0 12,12","#00d4ff","none");$l(g,-25,0,-18,0);$l(g,18,0,25,0)}},
+potentiometer:{name:"电位器",w:60,h:50,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"},{pin:3,x:0,y:25,name:"W"}],
+  draw(g){$r(g,-24,-8,48,16,"#1a1a3e","#00d4ff","1.5");$l(g,0,0,0,15);$p(g,"M-5,10 L0,15 L5,10","#00d4ff","none");$l(g,0,15,0,25);$l(g,-30,0,-24,0);$l(g,24,0,30,0)}},
+transformer:{name:"变压器",w:80,h:60,pins:[{pin:1,x:-40,y:-20,name:"P1"},{pin:2,x:-40,y:20,name:"P2"},{pin:3,x:40,y:-20,name:"S1"},{pin:4,x:40,y:20,name:"S2"}],
+  draw(g){$p(g,"M-30,-20 A5,5 0 0,1 -20,-20 A5,5 0 0,1 -10,-20 A5,5 0 0,1 -10,0 A5,5 0 0,1 -10,20 A5,5 0 0,1 -20,20 A5,5 0 0,1 -30,20");$p(g,"M30,-20 A5,5 0 0,1 20,-20 A5,5 0 0,1 10,-20 A5,5 0 0,1 10,0 A5,5 0 0,1 10,20 A5,5 0 0,1 20,20 A5,5 0 0,1 30,20");$l(g,-15,-22,15,-22,"#888","1");$l(g,-15,22,15,22,"#888","1")}},
+bridge_rectifier:{name:"整流桥",w:50,h:50,pins:[{pin:1,x:0,y:-25},{pin:2,x:0,y:25},{pin:3,x:-25,y:0,name:"+"},{pin:4,x:25,y:0,name:"-"}],
+  draw(g){$poly(g,"0,-20 20,0 0,20 -20,0");$p(g,"M-5,-15 L5,-5 L-5,5","#00d4ff","none");$l(g,5,-5,5,5,"#00d4ff","1.5");$p(g,"M5,15 L-5,5 L5,-5","#00d4ff","none");$l(g,-5,5,-5,-5,"#00d4ff","1.5");$t(g,-10,0,"+","#ff4444",10,"bold");$t(g,10,0,"-","#00d4ff",10,"bold")}},
+antenna:{name:"天线",w:30,h:50,pins:[{pin:1,x:0,y:25,name:"ANT"}],
+  draw(g){$l(g,0,25,0,-25);$l(g,-10,-20,10,-20);$l(g,-8,-15,8,-15);$l(g,-6,-10,6,-10)}},
+motor:{name:"电机",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"+"},{pin:2,x:25,y:0,name:"-"}],
+  draw(g){$c(g,0,0,20);$t(g,0,0,"M","#00d4ff",16,"bold");$l(g,-25,0,-20,0);$l(g,20,0,25,0)}},
+relay:{name:"继电器",w:60,h:50,pins:[{pin:1,x:-30,y:-15,name:"C1"},{pin:2,x:-30,y:15,name:"C2"},{pin:3,x:30,y:-15,name:"NO"},{pin:4,x:30,y:15,name:"COM"}],
+  draw(g){$r(g,-30,-15,20,30,"#1a1a3e","#00d4ff","1.5",3);$l(g,10,-15,30,-15);$c(g,30,-15,3,"#00d4ff");$l(g,10,-15,22,15);$c(g,30,15,3,"#00d4ff");$l(g,0,-15,0,-25,"#888","1");$l(g,0,-25,10,-25,"#888","1");$l(g,10,-25,10,-15,"#888","1")}},
+microphone:{name:"麦克风",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"+"},{pin:2,x:25,y:0,name:"-"}],
+  draw(g){$c(g,0,0,18);$p(g,"M-4,-8 L-4,4 C-4,8 4,8 4,4 L4,-8");$l(g,0,4,0,10);$l(g,-6,10,6,10);$l(g,-25,0,-18,0);$l(g,18,0,25,0)}},
+speaker:{name:"扬声器",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"+"},{pin:2,x:25,y:0,name:"-"}],
+  draw(g){$r(g,-15,-10,30,20,"#1a1a3e","#00d4ff","1.5",2);$p(g,"M8,-6 Q14,0 8,6","#00d4ff","none");$p(g,"M12,-10 Q20,0 12,10","#00d4ff","none");$l(g,-25,0,-15,0);$l(g,15,0,25,0)}},
+photoresistor:{name:"光敏电阻",w:60,h:50,pins:[{pin:1,x:-30,y:0,name:"1"},{pin:2,x:30,y:0,name:"2"}],
+  draw(g){$r(g,-24,-8,48,16,"#1a1a3e","#00d4ff","1.5");$l(g,-15,-18,-8,-8,"#ffaa00","1.2");$l(g,-15,-18,-8,-25,"#ffaa00","1.2");$l(g,15,-18,8,-8,"#ffaa00","1.2");$l(g,15,-18,8,-25,"#ffaa00","1.2");$l(g,-30,0,-24,0);$l(g,24,0,30,0)}},
+varistor:{name:"压敏电阻",w:50,h:50,pins:[{pin:1,x:-25,y:0,name:"1"},{pin:2,x:25,y:0,name:"2"}],
+  draw(g){$r(g,-24,-8,48,16,"#1a1a3e","#00d4ff","1.5");$l(g,-10,-8,10,8,"#ff4444","1");$l(g,-10,8,10,-8,"#ff4444","1");$l(g,-25,0,-24,0);$l(g,24,0,25,0)}}
+};
+SYMBOLS.switch=SYMBOLS.switch_spst;
+
+function getComponentPins(c){var s=SYMBOLS[c.type];if(!s)return[];var p=typeof s.getPins==="function"?s.getPins(c):(s.pins||[]);
+var r=(c.rotation||0)*Math.PI/180,mh=c.mirror==="h",mv=c.mirror==="v";
+return p.map(function(t){var x=t.x,y=t.y;if(mh)x=-x;if(mv)y=-y;var cs=Math.cos(r),sn=Math.sin(r);return{pin:t.pin,name:t.name,x:c.x+x*cs-y*sn,y:c.y+x*sn+y*cs,relX:x*cs-y*sn,relY:x*sn+y*cs}})}
+function getComponentBounds(c){var s=SYMBOLS[c.type];if(!s)return{x:c.x-20,y:c.y-20,w:40,h:40};var w=s.w||40,h=s.h||40;return{x:c.x-w/2,y:c.y-h/2,w:w,h:h}}
+</script>
+<script>
+// ================================================================
+// JSON Parser
+// ================================================================
+const SCHEMATIC_PARSER={parse:function(e){var t;try{t=JSON.parse(e)}catch(e){return{errors:["JSON parse error: "+e.message],components:[],wires:[],nets:[],meta:{title:"Error"}}}if(!t||typeof t!=="object")return{errors:["Invalid JSON, need meta/components/wires fields"],components:[],wires:[],nets:[],meta:{title:"Error"}};var r={meta:this._parseMeta(t.meta||{}),components:[],wires:[],nets:[],errors:[],warnings:[]};if(t.components&&Array.isArray(t.components))for(var n=0;n<t.components.length;n++){var o=this._parseComponent(t.components[n],n);o.error?r.errors.push(o.error):r.components.push(o)}if(t.wires&&Array.isArray(t.wires))for(var n=0;n<t.wires.length;n++){var i=this._parseWire(t.wires[n],n,r.components);i.error?r.errors.push(i.error):r.wires.push(i)}if(t.nets&&Array.isArray(t.nets))for(var n=0;n<t.nets.length;n++){var a=this._parseNet(t.nets[n],n);a.error?r.errors.push(a.error):r.nets.push(a)}return r},_parseMeta:function(e){return{title:e.title||"Untitled",author:e.author||"",date:e.date||(new Date).toISOString().split("T")[0],revision:e.revision||"1.0"}},_parseComponent:function(e,t){if(!e.id)return{error:"Component #"+(t+1)+": missing id"};if(!e.type)return{error:"Component "+e.id+": missing type"};var r=e.type;if(!SYMBOLS[r])return{error:"Component "+e.id+': unknown type "'+r+'"'};var n=null;if(e.lcsc&&(n=lookupLCSC(e.lcsc),!n))return{error:"Component "+e.id+': LCSC "'+e.lcsc+'" not found'};return{id:e.id,type:r,lcsc:e.lcsc||(n?n.lcsc:null),lcscInfo:n,value:e.value||(n?n.value:""),designator:e.designator||e.id,x:this._parseCoord(e.x,0),y:this._parseCoord(e.y,0),rotation:this._normalizeRotation(e.rotation||0),mirror:e.mirror||"none",pins:e.pins||null,desc:e.desc||(n?n.desc:""),footprint:e.footprint||"",extra:e.extra||{}}},_parseWire:function(e,t,r){if(!e.from||!e.to)return{error:"Wire #"+(t+1)+": missing from/to"};var n=this._parseConnection(e.from),o=this._parseConnection(e.to);if(!n)return{error:"Wire #"+(t+1)+": invalid from"};if(!o)return{error:"Wire #"+(t+1)+": invalid to"};if(!n.isNet){var i=r.find(function(e){return e.id===n.id});if(!i)return{error:'Wire #'+(t+1)+': component "'+n.id+'" not found'}}if(!o.isNet){var i=r.find(function(e){return e.id===o.id});if(!i)return{error:'Wire #'+(t+1)+': component "'+o.id+'" not found'}}return{from:n,to:o,points:e.points||null,label:e.label||null}},_parseConnection:function(e){if(typeof e==="string"){var t=e.split(":");return t.length===2?{id:t[0],pin:parseInt(t[1])||t[1],isNet:!1}:{id:e,pin:1,isNet:!0}}return typeof e==="object"&&e.id?{id:e.id,pin:e.pin||1,isNet:e.isNet||!1}:null},_parseNet:function(e,t){if(!e.name)return{error:"Net #"+(t+1)+": missing name"};return{name:e.name,x:this._parseCoord(e.x,0),y:this._parseCoord(e.y,0),color:e.color||"#ff4444"}},_parseCoord:function(e,t){if(typeof e==="number")return e;if(typeof e==="string"){var r=parseFloat(e);return isNaN(r)?t:r}return t},_normalizeRotation:function(e){return(e=Math.round((parseInt(e)||0)/90)*90)%360<0?((e%360)+360)%360:e%360},generateSample:function(){return JSON.stringify({meta:{title:"5V稳压电源电路",author:"",revision:"1.0"},components:[{id:"J1",type:"connector",lcsc:"C3939",value:"USB-C",x:200,y:200},{id:"F1",type:"fuse",lcsc:"C17576",value:"1A",x:300,y:200},{id:"D1",type:"schottky_diode",lcsc:"C77866",value:"SS14",x:400,y:200},{id:"C1",type:"capacitor",lcsc:"C15849",value:"10μF",x:500,y:150,rotation:90},{id:"C2",type:"capacitor",lcsc:"C107204",value:"100nF",x:550,y:150,rotation:90},{id:"U1",type:"ic",lcsc:"C8313",value:"AMS1117-3.3",x:650,y:200,pins:3},{id:"C3",type:"capacitor",lcsc:"C15849",value:"10μF",x:750,y:150,rotation:90},{id:"C4",type:"capacitor",lcsc:"C107204",value:"100nF",x:800,y:150,rotation:90},{id:"LED1",type:"led",lcsc:"C2286",value:"RED",x:850,y:200},{id:"R1",type:"resistor",lcsc:"C17583",value:"10KΩ",x:850,y:280}],wires:[{from:"J1:1",to:"F1:1"},{from:"F1:2",to:"D1:1"},{from:"D1:2",to:"U1:1"},{from:"C1:1",to:"U1:1"},{from:"C1:2",to:"GND"},{from:"C2:1",to:"U1:1"},{from:"C2:2",to:"GND"},{from:"U1:2",to:"C3:1"},{from:"C3:2",to:"GND"},{from:"U1:2",to:"C4:1"},{from:"C4:2",to:"GND"},{from:"U1:2",to:"LED1:1"},{from:"LED1:2",to:"R1:1"},{from:"R1:2",to:"GND"},{from:"J1:2",to:"GND"},{from:"U1:3",to:"GND"}],nets:[{name:"VCC",x:200,y:100},{name:"GND",x:200,y:350}]},null,2)}}
+</script>
+<script>
+// ================================================================
+// SVG Renderer - Native SVG, zero dependencies
+// ================================================================
+class SchematicRenderer{constructor(div){this.div=div;this.scale=1;this.offsetX=0;this.offsetY=0;this._interactionSetup=!1;this._init()}
+_init(){this.div.innerHTML="";this.svg=$e('svg');$a(this.svg,{width:"100%",height:"100%"});this.div.appendChild(this.svg);
+var bg=$e('rect');$a(bg,{width:"100%",height:"100%",fill:"#0d1117"});this.svg.appendChild(bg);
+this.mainGroup=$g(this.svg);this.gridGroup=$g(this.mainGroup);this._drawGrid();
+this.wireGroup=$g(this.mainGroup);this.componentGroup=$g(this.mainGroup);this.netGroup=$g(this.mainGroup);
+if(!this._interactionSetup){this._setupInteraction();this._interactionSetup=!0}}
+_drawGrid(){this.gridGroup.innerHTML="";var gs=10*this.scale;
+var defs=$e('defs');var pat=$e('pattern');$a(pat,{id:"grid",width:gs,height:gs,patternUnits:"userSpaceOnUse"});
+var pr=$e('rect');$a(pr,{width:gs,height:gs,fill:"none"});pat.appendChild(pr);
+var pp=$e('path');$a(pp,{d:"M"+gs+",0 L"+gs+","+gs+" M0,"+gs+" L"+gs+","+gs,stroke:"#1a2332","stroke-width":"0.5"});pat.appendChild(pp);
+defs.appendChild(pat);this.svg.insertBefore(defs,this.svg.firstChild);
+var gr=$e('rect');$a(gr,{x:-5000,y:-5000,width:10000,height:10000,fill:"url(#grid)"});this.gridGroup.appendChild(gr);
+this.gridGroup.setAttribute("transform","translate("+this.offsetX+","+this.offsetY+")")}
+_setupInteraction(){var s=this,p=!1,px=0,py=0,ox=0,oy=0;
+this.div.addEventListener("mousedown",function(e){p=!0;px=e.clientX;py=e.clientY;ox=s.offsetX;oy=s.offsetY;s.div.style.cursor="grabbing"});
+this.div.addEventListener("mousemove",function(e){if(p){s.offsetX=ox+(e.clientX-px);s.offsetY=oy+(e.clientY-py);s._updateTransform()}});
+this.div.addEventListener("mouseup",function(){p=!1;s.div.style.cursor="default"});
+this.div.addEventListener("wheel",function(e){e.preventDefault();var d=e.deltaY>0?.9:1.1,
+ns=Math.max(.1,Math.min(5,s.scale*d)),r=s.div.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+s.offsetX=mx-(mx-s.offsetX)*(ns/s.scale);s.offsetY=my-(my-s.offsetY)*(ns/s.scale);s.scale=ns;s._updateTransform();s._drawGrid()})}
+_updateTransform(){this.mainGroup.setAttribute("transform","translate("+this.offsetX+","+this.offsetY+") scale("+this.scale+")")}
+render(sc){this._init();this.components=sc.components||[];this.nets=sc.nets||[];this.componentElements={};
+this._renderNets(sc.nets||[]);this._renderWires(sc.wires||[],sc.components||[],sc.nets||[]);
+this._renderComponents(sc.components||[]);this._autoFit(sc.components||[],sc.nets||[])}
+_renderComponents(comps){for(var i=0;i<comps.length;i++){var c=comps[i],sym=SYMBOLS[c.type];if(!sym)continue;
+var g=$g(this.componentGroup);g.setAttribute("id","comp-"+c.id);g.setAttribute("data-comp-id",c.id);
+var cx=c.x,cy=c.y,rot=c.rotation||0,tr="translate("+cx+","+cy+") rotate("+rot+")";
+if(c.mirror==="h")tr+=" scale(-1,1)";else if(c.mirror==="v")tr+=" scale(1,-1)";g.setAttribute("transform",tr);
+var extra={pins:c.pins};for(var k in c.extra)extra[k]=c.extra[k];if(c.lcscInfo)extra.pins=c.lcscInfo.pins||extra.pins;
+sym.draw(g,cx,cy,rot,c.mirror,extra);
+var pins=getComponentPins(c);for(var pi=0;pi<pins.length;pi++){var pin=pins[pi],rr=rot*Math.PI/180,cs=Math.cos(-rr),sn=Math.sin(-rr);
+var lx=pin.relX*cs-pin.relY*sn,ly=pin.relX*sn+pin.relY*cs;$c(g,lx,ly,3,"#00d4ff")}
+var lY=c.type==="gnd"?sym.h/2+15:-sym.h/2-12;$t(g,0,lY,c.designator||c.id,"#e0e0e0",11,"bold");
+if(c.value&&c.type!=="vcc"&&c.type!=="gnd"){var vY=c.type==="gnd"?sym.h/2+25:-sym.h/2-25;$t(g,0,vY,c.value,"#888",9)}
+this.componentElements[c.id]={group:g,component:c}}}
+_renderWires(wires,comps,nets){if(!wires||!wires.length)return;var pm={};
+for(var i=0;i<comps.length;i++){var pins=getComponentPins(comps[i]);for(var j=0;j<pins.length;j++)pm[comps[i].id+":"+pins[j].pin]={x:pins[j].x,y:pins[j].y}}
+for(var i=0;i<nets.length;i++)pm[nets[i].name]={x:nets[i].x,y:nets[i].y};
+for(var i=0;i<wires.length;i++){var w=wires[i],fk=w.from.isNet?w.from.id:w.from.id+":"+w.from.pin,tk=w.to.isNet?w.to.id:w.to.id+":"+w.to.pin,
+fp=pm[fk],tp=pm[tk];if(!fp||!tp)continue;
+var pts=w.points&&w.points.length>=2?w.points:this._routeWire(fp,tp),
+d=pts.map(function(p,i){return(i===0?"M":"L")+p.x+","+p.y}).join(" ");
+$p(this.wireGroup,d,"#00d4ff","none");$c(this.wireGroup,fp.x,fp.y,4,"#00d4ff");$c(this.wireGroup,tp.x,tp.y,4,"#00d4ff");
+if(w.label){var mx=(fp.x+tp.x)/2,my=(fp.y+tp.y)/2-8;$t(this.wireGroup,mx,my,w.label,"#ffaa00",9)}}}
+_routeWire(f,t){var pts=[{x:f.x,y:f.y}],dx=t.x-f.x,dy=t.y-f.y;
+if(Math.abs(dx)>20)pts.push({x:f.x+dx/2,y:f.y}),pts.push({x:f.x+dx/2,y:t.y});
+else if(Math.abs(dy)>20)pts.push({x:f.x,y:f.y+dy/2}),pts.push({x:t.x,y:f.y+dy/2});pts.push({x:t.x,y:t.y});return pts}
+_renderNets(nets){if(!nets)return;for(var i=0;i<nets.length;i++){var n=nets[i],g=$g(this.netGroup),c=n.color||"#ff4444";
+if(n.name==="VCC"||n.name==="VDD"||n.name==="VIN"||n.name==="5V"||n.name==="3.3V"){$l(g,n.x-15,n.y-8,n.x+15,n.y-8,c);$t(g,n.x,n.y-14,n.name,c,11,"bold")}
+else if(n.name==="GND"){$l(g,n.x,n.y,n.x,n.y+10,c);$l(g,n.x-15,n.y+10,n.x+15,n.y+10,c);$l(g,n.x-10,n.y+14,n.x+10,n.y+14,c);$l(g,n.x-5,n.y+18,n.x+5,n.y+18,c)}
+else{$l(g,n.x-12,n.y,n.x+12,n.y,c);$t(g,n.x,n.y-6,n.name,c,10,"bold")}$c(g,n.x,n.y,4,c)}}
+_autoFit(comps,nets){if(comps.length===0){this.offsetX=100;this.offsetY=100;this.scale=1;this._updateTransform();return}
+var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+for(var i=0;i<comps.length;i++){var b=getComponentBounds(comps[i]);minX=Math.min(minX,b.x);minY=Math.min(minY,b.y);maxX=Math.max(maxX,b.x+b.w);maxY=Math.max(maxY,b.y+b.h)}
+for(var i=0;i<nets.length;i++){minX=Math.min(minX,nets[i].x-30);minY=Math.min(minY,nets[i].y-30);maxX=Math.max(maxX,nets[i].x+30);maxY=Math.max(maxY,nets[i].y+30)}
+var cw=maxX-minX+160,ch=maxY-minY+160,r=this.div.getBoundingClientRect(),sw=r.width||1200,sh=r.height||800;
+this.scale=Math.min(sw/cw,sh/ch,1.5);this.offsetX=-minX*this.scale+80*this.scale;this.offsetY=-minY*this.scale+80*this.scale;
+this._updateTransform();this._drawGrid()}
+zoom(d){this.scale=Math.max(.1,Math.min(5,this.scale*d));this._updateTransform();this._drawGrid()}
+resetView(){this.scale=1;this.offsetX=0;this.offsetY=0;this._updateTransform();this._drawGrid()}
+exportSVG(){return this.div.innerHTML}
+exportPNG(cb){var svgData=this.div.innerHTML,canvas=document.createElement("canvas"),r=this.div.getBoundingClientRect();
+canvas.width=2*r.width;canvas.height=2*r.height;var ctx=canvas.getContext("2d"),img=new Image,
+blob=new Blob([svgData],{type:"image/svg+xml;charset=utf-8"}),url=URL.createObjectURL(blob);
+img.onload=function(){ctx.fillStyle="#0d1117";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);canvas.toBlob(function(b){cb&&cb(b)},"image/png")};img.src=url}}
+</script>
+<script>
+// ================================================================
+// Main Application
+// ================================================================
+class SchematicApp{constructor(){this.renderer=null;this.currentSchematic=null;this.history=[];this.historyIndex=-1;this._init()}
+_init(){var div=document.getElementById("schematic-canvas");this.renderer=new SchematicRenderer(div);this._setupToolbar();this._setupEditor();this._setupComponentLibrary();this._setupKeyboardShortcuts();this._loadSample()}
+_setupToolbar(){var a=this;
+document.getElementById("btn-sample").addEventListener("click",function(){a._loadSample()});
+document.getElementById("btn-import").addEventListener("click",function(){document.getElementById("file-input").click()});
+document.getElementById("file-input").addEventListener("change",function(e){a._importFile(e)});
+document.getElementById("btn-export-json").addEventListener("click",function(){a._exportJSON()});
+document.getElementById("btn-export-svg").addEventListener("click",function(){a._exportSVG()});
+document.getElementById("btn-export-png").addEventListener("click",function(){a._exportPNG()});
+document.getElementById("btn-zoom-in").addEventListener("click",function(){a.renderer.zoom(1.2)});
+document.getElementById("btn-zoom-out").addEventListener("click",function(){a.renderer.zoom(.8)});
+document.getElementById("btn-zoom-fit").addEventListener("click",function(){a.renderer._autoFit(a.currentSchematic.components,a.currentSchematic.nets)});
+document.getElementById("btn-zoom-reset").addEventListener("click",function(){a.renderer.resetView()});
+document.getElementById("btn-clear").addEventListener("click",function(){confirm("确定要清空画布吗？")&&a._clear()});
+document.getElementById("btn-add-component").addEventListener("click",function(){var p=document.getElementById("component-panel");p.style.display=p.style.display==="none"?"block":"none"});
+document.getElementById("btn-close-panel").addEventListener("click",function(){document.getElementById("component-panel").style.display="none"});
+document.getElementById("lcsc-search").addEventListener("input",function(e){a._searchLCSC(e.target.value)})}
+_setupEditor(){var a=this,ed=document.getElementById("code-editor"),timer=null;
+ed.addEventListener("input",function(){clearTimeout(timer);timer=setTimeout(function(){a._parseAndRender()},500)});
+ed.addEventListener("keydown",function(e){if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();a._parseAndRender()}if(e.key==="Tab"){e.preventDefault();var s=ed.selectionStart,end=ed.selectionEnd;ed.value=ed.value.substring(0,s)+"  "+ed.value.substring(end);ed.selectionStart=ed.selectionEnd=s+2}});
+document.getElementById("btn-render").addEventListener("click",function(){a._parseAndRender()})}
+_setupComponentLibrary(){var list=document.getElementById("component-list"),types=getComponentTypes();
+for(var i=0;i<types.length;i++){var t=types[i],item=document.createElement("div");item.className="component-item";item.innerHTML='<span class="comp-icon">'+t.icon+'</span><span>'+t.name+"</span>";item.title=t.name;item.addEventListener("click",function(ct){return function(){this._addComponentToCanvas(ct)}}.bind(this)(t));list.appendChild(item)}}
+_setupKeyboardShortcuts(){var a=this;document.addEventListener("keydown",function(e){if(e.ctrlKey||e.metaKey){switch(e.key.toLowerCase()){case"s":e.preventDefault();a._exportJSON();break;case"z":e.preventDefault();a._undo();break;case"y":e.preventDefault();a._redo();break;case"o":e.preventDefault();document.getElementById("file-input").click();break;case"0":e.preventDefault();a.renderer.resetView()}}})}
+_loadSample(){document.getElementById("code-editor").value=SCHEMATIC_PARSER.generateSample();this._parseAndRender()}
+_parseAndRender(){var json=document.getElementById("code-editor").value.trim();if(!json){this._clear();return}
+var result=SCHEMATIC_PARSER.parse(json),status=document.getElementById("status-message");
+if(result.errors&&result.errors.length>0){status.innerHTML=result.errors.map(function(e){return'<span class="error">❌ '+e+"</span>"}).join("<br>");status.className="status error";return}
+if(result.warnings&&result.warnings.length>0){status.innerHTML=result.warnings.map(function(w){return'<span class="warning">⚠ '+w+"</span>"}).join("<br>");status.className="status warning"}
+else{status.innerHTML="✅ "+result.components.length+" 个元件, "+result.wires.length+" 条连线, "+result.nets.length+" 个网络标签";status.className="status success"}
+document.getElementById("meta-title").textContent=result.meta.title||"Untitled";this.currentSchematic=result;this._pushHistory(result);this.renderer.render(result)}
+_importFile(e){var f=e.target.files[0];if(!f)return;var r=new FileReader;r.onload=function(ev){document.getElementById("code-editor").value=ev.target.result;this._parseAndRender()}.bind(this);r.readAsText(f);e.target.value=""}
+_exportJSON(){var j=document.getElementById("code-editor").value;this._download(new Blob([j],{type:"application/json"}),"schematic.json")}
+_exportSVG(){this._download(new Blob([this.renderer.exportSVG()],{type:"image/svg+xml"}),"schematic.svg")}
+_exportPNG(){this.renderer.exportPNG(function(b){this._download(b,"schematic.png")}.bind(this))}
+_download(blob,fn){var u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u)}
+_clear(){document.getElementById("code-editor").value="";document.getElementById("status-message").innerHTML="";document.getElementById("status-message").className="status";document.getElementById("meta-title").textContent="Untitled";this.currentSchematic={components:[],wires:[],nets:[],errors:[],warnings:[]};this.renderer.render(this.currentSchematic)}
+_addComponentToCanvas(ci){var r=document.getElementById("schematic-canvas").getBoundingClientRect(),cx=(r.width/2-this.renderer.offsetX)/this.renderer.scale,cy=(r.height/2-this.renderer.offsetY)/this.renderer.scale,ids=this.currentSchematic.components.map(function(c){return c.id}),n=1,p=ci.id.charAt(0).toUpperCase(),nid=p+n;while(ids.includes(nid))n++,nid=p+n;var nc={id:nid,type:ci.id,value:"",x:Math.round(cx/10)*10,y:Math.round(cy/10)*10,rotation:0,mirror:"none"};this.currentSchematic.components.push(nc);this._updateEditorFromSchematic();this._parseAndRender()}
+_updateEditorFromSchematic(){var d={meta:this.currentSchematic.meta||{title:"Untitled"},components:this.currentSchematic.components,wires:this.currentSchematic.wires.map(function(w){return{from:w.from.isNet?w.from.id:w.from.id+":"+w.from.pin,to:w.to.isNet?w.to.id:w.to.id+":"+w.to.pin}}),nets:this.currentSchematic.nets};document.getElementById("code-editor").value=JSON.stringify(d,null,2)}
+_searchLCSC(kw){var r=document.getElementById("lcsc-results");if(!kw||kw.length<1){r.innerHTML="";r.style.display="none";return}var results=searchLCSC(kw);r.style.display="block";if(results.length===0){r.innerHTML='<div class="lcsc-item">未找到匹配的元件</div>';return}r.innerHTML=results.slice(0,20).map(function(x){return'<div class="lcsc-item" data-lcsc="'+x.lcsc+'" data-type="'+x.type+'" data-value="'+x.value+'"><span class="lcsc-code">'+x.lcsc+'</span><span class="lcsc-value">'+x.value+'</span><span class="lcsc-desc">'+x.desc+"</span></div>"}).join("");var a=this;r.querySelectorAll(".lcsc-item").forEach(function(item){item.addEventListener("click",function(){var l=this.dataset.lcsc,t=this.dataset.type,v=this.dataset.value;a._addLCSCComponent(l,t,v);r.style.display="none";document.getElementById("lcsc-search").value=""})})}
+_addLCSCComponent(lcsc,type,val){var r=document.getElementById("schematic-canvas").getBoundingClientRect(),cx=(r.width/2-this.renderer.offsetX)/this.renderer.scale,cy=(r.height/2-this.renderer.offsetY)/this.renderer.scale,ids=this.currentSchematic.components.map(function(c){return c.id}),n=1,p=type.charAt(0).toUpperCase(),nid=p+n;while(ids.includes(nid))n++,nid=p+n;var info=lookupLCSC(lcsc),nc={id:nid,type:type,lcsc:lcsc,lcscInfo:info,value:val,designator:nid,x:Math.round(cx/10)*10,y:Math.round(cy/10)*10,rotation:0,mirror:"none",pins:info?info.pins:null,desc:info?info.desc:""};this.currentSchematic.components.push(nc);this._updateEditorFromSchematic();this._parseAndRender()}
+_pushHistory(sc){this.history=this.history.slice(0,this.historyIndex+1);this.history.push(JSON.parse(JSON.stringify(sc)));this.historyIndex=this.history.length-1;if(this.history.length>50){this.history.shift();this.historyIndex--}}
+_undo(){if(this.historyIndex>0){this.historyIndex--;this._restoreFromHistory()}}
+_redo(){if(this.historyIndex<this.history.length-1){this.historyIndex++;this._restoreFromHistory()}}
+_restoreFromHistory(){var sc=JSON.parse(JSON.stringify(this.history[this.historyIndex]));this.currentSchematic=sc;this._updateEditorFromSchematic();this.renderer.render(sc);document.getElementById("status-message").innerHTML="↩ 已撤销/重做";document.getElementById("status-message").className="status"}}
+document.addEventListener("DOMContentLoaded",function(){window.app=new SchematicApp})
+</script>
+</body>
+</html>
