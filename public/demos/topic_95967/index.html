@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>球序 - 羽毛球线下匹配对战表</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    body {
+      background: #f5f7fa;
+      padding: 12px;
+      font-size: 15px;
+      color: #222;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 4px #00000012;
+    }
+    .title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #0d7bff;
+    }
+    input, button, textarea {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+    textarea {
+      min-height: 300px;
+      resize: vertical;
+      font-family: inherit;
+    }
+    button {
+      border: none;
+      background: #0d7bff;
+      color: white;
+      font-weight: 500;
+    }
+    button.gray {
+      background: #999;
+    }
+    button.success {
+      background: #00b460;
+    }
+    .player-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0;
+    }
+    .player-tag {
+      background: #e8f2ff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .match-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+      min-width: 250px;
+      background: #fafafa;
+    }
+    .round-container {
+      display: flex;
+      gap: 20px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+    }
+    .round {
+      min-width: 280px;
+      flex-shrink: 0;
+    }
+    .round-title {
+      font-weight: 600;
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: #0d7bff;
+      padding: 8px;
+      background: #e8f2ff;
+      border-radius: 6px;
+    }
+    .match-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .rank-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .hide {
+      display: none;
+    }
+    .score-input {
+      width: 80px !important;
+      padding: 8px !important;
+      font-size: 14px !important;
+    }
+    .team-label {
+      font-size: 14px;
+      margin-bottom: 4px;
+      color: #666;
+    }
+    .winner-btn {
+      background: #00b460 !important;
+      padding: 8px 16px !important;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">🏸 球序 - 羽毛球对战表</div>
+    <textarea id="playerInput" placeholder="粘贴接龙内容，格式如：&#10;1. 高地&#10;2. 山川&#10;3. 万川入海&#10;..."></textarea>
+    <button onclick="genMatch()" class="success">随机生成对战淘汰赛</button>
+    <button onclick="clearAll()" class="gray">清空全部数据</button>
+  </div>
+
+  <div class="card">
+    <div class="title">📋 对战赛程（2v2双打淘汰赛）</div>
+    <div id="matchBox"></div>
+  </div>
+
+  <script>
+    let players = [];
+    let rounds = []; // 存储每轮比赛数据
+
+    // 默认接龙内容
+    const defaultPlayerInput = `#接龙
+ 周日早上打球，小群报名
+
+ 1. 黛西
+ 2. 高8
+ 3. 洋气
+ 4. 刘+
+ 5. Wss
+ 6. 魔鬼
+ 7. 一生
+ 8. 四级考试
+ 9. SSr
+ 10. 烟花`;
+
+    // 从localStorage加载缓存
+    function loadCache() {
+      const cached = localStorage.getItem('playerInputCache');
+      if (cached) {
+        document.getElementById('playerInput').value = cached;
+      } else {
+        // 没有缓存时设置默认值
+        document.getElementById('playerInput').value = defaultPlayerInput;
+        localStorage.setItem('playerInputCache', defaultPlayerInput);
+      }
+    }
+
+    // 加载对战赛程缓存
+    function loadMatchCache() {
+      const cached = localStorage.getItem('matchDataCache');
+      if (cached) {
+        try {
+          rounds = JSON.parse(cached);
+          renderMatch();
+        } catch (e) {
+          console.error('加载赛程缓存失败', e);
+        }
+      }
+    }
+
+    // 保存对战赛程到localStorage
+    function saveMatchCache() {
+      localStorage.setItem('matchDataCache', JSON.stringify(rounds));
+    }
+
+    // 保存到localStorage
+    function saveCache() {
+      localStorage.setItem('playerInputCache', document.getElementById('playerInput').value);
+    }
+
+    // 监听文本域变化并缓存
+    document.addEventListener('DOMContentLoaded', () => {
+      loadCache();
+      loadMatchCache();
+      document.getElementById('playerInput').addEventListener('input', saveCache);
+    });
+
+    // 解析接龙格式文本，提取玩家名称
+    function parsePlayers(text) {
+      const lines = text.split('\n');
+      const result = [];
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('#')) continue;
+        if (trimmed.startsWith('例')) continue;
+
+        const match = trimmed.match(/^\d+\.\s*(.+)$/);
+        if (match) {
+          const name = match[1].trim();
+          if (name) result.push(name);
+        }
+      }
+
+      return result;
+    }
+
+    // 打乱数组顺序
+    function shuffle(array) {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // 生成淘汰赛
+    function genMatch() {
+      const text = document.getElementById('playerInput').value;
+      players = parsePlayers(text);
+
+      if (players.length < 2) {
+        alert('至少需要2名选手才能生成对战');
+        return;
+      }
+
+      if (players.length % 2 !== 0) {
+        alert('选手人数必须是2的倍数（当前' + players.length + '人）');
+        return;
+      }
+
+      rounds = [];
+      generateRound(shuffle([...players]), 1);
+      saveMatchCache();
+      renderMatch();
+    }
+
+    // 生成单轮比赛
+    function generateRound(currentPlayers, roundNum) {
+      const roundMatches = [];
+      const byePlayers = []; // 轮空选手
+
+      // 计算比赛数量和轮空人数
+      const matchCount = Math.floor(currentPlayers.length / 4);
+      const byeCount = currentPlayers.length % 4;
+
+      // 如果有轮空选手，随机选出
+      if (byeCount > 0) {
+        const shuffled = shuffle([...currentPlayers]);
+        byePlayers.push(...shuffled.slice(0, byeCount));
+        currentPlayers = shuffled.slice(byeCount);
+      }
+
+      // 分组比赛
+      for (let i = 0; i < currentPlayers.length; i += 4) {
+        roundMatches.push({
+          team1: [currentPlayers[i], currentPlayers[i + 1]],
+          team2: [currentPlayers[i + 2], currentPlayers[i + 3]],
+          winner: null,
+          score1: null,
+          score2: null
+        });
+      }
+
+      rounds.push({
+        num: roundNum,
+        matches: roundMatches,
+        byePlayers: byePlayers,
+        title: getRoundTitle(roundNum)
+      });
+    }
+
+    // 获取轮次标题
+    function getRoundTitle(num, totalRounds) {
+      if (num === 1) return '第一轮';
+      if (num === 2) return '第二轮';
+      if (num === 3) return '第三轮';
+      return `第${num}轮`;
+    }
+
+    // 渲染所有轮次
+    function renderMatch() {
+      const box = document.getElementById('matchBox');
+      box.innerHTML = '';
+
+      if (rounds.length === 0) return;
+
+      let html = '<div class="round-container">';
+
+      // 检查是否有决赛完成的亚军信息
+      let finalRunnerUps = [];
+      const finalRound = rounds.find(r => r.isFinal && r.matches.some(m => m.winner));
+      if (finalRound) {
+        const finalMatch = finalRound.matches.find(m => m.winner);
+        if (finalMatch && finalMatch.loser) {
+          finalRunnerUps = [...finalMatch.loser];
+          // 查找半决赛败者
+          const semiRound = rounds.find(r => r.semiFinalLoser);
+          if (semiRound) {
+            finalRunnerUps.push(...semiRound.semiFinalLoser);
+          }
+        }
+      }
+
+      rounds.forEach((round, roundIdx) => {
+        html += `<div class="round">
+          <div class="round-title">${round.title} (${round.matches.length}场比赛${round.byePlayers.length > 0 ? `，${round.byePlayers.length}人轮空` : ''})</div>
+          <div class="match-grid">`;
+
+        // 显示轮空选手
+        if (round.byePlayers && round.byePlayers.length > 0) {
+          html += `<div class="match-item" style="background:#fff3cd;border-color:#ffc107">
+            <div style="font-weight:600;color:#856404">轮空直接晋级</div>
+            <div style="margin-top:6px;font-size:14px">${round.byePlayers.join('、')}</div>
+          </div>`;
+        }
+
+        // 显示比赛
+        round.matches.forEach((match, matchIdx) => {
+          const matchId = `${roundIdx}-${matchIdx}`;
+          const isFinalMatch = round.isFinal && match.winner;
+          const score1Val = match.score1 !== null ? `value="${match.score1}"` : '';
+          const score2Val = match.score2 !== null ? `value="${match.score2}"` : '';
+
+          html += `<div class="match-item" style="${isFinalMatch ? 'background:#d4edda;border-color:#28a745' : ''}">
+            <div class="team-label">队伍A：${match.team1.join(' & ')}</div>
+            <div class="team-label" style="margin-bottom:8px">队伍B：${match.team2.join(' & ')}</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="score-input" id="score1-${matchId}" placeholder="A队分数" type="number" ${score1Val} onchange="saveScore(${roundIdx}, ${matchIdx}, 1, this.value)">
+              <span>VS</span>
+              <input class="score-input" id="score2-${matchId}" placeholder="B队分数" type="number" ${score2Val} onchange="saveScore(${roundIdx}, ${matchIdx}, 2, this.value)">
+            </div>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <button class="winner-btn" onclick="setWinner(${roundIdx}, ${matchIdx}, 1)">A队胜</button>
+              <button class="winner-btn" onclick="setWinner(${roundIdx}, ${matchIdx}, 2)">B队胜</button>
+            </div>
+            ${match.winner ? `<div style="margin-top:8px;color:#155724;font-weight:600;font-size:16px">${isFinalMatch ? '🏆 冠军：' : '胜者：'}${match.winner.join(' & ')}</div>` : ''}
+            ${isFinalMatch && finalRunnerUps.length > 0 ? `<div style="margin-top:6px;color:#666;font-size:14px">🥈 亚军：${finalRunnerUps.join('、')}</div>` : ''}
+          </div>`;
+        });
+
+        // 如果是决赛且只剩轮空选手（冠军）
+        if (round.isFinal && round.byePlayers.length === 2) {
+          html += `<div class="match-item" style="background:#d4edda;border-color:#28a745">
+            <div style="font-weight:600;color:#155724;font-size:16px">🏆 冠军</div>
+            <div style="margin-top:8px;font-size:15px;font-weight:600">${round.byePlayers.join(' & ')}</div>
+          </div>`;
+        }
+
+        html += `</div></div>`;
+      });
+
+      html += '</div>';
+      box.innerHTML = html;
+
+      // 滚动到最右边
+      const container = box.querySelector('.round-container');
+      if (container) {
+        container.scrollLeft = container.scrollWidth;
+      }
+    }
+
+    // 保存比分
+    function saveScore(roundIdx, matchIdx, team, score) {
+      const match = rounds[roundIdx].matches[matchIdx];
+      if (team === 1) {
+        match.score1 = score ? parseInt(score) : null;
+      } else {
+        match.score2 = score ? parseInt(score) : null;
+      }
+      saveMatchCache();
+    }
+
+    // 设置胜者并生成下一轮
+    function setWinner(roundIdx, matchIdx, team) {
+      const match = rounds[roundIdx].matches[matchIdx];
+      match.winner = team === 1 ? [...match.team1] : [...match.team2];
+
+      // 保存败者信息（用于亚军显示）
+      match.loser = team === 1 ? [...match.team2] : [...match.team1];
+
+      // 检查当前轮次是否所有比赛都已完成
+      const currentRound = rounds[roundIdx];
+      const allComplete = currentRound.matches.every(m => m.winner);
+
+      if (allComplete) {
+        // 如果当前轮只有1场比赛且无轮空，这是决赛，胜者是冠军
+        if (currentRound.matches.length === 1 && currentRound.byePlayers.length === 0) {
+          currentRound.title = '🏆 决赛';
+          currentRound.isFinal = true;
+          // 记录亚军
+          currentRound.runnerUp = match.loser;
+          saveMatchCache();
+          renderMatch();
+          return;
+        }
+
+        // 收集所有胜者 + 轮空选手
+        const winners = currentRound.matches.flatMap(m => m.winner);
+        const losers = currentRound.matches.flatMap(m => m.loser);
+        const nextPlayers = [...winners, ...currentRound.byePlayers];
+
+        // 如果当前轮是1场比赛+2人轮空（半决赛），下一轮是决赛
+        if (currentRound.matches.length === 1 && currentRound.byePlayers.length === 2) {
+          // 胜出队与轮空队对决
+          rounds = rounds.slice(0, roundIdx + 1);
+          currentRound.title = '半决赛';
+          currentRound.semiFinal = true;
+          // 记录半决赛败者作为亚军候选
+          currentRound.semiFinalLoser = match.loser;
+
+          // 生成决赛
+          rounds.push({
+            num: roundIdx + 2,
+            matches: [{
+              team1: [...winners],
+              team2: [...currentRound.byePlayers],
+              winner: null,
+              loser: null,
+              score1: null,
+              score2: null
+            }],
+            byePlayers: [],
+            title: '🏆 决赛',
+            isFinal: true
+          });
+          saveMatchCache();
+          renderMatch();
+          return;
+        }
+
+        // 如果下一轮选手人数>=4，生成下一轮
+        if (nextPlayers.length >= 4) {
+          // 移除后续轮次（如果存在）
+          rounds = rounds.slice(0, roundIdx + 1);
+
+          // 生成新的一轮
+          generateRound(shuffle(nextPlayers), roundIdx + 2);
+          saveMatchCache();
+          renderMatch();
+        } else if (nextPlayers.length === 2) {
+          // 决赛只剩2人（1对），显示冠军
+          rounds = rounds.slice(0, roundIdx + 1);
+          rounds.push({
+            num: roundIdx + 2,
+            matches: [],
+            byePlayers: nextPlayers,
+            title: '🏆 冠军',
+            isFinal: true
+          });
+          saveMatchCache();
+          renderMatch();
+        }
+      } else {
+        saveMatchCache();
+        renderMatch();
+      }
+    }
+
+    // 清空所有数据
+    function clearAll() {
+      if (!confirm('确定要清空全部数据吗？此操作不可恢复。')) {
+        return;
+      }
+      players = [];
+      rounds = [];
+      localStorage.removeItem('playerInputCache');
+      localStorage.removeItem('matchDataCache');
+      document.getElementById('playerInput').value = '';
+      document.getElementById('matchBox').innerHTML = '';
+    }
+  </script>
+</body>
+</html>

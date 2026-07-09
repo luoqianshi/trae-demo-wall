@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>足球大闯关</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+}
+#gameContainer {
+  position: relative;
+  width: 100%;
+  max-width: 450px;
+  aspect-ratio: 9/16;
+  background: #90EE90;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.touch-zone {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  z-index: 10;
+}
+#leftZone { left: 0; }
+#rightZone { right: 0; }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="gameCanvas"></canvas>
+  <div id="leftZone" class="touch-zone"></div>
+  <div id="rightZone" class="touch-zone"></div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('gameContainer');
+
+// 加载足球图片
+const ballImg = new Image();
+ballImg.src = 'ball.png';
+
+function resize() {
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 游戏状态
+const STATE = { MENU: 0, TUTORIAL: 3, PLAYING: 1, GAMEOVER: 2 };
+let state = STATE.MENU;
+let tutorialStarted = false;
+let score = 0;
+let bestScore = parseInt(localStorage.getItem('soccer_best')) || 0;
+let gameSpeed = 2;
+let frame = 0;
+
+// 足球
+const ball = {
+  x: 0, y: 0, radius: 18,
+  vx: 0, vy: 0,
+  angle: 0,
+  gravity: 0.15,
+  jumpForce: -5,
+  color: '#1a1a5e'
+};
+
+// 平台
+let platforms = [];
+const platformWidth = 100;
+const platformHeight = 28;
+const platformGap = 150;
+const platformColor = '#FFB080';
+const platformBorder = '#5a3d7a';
+
+// 障碍物
+let obstacles = [];
+
+// 粒子
+let particles = [];
+
+// 草地纹理线
+let grassLines = [];
+for(let i=0;i<20;i++){
+  grassLines.push({x:Math.random()*450,y:Math.random()*800,len:20+Math.random()*40});
+}
+
+function initGame() {
+  ball.x = canvas.width / 2;
+  ball.y = canvas.height * 0.82;
+  ball.vx = 0;
+  ball.vy = 0;
+  ball.angle = 0;
+  score = 0;
+  gameSpeed = 2;
+  frame = 0;
+  platforms = [];
+  obstacles = [];
+  particles = [];
+
+  // 初始生成一些平台，第一个平台在球上方足够远处，预留安全空间
+  let startY = ball.y - 300;
+  for(let i=0; i<8; i++) {
+    spawnPlatform(startY - i * 220);
+  }
+}
+
+function spawnPlatform(y) {
+  const gapCenter = 80 + Math.random() * (canvas.width - 160);
+  const leftWidth = gapCenter - platformGap/2;
+  const rightX = gapCenter + platformGap/2;
+  const rightWidth = canvas.width - rightX;
+
+  platforms.push({
+    y: y,
+    leftX: 0, leftW: Math.max(leftWidth, 30),
+    rightX: rightX, rightW: Math.max(rightWidth, 30),
+    passed: false,
+    hasObstacle: Math.random() > 0.5
+  });
+
+  // 在某些平台之间生成障碍物，降低密度使游戏更简单
+  if(Math.random() > 0.65 && y < canvas.height - 300) {
+    const type = Math.random() > 0.5 ? 'box' : 'bottle';
+    obstacles.push({
+      x: 40 + Math.random() * (canvas.width - 80),
+      y: y + 80 + Math.random() * 50,
+      type: type,
+      width: type === 'box' ? 32 : 36,
+      height: type === 'box' ? 32 : 44,
+      rotation: 0
+    });
+  }
+}
+
+function createParticles(x, y, color, count=8) {
+  for(let i=0;i<count;i++){
+    particles.push({
+      x, y,
+      vx: (Math.random()-0.5)*6,
+      vy: (Math.random()-0.5)*6,
+      life: 1,
+      color,
+      size: 3+Math.random()*4
+    });
+  }
+}
+
+function update() {
+  if(state === STATE.TUTORIAL) {
+    frame++;
+    // 教程状态下球只轻轻浮动，不受重力影响
+    ball.y = canvas.height * 0.82 + Math.sin(frame * 0.05) * 3;
+    ball.angle += 0.02;
+    return;
+  }
+  if(state !== STATE.PLAYING) return;
+
+  frame++;
+
+  // 足球物理
+  ball.vy += ball.gravity;
+  ball.y += ball.vy;
+  ball.x += ball.vx;
+  ball.vx *= 0.92;
+  ball.angle += ball.vx * 0.1;
+
+  // 边界
+  if(ball.x < ball.radius) { ball.x = ball.radius; ball.vx *= -0.5; }
+  if(ball.x > canvas.width - ball.radius) { ball.x = canvas.width - ball.radius; ball.vx *= -0.5; }
+
+  // 屏幕向上滚动
+  const targetY = canvas.height * 0.45;
+  if(ball.y < targetY) {
+    const diff = targetY - ball.y;
+    ball.y = targetY;
+
+    platforms.forEach(p => { p.y += diff; });
+    obstacles.forEach(o => { o.y += diff; });
+    grassLines.forEach(g => { g.y += diff * 0.3; if(g.y > canvas.height) g.y = -20; });
+
+    // 生成新平台
+    const topPlatform = platforms[platforms.length-1];
+    if(topPlatform && topPlatform.y > 100) {
+      spawnPlatform(topPlatform.y - 220);
+    }
+  }
+
+  // 移除屏幕外的平台
+  platforms = platforms.filter(p => p.y < canvas.height + 50);
+  obstacles = obstacles.filter(o => o.y < canvas.height + 50);
+
+  // 碰撞检测 - 平台
+  for(let p of platforms) {
+    const ballTop = ball.y - ball.radius;
+    const ballBottom = ball.y + ball.radius;
+    const ballLeft = ball.x - ball.radius;
+    const ballRight = ball.x + ball.radius;
+
+    // 左平台
+    if(ballBottom > p.y && ballTop < p.y + platformHeight) {
+      if(ballLeft < p.leftW && ballRight > 0) {
+        gameOver();
+        return;
+      }
+    }
+    // 右平台
+    if(ballBottom > p.y && ballTop < p.y + platformHeight) {
+      if(ballLeft < canvas.width && ballRight > p.rightX) {
+        gameOver();
+        return;
+      }
+    }
+
+    // 得分
+    if(!p.passed && ball.y < p.y) {
+      p.passed = true;
+      score++;
+      gameSpeed = Math.min(2 + score * 0.08, 5);
+      createParticles(ball.x, ball.y, '#FFD700', 6);
+    }
+  }
+
+  // 碰撞检测 - 障碍物
+  for(let o of obstacles) {
+    const dx = Math.abs(ball.x - o.x);
+    const dy = Math.abs(ball.y - o.y);
+    if(dx < ball.radius + o.width/2 - 4 && dy < ball.radius + o.height/2 - 4) {
+      gameOver();
+      return;
+    }
+    o.rotation += 0.02;
+  }
+
+  // 球掉出屏幕
+  if(ball.y > canvas.height + 50) {
+    gameOver();
+    return;
+  }
+
+  // 更新粒子
+  particles.forEach(pt => {
+    pt.x += pt.vx;
+    pt.y += pt.vy;
+    pt.life -= 0.03;
+    pt.vy += 0.1;
+  });
+  particles = particles.filter(pt => pt.life > 0);
+}
+
+function drawBall(x, y, r, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  if(ballImg.complete && ballImg.naturalWidth > 0) {
+    // 使用图片绘制足球
+    ctx.drawImage(ballImg, -r, -r, r*2, r*2);
+  } else {
+    // 图片未加载时的备用绘制
+    ctx.fillStyle = '#1a1a5e';
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawPlatform(p) {
+  const r = 6;
+
+  // 左平台
+  ctx.fillStyle = platformColor;
+  ctx.strokeStyle = platformBorder;
+  ctx.lineWidth = 2;
+  roundRect(p.leftX, p.y, p.leftW, platformHeight, r);
+  ctx.fill();
+  ctx.stroke();
+
+  // 右平台
+  roundRect(p.rightX, p.y, p.rightW, platformHeight, r);
+  ctx.fill();
+  ctx.stroke();
+
+  // 平台内纹理线
+  ctx.strokeStyle = 'rgba(90,61,122,0.15)';
+  ctx.lineWidth = 1;
+  for(let i=1;i<3;i++){
+    ctx.beginPath();
+    ctx.moveTo(p.leftX + 8, p.y + i*(platformHeight/3));
+    ctx.lineTo(p.leftX + p.leftW - 8, p.y + i*(platformHeight/3));
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(p.rightX + 8, p.y + i*(platformHeight/3));
+    ctx.lineTo(p.rightX + p.rightW - 8, p.y + i*(platformHeight/3));
+    ctx.stroke();
+  }
+}
+
+function drawObstacle(o) {
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.rotate(Math.sin(o.rotation)*0.15);
+
+  if(o.type === 'box') {
+    // 红色方块
+    const s = o.width;
+    ctx.fillStyle = '#FF6B7A';
+    ctx.strokeStyle = '#C44569';
+    ctx.lineWidth = 2;
+    roundRect(-s/2, -s/2, s, s, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // 方块细节
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(-s/2+4, -s/2+4, s-8, 6);
+  } else {
+    // 紫色瓶子
+    const w = o.width, h = o.height;
+    ctx.fillStyle = '#D4A5FF';
+    ctx.strokeStyle = '#9B59B6';
+    ctx.lineWidth = 2;
+
+    // 瓶身
+    ctx.beginPath();
+    ctx.ellipse(0, h*0.2, w*0.35, h*0.3, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 瓶颈
+    ctx.fillRect(-w*0.12, -h*0.45, w*0.24, h*0.5);
+    ctx.strokeRect(-w*0.12, -h*0.45, w*0.24, h*0.5);
+
+    // 瓶口
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-w*0.15, -h*0.5, w*0.3, h*0.08);
+    ctx.strokeRect(-w*0.15, -h*0.5, w*0.3, h*0.08);
+  }
+
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+function drawBackground() {
+  // 主背景
+  ctx.fillStyle = '#90EE90';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 草地纹理
+  ctx.strokeStyle = 'rgba(76,175,80,0.15)';
+  ctx.lineWidth = 2;
+  grassLines.forEach(g => {
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.lineTo(g.x + g.len, g.y + 8);
+    ctx.stroke();
+  });
+}
+
+function drawHand(x, y, direction) {
+  ctx.save();
+  ctx.translate(x, y);
+  if(direction === 'right') ctx.scale(-1, 1);
+
+  // 手指图标 - 简化的手形
+  ctx.fillStyle = '#333';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // 手掌
+  ctx.beginPath();
+  ctx.ellipse(-5, 5, 10, 14, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // 食指
+  ctx.beginPath();
+  ctx.moveTo(-5, -5);
+  ctx.lineTo(-5, -28);
+  ctx.stroke();
+
+  // 食指指尖圆
+  ctx.beginPath();
+  ctx.arc(-5, -28, 4, 0, Math.PI*2);
+  ctx.fill();
+
+  // 其他手指
+  ctx.beginPath();
+  ctx.moveTo(2, -2);
+  ctx.lineTo(6, -22);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(6, -22, 3, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(8, 2);
+  ctx.lineTo(12, -16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(12, -16, 3, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawTutorial() {
+  drawBackground();
+
+  // 绘制平台
+  platforms.forEach(drawPlatform);
+  obstacles.forEach(drawObstacle);
+
+  // 足球
+  drawBall(ball.x, ball.y, ball.radius, ball.angle);
+
+  // 半透明遮罩（只覆盖两侧提示区域）
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 左侧提示 - 在球的左下方
+  const ballY = canvas.height * 0.82;
+  const leftX = canvas.width * 0.18;
+  const hintY = ballY + 55;
+
+  drawHand(leftX, ballY + 5, 'left');
+
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 20px Microsoft YaHei';
+  ctx.textAlign = 'center';
+  ctx.fillText('点这里', leftX, hintY);
+  ctx.fillText('往左跳', leftX, hintY + 26);
+
+  // 右侧提示 - 在球的右下方
+  const rightX = canvas.width * 0.82;
+  drawHand(rightX, ballY + 5, 'right');
+
+  ctx.fillText('点这里', rightX, hintY);
+  ctx.fillText('往右跳', rightX, hintY + 26);
+
+  // 底部提示文字
+  ctx.fillStyle = '#555';
+  ctx.font = '16px Microsoft YaHei';
+  ctx.fillText('点击屏幕任意位置开始', canvas.width/2, canvas.height * 0.92);
+}
+
+function drawUI() {
+  if(state === STATE.PLAYING || state === STATE.TUTORIAL) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.arc(canvas.width/2, 42, 28, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px Microsoft YaHei';
+    ctx.textAlign = 'center';
+    ctx.fillText(score, canvas.width/2, 52);
+
+    ctx.fillStyle = '#5a4a3a';
+    ctx.font = '14px Microsoft YaHei';
+    ctx.fillText('简单模式', canvas.width/2, 22);
+  }
+}
+
+function drawMenu() {
+  drawBackground();
+
+  // 标题背景装饰
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(30, canvas.height*0.12, canvas.width-60, 160, 16);
+  ctx.fill();
+
+  // 足球图标
+  drawBall(canvas.width/2, canvas.height*0.22, 40, frame*0.02);
+
+  // 标题
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 36px Microsoft YaHei';
+  ctx.textAlign = 'center';
+  ctx.fillText('足球大闯关', canvas.width/2, canvas.height*0.38);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = '16px Microsoft YaHei';
+  ctx.fillText('点击屏幕左右两侧控制足球移动', canvas.width/2, canvas.height*0.48);
+  ctx.fillText('穿过平台缝隙，避开障碍物！', canvas.width/2, canvas.height*0.53);
+
+  // 开始按钮
+  const btnY = canvas.height * 0.65;
+  ctx.fillStyle = '#FF6B35';
+  roundRect(canvas.width/2 - 100, btnY, 200, 54, 27);
+  ctx.fill();
+
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  roundRect(canvas.width/2 - 100, btnY, 200, 54, 27);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px Microsoft YaHei';
+  ctx.fillText('开始游戏', canvas.width/2, btnY + 36);
+
+  if(bestScore > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillText('最佳成绩: ' + bestScore, canvas.width/2, canvas.height*0.82);
+  }
+}
+
+function drawGameOver() {
+  // 半透明遮罩
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 面板
+  ctx.fillStyle = '#fff';
+  roundRect(30, canvas.height*0.25, canvas.width-60, 220, 16);
+  ctx.fill();
+
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 28px Microsoft YaHei';
+  ctx.textAlign = 'center';
+  ctx.fillText('游戏结束', canvas.width/2, canvas.height*0.35);
+
+  ctx.font = '20px Microsoft YaHei';
+  ctx.fillStyle = '#666';
+  ctx.fillText('本次得分', canvas.width/2, canvas.height*0.42);
+
+  ctx.font = 'bold 48px Microsoft YaHei';
+  ctx.fillStyle = '#FF6B35';
+  ctx.fillText(score, canvas.width/2, canvas.height*0.52);
+
+  if(score >= bestScore && score > 0) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = '16px Microsoft YaHei';
+    ctx.fillText('新纪录!', canvas.width/2, canvas.height*0.58);
+  }
+
+  // 重新开始按钮
+  const btnY = canvas.height * 0.62;
+  ctx.fillStyle = '#4CAF50';
+  roundRect(canvas.width/2 - 90, btnY, 180, 48, 24);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px Microsoft YaHei';
+  ctx.fillText('再来一局', canvas.width/2, btnY + 33);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if(state === STATE.MENU) {
+    drawMenu();
+  } else if(state === STATE.TUTORIAL) {
+    drawTutorial();
+    drawUI();
+  } else if(state === STATE.PLAYING || state === STATE.GAMEOVER) {
+    drawBackground();
+
+    platforms.forEach(drawPlatform);
+    obstacles.forEach(drawObstacle);
+
+    // 粒子
+    particles.forEach(pt => {
+      ctx.globalAlpha = pt.life;
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.size * pt.life, 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // 足球
+    drawBall(ball.x, ball.y, ball.radius, ball.angle);
+
+    drawUI();
+
+    if(state === STATE.GAMEOVER) {
+      drawGameOver();
+    }
+  }
+}
+
+function gameOver() {
+  state = STATE.GAMEOVER;
+  createParticles(ball.x, ball.y, '#FF6B35', 20);
+  if(score > bestScore) {
+    bestScore = score;
+    localStorage.setItem('soccer_best', bestScore);
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  frame++;
+  requestAnimationFrame(gameLoop);
+}
+
+// 输入处理
+function handleInput(side) {
+  if(state === STATE.MENU) {
+    initGame();
+    state = STATE.TUTORIAL;
+    return;
+  }
+  if(state === STATE.TUTORIAL) {
+    state = STATE.PLAYING;
+    // 根据点击方向给初始跳跃
+    if(side === 'left') {
+      ball.vx = -3.5;
+    } else {
+      ball.vx = 3.5;
+    }
+    ball.vy = -5;
+    return;
+  }
+  if(state === STATE.GAMEOVER) {
+    initGame();
+    state = STATE.TUTORIAL;
+    return;
+  }
+  if(state === STATE.PLAYING) {
+    if(side === 'left') {
+      ball.vx -= 3.5;
+    } else {
+      ball.vx += 3.5;
+    }
+    ball.vy = -3.5;
+  }
+}
+
+document.getElementById('leftZone').addEventListener('click', (e) => { e.preventDefault(); handleInput('left'); });
+document.getElementById('rightZone').addEventListener('click', (e) => { e.preventDefault(); handleInput('right'); });
+document.getElementById('leftZone').addEventListener('touchstart', (e) => { e.preventDefault(); handleInput('left'); });
+document.getElementById('rightZone').addEventListener('touchstart', (e) => { e.preventDefault(); handleInput('right'); });
+
+// 键盘支持
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'ArrowLeft' || e.key === 'a') handleInput('left');
+  if(e.key === 'ArrowRight' || e.key === 'd') handleInput('right');
+  if(e.key === ' ' || e.key === 'Enter') {
+    if(state === STATE.MENU || state === STATE.GAMEOVER) handleInput('right');
+  }
+});
+
+// 启动
+gameLoop();
+</script>
+</body>
+</html>
