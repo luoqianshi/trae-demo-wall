@@ -1,0 +1,1 @@
+import{E as e,H as t,b as n,f as r,h as i,t as a,y as o}from"./vue-router-oPudu7Xw.js";var s={class:`phone-frame flex flex-col bg-ink-50`},c={class:`flex-1 overflow-y-auto no-scrollbar`},l=n({__name:`OnboardingLayout`,setup(n){return(n,l)=>(e(),i(`div`,s,[r(`div`,c,[o(t(a))])]))}});export{l as default};
