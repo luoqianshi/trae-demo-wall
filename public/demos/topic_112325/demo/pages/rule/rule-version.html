@@ -1,0 +1,550 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>规则版本管理 - 规则引擎管理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .rule-selector { display:flex; gap:12px; align-items:center; padding:16px 20px; background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%); border:1px solid #bfdbfe; border-radius:8px; margin-bottom:16px; }
+        .rule-selector .label { font-weight:600; color:#1e40af; }
+        .rule-selector select { flex:1; max-width:320px; padding:8px 12px; border:1px solid #bfdbfe; border-radius:6px; background:#fff; font-size:14px; }
+        /* 标题区域可动态修改 */
+        #page-title { display:inline; }
+        #page-subtitle { }
+        .version-compare { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+        .version-box { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+        .version-box .vb-head { padding:10px 16px; background:#f8fafc; font-weight:600; color:#334155; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; }
+        .version-box .vb-body { padding:16px; font-family:Consolas,monospace; font-size:13px; line-height:1.8; background:#fafbfc; }
+        .diff-line-removed { background:#fee2e2; color:#991b1b; padding:2px 8px; border-left:3px solid #dc2626; display:block; margin:2px 0; border-radius:2px; }
+        .diff-line-added { background:#dcfce7; color:#166534; padding:2px 8px; border-left:3px solid #16a34a; display:block; margin:2px 0; border-radius:2px; }
+        .diff-line-modified { background:#fef3c7; color:#92400e; padding:2px 8px; border-left:3px solid #d97706; display:block; margin:2px 0; border-radius:2px; }
+        .diff-line-normal { padding:2px 8px; display:block; color:#475569; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-code-fork" style="color:var(--primary);margin-right:8px"></i><span id="page-title">接口命名格式校验 - 历史版本</span></h2>
+            <div class="page-desc" id="page-subtitle">
+                首页 / 规则引擎管理 / 规则版本管理 - 查看规则历史版本、版本对比与回滚
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/rule/rule-list.html', ['首页','规则引擎管理','规则列表'], {})"><i class="fa fa-arrow-left"></i> 返回规则列表</button>
+            <button class="btn btn-default" onclick="showToast('查看规则定义')"><i class="fa fa-file-text-o"></i> 查看规则定义</button>
+        </div>
+    </div>
+
+    <!-- ====== 规则选择器 ====== -->
+    <div class="rule-selector">
+        <span class="label"><i class="fa fa-filter"></i> 当前规则：</span>
+        <select id="rule-selector" onchange="onRuleSelectorChange()">
+            <option value="R-FMT-0001">R-FMT-0001 - 接口命名格式校验（当前生效版本：v3.2）</option>
+            <option value="R-FMT-0002">R-FMT-0002 - 字段命名小驼峰校验（当前版本：v2.1）</option>
+            <option value="R-STD-0003">R-STD-0003 - 返回码标准合规检查（当前版本：v4.0）</option>
+            <option value="R-BIZ-0005">R-BIZ-0005 - 敏感字段脱敏检查（当前版本：v1.5）</option>
+            <option value="R-INT-0010">R-INT-0010 - 必填字段完整性校验（当前版本：v2.8）</option>
+        </select>
+        <button class="btn btn-default" onclick="refreshVersionList()"><i class="fa fa-refresh"></i> 刷新</button>
+    </div>
+
+    <!-- ====== 版本列表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-history"></i> 版本历史（接口命名格式校验）</div>
+            <div class="card-action">
+            <a href="javascript:;" onclick="exportChangeLog()">导出变更记录</a>
+            <a href="javascript:;" onclick="compareVersions()" style="margin-left:12px"><i class="fa fa-columns"></i> 对比选中版本</a>
+        </div>
+    </div>
+    <div class="card-body" style="padding:0">
+        <div class="table-wrapper" style="border:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="text-center" style="width:40px"><input type="checkbox" id="versionCheckAll" onchange="toggleVersionCheckAll(this)"></th>
+                        <th class="text-center" style="width:80px">版本号</th>
+                        <th class="text-center" style="width:100px">发布状态</th>
+                        <th class="text-center" style="width:120px">生效日期</th>
+                        <th>变更说明</th>
+                        <th class="text-center" style="width:100px">创建人</th>
+                        <th class="text-center op-col" style="width:180px">操作</th>
+                    </tr>
+                </thead>
+                    <tbody id="versionTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 版本对比视图 ====== -->
+    <div class="card" style="margin-top:16px">
+        <div class="card-header">
+            <div class="card-title" id="diffTitle"><i class="fa fa-columns"></i> 版本对比 · v3.1 → v3.2</div>
+            <div class="card-action">
+                <a href="javascript:;" onclick="showToast('切换对比版本')">切换对比版本</a>
+                <a href="javascript:;" onclick="showToast('仅显示差异')">仅显示差异</a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+                <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:16px;height:16px;background:#fee2e2;border-left:3px solid #dc2626"></span> 删除</div>
+                <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:16px;height:16px;background:#dcfce7;border-left:3px solid #16a34a"></span> 新增</div>
+                <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:16px;height:16px;background:#fef3c7;border-left:3px solid #d97706"></span> 修改</div>
+            </div>
+            <div class="version-compare" id="versionCompare">
+                <div class="version-box">
+                    <div class="vb-head" id="diffOldHead"><span><i class="fa fa-clock-o"></i> 旧版本 v3.1</span><span style="color:#94a3b8;font-weight:400">2026-05-20</span></div>
+                    <div class="vb-body" id="diffOldBody">
+<strong style="color:#1e40af">【规则条件】</strong>
+<span class="diff-line-normal">IF 接口名称存在</span>
+<span class="diff-line-modified">- 匹配正则: ^[a-z]{2}\.[a-z]+\.[a-zA-Z0-9]+$</span>
+<span class="diff-line-removed">- 不包含特殊字符 "@#$"</span>
+<span class="diff-line-normal">- 长度 5~50 字符</span>
+
+<strong style="color:#1e40af;margin-top:10px;display:block">【规则动作】</strong>
+<span class="diff-line-normal">THEN 标记：阻断</span>
+<span class="diff-line-modified">- 提示信息：接口命名不符合规范</span>
+<span class="diff-line-removed">- 禁止提交审核</span>
+
+<strong style="color:#1e40af;margin-top:10px;display:block">【严重程度】</strong>
+<span class="diff-line-normal">阻断</span>
+                    </div>
+                </div>
+                <div class="version-box">
+                    <div class="vb-head" id="diffNewHead"><span><i class="fa fa-star" style="color:#16a34a"></i> 新版本 v3.2</span><span style="color:#94a3b8;font-weight:400">2026-06-04</span></div>
+                    <div class="vb-body" id="diffNewBody">
+<strong style="color:#1e40af">【规则条件】</strong>
+<span class="diff-line-normal">IF 接口名称存在</span>
+<span class="diff-line-modified">+ 匹配正则: ^[a-z]{2,3}\.[a-z0-9_]+\.[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$</span>
+<span class="diff-line-added">+ 支持 RESTful 路径参数 {id}/{code}</span>
+<span class="diff-line-normal">- 长度 5~50 字符</span>
+
+<strong style="color:#1e40af;margin-top:10px;display:block">【规则动作】</strong>
+<span class="diff-line-normal">THEN 标记：阻断</span>
+<span class="diff-line-modified">+ 提示信息：接口命名不符合规范，请参考《命名规范v3.2》</span>
+<span class="diff-line-added">+ 提供一键修正建议按钮</span>
+
+<strong style="color:#1e40af;margin-top:10px;display:block">【严重程度】</strong>
+<span class="diff-line-normal">阻断</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+/* ============================================================
+ * 规则版本管理页面逻辑
+ * 功能：设为当前版本、版本回滚、版本对比、发布版本、编辑草稿、导出变更记录、刷新
+ * ============================================================ */
+
+/** 版本数据（用于对比和状态更新） */
+
+/**
+ * 获取当前规则对应的版本对比数据
+ */
+function getVersionDataMap() {
+    var code = getCurrentRuleCode();
+    var ruleData = RULES_VERSIONS[code] || RULES_VERSIONS['R-FMT-0001'];
+    var map = {};
+    (ruleData.versions || []).forEach(function(v) {
+        map[v.ver] = { date: v.date, status: v.status, desc: v.desc, creator: v.creator };
+    });
+    return map;
+}
+
+var VERSION_DATA = {
+    'v3.2': { date: '2026-06-04', status: '已发布', desc: '新增对RESTful路径参数的支持，修复版本号后两位不识别的问题', creator: '张工' },
+    'v3.1': { date: '2026-05-20', status: '历史', desc: '优化正则表达式性能，平均执行耗时降低35%', creator: '李工' },
+    'v3.0': { date: '2026-04-15', status: '历史', desc: '支持三级业务域前缀识别（原只支持两级）', creator: '王工' },
+    'v2.5': { date: '2026-03-10', status: '历史', desc: '增加接口英文缩写白名单（OA、HR、CRM等）', creator: '赵工' },
+    'v2.4': { date: '-', status: '草稿', desc: '增加对数字ID后缀的特殊处理（尚未发布）', creator: '张工' },
+    'v2.0': { date: '2026-01-20', status: '历史', desc: '规范首次重大升级：统一各业务线命名规则', creator: '架构组' },
+    'v1.0': { date: '2025-09-01', status: '历史', desc: '规则初版发布', creator: '架构组' }
+};
+
+/**
+ * 各规则版本数据集
+ */
+var RULES_VERSIONS = {
+    'R-FMT-0001': {
+        name: '接口命名格式校验',
+        current: 'v3.2',
+        versions: [
+            { ver: 'v3.2', status: '已发布', date: '2026-06-04', desc: '新增对RESTful路径参数的支持，修复版本号后两位不识别的问题', creator: '张工' },
+            { ver: 'v3.1', status: '历史', date: '2026-05-20', desc: '优化正则表达式性能，平均执行耗时降低35%', creator: '李工' },
+            { ver: 'v3.0', status: '历史', date: '2026-04-15', desc: '支持三级业务域前缀识别（原只支持两级）', creator: '王工' },
+            { ver: 'v2.5', status: '历史', date: '2026-03-10', desc: '增加接口英文缩写白名单（OA、HR、CRM等）', creator: '赵工' },
+            { ver: 'v2.4', status: '草稿', date: '-', desc: '增加对数字ID后缀的特殊处理（尚未发布）', creator: '张工' },
+            { ver: 'v2.0', status: '历史', date: '2026-01-20', desc: '规范首次重大升级：统一各业务线命名规则', creator: '架构组' },
+            { ver: 'v1.0', status: '历史', date: '2025-09-01', desc: '规则初版发布', creator: '架构组' }
+        ]
+    },
+    'R-FMT-0002': {
+        name: '字段命名小驼峰校验',
+        current: 'v2.1',
+        versions: [
+            { ver: 'v2.1', status: '已发布', date: '2026-05-12', desc: '放宽对ID后缀的校验，允许末尾大写缩写', creator: '李工' },
+            { ver: 'v2.0', status: '历史', date: '2026-02-28', desc: '新增批量字段命名校验支持', creator: '李工' },
+            { ver: 'v1.0', status: '历史', date: '2025-10-10', desc: '规则初版发布', creator: '架构组' }
+        ]
+    },
+    'R-STD-0003': {
+        name: '返回码标准合规检查',
+        current: 'v4.0',
+        versions: [
+            { ver: 'v4.0', status: '已发布', date: '2026-06-01', desc: '对接统一返回码标准 v4.0，新增异常子码', creator: '王工' },
+            { ver: 'v3.0', status: '历史', date: '2026-03-15', desc: '支持按业务域划分返回码区间', creator: '王工' },
+            { ver: 'v2.0', status: '历史', date: '2025-12-20', desc: '规则初版发布', creator: '架构组' }
+        ]
+    },
+    'R-BIZ-0005': {
+        name: '敏感字段脱敏检查',
+        current: 'v1.5',
+        versions: [
+            { ver: 'v1.5', status: '已发布', date: '2026-04-20', desc: '增加对手机号中间四位脱敏的校验', creator: '赵工' },
+            { ver: 'v1.0', status: '历史', date: '2025-11-11', desc: '规则初版发布', creator: '架构组' }
+        ]
+    },
+    'R-INT-0010': {
+        name: '必填字段完整性校验',
+        current: 'v2.8',
+        versions: [
+            { ver: 'v2.8', status: '已发布', date: '2026-05-30', desc: '支持嵌套对象必填字段递归校验', creator: '架构组' },
+            { ver: 'v2.0', status: '历史', date: '2026-01-15', desc: '规则初版发布', creator: '架构组' }
+        ]
+    }
+};
+
+/**
+ * 获取当前规则编码
+ */
+function getCurrentRuleCode() {
+    var selector = document.getElementById('rule-selector');
+    if (!selector) return 'R-FMT-0001';
+    return selector.value;
+}
+
+/**
+ * 根据规则编码渲染版本表格
+ */
+function renderVersionTable(code) {
+    code = code || getCurrentRuleCode();
+    var data = RULES_VERSIONS[code] || RULES_VERSIONS['R-FMT-0001'];
+    var tbody = document.getElementById('versionTableBody');
+    if (!tbody) return;
+
+    // 更新标题
+    var cardTitle = document.querySelector('.card-title');
+    if (cardTitle) cardTitle.innerHTML = '<i class="fa fa-history"></i> 版本历史（' + data.name + '）';
+    var pageTitle = document.getElementById('page-title');
+    if (pageTitle) pageTitle.textContent = data.name + ' - 历史版本';
+    document.title = data.name + ' - 规则版本管理';
+
+    tbody.innerHTML = data.versions.map(function (v) {
+        var isCurrent = v.ver === data.current;
+        var opLinks = '';
+        if (v.status === '草稿') {
+            opLinks = '<a href="javascript:;" onclick="editDraft(\'' + v.ver + '\')">编辑</a><a href="javascript:;" onclick="publishVersion(\'' + v.ver + '\')">发布</a>';
+        } else if (isCurrent) {
+            opLinks = '<a href="javascript:;" onclick="compareSingleVersion(\'' + v.ver + '\')">对比</a>';
+        } else {
+            opLinks = '<a href="javascript:;" onclick="rollbackVersion(\'' + v.ver + '\')">回滚</a><a href="javascript:;" onclick="setCurrentVersion(\'' + v.ver + '\')">设为当前</a><a href="javascript:;" onclick="compareSingleVersion(\'' + v.ver + '\')">对比</a>';
+        }
+        return '<tr data-version="' + v.ver + '"' + (isCurrent ? ' style="background:#f0fdf4"' : '') + '>' +
+            '<td class="text-center"><input type="checkbox" class="version-check" data-version="' + v.ver + '" onchange="onVersionCheckChange()"></td>' +
+            '<td class="text-center"><strong' + (isCurrent ? ' style="color:#16a34a;font-size:16px"' : '') + '>' + v.ver + '</strong>' + (isCurrent ? '<div style="font-size:11px;color:#16a34a;margin-top:2px"><i class="fa fa-star"></i> 当前版本</div>' : '') + '</td>' +
+            '<td class="text-center"><span class="tag ' + (v.status === '已发布' ? 'tag-success' : (v.status === '草稿' ? 'tag-warning' : 'tag-default')) + '">' + v.status + '</span></td>' +
+            '<td class="text-center">' + v.date + '</td>' +
+            '<td>' + (v.status === '草稿' ? '<span style="color:#d97706">[草稿]</span> ' : '') + v.desc + '</td>' +
+            '<td class="text-center">' + v.creator + '</td>' +
+            '<td class="text-center op-col">' + opLinks + '</td>' +
+            '</tr>';
+    }).join('');
+}
+
+/**
+ * 规则选择器切换
+ */
+function onRuleSelectorChange() {
+    var code = getCurrentRuleCode();
+    renderVersionTable(code);
+    showToast('已切换至 ' + code);
+}
+
+/**
+ * 初始化版本表格
+ */
+function initVersionTable() {
+    var code = getCurrentRuleCode();
+    renderVersionTable(code);
+}
+
+
+
+/**
+ * 设为当前版本
+ */
+function setCurrentVersion(version) {
+    if (!confirm('确认将版本 ' + version + ' 设为当前版本？')) return;
+
+    // 移除旧当前版本的标记
+    var oldCurrent = document.querySelector('.data-table tbody tr[style*="background:#f0fdf4"]');
+    if (oldCurrent) {
+        oldCurrent.removeAttribute('style');
+        var oldVersionCell = oldCurrent.cells[1]; // checkbox 是 cells[0]，版本号是 cells[1]
+        if (oldVersionCell) {
+            var oldStrong = oldVersionCell.querySelector('strong');
+            if (oldStrong) oldStrong.removeAttribute('style');
+            var oldMarker = oldVersionCell.querySelector('div');
+            if (oldMarker) oldMarker.remove();
+        }
+        // 旧当前版本状态改为"历史"
+        var oldStatusCell = oldCurrent.cells[2];
+        if (oldStatusCell) {
+            var oldTag = oldStatusCell.querySelector('.tag');
+            if (oldTag) {
+                oldTag.className = 'tag tag-default';
+                oldTag.textContent = '历史';
+            }
+        }
+    }
+
+    // 设置新当前版本标记
+    var newCurrent = document.querySelector('.data-table tbody tr[data-version="' + version + '"]');
+    if (newCurrent) {
+        newCurrent.style.background = '#f0fdf4';
+        var versionCell = newCurrent.cells[1];
+        if (versionCell) {
+            var strong = versionCell.querySelector('strong');
+            if (strong) {
+                strong.style.color = '#16a34a';
+                strong.style.fontSize = '16px';
+            }
+            var marker = document.createElement('div');
+            marker.style.cssText = 'font-size:11px;color:#16a34a;margin-top:2px';
+            marker.innerHTML = '<i class="fa fa-star"></i> 当前版本';
+            versionCell.appendChild(marker);
+        }
+        // 新当前版本状态改为"已发布"
+        var statusCell = newCurrent.cells[2];
+        if (statusCell) {
+            var tag = statusCell.querySelector('.tag');
+            if (tag) {
+                tag.className = 'tag tag-success';
+                tag.textContent = '已发布';
+            }
+        }
+    }
+
+    showToast('已将 ' + version + ' 设为当前版本', 'success');
+}
+
+/**
+ * 版本回滚
+ */
+function rollbackVersion(version) {
+    if (!confirm('确认回滚到版本 ' + version + '？回滚后当前版本将变为 ' + version)) return;
+    setCurrentVersion(version);
+    showToast('已回滚到版本 ' + version, 'success');
+}
+
+/**
+ * 版本对比：使用 checkbox 选中的两个版本
+ */
+function compareVersions() {
+    var checked = document.querySelectorAll('.version-check:checked');
+    if (checked.length < 2) {
+        showToast('请勾选两个版本进行对比');
+        return;
+    }
+    if (checked.length > 2) {
+        showToast('最多只能选择两个版本进行对比');
+        return;
+    }
+
+    var ver1 = checked[0].getAttribute('data-version');
+    var ver2 = checked[1].getAttribute('data-version');
+    updateDiffView(ver1, ver2);
+    showToast('已展示 ' + ver1 + ' → ' + ver2 + ' 的版本对比');
+}
+
+/**
+ * 单版本对比：与当前版本对比
+ */
+function compareSingleVersion(version) {
+    // 找到当前版本
+    var currentRow = document.querySelector('.data-table tbody tr[style*="background:#f0fdf4"]');
+    var currentVersion = currentRow ? currentRow.getAttribute('data-version') : 'v3.2';
+    if (version === currentVersion) {
+        showToast('该版本已是当前版本，无需对比');
+        return;
+    }
+    updateDiffView(version, currentVersion);
+    showToast('已展示 ' + version + ' → ' + currentVersion + ' 的版本对比');
+}
+
+/**
+ * 更新对比视图
+ */
+function updateDiffView(oldVer, newVer) {
+    // 更新标题
+    var titleEl = document.getElementById('diffTitle');
+    if (titleEl) titleEl.innerHTML = '<i class="fa fa-columns"></i> 版本对比 · ' + oldVer + ' → ' + newVer;
+
+    var versionData = getVersionDataMap();
+    var oldData = versionData[oldVer] || { date: '-', status: '未知', desc: '未知版本' };
+    var newData = versionData[newVer] || { date: '-', status: '未知', desc: '未知版本' };
+
+    // 更新旧版本框
+    var oldHead = document.getElementById('diffOldHead');
+    if (oldHead) oldHead.innerHTML = '<span><i class="fa fa-clock-o"></i> 旧版本 ' + oldVer + '</span><span style="color:#94a3b8;font-weight:400">' + oldData.date + '</span>';
+
+    var oldBody = document.getElementById('diffOldBody');
+    if (oldBody) {
+        oldBody.innerHTML =
+            '<strong style="color:#1e40af">【版本信息】</strong>\n' +
+            '<span class="diff-line-normal">版本号：' + oldVer + '</span>\n' +
+            '<span class="diff-line-normal">生效日期：' + oldData.date + '</span>\n' +
+            '<span class="diff-line-normal">状态：' + oldData.status + '</span>\n' +
+            '<strong style="color:#1e40af;margin-top:10px;display:block">【变更说明】</strong>\n' +
+            '<span class="diff-line-removed">- ' + oldData.desc + '</span>';
+    }
+
+    // 更新新版本框
+    var newHead = document.getElementById('diffNewHead');
+    if (newHead) newHead.innerHTML = '<span><i class="fa fa-star" style="color:#16a34a"></i> 新版本 ' + newVer + '</span><span style="color:#94a3b8;font-weight:400">' + newData.date + '</span>';
+
+    var newBody = document.getElementById('diffNewBody');
+    if (newBody) {
+        newBody.innerHTML =
+            '<strong style="color:#1e40af">【版本信息】</strong>\n' +
+            '<span class="diff-line-normal">版本号：' + newVer + '</span>\n' +
+            '<span class="diff-line-normal">生效日期：' + newData.date + '</span>\n' +
+            '<span class="diff-line-normal">状态：' + newData.status + '</span>\n' +
+            '<strong style="color:#1e40af;margin-top:10px;display:block">【变更说明】</strong>\n' +
+            '<span class="diff-line-added">+ ' + newData.desc + '</span>';
+    }
+}
+
+/**
+ * 发布版本（草稿 → 已发布）
+ */
+function publishVersion(version) {
+    if (!confirm('确认发布版本 ' + version + '？发布后该版本将正式生效。')) return;
+
+    var row = document.querySelector('.data-table tbody tr[data-version="' + version + '"]');
+    if (!row) return;
+
+    // 更新状态标签：草稿 → 已发布
+    var statusCell = row.cells[2];
+    if (statusCell) {
+        var tag = statusCell.querySelector('.tag');
+        if (tag) {
+            tag.className = 'tag tag-success';
+            tag.textContent = '已发布';
+        }
+    }
+
+    // 更新生效日期
+    var dateCell = row.cells[3];
+    if (dateCell && dateCell.textContent.trim() === '-') {
+        var today = new Date();
+        dateCell.textContent = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+    }
+
+    // 更新操作链接：移除"编辑"和"发布"，添加"回滚"和"设为当前"和"对比"
+    var opCell = row.cells[row.cells.length - 1];
+    if (opCell) {
+        opCell.innerHTML =
+            '<a href="javascript:;" onclick="rollbackVersion(\'' + version + '\')">回滚</a>' +
+            '<a href="javascript:;" onclick="setCurrentVersion(\'' + version + '\')">设为当前</a>' +
+            '<a href="javascript:;" onclick="compareSingleVersion(\'' + version + '\')">对比</a>';
+    }
+
+    showToast('版本 ' + version + ' 已发布', 'success');
+}
+
+/**
+ * 编辑草稿版本
+ */
+function editDraft(version) {
+    var code = getCurrentRuleCode();
+    var ruleName = (RULES_VERSIONS[code] || {}).name || code;
+    govNav('pages/rule/rule-edit.html', ['首页', '规则引擎管理', '规则版本管理', '编辑规则'], { code: code, name: ruleName });
+}
+
+/**
+ * 导出变更记录
+ */
+function exportChangeLog() {
+    showToast('正在导出变更记录...');
+}
+
+/**
+ * 刷新版本列表
+ */
+function refreshVersionList() {
+    showToast('已刷新版本列表');
+}
+
+/**
+ * 全选/取消全选版本 checkbox
+ */
+function toggleVersionCheckAll(checkAll) {
+    var checkboxes = document.querySelectorAll('.version-check');
+    checkboxes.forEach(function (cb) { cb.checked = checkAll.checked; });
+    onVersionCheckChange();
+}
+
+/**
+ * 版本 checkbox 选择变化时，限制最多选 2 个
+ */
+function onVersionCheckChange() {
+    var checked = document.querySelectorAll('.version-check:checked');
+    if (checked.length > 2) {
+        checked[checked.length - 1].checked = false;
+        showToast('最多只能选择两个版本进行对比');
+    }
+}
+
+/* ============================================================
+ * 初始化
+ * ============================================================ */
+(function init() {
+    // 初始化版本表格
+    initVersionTable();
+
+    // 页面初始化时，若存在 URL 参数 ?code=xxx，则按 value 匹配并刷新表格
+    var selector = document.getElementById('rule-selector');
+    if (selector) {
+        try {
+            var m = window.location.search.match(/[?&]code=([^&]+)/);
+            if (m) {
+                var targetCode = decodeURIComponent(m[1].replace(/\+/g, ' '));
+                for (var i = 0; i < selector.options.length; i++) {
+                    if (selector.options[i].value === targetCode) {
+                        selector.selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+        } catch (e) { /* ignore */ }
+        renderVersionTable(selector.value);
+    }
+})();
+</script>
+</body>
+</html>

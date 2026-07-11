@@ -1,0 +1,435 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>僵尸接口 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-eye-slash" style="color:var(--primary);margin-right:8px"></i>僵尸接口</h2>
+            <div class="page-desc">
+                首页 / 服务治理 / 僵尸接口 - 识别长期无调用的僵尸接口，推动清理下线，降低系统维护成本
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="showToast('正在导出僵尸接口清单...')"><i class="fa fa-download"></i> 导出</button>
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+        </div>
+    </div>
+
+    <!-- ====== 顶部统计卡 ====== -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-icon red"><i class="fa fa-eye-slash"></i></div>
+            <div class="stat-label">僵尸接口总数</div>
+            <div class="stat-value">35</div>
+            <div class="stat-foot">占接口总数 <span style="color:var(--warning)">1.0%</span></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon orange"><i class="fa fa-exclamation-circle"></i></div>
+            <div class="stat-label">A级僵尸</div>
+            <div class="stat-value">3</div>
+            <div class="stat-foot">核心接口需重点关注</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon green"><i class="fa fa-check-circle"></i></div>
+            <div class="stat-label">已处理数</div>
+            <div class="stat-value">18</div>
+            <div class="stat-foot">处理率 <span class="up">51.4%</span></div>
+        </div>
+    </div>
+
+    <!-- ====== 筛选操作区 ====== -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item">
+                <label>连续无调用天数</label>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <input type="number" id="filterMinDays" class="form-control" style="width:80px" value="90" placeholder="最小">
+                    <span style="color:var(--text-secondary)">至</span>
+                    <input type="number" id="filterMaxDays" class="form-control" style="width:80px" placeholder="最大">
+                </div>
+            </div>
+            <div class="form-item">
+                <label>所属系统</label>
+                <select id="filterSystem" class="form-control">
+                    <option>全部</option>
+                    <option>核心业务系统</option>
+                    <option>信贷管理系统</option>
+                    <option>风险管理系统</option>
+                    <option>会计总账系统</option>
+                    <option>客户关系管理</option>
+                    <option>支付清算系统</option>
+                    <option>投资理财系统</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>接口类型</label>
+                <select id="filterType" class="form-control">
+                    <option>全部</option>
+                    <option>API</option>
+                    <option>文件传输</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>分级</label>
+                <select id="filterLevel" class="form-control">
+                    <option>全部</option>
+                    <option>A 级（核心）</option>
+                    <option>B 级（重要）</option>
+                    <option>C 级（一般）</option>
+                </select>
+            </div>
+            <div class="form-item" style="min-width:auto">
+                <button class="btn btn-primary" onclick="filterZombies()"><i class="fa fa-search"></i> 查询</button>
+                <button class="btn btn-default" onclick="resetZombieFilters()"><i class="fa fa-eraser"></i> 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 僵尸接口表格 ====== -->
+    <div class="card" style="margin-bottom:0;position:relative">
+        <div class="card-header">
+            <div class="card-title">僵尸接口列表</div>
+            <div class="card-action">
+                <a href="javascript:;" onclick="batchOffline()"><i class="fa fa-check-square-o"></i> 批量申请下线</a>
+                <a href="javascript:;" onclick="batchKeep()"><i class="fa fa-thumb-tack"></i> 批量保留</a>
+            </div>
+        </div>
+        <!-- 加载中状态 -->
+        <div id="zombieLoading" style="display:flex;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.8);z-index:10;align-items:center;justify-content:center;">
+            <div style="text-align:center;">
+                <i class="fa fa-spinner fa-pulse fa-2x" style="color:var(--primary)"></i>
+                <div style="margin-top:8px;color:var(--text-secondary);font-size:13px">加载中...</div>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox"></th>
+                        <th style="width:140px">接口编码</th>
+                        <th>接口名称</th>
+                        <th style="width:130px">提供方系统</th>
+                        <th style="width:70px" class="text-center">接口类型</th>
+                        <th style="width:120px" class="text-center">最近调用时间</th>
+                        <th style="width:120px" class="text-center">连续无调用天数</th>
+                        <th style="width:80px" class="text-center">消费方数量</th>
+                        <th style="width:80px" class="text-center">状态</th>
+                        <th style="width:140px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="background:#fff5f5">
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-OLD-001</td>
+                        <td>旧版客户信息同步</td>
+                        <td>核心业务系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2025-08-15</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">293</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-OLD-001',name:'旧版客户信息同步',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr style="background:#fff5f5">
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-OLD-002</td>
+                        <td>旧版账户余额批量查询</td>
+                        <td>会计总账系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2025-09-20</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">257</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-OLD-002',name:'旧版账户余额批量查询',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr style="background:#fff5f5">
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-OLD-003</td>
+                        <td>旧版风险评级接口</td>
+                        <td>风险管理系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2025-10-10</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">236</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-OLD-003',name:'旧版风险评级接口',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">FILE-OLD-001</td>
+                        <td>旧版日终对账文件</td>
+                        <td>会计总账系统</td>
+                        <td class="text-center"><span class="tag tag-purple" style="font-size:11px">文件</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2025-11-05</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">211</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'FILE-OLD-001',name:'旧版日终对账文件',type:'FILE'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-OLD-004</td>
+                        <td>旧版贷款利率查询</td>
+                        <td>信贷管理系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2025-12-18</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">168</td>
+                        <td class="text-center" style="font-weight:600">1</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-OLD-004',name:'旧版贷款利率查询',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-CUST-015</td>
+                        <td>客户联系方式批量导出</td>
+                        <td>客户关系管理</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-01-22</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">133</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-CUST-015',name:'客户联系方式批量导出',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">FILE-RISK-003</td>
+                        <td>旧版风险评估报告</td>
+                        <td>风险管理系统</td>
+                        <td class="text-center"><span class="tag tag-purple" style="font-size:11px">文件</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-02-10</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">114</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">待处理</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'FILE-RISK-003',name:'旧版风险评估报告',type:'FILE'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-PAY-008</td>
+                        <td>旧版手续费查询</td>
+                        <td>支付清算系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-03-01</td>
+                        <td class="text-center" style="font-weight:700;font-family:'Segoe UI'">95</td>
+                        <td class="text-center" style="font-weight:600">2</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">评估中</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-PAY-008',name:'旧版手续费查询',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-INVEST-005</td>
+                        <td>旧版基金净值推送</td>
+                        <td>投资理财系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-03-15</td>
+                        <td class="text-center" style="font-weight:700;font-family:'Segoe UI'">81</td>
+                        <td class="text-center" style="font-weight:600">0</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">评估中</span></td>
+                        <td class="text-center op-col"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="navTo('pages/application/offline-apply.html','服务下线申请',{code:'API-INVEST-005',name:'旧版基金净值推送',type:'API'})"><i class="fa fa-power-off"></i> 下线申请</a><a class="btn-link" style="padding:0 4px"><i class="fa fa-thumb-tack"></i> 保留</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-ACCT-022</td>
+                        <td>旧版内部转账</td>
+                        <td>会计总账系统</td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px">API</span></td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-03-28</td>
+                        <td class="text-center" style="font-weight:700;font-family:'Segoe UI'">68</td>
+                        <td class="text-center" style="font-weight:600">1</td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">已保留</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px"><i class="fa fa-eye"></i> 查看</a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- 空数据状态 -->
+        <div id="zombieEmpty" style="display:none;padding:40px;text-align:center;color:var(--text-secondary);">
+            <i class="fa fa-inbox" style="font-size:48px;color:#d9d9d9"></i>
+            <div style="margin-top:12px;font-size:14px">暂无符合条件的僵尸接口</div>
+        </div>
+        <div class="pagination">
+            <span class="page-info">共 35 条，每页 10 条</span>
+            <div class="page-list">
+                <button onclick="showToast('已是第一页')">上一页</button>
+                <button class="active" onclick="showToast('当前第1页')">1</button>
+                <button onclick="showToast('跳转到第2页')">2</button>
+                <button onclick="showToast('跳转到第3页')">3</button>
+                <button onclick="showToast('跳转到第4页')">4</button>
+                <button onclick="showToast('跳转到下一页')">下一页</button>
+            </div>
+            <select class="page-size">
+                <option>10 条/页</option>
+                <option>20 条/页</option>
+            </select>
+        </div>
+    </div>
+
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+// ====== 僵尸接口页面交互逻辑 ======
+
+// 获取所有表格行（脚本位于 body 底部，DOM 已就绪）
+var zombieRows = document.querySelectorAll('.data-table tbody tr');
+
+// 显示/隐藏加载状态
+function showLoading() {
+    var el = document.getElementById('zombieLoading');
+    if (el) el.style.display = 'flex';
+}
+function hideLoading() {
+    var el = document.getElementById('zombieLoading');
+    if (el) el.style.display = 'none';
+}
+
+// 筛选僵尸接口：读取各筛选条件，过滤表格行显示/隐藏
+function filterZombies() {
+    var minDays = parseInt(document.getElementById('filterMinDays').value) || 0;
+    var maxDays = parseInt(document.getElementById('filterMaxDays').value) || Infinity;
+    var system = document.getElementById('filterSystem').value;
+    var type = document.getElementById('filterType').value;
+    var level = document.getElementById('filterLevel').value;
+
+    var visibleCount = 0;
+    zombieRows.forEach(function(row) {
+        var cells = row.querySelectorAll('td');
+        if (cells.length === 0) return;
+
+        var rowSystem = cells[3].textContent.trim();
+        var rowType = cells[4].textContent.trim();
+        var rowDays = parseInt(cells[6].textContent.trim()) || 0;
+        // 根据无调用天数推算分级（>=200为A级，>=100为B级，其余C级）
+        var rowLevel = rowDays >= 200 ? 'A' : (rowDays >= 100 ? 'B' : 'C');
+
+        var show = true;
+        if (system !== '全部' && rowSystem !== system) show = false;
+        if (type !== '全部') {
+            var typeMatch = (type === 'API' && rowType === 'API') ||
+                            (type === '文件传输' && rowType === '文件');
+            if (!typeMatch) show = false;
+        }
+        if (level !== '全部' && rowLevel !== level.charAt(0)) show = false;
+        if (rowDays < minDays || rowDays > maxDays) show = false;
+
+        row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
+    });
+
+    // 切换空数据状态显示
+    var empty = document.getElementById('zombieEmpty');
+    if (empty) empty.style.display = visibleCount === 0 ? 'block' : 'none';
+}
+
+// 重置筛选条件为默认值，显示所有行
+function resetZombieFilters() {
+    document.getElementById('filterMinDays').value = '90';
+    document.getElementById('filterMaxDays').value = '';
+    document.getElementById('filterSystem').selectedIndex = 0;
+    document.getElementById('filterType').selectedIndex = 0;
+    document.getElementById('filterLevel').selectedIndex = 0;
+
+    zombieRows.forEach(function(row) { row.style.display = ''; });
+    var empty = document.getElementById('zombieEmpty');
+    if (empty) empty.style.display = 'none';
+}
+
+// 批量申请下线：先检查勾选行，有则alert占位，无则提示
+function batchOffline() {
+    var checked = document.querySelectorAll('.data-table tbody input[type="checkbox"]:checked');
+    if (checked.length === 0) {
+        showToast('请先选择需要下线的接口');
+        return;
+    }
+    showToast('已选择 ' + checked.length + ' 个接口，正在批量申请下线...');
+}
+
+// 批量保留：同上逻辑
+function batchKeep() {
+    var checked = document.querySelectorAll('.data-table tbody input[type="checkbox"]:checked');
+    if (checked.length === 0) {
+        showToast('请先选择需要保留的接口');
+        return;
+    }
+    showToast('已选择 ' + checked.length + ' 个接口，正在批量保留...');
+}
+
+// 保留单个僵尸接口：更新状态为"已保留"（绿色），隐藏保留按钮
+function keepZombie(btn) {
+    var row = btn.closest('tr');
+    if (!row) return;
+    var cells = row.querySelectorAll('td');
+    var statusCell = cells[8];
+    if (statusCell) {
+        statusCell.innerHTML = '<span class="tag tag-success" style="font-size:11px">已保留</span>';
+    }
+    btn.style.display = 'none';
+}
+
+// 翻页（Demo占位）
+function goToPage(pageNum) {
+    showToast('跳转到第 ' + pageNum + ' 页');
+}
+
+// 为所有"保留"按钮和"查看"链接绑定 onclick 事件
+function bindRowActions() {
+    zombieRows.forEach(function(row) {
+        var links = row.querySelectorAll('.btn-link');
+        links.forEach(function(link) {
+            var text = link.textContent.trim();
+            if (text.indexOf('保留') >= 0 && !link.onclick) {
+                link.style.cursor = 'pointer';
+                link.onclick = function() { keepZombie(this); };
+            }
+            if (text.indexOf('查看') >= 0 && !link.onclick) {
+                link.style.cursor = 'pointer';
+                link.onclick = function() { showToast('查看保留原因详情'); };
+            }
+        });
+    });
+}
+
+// 面包屑导航（P0修复：僵尸接口属于"服务治理"菜单，下线申请属于"工作台>我的申请"）
+function navTo(url, title, params) {
+    var bc;
+    if (title === '服务下线申请') {
+        bc = ['首页', '工作台', '我的申请', '服务下线申请'];
+    } else {
+        bc = ['首页', '服务治理', '僵尸接口'];
+        if (title) bc.push(title);
+    }
+    // 优先使用 nav-helper.js 提供的 govNav（通过 postMessage 跨域兼容）
+    if (window.govNav) { window.govNav(url, bc, params || {}); return; }
+    try {
+        if (window.parent && window.parent.governancePlatform && typeof window.parent.governancePlatform.navigate === 'function') {
+            window.parent.governancePlatform.navigate(url, bc, params || {});
+            return;
+        }
+    } catch (e) { /* fall through */ }
+    // 最终回退：在新窗口打开
+    var fallback = '../../index.html?nav=' + encodeURIComponent(url);
+    if (params && typeof params === 'object') {
+        var qs = Object.keys(params).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);}).join('&');
+        if (qs) fallback += '&' + qs;
+    }
+    try { window.parent.location.href = fallback; } catch(e) { window.location.href = fallback; }
+}
+
+// 页面初始化：绑定行操作 + 模拟加载延迟
+bindRowActions();
+setTimeout(hideLoading, 500);
+</script>
+</body>
+</html>

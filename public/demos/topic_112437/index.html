@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第二个我 · 本地 AI 数字人档案</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-main: #1a1a2e;
+            --bg-sidebar: #16213e;
+            --bg-highlight: #0f3460;
+            --bg-card: #1e1e3a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #e94560;
+            --accent-hover: #ff6b81;
+            --border: #2a2a4a;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --error: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+        #root { height: 100vh; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--bg-highlight); }
+        .gradient-text {
+            background: linear-gradient(135deg, #e94560, #0f3460, #e94560);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s linear infinite;
+        }
+        @keyframes shimmer { to { background-position: 200% center; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
+        .typing-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); margin: 0 2px; animation: typing 1.4s infinite; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: 600; margin: 0.5em 0; color: #fff; }
+        .markdown-body h1 { font-size: 1.4em; }
+        .markdown-body h2 { font-size: 1.2em; }
+        .markdown-body h3 { font-size: 1.05em; }
+        .markdown-body p { margin: 0.4em 0; line-height: 1.6; }
+        .markdown-body ul, .markdown-body ol { padding-left: 1.2em; margin: 0.4em 0; }
+        .markdown-body li { margin: 0.2em 0; line-height: 1.5; }
+        .markdown-body code { background: rgba(255,255,255,0.1); padding: 2px 5px; border-radius: 3px; font-size: 0.9em; font-family: 'SF Mono', 'Fira Code', monospace; }
+        .markdown-body pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+        .markdown-body pre code { background: transparent; padding: 0; }
+        .markdown-body blockquote { border-left: 3px solid var(--accent); padding-left: 10px; margin: 0.5em 0; color: var(--text-secondary); }
+        .markdown-body strong { color: #fff; }
+        .markdown-body a { color: var(--accent); text-decoration: none; }
+        .markdown-body table { border-collapse: collapse; margin: 0.5em 0; }
+        .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 8px; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+
+// ============================================================
+// 1. 全局状态上下文
+// ============================================================
+const AppContext = createContext(null);
+const useApp = () => useContext(AppContext);
+
+// ============================================================
+// 2. IndexedDB 数据层 (原生实现，无外部依赖)
+// ============================================================
+const DB_NAME = 'second_me_db';
+const DB_VERSION = 1;
+
+let _dbInstance = null;
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        if (_dbInstance) { resolve(_dbInstance); return; }
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => { _dbInstance = req.result; resolve(_dbInstance); };
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('files')) {
+                const fileStore = db.createObjectStore('files', { keyPath: 'id' });
+                fileStore.createIndex('path', 'path');
+                fileStore.createIndex('type', 'type');
+            }
+            if (!db.objectStoreNames.contains('profile')) {
+                db.createObjectStore('profile', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('chats')) {
+                const chatStore = db.createObjectStore('chats', { keyPath: 'id' });
+                chatStore.createIndex('createdAt', 'createdAt');
+            }
+            if (!db.objectStoreNames.contains('settings')) {
+                db.createObjectStore('settings', { keyPath: 'key' });
+            }
+        };
+    });
+}
+
+function tx(db, store, mode) {
+    return db.transaction(store, mode).objectStore(store);
+}
+
+function reqToPromise(request) {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+const db = {
+    async addFile(file) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'files', 'readwrite').put(file));
+    },
+    async getFile(id) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'files', 'readonly').get(id));
+    },
+    async getAllFiles() {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'files', 'readonly').getAll());
+    },
+    async deleteFile(id) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'files', 'readwrite').delete(id));
+    },
+    async clearFiles() {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'files', 'readwrite').clear());
+    },
+    async getProfile() {
+        const d = await openDB();
+        const r = await reqToPromise(tx(d, 'profile', 'readonly').get('main'));
+        return r ? r.data : null;
+    },
+    async saveProfile(data) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'profile', 'readwrite').put({ id: 'main', data, updatedAt: Date.now() }));
+    },
+    async getAllChats() {
+        const d = await openDB();
+        const chats = await reqToPromise(tx(d, 'chats', 'readonly').getAll());
+        return chats.sort((a, b) => b.createdAt - a.createdAt);
+    },
+    async getChat(id) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'chats', 'readonly').get(id));
+    },
+    async saveChat(chat) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'chats', 'readwrite').put(chat));
+    },
+    async deleteChat(id) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'chats', 'readwrite').delete(id));
+    },
+    async getSetting(key) {
+        const d = await openDB();
+        const r = await reqToPromise(tx(d, 'settings', 'readonly').get(key));
+        return r ? r.value : null;
+    },
+    async setSetting(key, value) {
+        const d = await openDB();
+        return reqToPromise(tx(d, 'settings', 'readwrite').put({ key, value }));
+    },
+    async clearAll() {
+        const d = await openDB();
+        await reqToPromise(tx(d, 'files', 'readwrite').clear());
+        await reqToPromise(tx(d, 'profile', 'readwrite').clear());
+        await reqToPromise(tx(d, 'chats', 'readwrite').clear());
+    }
+};
+
+// ============================================================
+// 3. Ollama API 对接层
+// ============================================================
+const ollama = {
+    baseUrl: 'http://localhost:11434',
+
+    async listModels() {
+        const res = await fetch(`${this.baseUrl}/api/tags`);
+        if (!res.ok) throw new Error(`获取模型列表失败: ${res.status}`);
+        const data = await res.json();
+        return data.models || [];
+    },
+
+    async embed(text, model) {
+        const res = await fetch(`${this.baseUrl}/api/embed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, input: text }),
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!res.ok) throw new Error(`向量化失败: ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (!data.embeddings || !data.embeddings[0]) throw new Error('无嵌入结果');
+        return data.embeddings[0];
+    },
+
+    async chat(messages, model, options = {}) {
+        const res = await fetch(`${this.baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model,
+                messages,
+                stream: options.stream || false,
+                options: options.options || {}
+            })
+        });
+        if (!res.ok) throw new Error(`对话失败: ${res.status}`);
+        if (options.stream) return res;
+        const data = await res.json();
+        return data.message.content;
+    },
+
+    async chatStream(messages, model, onChunk) {
+        const res = await this.chat(messages, model, { stream: true });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const json = JSON.parse(line);
+                    if (json.message && json.message.content) {
+                        onChunk(json.message.content);
+                    }
+                    if (json.done) return;
+                } catch (e) { /* skip */ }
+            }
+        }
+    },
+
+    async testConnection() {
+        try {
+            const res = await fetch(`${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+            return res.ok;
+        } catch {
+            return false;
+        }
+    }
+};
+
+// ============================================================
+// 4. 向量检索工具
+// ============================================================
+function cosineSimilarity(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom === 0 ? 0 : dot / denom;
+}
+
+async function searchRelevantFiles(queryEmbedding, topK = 5) {
+    const files = await db.getAllFiles();
+    const scored = files
+        .filter(f => f.embedding)
+        .map(f => ({ ...f, score: cosineSimilarity(queryEmbedding, f.embedding) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK);
+    return scored;
+}
+
+// 关键词搜索降级方案
+async function keywordSearchFiles(query, topK = 3) {
+    const files = await db.getAllFiles();
+    const keywords = query.toLowerCase().split(/\s+/).filter(k => k.length > 1);
+    const scored = files.map(f => {
+        const content = (f.name + ' ' + f.content).toLowerCase();
+        let score = 0;
+        for (const kw of keywords) {
+            const matches = content.split(kw).length - 1;
+            score += matches;
+        }
+        return { ...f, score };
+    }).filter(f => f.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+    return scored;
+}
+
+// ============================================================
+// 5. 文件系统工具
+// ============================================================
+const SUPPORTED_EXTENSIONS = ['md', 'txt', 'json', 'js', 'ts', 'jsx', 'tsx', 'py', 'html', 'css', 'csv', 'xml', 'yaml', 'yml', 'sh', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'log', 'sql', 'env', 'vue', 'svelte'];
+const MAX_FILE_SIZE = 50 * 1024; // 50KB
+
+function getFileExtension(name) {
+    const parts = name.split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
+}
+
+async function readDirectoryRecursive(dirHandle, path = '', results = []) {
+    for await (const entry of dirHandle.values()) {
+        const fullPath = path ? `${path}/${entry.name}` : entry.name;
+        if (entry.kind === 'directory') {
+            await readDirectoryRecursive(entry, fullPath, results);
+        } else {
+            const ext = getFileExtension(entry.name);
+            if (SUPPORTED_EXTENSIONS.includes(ext)) {
+                results.push({ handle: entry, path: fullPath, name: entry.name, ext });
+            }
+        }
+    }
+    return results;
+}
+
+async function readFileContent(fileHandle) {
+    const file = await fileHandle.getFile();
+    if (file.size > MAX_FILE_SIZE) {
+        return file.text().slice(0, MAX_FILE_SIZE) + '\n... [文件截断，超过50KB]';
+    }
+    return file.text();
+}
+
+// Firefox/Safari 降级：从 File 对象读取内容
+async function fileToFileContent(file) {
+    if (file.size > MAX_FILE_SIZE) {
+        return file.text().slice(0, MAX_FILE_SIZE) + '\n... [文件截断，超过50KB]';
+    }
+    return file.text();
+}
+
+// ============================================================
+// 6. 图标组件
+// ============================================================
+const Icon = {
+    Logo: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-2 2.83V16a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4v-2.17A3 3 0 0 1 4 11v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><path d="M12 8v8M9 11h6"/></svg>,
+    Folder: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+    Profile: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+    Chat: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
+    Settings: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+    Send: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+    Plus: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    Trash: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+    Check: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
+    Alert: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+    File: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>,
+    Edit: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+    Refresh: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+    Sparkles: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>,
+    Book: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+    Code: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>,
+    ArrowRight: (props) => <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+    Dot: (props) => <svg {...props} viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>,
+};
+
+// ============================================================
+// 7. 通用UI组件
+// ============================================================
+function Spinner({ size = 16, className = '' }) {
+    return <div className={`spin border-2 border-current border-t-transparent rounded-full inline-block ${className}`} style={{ width: size, height: size }} />;
+}
+
+function Card({ children, className = '', ...props }) {
+    return <div className={`bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5 ${className}`} {...props}>{children}</div>;
+}
+
+function Button({ children, variant = 'primary', className = '', ...props }) {
+    const variants = {
+        primary: 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white',
+        secondary: 'bg-[var(--bg-highlight)] hover:opacity-80 text-white',
+        ghost: 'hover:bg-[var(--bg-highlight)] text-[var(--text-secondary)] hover:text-white',
+        danger: 'bg-[var(--error)] hover:opacity-80 text-white',
+    };
+    return (
+        <button className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`} {...props}>
+            {children}
+        </button>
+    );
+}
+
+function EmptyState({ icon, title, description, action }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="text-[var(--text-secondary)] opacity-40 mb-4">{icon}</div>
+            <h3 className="text-lg font-semibold text-[var(--text-secondary)] mb-2">{title}</h3>
+            <p className="text-sm text-[var(--text-secondary)] opacity-60 mb-6 max-w-md">{description}</p>
+            {action}
+        </div>
+    );
+}
+
+// ============================================================
+// 8. 侧边栏组件
+// ============================================================
+function Sidebar({ currentView, setCurrentView, connectionStatus }) {
+    const menuItems = [
+        { id: 'welcome', label: '首页', icon: <Icon.Logo className="w-5 h-5" /> },
+        { id: 'files', label: '文件索引', icon: <Icon.Folder className="w-5 h-5" /> },
+        { id: 'profile', label: '数字档案', icon: <Icon.Profile className="w-5 h-5" /> },
+        { id: 'chat', label: '情境对话', icon: <Icon.Chat className="w-5 h-5" /> },
+        { id: 'settings', label: '设置', icon: <Icon.Settings className="w-5 h-5" /> },
+    ];
+
+    return (
+        <div className="w-56 h-full bg-[var(--bg-sidebar)] flex flex-col border-r border-[var(--border)]">
+            <div className="p-5 border-b border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                    <Icon.Logo className="w-7 h-7 text-[var(--accent)]" />
+                    <div>
+                        <h1 className="text-sm font-bold text-white">第二个我</h1>
+                        <p className="text-[10px] text-[var(--text-secondary)]">本地 AI 数字人档案</p>
+                    </div>
+                </div>
+            </div>
+            <nav className="flex-1 p-3 space-y-1">
+                {menuItems.map(item => (
+                    <button
+                        key={item.id}
+                        onClick={() => setCurrentView(item.id)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                            currentView === item.id
+                                ? 'bg-[var(--bg-highlight)] text-white'
+                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-highlight)] hover:text-white'
+                        }`}
+                    >
+                        {item.icon}
+                        {item.label}
+                    </button>
+                ))}
+            </nav>
+            <div className="p-4 border-t border-[var(--border)]">
+                <div className="flex items-center gap-2 text-xs">
+                    <div className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-[var(--success)]' : connectionStatus === 'checking' ? 'bg-[var(--warning)] pulse' : 'bg-[var(--error)]'}`} />
+                    <span className="text-[var(--text-secondary)]">
+                        {connectionStatus === 'connected' ? 'Ollama 已连接' : connectionStatus === 'checking' ? '检测中...' : 'Ollama 未连接'}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 9. 欢迎页组件
+// ============================================================
+function WelcomePage({ setCurrentView, fileCount, hasProfile, connectionStatus }) {
+    const features = [
+        {
+            icon: <Icon.Folder className="w-8 h-8" />,
+            title: '文件索引',
+            desc: '选择本地文件夹，AI 自动读取并理解你的所有文件',
+            action: () => setCurrentView('files'),
+            status: fileCount > 0 ? `已索引 ${fileCount} 个文件` : '尚未索引',
+            color: 'text-blue-400',
+        },
+        {
+            icon: <Icon.Profile className="w-8 h-8" />,
+            title: '数字档案',
+            desc: '基于文件内容构建你的个人知识画像',
+            action: () => setCurrentView('profile'),
+            status: hasProfile ? '档案已生成' : '档案未生成',
+            color: 'text-purple-400',
+        },
+        {
+            icon: <Icon.Chat className="w-8 h-8" />,
+            title: '情境对话',
+            desc: 'AI "认识"你，提供个性化的深度对话',
+            action: () => setCurrentView('chat'),
+            status: '准备就绪',
+            color: 'text-green-400',
+        },
+    ];
+
+    return (
+        <div className="h-full overflow-y-auto p-8">
+            <div className="max-w-4xl mx-auto fade-in">
+                <div className="text-center py-12">
+                    <div className="inline-block mb-6">
+                        <Icon.Logo className="w-20 h-20 text-[var(--accent)] mx-auto" />
+                    </div>
+                    <h1 className="text-4xl font-bold mb-3">
+                        <span className="gradient-text">第二个我</span>
+                    </h1>
+                    <p className="text-lg text-[var(--text-secondary)] mb-2">本地 AI 数字人档案</p>
+                    <p className="text-sm text-[var(--text-secondary)] opacity-60 max-w-xl mx-auto">
+                        让 AI 真正"认识"你 — 读取本地文件，构建知识档案，提供情境感知的深度对话。全部本地运行，隐私安全。
+                    </p>
+                </div>
+
+                {connectionStatus !== 'connected' && (
+                    <div className="mb-8 bg-[var(--error)]/10 border border-[var(--error)]/30 rounded-xl p-4 flex items-start gap-3">
+                        <Icon.Alert className="w-5 h-5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                            <p className="text-sm font-medium text-[var(--error)]">Ollama 未连接</p>
+                            <p className="text-xs text-[var(--text-secondary)] mt-1">
+                                请确保 Ollama 已启动运行。在终端执行 <code className="bg-black/30 px-1.5 py-0.5 rounded">ollama serve</code> 启动服务。
+                            </p>
+                            <Button variant="secondary" className="mt-2 text-xs py-1 px-3" onClick={() => setCurrentView('settings')}>
+                                前往设置
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                    {features.map((f, i) => (
+                        <Card key={i} className="hover:border-[var(--accent)] transition-all cursor-pointer group" onClick={f.action}>
+                            <div className={`${f.color} mb-3 group-hover:scale-110 transition-transform`}>{f.icon}</div>
+                            <h3 className="font-semibold text-white mb-1">{f.title}</h3>
+                            <p className="text-xs text-[var(--text-secondary)] mb-3">{f.desc}</p>
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-[var(--text-secondary)] opacity-60">{f.status}</span>
+                                <Icon.ArrowRight className="w-4 h-4 text-[var(--text-secondary)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                        </Card>
+                    ))}
+                </div>
+
+                <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6">
+                    <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                        <Icon.Sparkles className="w-4 h-4 text-[var(--accent)]" />
+                        快速开始
+                    </h3>
+                    <ol className="space-y-3">
+                        {[
+                            '确保本地 Ollama 已运行并拉取模型（如 qwen2.5、llama3.2）',
+                            '在「设置」中确认 Ollama 连接并选择模型',
+                            '在「文件索引」中选择本地文件夹进行索引',
+                            '在「数字档案」中生成你的个人知识档案',
+                            '在「情境对话」中开始与"第二个我"对话',
+                        ].map((step, i) => (
+                            <li key={i} className="flex items-start gap-3 text-sm text-[var(--text-secondary)]">
+                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--bg-highlight)] text-white text-xs flex items-center justify-center font-semibold">{i + 1}</span>
+                                {step}
+                            </li>
+                        ))}
+                    </ol>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 10. 文件索引页组件
+// ============================================================
+function FileIndexPage() {
+    const { settings, selectedModel, embeddingModel, setCurrentView } = useApp();
+    const [files, setFiles] = useState([]);
+    const [indexing, setIndexing] = useState(false);
+    const [progress, setProgress] = useState({ current: 0, total: 0, currentFile: '' });
+    const [searchQuery, setSearchQuery] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [dirName, setDirName] = useState('');
+    const fileInputRef = useRef(null);
+
+    const loadFiles = useCallback(async () => {
+        try {
+            setLoading(true);
+            const allFiles = await db.getAllFiles();
+            setFiles(allFiles.sort((a, b) => b.indexedAt - a.indexedAt));
+        } catch (e) {
+            console.error('加载文件列表失败:', e);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadFiles(); }, [loadFiles]);
+
+    const indexFiles = async (fileList, folderName) => {
+        setDirName(folderName);
+        setIndexing(true);
+        setProgress({ current: 0, total: fileList.length, currentFile: '' });
+
+        const existingFiles = await db.getAllFiles();
+        const existingPaths = new Set(existingFiles.map(f => f.path));
+
+        let processed = 0;
+        for (const fileInfo of fileList) {
+            setProgress({ current: processed, total: fileList.length, currentFile: fileInfo.name });
+
+            if (existingPaths.has(fileInfo.path)) {
+                processed++;
+                continue;
+            }
+
+            try {
+                let content;
+                if (fileInfo.handle) {
+                    content = await readFileContent(fileInfo.handle);
+                } else if (fileInfo.file) {
+                    content = await fileToFileContent(fileInfo.file);
+                } else {
+                    processed++;
+                    continue;
+                }
+
+                const fileData = {
+                    id: `${fileInfo.path}_${Date.now()}`,
+                    path: fileInfo.path,
+                    name: fileInfo.name,
+                    type: fileInfo.ext,
+                    size: content.length,
+                    content: content,
+                    embedding: null,
+                    indexedAt: Date.now(),
+                };
+
+                // 向量化（仅当设置了嵌入模型时）
+                if (embeddingModel) {
+                    try {
+                        const embedText = content.slice(0, 2000);
+                        const embedding = await ollama.embed(embedText, embeddingModel);
+                        if (embedding && embedding.length > 0) {
+                            fileData.embedding = embedding;
+                        }
+                    } catch (e) {
+                        console.warn('向量化失败:', fileInfo.name, e);
+                    }
+                }
+
+                await db.addFile(fileData);
+                processed++;
+            } catch (e) {
+                console.error('索引文件失败:', fileInfo.name, e);
+                processed++;
+            }
+        }
+
+        setProgress({ current: processed, total: fileList.length, currentFile: '' });
+        await loadFiles();
+        setIndexing(false);
+    };
+
+    // Chrome/Edge: 使用 File System Access API
+    const handleSelectFolder = async () => {
+        if (!selectedModel) {
+            alert('请先在设置中选择模型');
+            return;
+        }
+
+        if (window.showDirectoryPicker) {
+            try {
+                const dirHandle = await window.showDirectoryPicker();
+                const fileList = await readDirectoryRecursive(dirHandle);
+                await indexFiles(fileList, dirHandle.name);
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    console.error('选择文件夹失败:', e);
+                    alert('选择文件夹失败: ' + e.message);
+                }
+                setIndexing(false);
+            }
+        } else {
+            // Firefox/Safari: 使用 input[webkitdirectory] 降级
+            fileInputRef.current?.click();
+        }
+    };
+
+    // Firefox/Safari 降级：处理 input[type=file][webkitdirectory] 选择的文件
+    const handleFileInput = async (e) => {
+        const selectedFiles = Array.from(e.target.files || []);
+        if (selectedFiles.length === 0) return;
+
+        const fileList = selectedFiles
+            .map(f => {
+                const path = f.webkitRelativePath || f.name;
+                const ext = getFileExtension(f.name);
+                if (!SUPPORTED_EXTENSIONS.includes(ext)) return null;
+                return { file: f, path, name: f.name, ext };
+            })
+            .filter(Boolean);
+
+        e.target.value = ''; // 重置 input，允许重复选择同一目录
+
+        if (fileList.length === 0) {
+            alert('所选文件夹中没有支持的文件类型');
+            return;
+        }
+
+        const folderName = selectedFiles[0]?.webkitRelativePath?.split('/')[0] || '文件夹';
+        await indexFiles(fileList, folderName);
+    };
+
+    const handleDeleteFile = async (id) => {
+        await db.deleteFile(id);
+        await loadFiles();
+    };
+
+    const handleClearAll = async () => {
+        if (!confirm('确定清除所有索引文件吗？此操作不可恢复。')) return;
+        await db.clearFiles();
+        await loadFiles();
+    };
+
+    const filteredFiles = files.filter(f =>
+        !searchQuery || f.name.toLowerCase().includes(searchQuery.toLowerCase()) || f.path.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const indexedCount = files.filter(f => f.embedding).length;
+
+    return (
+        <div className="h-full flex flex-col overflow-hidden">
+            <input
+                ref={fileInputRef}
+                type="file"
+                webkitdirectory=""
+                directory=""
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleFileInput}
+            />
+            <div className="p-6 border-b border-[var(--border)]">
+                {!embeddingModel && (
+                    <div className="mb-4 bg-[var(--warning)]/10 border border-[var(--warning)]/30 rounded-lg p-3 flex items-center gap-2">
+                        <Icon.Alert className="w-4 h-4 text-[var(--warning)] flex-shrink-0" />
+                        <span className="text-xs text-[var(--text-secondary)]">
+                            未设置嵌入模型，文件将仅索引内容（不向量化），对话检索将使用关键词匹配。
+                            <button onClick={() => setCurrentView('settings')} className="text-[var(--accent)] hover:underline ml-1">前往设置</button>
+                        </span>
+                    </div>
+                )}
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                            <Icon.Folder className="w-5 h-5 text-[var(--accent)]" />
+                            文件索引
+                        </h2>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1">选择本地文件夹，AI 自动读取并理解你的文件内容</p>
+                    </div>
+                    <div className="flex gap-2">
+                        {files.length > 0 && (
+                            <Button variant="ghost" onClick={handleClearAll} className="text-sm">
+                                <Icon.Trash className="w-4 h-4 mr-1" /> 清除全部
+                            </Button>
+                        )}
+                        <Button onClick={handleSelectFolder} disabled={indexing}>
+                            {indexing ? <Spinner size={14} className="mr-2" /> : <Icon.Folder className="w-4 h-4 mr-2" />}
+                            {indexing ? '索引中...' : '选择文件夹'}
+                        </Button>
+                    </div>
+                </div>
+
+                {/* 统计信息 */}
+                {files.length > 0 && (
+                    <div className="grid grid-cols-4 gap-3">
+                        <div className="bg-[var(--bg-card)] rounded-lg px-4 py-2.5 border border-[var(--border)]">
+                            <div className="text-xs text-[var(--text-secondary)]">文件总数</div>
+                            <div className="text-lg font-bold text-white">{files.length}</div>
+                        </div>
+                        <div className="bg-[var(--bg-card)] rounded-lg px-4 py-2.5 border border-[var(--border)]">
+                            <div className="text-xs text-[var(--text-secondary)]">已向量化</div>
+                            <div className="text-lg font-bold text-[var(--success)]">{indexedCount}</div>
+                        </div>
+                        <div className="bg-[var(--bg-card)] rounded-lg px-4 py-2.5 border border-[var(--border)]">
+                            <div className="text-xs text-[var(--text-secondary)]">总大小</div>
+                            <div className="text-lg font-bold text-white">{(totalSize / 1024).toFixed(1)} KB</div>
+                        </div>
+                        <div className="bg-[var(--bg-card)] rounded-lg px-4 py-2.5 border border-[var(--border)]">
+                            <div className="text-xs text-[var(--text-secondary)]">文件类型</div>
+                            <div className="text-lg font-bold text-white">{new Set(files.map(f => f.type)).size}</div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 进度条 */}
+                {indexing && (
+                    <div className="mt-4 bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-white">正在索引: {progress.currentFile}</span>
+                            <span className="text-sm text-[var(--text-secondary)]">{progress.current} / {progress.total}</span>
+                        </div>
+                        <div className="h-2 bg-[var(--bg-main)] rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-[var(--accent)] to-[var(--bg-highlight)] transition-all duration-300"
+                                style={{ width: `${progress.total > 0 ? (progress.current / progress.total * 100) : 0}%` }} />
+                        </div>
+                    </div>
+                )}
+
+                {/* 搜索 */}
+                {files.length > 0 && !indexing && (
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="搜索文件..."
+                        className="mt-4 w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-white placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                )}
+            </div>
+
+            {/* 文件列表 */}
+            <div className="flex-1 overflow-y-auto p-6">
+                {loading ? (
+                    <div className="flex justify-center py-12"><Spinner size={24} /></div>
+                ) : files.length === 0 ? (
+                    <EmptyState
+                        icon={<Icon.Folder className="w-16 h-16" />}
+                        title="尚未索引任何文件"
+                        description="选择本地文件夹，AI 将自动读取并理解你的文件内容，构建个人知识库"
+                        action={<Button onClick={handleSelectFolder}><Icon.Folder className="w-4 h-4 mr-2" />选择文件夹</Button>}
+                    />
+                ) : (
+                    <div className="space-y-2">
+                        {filteredFiles.map(file => (
+                            <div key={file.id} className="flex items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 hover:border-[var(--accent)] transition-colors group">
+                                <div className="flex-shrink-0">
+                                    {['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'sh', 'sql'].includes(file.type) ? (
+                                        <Icon.Code className="w-5 h-5 text-yellow-400" />
+                                    ) : ['md', 'txt', 'log'].includes(file.type) ? (
+                                        <Icon.Book className="w-5 h-5 text-blue-400" />
+                                    ) : (
+                                        <Icon.File className="w-5 h-5 text-[var(--text-secondary)]" />
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium text-white truncate">{file.name}</div>
+                                    <div className="text-xs text-[var(--text-secondary)] truncate">{file.path} · {(file.size / 1024).toFixed(1)}KB</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {file.embedding ? (
+                                        <span className="flex items-center gap-1 text-xs text-[var(--success)]"><Icon.Check className="w-3 h-3" /> 已索引</span>
+                                    ) : (
+                                        <span className="text-xs text-[var(--text-secondary)]">未向量化</span>
+                                    )}
+                                    <button onClick={() => handleDeleteFile(file.id)} className="text-[var(--text-secondary)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Icon.Trash className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 11. 数字档案页组件
+// ============================================================
+function ProfilePage() {
+    const { selectedModel, fileCount, setCurrentView } = useApp();
+    const [profile, setProfile] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [generating, setGenerating] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [editText, setEditText] = useState('');
+    const [genProgress, setGenProgress] = useState('');
+
+    const loadProfile = useCallback(async () => {
+        setLoading(true);
+        const p = await db.getProfile();
+        setProfile(p);
+        setLoading(false);
+    }, []);
+
+    useEffect(() => { loadProfile(); }, [loadProfile]);
+
+    const generateProfile = async () => {
+        if (!selectedModel) {
+            alert('请先在设置中选择模型');
+            setCurrentView('settings');
+            return;
+        }
+        if (fileCount === 0) {
+            alert('请先索引文件');
+            setCurrentView('files');
+            return;
+        }
+
+        setGenerating(true);
+        setGenProgress('正在读取索引文件...');
+
+        try {
+            const files = await db.getAllFiles();
+            const fileSummaries = files.map(f => `[${f.name}] (${f.type})\n${f.content.slice(0, 800)}`).join('\n\n---\n\n');
+
+            setGenProgress('AI 正在分析文件内容，构建知识档案...');
+
+            const systemPrompt = `你是一个个人知识档案分析专家。请基于以下用户的所有文件内容，构建一份结构化的个人知识档案。
+
+请严格按照以下 JSON 格式输出（只输出JSON，不要其他内容）：
+{
+    "basicInfo": {
+        "name": "从文件中推断的姓名或昵称",
+        "profession": "职业/身份",
+        "summary": "一句话概括"
+    },
+    "skills": [
+        {"name": "技能名称", "level": "了解/熟悉/熟练/精通", "category": "技术/语言/工具/软技能"}
+    ],
+    "projects": [
+        {"name": "项目名", "description": "项目描述", "tech": ["技术栈"], "role": "角色"}
+    ],
+    "knowledgeDomains": [
+        {"domain": "领域名", "depth": "入门/进阶/深入/专家", "evidence": "相关文件或内容"}
+    ],
+    "interests": ["兴趣1", "兴趣2"],
+    "workStyle": "工作风格分析",
+    "suggestions": ["基于档案的建议1", "建议2", "建议3"]
+}
+
+用户文件内容：
+${fileSummaries.slice(0, 12000)}`;
+
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: '请分析以上文件内容，生成我的个人知识档案。' }
+            ];
+
+            const result = await ollama.chat(messages, selectedModel, {
+                options: { temperature: 0.3 }
+            });
+
+            // 尝试提取 JSON
+            let profileData;
+            try {
+                const jsonMatch = result.match(/\{[\s\S]*\}/);
+                profileData = JSON.parse(jsonMatch ? jsonMatch[0] : result);
+            } catch (e) {
+                // 如果无法解析，存储原始文本
+                profileData = {
+                    basicInfo: { name: '未知', profession: '未知', summary: '档案解析失败' },
+                    skills: [], projects: [], knowledgeDomains: [],
+                    interests: [], workStyle: '', suggestions: [],
+                    rawText: result
+                };
+            }
+
+            await db.saveProfile(profileData);
+            setProfile(profileData);
+            setGenProgress('');
+        } catch (e) {
+            console.error('生成档案失败:', e);
+            alert('生成档案失败: ' + e.message);
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        try {
+            const data = JSON.parse(editText);
+            await db.saveProfile(data);
+            setProfile(data);
+            setEditing(false);
+        } catch (e) {
+            alert('JSON 格式错误: ' + e.message);
+        }
+    };
+
+    if (loading) {
+        return <div className="flex justify-center items-center h-full"><Spinner size={32} /></div>;
+    }
+
+    if (generating) {
+        return (
+            <div className="h-full flex flex-col items-center justify-center">
+                <div className="text-center">
+                    <Icon.Sparkles className="w-16 h-16 text-[var(--accent)] mx-auto mb-4 pulse" />
+                    <h3 className="text-lg font-semibold text-white mb-2">正在生成你的数字档案</h3>
+                    <p className="text-sm text-[var(--text-secondary)] mb-4">{genProgress}</p>
+                    <Spinner size={24} />
+                </div>
+            </div>
+        );
+    }
+
+    if (!profile) {
+        return (
+            <div className="h-full overflow-y-auto p-6">
+                <div className="max-w-4xl mx-auto">
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-1">
+                        <Icon.Profile className="w-5 h-5 text-[var(--accent)]" />
+                        数字档案
+                    </h2>
+                    <p className="text-xs text-[var(--text-secondary)] mb-6">基于索引文件构建的个人知识画像</p>
+                    <EmptyState
+                        icon={<Icon.Profile className="w-16 h-16" />}
+                        title="尚未生成数字档案"
+                        description={fileCount === 0 ? "请先索引文件，然后生成你的数字档案" : "点击下方按钮，AI 将分析你的文件内容并构建知识档案"}
+                        action={<Button onClick={generateProfile} disabled={fileCount === 0}>
+                            <Icon.Sparkles className="w-4 h-4 mr-2" />
+                            {fileCount === 0 ? '请先索引文件' : '生成数字档案'}
+                        </Button>}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto fade-in">
+                <div className="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                            <Icon.Profile className="w-5 h-5 text-[var(--accent)]" />
+                            数字档案
+                        </h2>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1">基于索引文件构建的个人知识画像</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button variant="ghost" onClick={() => { setEditText(JSON.stringify(profile, null, 2)); setEditing(true); }} className="text-sm">
+                            <Icon.Edit className="w-4 h-4 mr-1" /> 编辑
+                        </Button>
+                        <Button variant="secondary" onClick={generateProfile} className="text-sm">
+                            <Icon.Refresh className="w-4 h-4 mr-1" /> 重新生成
+                        </Button>
+                    </div>
+                </div>
+
+                {editing ? (
+                    <Card>
+                        <textarea
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            className="w-full h-96 bg-[var(--bg-main)] text-white text-xs font-mono p-4 rounded-lg border border-[var(--border)] focus:outline-none focus:border-[var(--accent)]"
+                        />
+                        <div className="flex justify-end gap-2 mt-3">
+                            <Button variant="ghost" onClick={() => setEditing(false)}>取消</Button>
+                            <Button onClick={handleSaveEdit}>保存</Button>
+                        </div>
+                    </Card>
+                ) : (
+                    <>
+                        {/* 基本信息 */}
+                        {profile.basicInfo && (
+                            <Card className="mb-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--bg-highlight)] flex items-center justify-center text-2xl font-bold text-white">
+                                        {(profile.basicInfo.name || '?')[0]}
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-white">{profile.basicInfo.name || '未知'}</h3>
+                                        <p className="text-sm text-[var(--accent)]">{profile.basicInfo.profession || ''}</p>
+                                        <p className="text-xs text-[var(--text-secondary)] mt-1">{profile.basicInfo.summary || ''}</p>
+                                    </div>
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* 技能图谱 */}
+                        {profile.skills && profile.skills.length > 0 && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Icon.Code className="w-4 h-4 text-[var(--accent)]" /> 技能图谱</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {profile.skills.map((s, i) => (
+                                        <div key={i} className="bg-[var(--bg-highlight)] rounded-lg px-3 py-1.5 text-sm">
+                                            <span className="text-white">{s.name}</span>
+                                            <span className="text-[var(--text-secondary)] text-xs ml-2">{s.level}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* 项目经历 */}
+                        {profile.projects && profile.projects.length > 0 && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Icon.Folder className="w-4 h-4 text-[var(--accent)]" /> 项目经历</h3>
+                                <div className="space-y-3">
+                                    {profile.projects.map((p, i) => (
+                                        <div key={i} className="border-l-2 border-[var(--accent)] pl-3">
+                                            <div className="font-medium text-white">{p.name}</div>
+                                            <div className="text-sm text-[var(--text-secondary)]">{p.description}</div>
+                                            {p.tech && <div className="flex gap-1 mt-1 flex-wrap">
+                                                {p.tech.map((t, j) => <span key={j} className="text-xs bg-[var(--bg-highlight)] px-2 py-0.5 rounded text-[var(--text-secondary)]">{t}</span>)}
+                                            </div>}
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* 知识领域 */}
+                        {profile.knowledgeDomains && profile.knowledgeDomains.length > 0 && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Icon.Book className="w-4 h-4 text-[var(--accent)]" /> 知识领域</h3>
+                                <div className="space-y-2">
+                                    {profile.knowledgeDomains.map((d, i) => (
+                                        <div key={i} className="flex items-center gap-3">
+                                            <span className="text-sm text-white flex-1">{d.domain}</span>
+                                            <span className="text-xs text-[var(--text-secondary)]">{d.depth}</span>
+                                            <div className="w-24 h-1.5 bg-[var(--bg-main)] rounded-full overflow-hidden">
+                                                <div className="h-full bg-[var(--accent)]" style={{ width: { '入门': '25%', '进阶': '50%', '深入': '75%', '专家': '100%' }[d.depth] || '50%' }} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* 兴趣 */}
+                        {profile.interests && profile.interests.length > 0 && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Icon.Dot className="w-4 h-4 text-[var(--accent)]" /> 兴趣方向</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {profile.interests.map((interest, i) => (
+                                        <span key={i} className="bg-[var(--bg-highlight)] rounded-full px-3 py-1 text-sm text-white">{interest}</span>
+                                    ))}
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* 工作风格 */}
+                        {profile.workStyle && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-2 flex items-center gap-2"><Icon.Profile className="w-4 h-4 text-[var(--accent)]" /> 工作风格</h3>
+                                <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{profile.workStyle}</p>
+                            </Card>
+                        )}
+
+                        {/* AI 建议 */}
+                        {profile.suggestions && profile.suggestions.length > 0 && (
+                            <Card className="mb-4 border-[var(--accent)]/30">
+                                <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Icon.Sparkles className="w-4 h-4 text-[var(--accent)]" /> AI 建议</h3>
+                                <ul className="space-y-2">
+                                    {profile.suggestions.map((s, i) => (
+                                        <li key={i} className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
+                                            <span className="text-[var(--accent)] font-bold">{i + 1}.</span>
+                                            {s}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Card>
+                        )}
+
+                        {/* 原始文本（解析失败时） */}
+                        {profile.rawText && (
+                            <Card className="mb-4">
+                                <h3 className="font-semibold text-white mb-2">AI 分析结果（原始文本）</h3>
+                                <div className="markdown-body text-sm text-[var(--text-secondary)]" dangerouslySetInnerHTML={{ __html: marked.parse(profile.rawText) }} />
+                            </Card>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 12. 对话页组件
+// ============================================================
+function ChatPage() {
+    const { selectedModel, embeddingModel, hasProfile, fileCount, setCurrentView } = useApp();
+    const [chats, setChats] = useState([]);
+    const [currentChat, setCurrentChat] = useState(null);
+    const [input, setInput] = useState('');
+    const [streaming, setStreaming] = useState(false);
+    const [loadingChats, setLoadingChats] = useState(true);
+    const messagesEndRef = useRef(null);
+    const inputRef = useRef(null);
+
+    const loadChats = useCallback(async () => {
+        setLoadingChats(true);
+        const allChats = await db.getAllChats();
+        setChats(allChats);
+        setLoadingChats(false);
+    }, []);
+
+    useEffect(() => { loadChats(); }, [loadChats]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [currentChat?.messages]);
+
+    const createNewChat = async () => {
+        const chat = {
+            id: `chat_${Date.now()}`,
+            title: '新对话',
+            messages: [],
+            createdAt: Date.now(),
+        };
+        await db.saveChat(chat);
+        setCurrentChat(chat);
+        await loadChats();
+        inputRef.current?.focus();
+    };
+
+    const selectChat = async (id) => {
+        const chat = await db.getChat(id);
+        setCurrentChat(chat);
+    };
+
+    const deleteChat = async (id) => {
+        await db.deleteChat(id);
+        if (currentChat?.id === id) setCurrentChat(null);
+        await loadChats();
+    };
+
+    const buildSystemPrompt = async (query) => {
+        const profile = await db.getProfile();
+        let context = '你是用户的"第二个我"——一个完全了解用户的 AI 助手。请基于用户的个人信息和知识档案，给出个性化、有深度的回答。\n\n';
+
+        if (profile) {
+            context += '## 用户档案\n';
+            if (profile.basicInfo) {
+                context += `姓名: ${profile.basicInfo.name || '未知'}\n职业: ${profile.basicInfo.profession || '未知'}\n简介: ${profile.basicInfo.summary || '未知'}\n\n`;
+            }
+            if (profile.skills && profile.skills.length > 0) {
+                context += `技能: ${profile.skills.map(s => `${s.name}(${s.level})`).join(', ')}\n\n`;
+            }
+            if (profile.projects && profile.projects.length > 0) {
+                context += `项目经历:\n${profile.projects.map(p => `- ${p.name}: ${p.description}`).join('\n')}\n\n`;
+            }
+            if (profile.knowledgeDomains && profile.knowledgeDomains.length > 0) {
+                context += `知识领域: ${profile.knowledgeDomains.map(d => `${d.domain}(${d.depth})`).join(', ')}\n\n`;
+            }
+            if (profile.interests && profile.interests.length > 0) {
+                context += `兴趣: ${profile.interests.join(', ')}\n\n`;
+            }
+            if (profile.workStyle) {
+                context += `工作风格: ${profile.workStyle}\n\n`;
+            }
+        }
+
+        // 检索相关文件
+        if (fileCount > 0) {
+            try {
+                let relevantFiles = [];
+                if (embeddingModel) {
+                    const queryEmbedding = await ollama.embed(query, embeddingModel);
+                    if (queryEmbedding && queryEmbedding.length > 0) {
+                        relevantFiles = await searchRelevantFiles(queryEmbedding, 3);
+                    }
+                }
+                // 降级：关键词搜索
+                if (relevantFiles.length === 0) {
+                    relevantFiles = await keywordSearchFiles(query, 3);
+                }
+                if (relevantFiles.length > 0) {
+                    context += '## 相关文件内容\n';
+                    relevantFiles.forEach(f => {
+                        context += `### ${f.name}\n${f.content.slice(0, 1000)}\n\n`;
+                    });
+                }
+            } catch (e) {
+                console.warn('检索相关文件失败:', e);
+            }
+        }
+
+        context += '请基于以上信息，给出个性化的深度回答。如果用户的问题与档案信息相关，请引用具体的项目或技能。回答使用中文。';
+        return context;
+    };
+
+    const handleSend = async () => {
+        if (!input.trim() || streaming) return;
+        if (!selectedModel) {
+            alert('请先在设置中选择模型');
+            setCurrentView('settings');
+            return;
+        }
+
+        const userMessage = input.trim();
+        setInput('');
+
+        let chat = currentChat;
+        if (!chat) {
+            chat = {
+                id: `chat_${Date.now()}`,
+                title: userMessage.slice(0, 30),
+                messages: [],
+                createdAt: Date.now(),
+            };
+        }
+
+        // 添加用户消息
+        chat.messages.push({ role: 'user', content: userMessage });
+        if (chat.title === '新对话') {
+            chat.title = userMessage.slice(0, 30);
+        }
+
+        // 添加空的 AI 消息用于流式输出
+        const aiMessage = { role: 'assistant', content: '' };
+        chat.messages.push(aiMessage);
+        setCurrentChat({ ...chat });
+        setStreaming(true);
+
+        try {
+            // 构建系统提示词
+            const systemPrompt = await buildSystemPrompt(userMessage);
+
+            // 构建消息列表（只取最近的消息避免token过多）
+            const recentMessages = chat.messages.slice(-10).map(m => ({ role: m.role, content: m.content }));
+            const ollamaMessages = [
+                { role: 'system', content: systemPrompt },
+                ...recentMessages.slice(0, -1), // 排除空的AI消息
+                { role: 'user', content: userMessage }
+            ];
+
+            // 流式输出
+            let fullResponse = '';
+            await ollama.chatStream(ollamaMessages, selectedModel, (chunk) => {
+                fullResponse += chunk;
+                aiMessage.content = fullResponse;
+                setCurrentChat({ ...chat, messages: [...chat.messages] });
+            });
+
+            // 保存对话
+            await db.saveChat(chat);
+            await loadChats();
+        } catch (e) {
+            console.error('对话失败:', e);
+            aiMessage.content = `对话出错: ${e.message}\n\n请检查 Ollama 是否正常运行，模型是否已选择。`;
+            setCurrentChat({ ...chat });
+            await db.saveChat(chat);
+        } finally {
+            setStreaming(false);
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
+    };
+
+    const renderMessage = (msg, idx) => {
+        const isUser = msg.role === 'user';
+        return (
+            <div key={idx} className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} fade-in`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
+                    isUser ? 'bg-[var(--bg-highlight)] text-white' : 'bg-gradient-to-br from-[var(--accent)] to-[var(--bg-highlight)] text-white'
+                }`}>
+                    {isUser ? '我' : 'AI'}
+                </div>
+                <div className={`max-w-[70%] ${isUser ? 'text-right' : ''}`}>
+                    <div className={`rounded-xl px-4 py-2.5 inline-block text-left ${
+                        isUser ? 'bg-[var(--bg-highlight)] text-white' : 'bg-[var(--bg-card)] text-[var(--text-primary)] border border-[var(--border)]'
+                    }`}>
+                        {msg.content ? (
+                            <div className="markdown-body text-sm" dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }} />
+                        ) : (
+                            <div className="flex items-center gap-1 py-1">
+                                <span className="typing-dot"></span><span className="typing-dot"></span><span className="typing-dot"></span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div className="h-full flex overflow-hidden">
+            {/* 对话列表 */}
+            <div className="w-64 border-r border-[var(--border)] flex flex-col bg-[var(--bg-sidebar)]">
+                <div className="p-3 border-b border-[var(--border)]">
+                    <Button onClick={createNewChat} className="w-full text-sm">
+                        <Icon.Plus className="w-4 h-4 mr-2" /> 新对话
+                    </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    {loadingChats ? (
+                        <div className="flex justify-center py-4"><Spinner size={16} /></div>
+                    ) : chats.length === 0 ? (
+                        <div className="text-center py-8 text-xs text-[var(--text-secondary)] opacity-50">暂无对话</div>
+                    ) : (
+                        chats.map(chat => (
+                            <div key={chat.id} className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                                currentChat?.id === chat.id ? 'bg-[var(--bg-highlight)]' : 'hover:bg-[var(--bg-highlight)]'
+                            }`} onClick={() => selectChat(chat.id)}>
+                                <Icon.Chat className="w-4 h-4 flex-shrink-0 text-[var(--text-secondary)]" />
+                                <span className="text-sm text-white truncate flex-1">{chat.title}</span>
+                                <button onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }} className="opacity-0 group-hover:opacity-100 text-[var(--text-secondary)] hover:text-[var(--error)]">
+                                    <Icon.Trash className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {/* 对话区域 */}
+            <div className="flex-1 flex flex-col">
+                {!currentChat ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="text-center">
+                            <Icon.Chat className="w-16 h-16 text-[var(--text-secondary)] opacity-30 mx-auto mb-4" />
+                            <h3 className="text-lg font-semibold text-[var(--text-secondary)] mb-2">开始与"第二个我"对话</h3>
+                            <p className="text-sm text-[var(--text-secondary)] opacity-60 mb-4">
+                                {hasProfile ? 'AI 已了解你的档案，可以开始个性化对话' : '建议先生成数字档案以获得更好的对话体验'}
+                            </p>
+                            <Button onClick={createNewChat}><Icon.Plus className="w-4 h-4 mr-2" /> 新建对话</Button>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                            {currentChat.messages.map(renderMessage)}
+                            <div ref={messagesEndRef} />
+                        </div>
+                        <div className="border-t border-[var(--border)] p-4">
+                            <div className="flex gap-2 max-w-3xl mx-auto">
+                                <textarea
+                                    ref={inputRef}
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+                                    rows="1"
+                                    className="flex-1 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-2.5 text-sm text-white placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent)] resize-none"
+                                    style={{ minHeight: '42px', maxHeight: '120px' }}
+                                />
+                                <Button onClick={handleSend} disabled={!input.trim() || streaming} className="flex-shrink-0">
+                                    {streaming ? <Spinner size={16} /> : <Icon.Send className="w-4 h-4" />}
+                                </Button>
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 13. 设置页组件
+// ============================================================
+function SettingsPage() {
+    const { settings, setSettings, connectionStatus, checkConnection } = useApp();
+    const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl);
+    const [models, setModels] = useState([]);
+    const [loadingModels, setLoadingModels] = useState(false);
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState(null);
+    const [showEmbedModels, setShowEmbedModels] = useState(false);
+
+    const loadModels = useCallback(async () => {
+        setLoadingModels(true);
+        try {
+            ollama.baseUrl = settings.ollamaUrl;
+            const list = await ollama.listModels();
+            setModels(list);
+        } catch (e) {
+            console.error('获取模型列表失败:', e);
+        } finally {
+            setLoadingModels(false);
+        }
+    }, [settings.ollamaUrl]);
+
+    useEffect(() => {
+        if (connectionStatus === 'connected') {
+            loadModels();
+        }
+    }, [connectionStatus, loadModels]);
+
+    const handleSaveUrl = async () => {
+        await setSettings({ ...settings, ollamaUrl });
+        ollama.baseUrl = ollamaUrl;
+        await checkConnection();
+        if (connectionStatus === 'connected' || (await ollama.testConnection())) {
+            await loadModels();
+        }
+    };
+
+    const handleTestConnection = async () => {
+        setTesting(true);
+        setTestResult(null);
+        ollama.baseUrl = ollamaUrl;
+        const ok = await ollama.testConnection();
+        setTestResult(ok ? 'success' : 'fail');
+        setTesting(false);
+        if (ok) {
+            await checkConnection();
+            await loadModels();
+        }
+    };
+
+    const handleSelectModel = async (modelName) => {
+        await setSettings({ ...settings, selectedModel: modelName });
+    };
+
+    const handleSelectEmbeddingModel = async (modelName) => {
+        await setSettings({ ...settings, embeddingModel: modelName });
+    };
+
+    const handleClearData = async () => {
+        if (!confirm('确定清除所有数据吗？包括索引文件、档案和对话记录。此操作不可恢复。')) return;
+        await db.clearAll();
+        alert('数据已清除');
+    };
+
+    return (
+        <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-2xl mx-auto fade-in">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-1">
+                    <Icon.Settings className="w-5 h-5 text-[var(--accent)]" />
+                    设置
+                </h2>
+                <p className="text-xs text-[var(--text-secondary)] mb-6">配置 Ollama 连接和模型选择</p>
+
+                {/* Ollama 连接配置 */}
+                <Card className="mb-4">
+                    <h3 className="font-semibold text-white mb-3">Ollama 连接</h3>
+                    <label className="block text-sm text-[var(--text-secondary)] mb-1.5">服务地址</label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={ollamaUrl}
+                            onChange={(e) => setOllamaUrl(e.target.value)}
+                            placeholder="http://localhost:11434"
+                            className="flex-1 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-[var(--accent)]"
+                        />
+                        <Button variant="secondary" onClick={handleTestConnection} disabled={testing}>
+                            {testing ? <Spinner size={14} /> : '测试连接'}
+                        </Button>
+                    </div>
+                    {testResult === 'success' && (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-[var(--success)]"><Icon.Check className="w-4 h-4" /> 连接成功</div>
+                    )}
+                    {testResult === 'fail' && (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-[var(--error)]"><Icon.Alert className="w-4 h-4" /> 连接失败，请确认 Ollama 已启动</div>
+                    )}
+                    <Button onClick={handleSaveUrl} className="mt-3 text-sm">保存地址</Button>
+                </Card>
+
+                {/* 模型选择 */}
+                <Card className="mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-semibold text-white">模型选择</h3>
+                        <Button variant="ghost" onClick={loadModels} disabled={loadingModels} className="text-xs">
+                            {loadingModels ? <Spinner size={12} /> : <Icon.Refresh className="w-3.5 h-3.5 mr-1" />}
+                            刷新
+                        </Button>
+                    </div>
+                    {models.length === 0 ? (
+                        <p className="text-sm text-[var(--text-secondary)]">
+                            {connectionStatus === 'connected' ? '未找到已部署的模型，请先拉取模型' : '请先连接 Ollama 服务'}
+                        </p>
+                    ) : (
+                        <div className="space-y-2">
+                            {models.map(m => (
+                                <div key={m.name}
+                                    onClick={() => handleSelectModel(m.name)}
+                                    className={`flex items-center gap-3 px-4 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                                        settings.selectedModel === m.name
+                                            ? 'bg-[var(--bg-highlight)] border border-[var(--accent)]'
+                                            : 'bg-[var(--bg-main)] border border-[var(--border)] hover:border-[var(--accent)]'
+                                    }`}>
+                                    <Icon.Sparkles className="w-4 h-4 text-[var(--accent)]" />
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-white">{m.name}</div>
+                                        <div className="text-xs text-[var(--text-secondary)]">{(m.size / 1e9).toFixed(1)} GB</div>
+                                    </div>
+                                    {settings.selectedModel === m.name && <Icon.Check className="w-4 h-4 text-[var(--success)]" />}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {settings.selectedModel && (
+                        <div className="mt-3 text-xs text-[var(--text-secondary)]">
+                            当前对话模型: <span className="text-[var(--accent)]">{settings.selectedModel}</span>
+                        </div>
+                    )}
+                </Card>
+
+                {/* 嵌入模型选择 */}
+                <Card className="mb-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-semibold text-white">嵌入模型 <span className="text-xs text-[var(--text-secondary)] font-normal">(用于向量检索)</span></h3>
+                        <button onClick={() => setShowEmbedModels(!showEmbedModels)} className="text-xs text-[var(--accent)] hover:underline">
+                            {showEmbedModels ? '收起' : '展开'}
+                        </button>
+                    </div>
+                    <p className="text-xs text-[var(--text-secondary)] mb-2">
+                        用于文件向量化检索。推荐使用 <code className="bg-black/30 px-1 rounded">nomic-embed-text</code> 等专用嵌入模型。如不设置，将自动降级为关键词搜索。
+                    </p>
+                    {showEmbedModels && (
+                        <div className="space-y-2">
+                            {models.filter(m => m.name.includes('embed') || m.name.includes('nomic')).length === 0 && (
+                                <div className="text-xs text-[var(--warning)] bg-[var(--warning)]/10 rounded-lg p-2 mb-2">
+                                    未检测到专用嵌入模型，建议运行: <code className="bg-black/30 px-1 rounded">ollama pull nomic-embed-text</code>
+                                </div>
+                            )}
+                            {models.map(m => (
+                                <div key={m.name}
+                                    onClick={() => handleSelectEmbeddingModel(m.name)}
+                                    className={`flex items-center gap-3 px-4 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                                        settings.embeddingModel === m.name
+                                            ? 'bg-[var(--bg-highlight)] border border-[var(--accent)]'
+                                            : 'bg-[var(--bg-main)] border border-[var(--border)] hover:border-[var(--accent)]'
+                                    }`}>
+                                    <Icon.Sparkles className="w-4 h-4 text-[var(--accent)]" />
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-white">{m.name}</div>
+                                        <div className="text-xs text-[var(--text-secondary)]">{(m.size / 1e9).toFixed(1)} GB</div>
+                                    </div>
+                                    {settings.embeddingModel === m.name && <Icon.Check className="w-4 h-4 text-[var(--success)]" />}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {settings.embeddingModel && (
+                        <div className="mt-3 text-xs text-[var(--text-secondary)]">
+                            当前嵌入模型: <span className="text-[var(--accent)]">{settings.embeddingModel}</span>
+                            <button onClick={() => handleSelectEmbeddingModel(null)} className="ml-2 text-[var(--error)] hover:underline">移除</button>
+                        </div>
+                    )}
+                </Card>
+
+                {/* 数据管理 */}
+                <Card className="mb-4 border-[var(--error)]/30">
+                    <h3 className="font-semibold text-white mb-3">数据管理</h3>
+                    <Button variant="danger" onClick={handleClearData} className="text-sm">
+                        <Icon.Trash className="w-4 h-4 mr-2" /> 清除所有数据
+                    </Button>
+                    <p className="text-xs text-[var(--text-secondary)] mt-2">将清除所有索引文件、数字档案和对话记录</p>
+                </Card>
+
+                {/* 关于 */}
+                <Card>
+                    <h3 className="font-semibold text-white mb-2">关于</h3>
+                    <p className="text-sm text-[var(--text-secondary)]">
+                        第二个我 · 本地 AI 数字人档案
+                    </p>
+                    <p className="text-xs text-[var(--text-secondary)] opacity-60 mt-1">
+                        纯前端实现 · 数据本地存储 · 隐私安全 · 调用本地 Ollama API
+                    </p>
+                </Card>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// 14. 主应用组件
+// ============================================================
+function App() {
+    const [currentView, setCurrentView] = useState('welcome');
+    const [connectionStatus, setConnectionStatus] = useState('checking');
+    const [settings, setSettingsState] = useState({
+        ollamaUrl: 'http://localhost:11434',
+        selectedModel: null,
+        embeddingModel: null,
+    });
+    const [fileCount, setFileCount] = useState(0);
+    const [hasProfile, setHasProfile] = useState(false);
+
+    // 加载设置
+    useEffect(() => {
+        (async () => {
+            const url = await db.getSetting('ollamaUrl');
+            const model = await db.getSetting('selectedModel');
+            const embedModel = await db.getSetting('embeddingModel');
+            if (url) {
+                setSettingsState(prev => ({ ...prev, ollamaUrl: url }));
+                ollama.baseUrl = url;
+            } else {
+                ollama.baseUrl = settings.ollamaUrl;
+            }
+            if (model) {
+                setSettingsState(prev => ({ ...prev, selectedModel: model }));
+            }
+            if (embedModel) {
+                setSettingsState(prev => ({ ...prev, embeddingModel: embedModel }));
+            }
+        })();
+    }, []);
+
+    // 检测连接
+    const checkConnection = useCallback(async () => {
+        setConnectionStatus('checking');
+        const ok = await ollama.testConnection();
+        setConnectionStatus(ok ? 'connected' : 'disconnected');
+    }, []);
+
+    useEffect(() => {
+        checkConnection();
+        const interval = setInterval(checkConnection, 10000);
+        return () => clearInterval(interval);
+    }, [checkConnection]);
+
+    // 加载文件数和档案状态
+    const loadData = useCallback(async () => {
+        const files = await db.getAllFiles();
+        setFileCount(files.length);
+        const profile = await db.getProfile();
+        setHasProfile(!!profile);
+    }, []);
+
+    useEffect(() => { loadData(); }, [currentView]);
+
+    const setSettings = async (newSettings) => {
+        setSettingsState(newSettings);
+        await db.setSetting('ollamaUrl', newSettings.ollamaUrl);
+        await db.setSetting('selectedModel', newSettings.selectedModel);
+        if (newSettings.embeddingModel !== undefined) {
+            await db.setSetting('embeddingModel', newSettings.embeddingModel);
+        }
+    };
+
+    const contextValue = {
+        settings,
+        setSettings,
+        selectedModel: settings.selectedModel,
+        embeddingModel: settings.embeddingModel,
+        connectionStatus,
+        checkConnection,
+        fileCount,
+        hasProfile,
+        setCurrentView,
+    };
+
+    return (
+        <AppContext.Provider value={contextValue}>
+            <div className="flex h-screen">
+                <Sidebar currentView={currentView} setCurrentView={setCurrentView} connectionStatus={connectionStatus} />
+                <main className="flex-1 overflow-hidden">
+                    {currentView === 'welcome' && <WelcomePage setCurrentView={setCurrentView} fileCount={fileCount} hasProfile={hasProfile} connectionStatus={connectionStatus} />}
+                    {currentView === 'files' && <FileIndexPage />}
+                    {currentView === 'profile' && <ProfilePage />}
+                    {currentView === 'chat' && <ChatPage />}
+                    {currentView === 'settings' && <SettingsPage />}
+                </main>
+            </div>
+        </AppContext.Provider>
+    );
+}
+
+// ============================================================
+// 15. 渲染应用
+// ============================================================
+if (window.location.protocol === 'file:') {
+    document.getElementById('root').innerHTML = `
+        <div style="max-width:640px;margin:80px auto;padding:32px;font-family:system-ui,sans-serif;color:#e0e0e0;background:#1a1a2e;border-radius:16px;text-align:center;line-height:1.8;">
+            <h2 style="color:#e94560;font-size:22px;margin-bottom:16px;">需要通过 HTTP 访问</h2>
+            <p style="color:#a0a0b8;font-size:14px;">当前通过 file:// 协议打开，浏览器会阻止与 Ollama 的通信。</p>
+            <p style="color:#a0a0b8;font-size:14px;">请在 index.html 所在目录启动本地服务器：</p>
+            <pre style="background:#0f3460;padding:16px;border-radius:8px;color:#e0e0e0;font-size:13px;margin:16px 0;overflow-x:auto;text-align:left;"># Python
+python3 -m http.server 8080
+
+# Node.js
+npx serve</pre>
+            <p style="color:#a0a0b8;font-size:14px;">然后浏览器访问 <span style="color:#e94560;">http://localhost:8080</span></p>
+        </div>
+    `;
+} else {
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+}
+</script>
+</body>
+</html>

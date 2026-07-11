@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>饭搭子匹配器 - 聊天</title>
+<link rel="stylesheet" href="../css/common.css">
+<style>
+.page-content{min-height:calc(100vh - 80px);padding-bottom:80px;display:flex;flex-direction:column}
+
+/* ==== 消息列表 ==== */
+.message-list{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:0.8rem}
+.message-item{display:flex;max-width:85%}
+.message-item.me{justify-content:flex-end}
+.message-item.other{justify-content:flex-start}
+.message-bubble{padding:0.7rem 1rem;border-radius:16px;position:relative}
+.message-item.me .message-bubble{background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--bg);border-bottom-right-radius:4px}
+.message-item.other .message-bubble{background:var(--card);color:var(--ink);border-bottom-left-radius:4px}
+.message-text{font-size:0.9rem;line-height:1.5}
+.message-time{font-size:0.65rem;color:var(--muted);margin-top:0.2rem;text-align:right}
+.message-item.other .message-time{text-align:left}
+.message-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1rem;margin-right:0.5rem;flex-shrink:0}
+
+/* ==== 输入区域 ==== */
+.chat-input-area{position:absolute;bottom:60px;left:0;right:0;padding:0.6rem 1rem;background:var(--bg2);border-top:1px solid var(--rule);display:flex;align-items:center;gap:0.6rem}
+.chat-input{flex:1;padding:10px 14px;border:1px solid var(--rule);border-radius:20px;background:var(--card);color:var(--ink);font-size:0.9rem;outline:none}
+.chat-input:focus{border-color:var(--accent)}
+.chat-send-btn{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1rem;cursor:pointer;transition:transform 0.2s}
+.chat-send-btn:active{transform:scale(0.95)}
+
+/* ==== 导航栏 ==== */
+.nav-bar{padding:10px 16px}
+.nav-back{font-size:20px;color:var(--muted)}
+.nav-info{flex:1;text-align:center}
+.nav-name{font-weight:700;font-size:0.95rem;display:block}
+.nav-status{font-size:0.7rem;color:var(--muted);display:block;margin-top:1px}
+.nav-actions{font-size:1.2rem;color:var(--muted)}
+
+/* ==== 正在输入提示 ==== */
+.typing-indicator{display:flex;align-items:center;gap:4px;padding:0.4rem 0.8rem;background:var(--card);border-radius:20px;border-bottom-left-radius:4px;color:var(--muted);font-size:0.75rem}
+.typing-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:typingPulse 1.4s infinite ease-in-out both}
+.typing-dot:nth-child(1){animation-delay:-0.32s}
+.typing-dot:nth-child(2){animation-delay:-0.16s}
+@keyframes typingPulse{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
+
+/* ==== 空状态 ==== */
+.empty-chat{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3rem 1rem;color:var(--muted)}
+.empty-chat .empty-emoji{font-size:3rem;margin-bottom:1rem}
+.empty-chat .empty-text{font-size:0.9rem}
+
+/* ==== 操作菜单 ==== */
+.action-menu-overlay{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;display:none}
+.action-menu-overlay.active{display:block}
+.action-menu{position:absolute;top:70px;right:1rem;background:var(--bg3);border:1px solid var(--rule);border-radius:12px;z-index:210;min-width:140px;transform:scale(0.9);opacity:0;visibility:hidden;transition:all 0.2s}
+.action-menu.active{transform:scale(1);opacity:1;visibility:visible}
+.menu-item{display:flex;align-items:center;gap:0.6rem;padding:0.8rem 1rem;cursor:pointer;transition:background 0.2s}
+.menu-item:hover{background:var(--card)}
+.menu-item:first-child{border-bottom:1px solid var(--rule)}
+.menu-icon{font-size:1.1rem}
+.menu-text{font-size:0.85rem}
+</style>
+</head>
+<body>
+<div class="app-frame">
+  <div class="status-bar"><span>12:30</span><span>5G 🔋</span></div>
+  <div class="nav-bar" style="display:flex;align-items:center;justify-content:space-between">
+    <span class="nav-back" onclick="goPage('matches')">←</span>
+    <div class="nav-info">
+      <span class="nav-name" id="chatName">小林</span>
+      <span class="nav-status">在线</span>
+    </div>
+    <span class="nav-actions" onclick="toggleMenu()">⋮</span>
+  </div>
+  
+  <div class="page-content">
+    <div class="message-list" id="messageList"></div>
+    
+    <div class="chat-input-area">
+      <input type="text" class="chat-input" id="chatInput" placeholder="输入消息..." onkeypress="handleEnter(event)">
+      <div class="chat-send-btn" onclick="sendMessage()">➤</div>
+    </div>
+  </div>
+
+  <!-- ==== 操作菜单 ==== -->
+  <div class="action-menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
+  <div class="action-menu" id="actionMenu">
+    <div class="menu-item" onclick="closeMenu();reportMatch()">
+      <span class="menu-icon">🚨</span>
+      <span class="menu-text">举报</span>
+    </div>
+    <div class="menu-item" onclick="closeMenu();deleteMatch()">
+      <span class="menu-icon">🗑️</span>
+      <span class="menu-text">删除联系人</span>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <div class="tab-item" onclick="goPage('discover')"><span class="tab-icon">🔍</span>发现</div>
+    <div class="tab-item" onclick="goPage('filters')"><span class="tab-icon">⚙️</span>筛选</div>
+    <div class="tab-item active" onclick="goPage('matches')"><span class="tab-icon">💬</span>匹配</div>
+    <div class="tab-item" onclick="goPage('profile')"><span class="tab-icon">👤</span>我的</div>
+  </div>
+</div>
+<script src="../js/utils.js"></script>
+<script>
+checkLogin();
+
+/* ==== 模拟回复消息 ==== */
+const replyMessages=[
+  '好啊！那家店确实不错，我也想去试试',
+  '太棒了！周末一起去吧',
+  '听起来很美味，我也喜欢这种口味',
+  '没问题，约个时间吧',
+  '好的，我这几天有空',
+  '哈哈，果然是吃货！',
+  '可以啊，我也想找人一起去',
+  '那家店我知道，确实值得打卡',
+  '太好了！终于找到饭搭子了',
+  'OK，那我们就约这个周末吧'
+];
+
+/* ==== 获取当前聊天对象 ==== */
+const params=new URLSearchParams(window.location.search);
+const matchIndex=params.get('index');
+let matchesData=loadMatches();
+let currentMatch=matchesData[matchIndex]||{name:'新朋友',avatar:'👤',preview:'你好！'};
+
+/* ==== 消息数据 ==== */
+let messages=[];
+
+/* ==== 加载聊天记录 ==== */
+function loadChat(){
+  const saved=localStorage.getItem('fandazi_chat_'+matchIndex);
+  if(saved){
+    messages=JSON.parse(saved);
+  }else{
+    /* 初始化第一条消息 */
+    messages=[{type:'other',text:currentMatch.preview,time:getCurrentTime()}];
+  }
+  renderMessages();
+}
+
+/* ==== 获取当前时间 ==== */
+function getCurrentTime(){
+  const now=new Date();
+  return now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+}
+
+/* ==== 渲染消息列表 ==== */
+function renderMessages(){
+  const list=document.getElementById('messageList');
+  document.getElementById('chatName').textContent=currentMatch.name;
+  
+  if(messages.length===0){
+    list.innerHTML='<div class="empty-chat"><span class="empty-emoji">💬</span><span class="empty-text">开始聊天吧</span></div>';
+    return;
+  }
+  
+  list.innerHTML=messages.map(msg=>{
+    const isMe=msg.type==='me';
+    return '<div class="message-item '+msg.type+'">'+
+      (isMe?'':'<div class="message-avatar">'+currentMatch.avatar+'</div>')+
+      '<div class="message-bubble">'+
+        '<div class="message-text">'+msg.text+'</div>'+
+        '<div class="message-time">'+msg.time+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  
+  /* 滚动到底部 */
+  setTimeout(()=>{
+    list.scrollTop=list.scrollHeight;
+  },100);
+}
+
+/* ==== 发送消息 ==== */
+function sendMessage(){
+  const input=document.getElementById('chatInput');
+  const text=input.value.trim();
+  if(!text)return;
+  
+  /* 添加我的消息 */
+  messages.push({type:'me',text:text,time:getCurrentTime()});
+  input.value='';
+  saveChat();
+  renderMessages();
+  
+  /* 模拟对方回复 */
+  setTimeout(()=>{
+    showTyping();
+    setTimeout(()=>{
+      hideTyping();
+      const reply=replyMessages[Math.floor(Math.random()*replyMessages.length)];
+      messages.push({type:'other',text:reply,time:getCurrentTime()});
+      saveChat();
+      renderMessages();
+    },1500);
+  },500);
+}
+
+/* ==== 显示正在输入 ==== */
+function showTyping(){
+  const list=document.getElementById('messageList');
+  const typing=document.createElement('div');
+  typing.className='message-item other';
+  typing.id='typingIndicator';
+  typing.innerHTML='<div class="message-avatar">'+currentMatch.avatar+'</div>'+
+    '<div class="typing-indicator">'+
+      '<span class="typing-dot"></span>'+
+      '<span class="typing-dot"></span>'+
+      '<span class="typing-dot"></span>'+
+      '<span style="margin-left:6px">正在输入...</span>'+
+    '</div>';
+  list.appendChild(typing);
+  list.scrollTop=list.scrollHeight;
+}
+
+/* ==== 隐藏正在输入 ==== */
+function hideTyping(){
+  const el=document.getElementById('typingIndicator');
+  if(el)el.remove();
+}
+
+/* ==== 回车键发送 ==== */
+function handleEnter(e){
+  if(e.key==='Enter')sendMessage();
+}
+
+/* ==== 保存聊天记录 ==== */
+function saveChat(){
+  localStorage.setItem('fandazi_chat_'+matchIndex,JSON.stringify(messages));
+}
+
+/* ==== 菜单操作 ==== */
+function toggleMenu(){
+  const overlay=document.getElementById('menuOverlay');
+  const menu=document.getElementById('actionMenu');
+  if(overlay.classList.contains('active')){
+    closeMenu();
+  }else{
+    overlay.classList.add('active');
+    menu.classList.add('active');
+  }
+}
+
+function closeMenu(){
+  document.getElementById('menuOverlay').classList.remove('active');
+  document.getElementById('actionMenu').classList.remove('active');
+}
+
+function reportMatch(){
+  if(confirm('确定要举报「'+currentMatch.name+'」吗？')){
+    alert('举报已提交，我们会尽快处理');
+  }
+}
+
+function deleteMatch(){
+  if(confirm('确定要删除「'+currentMatch.name+'」吗？聊天记录也会被删除。')){
+    /* 删除聊天记录 */
+    localStorage.removeItem('fandazi_chat_'+matchIndex);
+    /* 删除匹配 */
+    matchesData.splice(matchIndex,1);
+    saveMatches(matchesData);
+    /* 返回匹配列表 */
+    window.location.href='matches.html';
+  }
+}
+
+/* ==== 页面加载 ==== */
+loadChat();
+</script>
+</body>
+</html>

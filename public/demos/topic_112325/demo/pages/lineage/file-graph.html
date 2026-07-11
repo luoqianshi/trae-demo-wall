@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件血缘图谱 - 追溯与血缘</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .file-graph-layout { display:flex; gap:12px; min-height:580px; }
+        .file-graph-main { flex:1; background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:16px; position:relative; }
+        .file-graph-side { width:300px; background:#fff; border:1px solid var(--border); border-radius:var(--radius); display:flex; flex-direction:column; }
+        .graph-title { font-size:14px; font-weight:600; color:var(--text-primary); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+        .file-stats-bar { display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+        .file-stat-card { flex:1; min-width:130px; padding:10px 12px; background:var(--bg); border-radius:6px; border:1px solid var(--border); }
+        .file-stat-card .label { font-size:11px; color:var(--text-secondary); margin-bottom:4px; }
+        .file-stat-card .value { font-size:18px; font-weight:700; color:var(--text-primary); }
+        .file-stat-card .trend { font-size:11px; color:#10b981; margin-left:6px; }
+        .file-svg-wrap { background:
+            linear-gradient(rgba(139,92,246,0.03) 1px, transparent 1px) 0 0/24px 24px,
+            linear-gradient(90deg, rgba(139,92,246,0.03) 1px, transparent 1px) 0 0/24px 24px;
+            border-radius:8px; padding:12px; min-height:480px; }
+        .side-panel-header { padding:12px 14px; border-bottom:1px solid var(--border); font-weight:600; font-size:13px; color:var(--text-primary); }
+        .side-panel-body { padding:12px; overflow:auto; flex:1; }
+        .field-row { display:flex; justify-content:space-between; padding:6px 8px; border-bottom:1px dashed var(--border); font-size:12px; }
+        .field-row:hover { background:#f8fafc; }
+        .field-row .field-name { color:var(--text-primary); font-family:'Segoe UI'; font-weight:500; }
+        .field-row .field-meta { color:var(--text-secondary); font-size:11px; }
+        .field-mapped { color:#10b981 !important; font-weight:600; }
+        .field-unmapped { color:var(--text-secondary); }
+        .legend-row { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; color:var(--text-secondary); }
+        .legend-box { width:14px; height:14px; border-radius:3px; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-file-archive-o" style="color:var(--primary);margin-right:8px"></i>文件血缘图谱</h2>
+            <div class="page-desc">
+                首页 / 追溯与血缘 / 文件血缘图谱 - 专门展示文件传输链路的血缘关系 · 从提供方系统生成文件到消费方系统的完整流向
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/lineage/graph-view.html', ['首页','追溯与血缘','血缘图谱'], {})"><i class="fa fa-sitemap"></i> 返回通用图谱</button>
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+            <button class="btn btn-default" onclick="showToast('正在导出血缘图谱...')"><i class="fa fa-download"></i> 导出</button>
+            <button class="btn btn-primary" onclick="showToast('请到文件服务清单页注册新文件服务')"><i class="fa fa-plus-circle"></i> 新增文件服务</button>
+        </div>
+    </div>
+
+    <!-- ====== 筛选操作区 ====== -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item">
+                <label>文件类型</label>
+                <select class="form-control" id="filterFileType">
+                    <option>全部</option>
+                    <option>交易流水</option>
+                    <option>对账单</option>
+                    <option>监管报送</option>
+                    <option>客户档案</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>提供方系统</label>
+                <select class="form-control" id="filterProvider">
+                    <option>全部</option>
+                    <option>核心业务系统</option>
+                    <option>交易清算系统</option>
+                    <option>信用卡核心</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>传输状态</label>
+                <select class="form-control" id="filterStatus">
+                    <option>全部</option>
+                    <option>传输成功</option>
+                    <option>传输失败</option>
+                    <option>延迟</option>
+                </select>
+            </div>
+            <div class="form-item" style="flex:1; min-width:200px">
+                <label>关键字</label>
+                <input type="text" class="form-control" id="filterKeyword" placeholder="搜索文件服务名称 / 文件节点">
+            </div>
+            <div class="form-item" style="min-width:auto">
+                <button class="btn btn-primary" onclick="filterFileGraph()"><i class="fa fa-search"></i> 查询</button>
+                <button class="btn btn-default" onclick="resetFileGraphFilter()"><i class="fa fa-eraser"></i> 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 内容区 ====== -->
+    <div class="file-graph-layout">
+
+        <!-- 主图 -->
+        <div class="file-graph-main">
+            <div class="graph-title">
+                <span><i class="fa fa-share-alt"></i> 文件传输链路图谱</span>
+                <span style="font-size:12px;color:var(--text-secondary);font-weight:400">展示：日终交易流水文件链路</span>
+            </div>
+
+            <!-- 指标卡 -->
+            <div class="file-stats-bar">
+                <div class="file-stat-card">
+                    <div class="label">今日传输次数</div>
+                    <div class="value">12,485 <span class="trend">+2.3%</span></div>
+                </div>
+                <div class="file-stat-card">
+                    <div class="label">传输成功率</div>
+                    <div class="value" style="color:#10b981">99.6%</div>
+                </div>
+                <div class="file-stat-card">
+                    <div class="label">平均耗时</div>
+                    <div class="value" style="color:#06b6d4">3.2 分钟</div>
+                </div>
+                <div class="file-stat-card">
+                    <div class="label">失败任务</div>
+                    <div class="value" style="color:#ef4444">8</div>
+                </div>
+            </div>
+
+            <!-- SVG 文件图谱 -->
+            <div class="file-svg-wrap">
+                <svg width="100%" height="500" viewBox="0 0 1100 500">
+                    <defs>
+                        <marker id="arr-f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+                        </marker>
+                        <marker id="arr-f2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b5cf6"/>
+                        </marker>
+                        <marker id="arr-f3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+                        </marker>
+                    </defs>
+
+                    <!-- 第一列：系统节点（蓝色） -->
+                    <g>
+                        <rect x="40" y="40" width="160" height="60" rx="8" fill="#3b82f6"/>
+                        <text x="120" y="65" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">交易清算系统</text>
+                        <text x="120" y="85" fill="#dbeafe" text-anchor="middle" font-size="11px">提供方系统 · SYS-008</text>
+
+                        <rect x="40" y="220" width="160" height="60" rx="8" fill="#3b82f6" opacity="0.9"/>
+                        <text x="120" y="245" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">核心业务系统</text>
+                        <text x="120" y="265" fill="#dbeafe" text-anchor="middle" font-size="11px">提供方系统 · SYS-001</text>
+
+                        <rect x="40" y="400" width="160" height="60" rx="8" fill="#3b82f6" opacity="0.9"/>
+                        <text x="120" y="425" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">信用卡核心</text>
+                        <text x="120" y="445" fill="#dbeafe" text-anchor="middle" font-size="11px">提供方系统 · SYS-012</text>
+                    </g>
+
+                    <!-- 第二列：文件服务节点（紫色） -->
+                    <g>
+                        <rect x="280" y="40" width="160" height="60" rx="8" fill="#8b5cf6"/>
+                        <text x="360" y="65" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">交易流水文件服务</text>
+                        <text x="360" y="85" fill="#ede9fe" text-anchor="middle" font-size="11px">FILE-SVC-008 · 56 字段</text>
+
+                        <rect x="280" y="220" width="160" height="60" rx="8" fill="#8b5cf6" opacity="0.9"/>
+                        <text x="360" y="245" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">账户明细文件服务</text>
+                        <text x="360" y="265" fill="#ede9fe" text-anchor="middle" font-size="11px">FILE-SVC-001 · 48 字段</text>
+
+                        <rect x="280" y="400" width="160" height="60" rx="8" fill="#8b5cf6" opacity="0.9"/>
+                        <text x="360" y="425" fill="#fff" text-anchor="middle" font-size="13" font-weight="600">对账单文件服务</text>
+                        <text x="360" y="445" fill="#ede9fe" text-anchor="middle" font-size="11px">FILE-SVC-012 · 32 字段</text>
+                    </g>
+
+                    <!-- 第三列：文件节点（绿色） -->
+                    <g>
+                        <rect x="520" y="30" width="160" height="80" rx="8" fill="#10b981" stroke="#047857" stroke-width="2"/>
+                        <text x="600" y="58" fill="#fff" text-anchor="middle" font-size="13" font-weight="700">日终交易流水.dat</text>
+                        <text x="600" y="78" fill="#d1fae5" text-anchor="middle" font-size="11px">大小: 458MB · 230万行</text>
+                        <text x="600" y="96" fill="#d1fae5" text-anchor="middle" font-size="11px">生成时间: 每日 22:00</text>
+
+                        <rect x="520" y="210" width="160" height="80" rx="8" fill="#10b981"/>
+                        <text x="600" y="238" fill="#fff" text-anchor="middle" font-size="13" font-weight="700">账户明细.csv</text>
+                        <text x="600" y="258" fill="#d1fae5" text-anchor="middle" font-size="11px">大小: 312MB · 180万行</text>
+                        <text x="600" y="276" fill="#d1fae5" text-anchor="middle" font-size="11px">生成时间: 每日 23:00</text>
+
+                        <rect x="520" y="390" width="160" height="80" rx="8" fill="#10b981"/>
+                        <text x="600" y="418" fill="#fff" text-anchor="middle" font-size="13" font-weight="700">客户对账单.pdf</text>
+                        <text x="600" y="438" fill="#d1fae5" text-anchor="middle" font-size="11px">大小: 1.2GB · 50万份</text>
+                        <text x="600" y="456" fill="#d1fae5" text-anchor="middle" font-size="11px">生成时间: 每月1日</text>
+                    </g>
+
+                    <!-- 第四列：传输通道（橙色） -->
+                    <g>
+                        <rect x="760" y="60" width="160" height="50" rx="8" fill="#f59e0b"/>
+                        <text x="840" y="82" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">SFTP 通道 A</text>
+                        <text x="840" y="100" fill="#fef3c7" text-anchor="middle" font-size="10px">内网 · 10Gbps · 正常</text>
+
+                        <rect x="760" y="230" width="160" height="50" rx="8" fill="#f59e0b"/>
+                        <text x="840" y="252" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">SFTP 通道 B</text>
+                        <text x="840" y="270" fill="#fef3c7" text-anchor="middle" font-size="10px">内网 · 10Gbps · 正常</text>
+
+                        <rect x="760" y="410" width="160" height="50" rx="8" fill="#f59e0b" opacity="0.85"/>
+                        <text x="840" y="432" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">SFTP 通道 C</text>
+                        <text x="840" y="450" fill="#fef3c7" text-anchor="middle" font-size="10px">外网 · 1Gbps · 延迟</text>
+                    </g>
+
+                    <!-- 第五列：消费方系统（蓝色，不同阴影） -->
+                    <g>
+                        <rect x="940" y="50" width="140" height="70" rx="8" fill="#3b82f6" opacity="0.85"/>
+                        <text x="1010" y="80" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">会计总账系统</text>
+                        <text x="1010" y="100" fill="#dbeafe" text-anchor="middle" font-size="10px">消费方 · 入账处理</text>
+
+                        <rect x="940" y="220" width="140" height="70" rx="8" fill="#3b82f6" opacity="0.85"/>
+                        <text x="1010" y="250" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">监管报送平台</text>
+                        <text x="1010" y="270" fill="#dbeafe" text-anchor="middle" font-size="10px">消费方 · 监管报送</text>
+
+                        <rect x="940" y="395" width="140" height="70" rx="8" fill="#3b82f6" opacity="0.85"/>
+                        <text x="1010" y="425" fill="#fff" text-anchor="middle" font-size="12" font-weight="600">客户关系管理</text>
+                        <text x="1010" y="445" fill="#dbeafe" text-anchor="middle" font-size="10px">消费方 · 邮件发送</text>
+                    </g>
+
+                    <!-- 连线 系统→文件服务 -->
+                    <g stroke="#94a3b8" stroke-width="2" fill="none" opacity="0.85">
+                        <path d="M 200 70 C 240 70, 240 70, 280 70" marker-end="url(#arr-f1)"/>
+                        <path d="M 200 250 C 240 250, 240 250, 280 250" marker-end="url(#arr-f1)"/>
+                        <path d="M 200 430 C 240 430, 240 430, 280 430" marker-end="url(#arr-f1)"/>
+                    </g>
+                    <!-- 连线 文件服务→文件节点 -->
+                    <g stroke="#a78bfa" stroke-width="2" fill="none" opacity="0.85">
+                        <path d="M 440 70 C 480 70, 480 70, 520 70" marker-end="url(#arr-f2)"/>
+                        <path d="M 440 250 C 480 250, 480 250, 520 250" marker-end="url(#arr-f2)"/>
+                        <path d="M 440 430 C 480 430, 480 430, 520 430" marker-end="url(#arr-f2)"/>
+                    </g>
+                    <!-- 连线 文件节点→传输通道 -->
+                    <g stroke="#fbbf24" stroke-width="2" fill="none" opacity="0.85">
+                        <path d="M 680 70 C 720 70, 720 85, 760 85" marker-end="url(#arr-f3)"/>
+                        <path d="M 680 250 C 720 250, 720 255, 760 255" marker-end="url(#arr-f3)"/>
+                        <path d="M 680 430 C 720 430, 720 435, 760 435" marker-end="url(#arr-f3)"/>
+                    </g>
+                    <!-- 连线 传输通道→消费方系统 -->
+                    <g stroke="#94a3b8" stroke-width="2" fill="none" opacity="0.85" stroke-dasharray="4 2">
+                        <path d="M 920 85 C 930 85, 930 85, 940 85" marker-end="url(#arr-f1)"/>
+                        <path d="M 920 255 C 930 255, 930 255, 940 255" marker-end="url(#arr-f1)"/>
+                        <path d="M 920 435 C 930 435, 930 435, 940 435" marker-end="url(#arr-f1)"/>
+                    </g>
+
+                    <!-- 图例 -->
+                    <g transform="translate(40, 470)">
+                        <text x="0" y="0" fill="#64748b" font-size="11px">图例:</text>
+                        <rect x="40" y="-10" width="12" height="12" rx="2" fill="#3b82f6"/>
+                        <text x="58" y="0" fill="#64748b" font-size="11px">系统节点</text>
+                        <rect x="130" y="-10" width="12" height="12" rx="2" fill="#8b5cf6"/>
+                        <text x="148" y="0" fill="#64748b" font-size="11px">文件服务节点</text>
+                        <rect x="240" y="-10" width="12" height="12" rx="2" fill="#10b981"/>
+                        <text x="258" y="0" fill="#64748b" font-size="11px">文件节点</text>
+                        <rect x="325" y="-10" width="12" height="12" rx="2" fill="#f59e0b"/>
+                        <text x="343" y="0" fill="#64748b" font-size="11px">传输通道节点</text>
+                        <text x="440" y="0" fill="#10b981" font-size="11px">今日传输记录: 12,485 条</text>
+                        <text x="600" y="0" fill="#ef4444" font-size="11px">失败: 8 条</text>
+                    </g>
+                </svg>
+            </div>
+        </div>
+
+        <!-- 右侧：选中文件节点详情 -->
+        <div class="file-graph-side">
+            <div class="side-panel-header"><i class="fa fa-info-circle"></i> 文件节点详情</div>
+            <div class="side-panel-body">
+                <div style="padding:10px; background:rgba(16,185,129,0.08); border-radius:6px; margin-bottom:12px; border:1px solid rgba(16,185,129,0.2)">
+                    <div style="font-size:13px; font-weight:600; color:var(--text-primary); margin-bottom:6px"><i class="fa fa-file-text-o" style="color:#10b981"></i> 日终交易流水.dat</div>
+                    <div style="font-size:12px; color:var(--text-secondary); line-height:1.8">
+                        文件服务: FILE-SVC-008<br>
+                        格式: DAT (固定宽)<br>
+                        字段数: <span style="color:#10b981;font-weight:600">56</span> / 已映射: <span style="color:var(--primary);font-weight:600">48</span><br>
+                        覆盖率: <span style="color:#10b981;font-weight:600">85.7%</span><br>
+                        平均大小: 458 MB<br>
+                        日均记录: 230 万行
+                    </div>
+                </div>
+
+                <div style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px">
+                    <i class="fa fa-list"></i> 字段结构（部分）
+                </div>
+                <div style="border:1px solid var(--border); border-radius:6px; overflow:hidden">
+                    <div class="field-row"><span class="field-name field-mapped">TRANS_ID (交易编号)</span><span class="field-meta">VARCHAR(32)</span></div>
+                    <div class="field-row"><span class="field-name field-mapped">TRANS_DATE (交易日期)</span><span class="field-meta">DATE</span></div>
+                    <div class="field-row"><span class="field-name field-mapped">ACCT_NO (账号)</span><span class="field-meta">VARCHAR(20)</span></div>
+                    <div class="field-row"><span class="field-name field-mapped">CURR_AMT (本币金额)</span><span class="field-meta">DECIMAL(18,2)</span></div>
+                    <div class="field-row"><span class="field-name field-mapped">BAL_DIR (借贷方向)</span><span class="field-meta">CHAR(1)</span></div>
+                    <div class="field-row"><span class="field-name field-unmapped">BIZ_TYPE (业务类型)</span><span class="field-meta">未映射</span></div>
+                    <div class="field-row"><span class="field-name field-unmapped">REMARK (备注)</span><span class="field-meta">未映射</span></div>
+                    <div class="field-row"><span class="field-name field-mapped">OPER_NO (操作员)</span><span class="field-meta">VARCHAR(12)</span></div>
+                </div>
+                <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; font-size:11px; color:var(--text-secondary); line-height:1.8">
+                    <i class="fa fa-tasks"></i> 传输记录（近7日）<br>
+                    &nbsp;&nbsp;· 06-18 22:05 成功 (462MB / 232万行)<br>
+                    &nbsp;&nbsp;· 06-17 22:03 成功 (451MB / 228万行)<br>
+                    &nbsp;&nbsp;· 06-16 22:15 <span style="color:#ef4444">延迟15分钟</span><br>
+                    &nbsp;&nbsp;· 06-15 22:04 成功<br>
+                    &nbsp;&nbsp;· 06-14 22:02 成功
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="../../js/mock-data.js"></script>
+<script>
+
+/* ====== 判断元素是否位于图例区域（translate(...470...)） ====== */
+function isLegendNode(el) {
+    var parent = el.parentNode;
+    var transform = parent && parent.getAttribute ? parent.getAttribute('transform') : null;
+    return !!(transform && transform.indexOf('470') >= 0);
+}
+
+/* ====== 保存SVG节点原始样式（仅初始化一次，便于重置恢复） ====== */
+function ensureGraphSnapshot() {
+    var texts = document.querySelectorAll('.file-svg-wrap svg text');
+    texts.forEach(function(t) {
+        if (t.getAttribute('data-graph-snap')) return;
+        t.setAttribute('data-graph-snap', '1');
+        t.setAttribute('data-orig-opacity', t.style.opacity || '');
+        var rect = t.previousElementSibling;
+        if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') {
+            rect.setAttribute('data-orig-stroke', rect.getAttribute('stroke') || '');
+            rect.setAttribute('data-orig-stroke-width', rect.getAttribute('stroke-width') || '');
+            rect.setAttribute('data-orig-opacity', rect.style.opacity || '');
+        }
+    });
+}
+
+/* ====== 恢复SVG节点原始样式 ====== */
+function restoreGraphNodes() {
+    var texts = document.querySelectorAll('.file-svg-wrap svg text');
+    texts.forEach(function(t) {
+        if (!t.getAttribute('data-graph-snap')) return;
+        t.style.opacity = t.getAttribute('data-orig-opacity') || '';
+        var rect = t.previousElementSibling;
+        if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') {
+            rect.style.opacity = rect.getAttribute('data-orig-opacity') || '';
+            var ds = rect.getAttribute('data-orig-stroke');
+            if (ds) rect.setAttribute('stroke', ds); else rect.removeAttribute('stroke');
+            var dsw = rect.getAttribute('data-orig-stroke-width');
+            if (dsw) rect.setAttribute('stroke-width', dsw); else rect.removeAttribute('stroke-width');
+        }
+    });
+}
+
+/* ====== 查询：按筛选条件高亮匹配节点、弱化非匹配节点 ====== */
+function filterFileGraph() {
+    var keyword = document.getElementById('filterKeyword').value.trim();
+    var fileType = document.getElementById('filterFileType').value;
+    var provider = document.getElementById('filterProvider').value;
+    var status = document.getElementById('filterStatus').value;
+    var terms = [];
+    if (keyword) terms.push(keyword);
+    if (fileType && fileType !== '全部') terms.push(fileType);
+    if (provider && provider !== '全部') terms.push(provider);
+    if (status && status !== '全部') terms.push(status);
+    ensureGraphSnapshot();
+    restoreGraphNodes();
+    if (terms.length === 0) {
+        showToast('请输入筛选条件后再查询');
+        return;
+    }
+    var matchCount = 0;
+    var texts = document.querySelectorAll('.file-svg-wrap svg text');
+    texts.forEach(function(t) {
+        if (isLegendNode(t)) return; // 跳过图例
+        var txt = t.textContent || '';
+        var matched = terms.some(function(term) { return txt.indexOf(term) >= 0; });
+        var rect = t.previousElementSibling;
+        if (matched) {
+            matchCount++;
+            if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') {
+                rect.setAttribute('stroke', '#ef4444');
+                rect.setAttribute('stroke-width', '3');
+            }
+            t.style.opacity = '1';
+            if (rect) rect.style.opacity = '1';
+        } else {
+            t.style.opacity = '0.2';
+            if (rect && rect.tagName && rect.tagName.toLowerCase() === 'rect') rect.style.opacity = '0.2';
+        }
+    });
+    showToast('查询完成，高亮 ' + matchCount + ' 个匹配节点');
+}
+
+/* ====== 重置：清空筛选条件并恢复图谱 ====== */
+function resetFileGraphFilter() {
+    document.getElementById('filterFileType').value = '全部';
+    document.getElementById('filterProvider').value = '全部';
+    document.getElementById('filterStatus').value = '全部';
+    var kw = document.getElementById('filterKeyword');
+    if (kw) kw.value = '';
+    restoreGraphNodes();
+    showToast('已重置筛选条件');
+}
+
+/* ====== 为SVG节点添加点击与悬停事件（跳过图例） ====== */
+(function() {
+    var svgRects = document.querySelectorAll('.file-svg-wrap svg rect');
+    svgRects.forEach(function(r) {
+        if (isLegendNode(r)) return;
+        r.style.cursor = 'pointer';
+        r.style.transition = 'opacity 0.2s ease';
+        // 获取节点名称（rect 后紧邻的第一个 text 元素）
+        var nameEl = r.nextElementSibling;
+        var nodeName = nameEl ? nameEl.textContent.trim() : '未知节点';
+        r.addEventListener('click', function() { showToast('选中节点 - ' + nodeName); });
+        // 悬停效果：使用 brightness 避免与查询筛选的 opacity 冲突
+        r.addEventListener('mouseover', function() { r.style.filter = 'brightness(0.8)'; });
+        r.addEventListener('mouseout', function() { r.style.filter = ''; });
+    });
+})();
+</script>
+</body>
+</html>

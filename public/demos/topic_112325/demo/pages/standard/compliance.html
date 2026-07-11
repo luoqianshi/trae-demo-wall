@@ -1,0 +1,626 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>标准合规检查 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .gauge-ring { position:relative; width:180px; height:180px; margin:0 auto; }
+        .gauge-ring svg { transform:rotate(-90deg); }
+        .gauge-ring .gauge-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .gauge-ring .gc-value { font-size:36px; font-weight:700; color:#1e40af; }
+        .gauge-ring .gc-label { font-size:13px; color:#64748b; margin-top:4px; }
+
+        .compliance-by-category { display:flex; flex-direction:column; gap:14px; }
+        .cbc-item { display:grid; grid-template-columns:160px 1fr 80px; align-items:center; gap:12px; }
+        .cbc-item .cbc-name { font-size:13px; color:#334155; }
+        .cbc-item .cbc-bar { height:20px; background:#f1f5f9; border-radius:10px; position:relative; overflow:hidden; }
+        .cbc-item .cbc-bar .fill { height:100%; background:linear-gradient(90deg,#93c5fd,#2563eb); border-radius:10px; display:flex; align-items:center; justify-content:flex-end; padding-right:8px; color:#fff; font-size:11px; font-weight:600; }
+        .cbc-item .cbc-num { font-size:13px; font-weight:600; color:#1e293b; text-align:right; }
+
+        .trend-mini { display:flex; align-items:flex-end; gap:6px; height:80px; padding:0 8px; }
+        .trend-mini .bar { flex:1; background:linear-gradient(180deg,#93c5fd,#2563eb); border-radius:4px 4px 0 0; min-height:8px; position:relative; }
+        .trend-mini .bar:hover::after { content:attr(data-label); position:absolute; top:-24px; left:50%; transform:translateX(-50%); background:#1e293b; color:#fff; padding:2px 8px; border-radius:4px; font-size:11px; white-space:nowrap; }
+
+        /* ====== 统一弹窗样式 ====== */
+        .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:1000; display:flex; align-items:center; justify-content:center; }
+        .modal-box { background:#fff; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,.15); display:flex; flex-direction:column; max-height: 85vh; height: auto; }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+        .modal-header h3 { font-size:16px; color:var(--text-primary,#1e293b); margin:0; }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border); flex-shrink:0; }
+        .modal-close { font-size:18px; color:var(--text-light,#94a3b8); text-decoration:none; line-height:1; }
+
+        /* ====== 表单网格样式 ====== */
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .form-grid .form-field { display:flex; flex-direction:column; gap:6px; }
+        .form-grid .form-field.full { grid-column:1 / -1; }
+        .form-grid .form-field label { font-size:13px; color:var(--text-secondary,#64748b); font-weight:500; }
+        .form-grid .form-field label .req { color:#dc2626; margin-left:2px; }
+        .form-grid .form-field input,
+        .form-grid .form-field select,
+        .form-grid .form-field textarea { padding:8px 12px; border:1px solid var(--border,#e2e8f0); border-radius:4px; font-size:13px; font-family:inherit; }
+        .form-grid .form-field textarea { resize:vertical; min-height:70px; }
+
+        /* ====== 开关样式 ====== */
+        .switch { position:relative; display:inline-block; width:40px; height:22px; vertical-align:middle; }
+        .switch input { opacity:0; width:0; height:0; }
+        .switch .slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e1; border-radius:22px; transition:.3s; }
+        .switch .slider::before { content:''; position:absolute; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.3s; }
+        .switch input:checked + .slider { background:#16a34a; }
+        .switch input:checked + .slider::before { transform:translateX(18px); }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-check-circle" style="color:var(--primary);margin-right:8px"></i>标准合规检查</h2>
+            <div class="page-desc">首页 / 服务治理 / 标准合规检查 · 实时监控各系统的规范执行情况</div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="openRuleConfigModal()"><i class="fa fa-cog"></i> 合规规则配置</button>
+            <button class="btn btn-default" onclick="showToast('正在重新扫描合规性...')"><i class="fa fa-refresh"></i> 重新扫描</button>
+            <button class="btn btn-default" onclick="showToast('正在导出合规检查报告...')"><i class="fa fa-download"></i> 导出报告</button>
+            <button class="btn btn-primary" onclick="showToast('整改通知已发送给相关责任人')"><i class="fa fa-bell"></i> 发送整改通知</button>
+        </div>
+    </div>
+
+    <!-- 顶部仪表盘 -->
+    <div style="display:grid; grid-template-columns:320px 1fr 320px; gap:16px; margin-bottom:16px">
+
+        <!-- 大仪表盘 -->
+        <div class="card" style="margin:0">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-dashboard"></i> 总体合规率</div>
+            </div>
+            <div class="card-body" style="padding:24px 16px">
+                <div class="gauge-ring">
+                    <svg width="180" height="180">
+                        <circle cx="90" cy="90" r="75" stroke="#e2e8f0" stroke-width="16" fill="none"/>
+                        <circle cx="90" cy="90" r="75" stroke="#2563eb" stroke-width="16" fill="none" stroke-dasharray="471" stroke-dashoffset="54" stroke-linecap="round"/>
+                    </svg>
+                    <div class="gauge-center">
+                        <div class="gc-value">88.6%</div>
+                        <div class="gc-label">整体合规率</div>
+                        <div style="margin-top:8px; font-size:12px; color:#16a34a"><i class="fa fa-arrow-up"></i> 较上月 ↑2.3%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 按分类合规 -->
+        <div class="card" style="margin:0">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-bar-chart"></i> 按分类合规率</div>
+            </div>
+            <div class="card-body">
+                <div class="compliance-by-category">
+                    <div class="cbc-item"><div class="cbc-name">接口命名规范</div><div class="cbc-bar"><div class="fill" style="width:92%">92%</div></div><div class="cbc-num">1,165/1,266</div></div>
+                    <div class="cbc-item"><div class="cbc-name">字段命名规范</div><div class="cbc-bar"><div class="fill" style="width:85%">85%</div></div><div class="cbc-num">1,076/1,266</div></div>
+                    <div class="cbc-item"><div class="cbc-name">返回码规范</div><div class="cbc-bar"><div class="fill" style="width:78%">78%</div></div><div class="cbc-num">987/1,266</div></div>
+                    <div class="cbc-item"><div class="cbc-name">敏感数据脱敏</div><div class="cbc-bar"><div class="fill" style="width:68%;background:linear-gradient(90deg,#fbbf24,#f59e0b)">68%</div></div><div class="cbc-num">861/1,266</div></div>
+                    <div class="cbc-item"><div class="cbc-name">接口文档完整性</div><div class="cbc-bar"><div class="fill" style="width:72%">72%</div></div><div class="cbc-num">912/1,266</div></div>
+                    <div class="cbc-item"><div class="cbc-name">文件命名规范</div><div class="cbc-bar"><div class="fill" style="width:88%">88%</div></div><div class="cbc-num">211/240</div></div>
+                    <div class="cbc-item"><div class="cbc-name">HTTPS协议要求</div><div class="cbc-bar"><div class="fill" style="width:95%">95%</div></div><div class="cbc-num">1,203/1,266</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 趋势 -->
+        <div class="card" style="margin:0">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-line-chart"></i> 近7日合规率趋势</div>
+            </div>
+            <div class="card-body">
+                <div style="font-size:12px; color:#64748b; text-align:center; margin-bottom:8px">近7日平均合规率</div>
+                <div class="trend-mini">
+                    <div class="bar" style="height:58%" data-label="05-29: 72.1%"></div>
+                    <div class="bar" style="height:62%" data-label="05-30: 73.8%"></div>
+                    <div class="bar" style="height:55%" data-label="05-31: 71.5%"></div>
+                    <div class="bar" style="height:70%" data-label="06-01: 74.6%"></div>
+                    <div class="bar" style="height:72%" data-label="06-02: 75.2%"></div>
+                    <div class="bar" style="height:75%" data-label="06-03: 76.1%"></div>
+                    <div class="bar" style="height:90%" data-label="06-04: 88.6%"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#94a3b8; padding:0 8px; margin-top:6px">
+                    <span>05-29</span><span>05-31</span><span>06-02</span><span>06-04</span>
+                </div>
+                <div style="margin-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:12px; text-align:center">
+                    <div style="padding:12px 0; background:#ecfdf5; border-radius:6px"><div style="color:#065f46; font-size:11px">今日合规</div><div style="font-size:24px; font-weight:700; color:#16a34a">1,845</div></div>
+                    <div style="padding:12px 0; background:#fef2f2; border-radius:6px"><div style="color:#991b1b; font-size:11px">不合规项</div><div style="font-size:24px; font-weight:700; color:#dc2626">238</div></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 不合规明细 -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-exclamation-triangle" style="color:#dc2626"></i> 不合规明细（TOP 问题项）</div>
+            <div class="card-action"><a href="javascript:;" onclick="viewAllCompliance()">查看全部</a><a href="javascript:;" onclick="showToast('正在导出不合规清单...')">导出清单</a></div>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>接口/文件服务名</th>
+                        <th>所属系统</th>
+                        <th>不合规字段</th>
+                        <th>不合规原因</th>
+                        <th>严重程度</th>
+                        <th>建议修正</th>
+                        <th class="text-center">状态</th>
+                        <th class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="govNav('pages/interface/api-detail.html', ['首页','服务目录','接口详情'], {code:'API-CUS-0051', kind:'API'})">API-CUS-0051</span></td><td>CRM系统</td><td style="font-family:Consolas,monospace; color:#dc2626">response.data.idCardNo</td><td>身份证号未脱敏直接返回明文</td><td class="text-center"><span class="tag tag-danger">严重</span></td><td>应用身份证号脱敏规则（显示中间10位为*）</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('API-CUS-0051')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('API-CUS-0051')">忽略</a><a href="javascript:;" onclick="showTrackModal('API-CUS-0051')">跟踪</a></td></tr>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="govNav('pages/interface/api-detail.html', ['首页','服务目录','接口详情'], {code:'API-OP-0061', kind:'API'})">API-OP-0061</span></td><td>订单系统</td><td style="font-family:Consolas,monospace; color:#dc2626">返回码code=200/success</td><td>未使用企业标准返回码字典</td><td class="text-center"><span class="tag tag-warning">中等</span></td><td>改为标准code=00000/message=success</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('API-OP-0061')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('API-OP-0061')">忽略</a><a href="javascript:;" onclick="showTrackModal('API-OP-0061')">跟踪</a></td></tr>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="govNav('pages/interface/api-detail.html', ['首页','服务目录','接口详情'], {code:'API-PAY-0101', kind:'API'})">API-PAY-0101</span></td><td>支付系统</td><td style="font-family:Consolas,monospace; color:#dc2626">字段order_no/使用下划线</td><td>字段未使用小驼峰命名</td><td class="text-center"><span class="tag tag-warning">中等</span></td><td>改为orderNo</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('API-PAY-0101')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('API-PAY-0101')">忽略</a><a href="javascript:;" onclick="showTrackModal('API-PAY-0101')">跟踪</a></td></tr>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="govNav('pages/interface/api-detail.html', ['首页','服务目录','接口详情'], {code:'API-CUS-0071', kind:'API'})">API-CUS-0071</span></td><td>用户系统</td><td style="font-family:Consolas,monospace; color:#dc2626">HTTP协议(明文)</td><td>登录接口使用HTTP而非HTTPS</td><td class="text-center"><span class="tag tag-danger">严重</span></td><td>必须切换为HTTPS协议</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('API-CUS-0071')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('API-CUS-0071')">忽略</a><a href="javascript:;" onclick="showTrackModal('API-CUS-0071')">跟踪</a></td></tr>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="showToast('查看文件详情')">FILE-FIN-DailyReport</span></td><td>财务系统</td><td style="font-family:Consolas,monospace; color:#dc2626">文件名rpt_20260604.csv</td><td>不符合{系统}-{业务}-{日期}.{扩展名}规范</td><td class="text-center"><span class="tag tag-warning">中等</span></td><td>改为FIN-DRPT-20260604.csv</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('FILE-FIN-DailyReport')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('FILE-FIN-DailyReport')">忽略</a><a href="javascript:;" onclick="showTrackModal('FILE-FIN-DailyReport')">跟踪</a></td></tr>
+                    <tr data-status="待整改"><td class="num"><span style="color:var(--primary);cursor:pointer" onclick="govNav('pages/interface/api-detail.html', ['首页','服务目录','接口详情'], {code:'API-OP-0081', kind:'API'})">API-OP-0081</span></td><td>营销系统</td><td style="font-family:Consolas,monospace; color:#f59e0b">接口文档不完整</td><td>缺少错误码描述章节</td><td class="text-center"><span class="tag tag-info">轻微</span></td><td>补充错误码说明</td><td class="text-center status-cell"><span class="tag tag-warning">待整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="fixIssue('API-OP-0081')">立即修复</a><a href="javascript:;" onclick="ignoreIssue('API-OP-0081')">忽略</a><a href="javascript:;" onclick="showTrackModal('API-OP-0081')">跟踪</a></td></tr>
+                </tbody>
+            </table>
+            <!-- 空数据状态占位（无数据时显示） -->
+            <div id="issueEmptyState" style="display:none; text-align:center; padding:48px 20px;">
+                <i class="fa fa-check-circle" style="font-size:48px; color:#16a34a;"></i>
+                <div style="margin-top:12px; font-size:14px; color:#94a3b8;">暂无不合规项，所有接口均符合规范</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统合规统计 -->
+    <div class="card" style="margin-top:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-cubes"></i> 按系统合规率统计</div>
+            <div class="card-action"><a href="javascript:;" onclick="showToast('正在导出系统合规报告...')">导出合规报告</a></div>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>系统名称</th>
+                        <th class="text-center">接口/文件数</th>
+                        <th class="text-center">合规项</th>
+                        <th class="text-center">不合规项</th>
+                        <th class="text-center">合规率</th>
+                        <th class="text-center">状态</th>
+                        <th class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>核心业务系统</td><td class="text-center">906</td><td class="text-center" style="color:#16a34a">820</td><td class="text-center" style="color:#dc2626">86</td><td class="text-center"><strong style="color:#2563eb; font-size:16px">90.5%</strong></td><td class="text-center"><span class="tag tag-success">优秀</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('核心业务系统')">查看报告</a></td></tr>
+                    <tr><td>信贷管理系统</td><td class="text-center">432</td><td class="text-center" style="color:#16a34a">380</td><td class="text-center" style="color:#dc2626">52</td><td class="text-center"><strong style="color:#2563eb; font-size:16px">88.0%</strong></td><td class="text-center"><span class="tag tag-success">优秀</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('信贷管理系统')">查看报告</a></td></tr>
+                    <tr><td>客户管理系统</td><td class="text-center">327</td><td class="text-center" style="color:#16a34a">285</td><td class="text-center" style="color:#dc2626">42</td><td class="text-center"><strong style="color:#2563eb; font-size:16px">87.2%</strong></td><td class="text-center"><span class="tag tag-success">优秀</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('客户管理系统')">查看报告</a></td></tr>
+                    <tr><td>支付清算系统</td><td class="text-center">208</td><td class="text-center" style="color:#16a34a">180</td><td class="text-center" style="color:#dc2626">28</td><td class="text-center"><strong style="color:#2563eb; font-size:16px">86.5%</strong></td><td class="text-center"><span class="tag tag-success">优秀</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('支付清算系统')">查看报告</a></td></tr>
+                    <tr><td>风险管理系统</td><td class="text-center">113</td><td class="text-center" style="color:#16a34a">95</td><td class="text-center" style="color:#dc2626">18</td><td class="text-center"><strong style="color:#f59e0b; font-size:16px">84.1%</strong></td><td class="text-center"><span class="tag tag-warning">需整改</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('风险管理系统')">查看报告</a><a href="javascript:;" onclick="sendSysNotice('风险管理系统')">发送通知</a></td></tr>
+                    <tr><td>渠道管理系统</td><td class="text-center">97</td><td class="text-center" style="color:#16a34a">85</td><td class="text-center" style="color:#dc2626">12</td><td class="text-center"><strong style="color:#2563eb; font-size:16px">87.6%</strong></td><td class="text-center"><span class="tag tag-success">优秀</span></td><td class="text-center op-col"><a href="javascript:;" onclick="viewSysReport('渠道管理系统')">查看报告</a></td></tr>
+                </tbody>
+            </table>
+            <!-- 空数据状态占位（无数据时显示） -->
+            <div id="sysEmptyState" style="display:none; text-align:center; padding:48px 20px;">
+                <i class="fa fa-cubes" style="font-size:48px; color:#cbd5e1;"></i>
+                <div style="margin-top:12px; font-size:14px; color:#94a3b8;">暂无系统合规数据</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- 整改跟踪弹窗 -->
+<div class="modal-overlay" id="trackModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:8px;width:640px;max-width:90vw;max-height: 85vh; height: auto;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15)">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <h3 id="trackModalTitle" style="font-size:16px"><i class="fa fa-tasks" style="color:var(--primary);margin-right:6px"></i>整改跟踪</h3>
+            <a href="javascript:;" onclick="closeTrackModal()" style="font-size:18px;color:var(--text-light)"><i class="fa fa-times"></i></a>
+        </div>
+        <div id="trackModalBody" style="padding:20px;font-size:14px;line-height:1.8"></div>
+        <div style="padding:12px 20px;border-top:1px solid var(--border);text-align:right">
+            <button class="btn btn-default" onclick="closeTrackModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 合规规则配置弹窗（列表视图 + 表单视图切换） ====== -->
+<div class="modal-overlay" id="ruleConfigModal" style="display:none">
+    <div class="modal-box" style="width:900px;max-width:92vw">
+        <!-- 视图A：规则列表 -->
+        <div id="ruleListView" style="display:flex;flex-direction:column;flex:1;min-height:0">
+            <div class="modal-header">
+                <h3><i class="fa fa-cog" style="color:var(--primary);margin-right:6px"></i>合规规则配置</h3>
+                <a href="javascript:;" class="modal-close" onclick="closeRuleConfigModal()"><i class="fa fa-times"></i></a>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:13px;color:var(--text-secondary)">共 <strong id="ruleTotalCount">0</strong> 条规则</span>
+                    <button class="btn btn-primary" onclick="showRuleForm()"><i class="fa fa-plus"></i> 新增规则</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>规则名称</th>
+                            <th>检查对象</th>
+                            <th>标准条目</th>
+                            <th>检查条件</th>
+                            <th>合规阈值</th>
+                            <th class="text-center">启用状态</th>
+                            <th class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ruleListBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="closeRuleConfigModal()">关闭</button>
+            </div>
+        </div>
+        <!-- 视图B：规则表单（新增/编辑） -->
+        <div id="ruleFormView" style="display:none">
+            <div class="modal-header">
+                <h3 id="ruleFormTitle"><i class="fa fa-plus" style="color:var(--primary);margin-right:6px"></i>新增规则</h3>
+                <a href="javascript:;" class="modal-close" onclick="hideRuleForm()"><i class="fa fa-times"></i></a>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>规则名称<span class="req">*</span></label>
+                        <input type="text" id="ruleName" placeholder="请输入规则名称">
+                    </div>
+                    <div class="form-field">
+                        <label>检查对象</label>
+                        <select id="ruleTarget">
+                            <option>接口</option>
+                            <option>文件服务</option>
+                            <option>系统</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>标准条目</label>
+                        <select id="ruleStandard">
+                            <option>命名规范</option>
+                            <option>返回码字典</option>
+                            <option>脱敏规则</option>
+                            <option>HTTPS要求</option>
+                            <option>版本管理</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>合规阈值</label>
+                        <input type="text" id="ruleThreshold" placeholder="如：合规率≥95%">
+                    </div>
+                    <div class="form-field full">
+                        <label>检查条件</label>
+                        <textarea id="ruleCondition" placeholder="请输入检查条件描述"></textarea>
+                    </div>
+                    <div class="form-field full">
+                        <label>启用状态</label>
+                        <label class="switch"><input type="checkbox" id="ruleEnabled" checked><span class="slider"></span></label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="hideRuleForm()">取消</button>
+                <button class="btn btn-primary" onclick="saveRule()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+// ====== 整改跟踪数据存储 ======
+// 每条记录的整改跟踪信息：status(状态)、tracker(整改人)、trackTime(整改时间)、eta(预计完成时间)、timeline(时间线)
+var complianceTrackData = {};
+
+
+// ====== 根据接口/文件服务名定位不合规明细行 ======
+function findIssueRow(apiName) {
+    var rows = document.querySelectorAll('.data-table tbody tr');
+    for (var i = 0; i < rows.length; i++) {
+        var firstCell = rows[i].querySelector('td');
+        if (firstCell && firstCell.textContent.indexOf(apiName) >= 0) return rows[i];
+    }
+    return null;
+}
+
+// ====== 更新行状态标签 ======
+// statusCell: 状态列单元格, opCell: 操作列单元格, status: 新状态
+function updateRowStatus(row, statusCell, opCell, status) {
+    row.setAttribute('data-status', status);
+    if (status === '整改中') {
+        if (statusCell) statusCell.innerHTML = '<span class="tag" style="background:#f59e0b;color:#fff;font-size:11px">整改中</span>';
+        if (opCell) opCell.innerHTML = '<a href="javascript:;" onclick="completeFixIssue(\'' + row.querySelector('td').textContent.trim() + '\')">完成整改</a><a href="javascript:;" onclick="showTrackModal(\'' + row.querySelector('td').textContent.trim() + '\')">跟踪</a>';
+        row.style.opacity = '0.85';
+    } else if (status === '已整改') {
+        if (statusCell) statusCell.innerHTML = '<span class="tag tag-success">已整改</span>';
+        if (opCell) opCell.innerHTML = '<a href="javascript:;" onclick="showTrackModal(\'' + row.querySelector('td').textContent.trim() + '\')">跟踪</a>';
+        row.style.opacity = '0.7';
+    } else if (status === '已忽略') {
+        if (statusCell) statusCell.innerHTML = '<span class="tag" style="background:#94a3b8;color:#fff;font-size:11px">已忽略</span>';
+        if (opCell) opCell.innerHTML = '<span style="color:#94a3b8;font-size:12px"><i class="fa fa-ban"></i> 已忽略</span>';
+        row.style.opacity = '0.6';
+    }
+}
+
+// ====== 立即修复：将状态改为"整改中"，添加整改跟踪信息 ======
+function fixCompliance(apiName) {
+    var row = findIssueRow(apiName);
+    if (!row) { showToast('未找到对应记录'); return; }
+    var cells = row.querySelectorAll('td');
+    var statusCell = cells[6];
+    var opCell = cells[7];
+    // 更新状态为"整改中"
+    updateRowStatus(row, statusCell, opCell, '整改中');
+    // 添加整改跟踪信息（整改人、整改时间、预计完成时间）
+    var now = new Date();
+    var trackTime = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    var etaDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    var eta = etaDate.getFullYear() + '-' + String(etaDate.getMonth() + 1).padStart(2, '0') + '-' + String(etaDate.getDate()).padStart(2, '0');
+    complianceTrackData[apiName] = {
+        status: '整改中',
+        tracker: '张运维',
+        trackTime: trackTime,
+        eta: eta,
+        timeline: [
+            { time: trackTime, title: '提交整改', desc: '系统检测到不合规项，已创建整改工单并通知相关负责人', done: true },
+            { time: '', title: '处理中', desc: '开发团队正在修复不合规问题', done: false },
+            { time: '', title: '已完成', desc: '修复完成并通过复核验证', done: false }
+        ]
+    };
+    showToast('已创建整改工单，' + apiName + ' 的状态已更新为"整改中"，整改人：张运维，预计完成：' + eta);
+}
+
+// ====== 完成整改：将状态改为"已整改" ======
+function completeFixIssue(apiName) {
+    if (!confirm('确认将 ' + apiName + ' 标记为已完成整改？')) return;
+    var row = findIssueRow(apiName);
+    if (!row) { showToast('未找到对应记录'); return; }
+    var cells = row.querySelectorAll('td');
+    var statusCell = cells[6];
+    var opCell = cells[7];
+    // 更新状态为"已整改"
+    updateRowStatus(row, statusCell, opCell, '已整改');
+    // 更新跟踪数据
+    if (complianceTrackData[apiName]) {
+        var now = new Date();
+        var completeTime = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        complianceTrackData[apiName].status = '已整改';
+        complianceTrackData[apiName].timeline[1].done = true;
+        complianceTrackData[apiName].timeline[1].time = completeTime;
+        complianceTrackData[apiName].timeline[2].done = true;
+        complianceTrackData[apiName].timeline[2].time = completeTime;
+    }
+    showToast(apiName + ' 已标记为"已整改"，整改闭环完成');
+}
+
+// ====== 忽略：confirm确认后行状态更新为"已忽略"（灰色标签） ======
+function ignoreCompliance(apiName) {
+    if (!confirm('确认忽略 ' + apiName + ' 的不合规项？\n\n忽略后将不再提示该问题。')) return;
+    var row = findIssueRow(apiName);
+    if (!row) { showToast('未找到对应记录'); return; }
+    var cells = row.querySelectorAll('td');
+    var statusCell = cells[6];
+    var opCell = cells[7];
+    // 更新状态为"已忽略"
+    updateRowStatus(row, statusCell, opCell, '已忽略');
+    // 记录忽略操作到跟踪数据
+    var now = new Date();
+    var ignoreTime = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    complianceTrackData[apiName] = {
+        status: '已忽略',
+        tracker: '当前用户',
+        trackTime: ignoreTime,
+        eta: '-',
+        timeline: [
+            { time: ignoreTime, title: '已忽略', desc: '该不合规项已被人工忽略，不再跟踪', done: true }
+        ]
+    };
+    showToast('已忽略 ' + apiName + ' 的不合规项，状态已更新为"已忽略"');
+}
+
+// ====== 整改跟踪弹窗 ======
+function showTrackModal(apiName) {
+    var data = complianceTrackData[apiName];
+    document.getElementById('trackModalTitle').innerHTML = '<i class="fa fa-tasks" style="color:var(--primary);margin-right:6px"></i>整改跟踪 - ' + apiName;
+
+    var html;
+    if (!data) {
+        // 无跟踪数据时显示待整改状态
+        html = '<div style="text-align:center;padding:32px 0;color:#94a3b8">' +
+            '<i class="fa fa-clock-o" style="font-size:36px;display:block;margin-bottom:8px"></i>' +
+            '<div>该记录尚未发起整改，当前状态：待整改</div>' +
+            '<div style="margin-top:12px"><button class="btn btn-primary" onclick="closeTrackModal();fixCompliance(\'' + apiName + '\')"><i class="fa fa-wrench"></i> 发起整改</button></div>' +
+        '</div>';
+    } else {
+        // 构建跟踪信息表格
+        var statusTag = data.status === '已整改' ? '<span class="tag tag-success">已整改</span>' :
+                        data.status === '整改中' ? '<span class="tag" style="background:#f59e0b;color:#fff;font-size:11px">整改中</span>' :
+                        '<span class="tag" style="background:#94a3b8;color:#fff;font-size:11px">已忽略</span>';
+        var infoHtml =
+            '<table style="width:100%;font-size:14px;line-height:2;margin-bottom:20px">' +
+                '<tr><td style="width:100px;color:var(--text-secondary)">当前状态</td><td>' + statusTag + '</td></tr>' +
+                '<tr><td style="color:var(--text-secondary)">整改人</td><td>' + data.tracker + '</td></tr>' +
+                '<tr><td style="color:var(--text-secondary)">整改时间</td><td>' + data.trackTime + '</td></tr>' +
+                '<tr><td style="color:var(--text-secondary)">预计完成</td><td>' + data.eta + '</td></tr>' +
+            '</table>';
+
+        // 构建时间线
+        var timelineHtml = '<h4 style="font-size:14px;margin-bottom:16px"><i class="fa fa-history" style="color:var(--primary)"></i> 整改进度时间线</h4>';
+        timelineHtml += '<div style="position:relative;padding-left:28px">';
+        timelineHtml += '<div style="position:absolute;left:8px;top:8px;bottom:8px;width:2px;background:#e2e8f0"></div>';
+        data.timeline.forEach(function(item) {
+            var circleColor = item.done ? '#16a34a' : '#cbd5e1';
+            var circleIcon = item.done ? '<i class="fa fa-check"></i>' : '';
+            var titleColor = item.done ? '#1e293b' : '#94a3b8';
+            timelineHtml += '<div style="position:relative;padding-bottom:20px">' +
+                '<div style="position:absolute;left:-24px;top:4px;width:14px;height:14px;border-radius:50%;background:' + circleColor + ';border:2px solid #fff;box-shadow:0 0 0 2px ' + circleColor + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:8px">' + circleIcon + '</div>' +
+                '<div style="font-size:12px;color:#64748b">' + (item.time || '待处理') + '</div>' +
+                '<div style="font-weight:600;color:' + titleColor + ';margin:2px 0">' + item.title + '</div>' +
+                '<div style="font-size:13px;color:#334155;background:#f8fafc;padding:6px 10px;border-radius:4px">' + item.desc + '</div>' +
+            '</div>';
+        });
+        timelineHtml += '</div>';
+
+        html = infoHtml + timelineHtml;
+    }
+
+    document.getElementById('trackModalBody').innerHTML = html;
+    document.getElementById('trackModal').style.display = 'flex';
+}
+
+function closeTrackModal() {
+    document.getElementById('trackModal').style.display = 'none';
+}
+
+// ====== 查看系统报告 ======
+function viewSysReport(sysName) {
+    govNav('pages/report/governance.html', ['首页','服务治理','标准合规检查','治理报表'], {});
+}
+
+// ====== 发送系统通知 ======
+function sendSysNotice(sysName) {
+    showToast('整改通知已发送至 ' + sysName + ' 负责人');
+}
+
+// ====== 查看全部不合规明细 ======
+function viewAllCompliance() {
+    showToast('正在加载全部不合规明细...');
+}
+
+// ====== 合规规则配置 ======
+// 合规规则 mock 数据
+var complianceRules = [
+    { name: '接口命名规范检查', target: '接口', standard: '命名规范', condition: '正则匹配 API-{业务}-{序号} 格式', threshold: '合规率≥95%', enabled: true },
+    { name: '返回码字典校验', target: '接口', standard: '返回码字典', condition: '响应 code 必须为标准返回码', threshold: '合规率≥90%', enabled: true },
+    { name: '敏感数据脱敏检查', target: '接口', standard: '脱敏规则', condition: '身份证/手机号/银行卡号需脱敏', threshold: '脱敏率100%', enabled: true },
+    { name: 'HTTPS协议要求', target: '接口', standard: 'HTTPS要求', condition: '接口必须使用 HTTPS 协议', threshold: '合规率100%', enabled: true },
+    { name: '文件命名规范检查', target: '文件服务', standard: '命名规范', condition: '文件名符合 {系统}_{业务}_{日期}.{扩展名}', threshold: '合规率≥85%', enabled: true },
+    { name: '接口版本管理', target: '接口', standard: '版本管理', condition: 'URL 路径需包含版本号', threshold: '合规率≥80%', enabled: false }
+];
+var editingRuleIndex = -1; // 当前编辑的规则索引，-1 表示新增
+
+// 渲染规则列表表格
+function renderRuleList() {
+    var tbody = document.getElementById('ruleListBody');
+    var html = complianceRules.map(function(rule, idx) {
+        var checkedAttr = rule.enabled ? 'checked' : '';
+        var switchHtml = '<label class="switch"><input type="checkbox" ' + checkedAttr + ' onchange="toggleRule(' + idx + ')"><span class="slider"></span></label>';
+        return '<tr>' +
+            '<td style="font-weight:600">' + rule.name + '</td>' +
+            '<td>' + rule.target + '</td>' +
+            '<td>' + rule.standard + '</td>' +
+            '<td style="font-size:12px;color:var(--text-secondary)">' + rule.condition + '</td>' +
+            '<td>' + rule.threshold + '</td>' +
+            '<td class="text-center">' + switchHtml + '</td>' +
+            '<td class="text-center op-col"><a href="javascript:;" onclick="showRuleForm(' + idx + ')">编辑</a><a href="javascript:;" onclick="deleteRule(' + idx + ')" style="color:#dc2626">删除</a></td>' +
+        '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+    document.getElementById('ruleTotalCount').textContent = complianceRules.length;
+}
+
+// 打开合规规则配置弹窗
+function openRuleConfigModal() {
+    renderRuleList();
+    document.getElementById('ruleListView').style.display = 'flex';
+    document.getElementById('ruleFormView').style.display = 'none';
+    document.getElementById('ruleConfigModal').style.display = 'flex';
+}
+
+// 关闭合规规则配置弹窗
+function closeRuleConfigModal() {
+    document.getElementById('ruleConfigModal').style.display = 'none';
+}
+
+// 显示规则表单（新增或编辑，editIndex 为空表示新增）
+function showRuleForm(editIndex) {
+    editingRuleIndex = (editIndex === undefined) ? -1 : editIndex;
+    if (editingRuleIndex >= 0) {
+        // 编辑：预填表单
+        var rule = complianceRules[editingRuleIndex];
+        document.getElementById('ruleFormTitle').innerHTML = '<i class="fa fa-edit" style="color:var(--primary);margin-right:6px"></i>编辑规则';
+        document.getElementById('ruleName').value = rule.name;
+        document.getElementById('ruleTarget').value = rule.target;
+        document.getElementById('ruleStandard').value = rule.standard;
+        document.getElementById('ruleCondition').value = rule.condition;
+        document.getElementById('ruleThreshold').value = rule.threshold;
+        document.getElementById('ruleEnabled').checked = rule.enabled;
+    } else {
+        // 新增：清空表单
+        document.getElementById('ruleFormTitle').innerHTML = '<i class="fa fa-plus" style="color:var(--primary);margin-right:6px"></i>新增规则';
+        document.getElementById('ruleName').value = '';
+        document.getElementById('ruleTarget').value = '接口';
+        document.getElementById('ruleStandard').value = '命名规范';
+        document.getElementById('ruleCondition').value = '';
+        document.getElementById('ruleThreshold').value = '';
+        document.getElementById('ruleEnabled').checked = true;
+    }
+    document.getElementById('ruleListView').style.display = 'none';
+    document.getElementById('ruleFormView').style.display = '';
+}
+
+// 隐藏规则表单，返回列表视图
+function hideRuleForm() {
+    document.getElementById('ruleFormView').style.display = 'none';
+    document.getElementById('ruleListView').style.display = 'flex';
+}
+
+// 保存规则（新增或更新）
+function saveRule() {
+    var name = document.getElementById('ruleName').value.trim();
+    if (!name) { showToast('请填写规则名称'); return; }
+    var ruleData = {
+        name: name,
+        target: document.getElementById('ruleTarget').value,
+        standard: document.getElementById('ruleStandard').value,
+        condition: document.getElementById('ruleCondition').value.trim(),
+        threshold: document.getElementById('ruleThreshold').value.trim(),
+        enabled: document.getElementById('ruleEnabled').checked
+    };
+    if (editingRuleIndex >= 0) {
+        complianceRules[editingRuleIndex] = ruleData;
+        showToast('规则「' + name + '」已更新');
+    } else {
+        complianceRules.push(ruleData);
+        showToast('规则「' + name + '」已新增');
+    }
+    renderRuleList();
+    hideRuleForm();
+}
+
+// 删除规则
+function deleteRule(idx) {
+    if (!confirm('确认删除规则「' + complianceRules[idx].name + '」？')) return;
+    complianceRules.splice(idx, 1);
+    renderRuleList();
+    showToast('规则已删除');
+}
+
+// 启用/停用规则切换
+function toggleRule(idx) {
+    complianceRules[idx].enabled = !complianceRules[idx].enabled;
+    renderRuleList();
+    showToast(complianceRules[idx].enabled ? '规则已启用' : '规则已停用');
+}
+
+// ====== 统一绑定"立即修复/忽略"按钮到 fixCompliance/ignoreCompliance ======
+(function() {
+    document.querySelectorAll('a[onclick*="fixIssue"]').forEach(function(a) {
+        a.setAttribute('onclick', a.getAttribute('onclick').replace('fixIssue', 'fixCompliance'));
+    });
+    document.querySelectorAll('a[onclick*="ignoreIssue"]').forEach(function(a) {
+        a.setAttribute('onclick', a.getAttribute('onclick').replace('ignoreIssue', 'ignoreCompliance'));
+    });
+})();
+</script>
+</body>
+</html>

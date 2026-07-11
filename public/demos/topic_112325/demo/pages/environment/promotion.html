@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>版本晋升管理 - 投产管理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .promo-flow { display:flex; align-items:center; justify-content:center; padding:20px 0; margin-bottom:16px; }
+        .promo-step { display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 20px; border-radius:8px; font-size:13px; color:#64748b; background:#f8fafc; border:1px solid #e2e8f0; min-width:120px; text-align:center; }
+        .promo-step.active { background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#fff; border-color:#1d4ed8; box-shadow:0 4px 12px rgba(37,99,235,0.25); }
+        .promo-step.done { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+        .promo-step .step-icon { width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; font-size:14px; }
+        .promo-step:not(.active):not(.done) .step-icon { background:#e2e8f0; color:#64748b; }
+        .promo-step.done .step-icon { background:#16a34a; color:#fff; }
+        .promo-arrow { font-size:20px; color:#94a3b8; margin:0 8px; }
+        .promo-arrow.done { color:#86efac; }
+
+        .promo-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+        .promo-card .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .promo-card .title { font-weight:700; font-size:14px; color:#1e293b; }
+        .promo-card .meta { font-size:12px; color:#64748b; }
+        .promo-card .tags { display:flex; gap:6px; margin-top:8px; }
+
+        .checklist { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .check-item { display:flex; align-items:center; gap:8px; padding:8px 12px; background:#f8fafc; border-radius:6px; font-size:13px; }
+        .check-item.done { background:#f0fdf4; }
+        .check-item.pending { background:#fffbeb; }
+
+        /* 补充未定义的 tag 样式 */
+        .tag-note { background:#e0f2fe; color:#0369a1; }
+
+        /* 检查清单摘要 */
+        .checklist-summary { margin-top:8px; font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; }
+
+        /* Toast 提示条 */
+        .pr-toast { position:fixed; top:24px; left:50%; transform:translateX(-50%); background:#10b981; color:#fff; padding:10px 18px; border-radius:6px; font-size:13px; z-index:10000; box-shadow:0 6px 16px rgba(0,0,0,0.15); opacity:0; transition:opacity .2s; pointer-events:none; }
+        .pr-toast.show { opacity:1; }
+        .pr-toast.info { background:#2563eb; }
+        .pr-toast.success { background:#10b981; }
+
+        /* 空状态 */
+        .empty-state { text-align:center; padding:40px 0; color:#94a3b8; font-size:13px; }
+
+        /* 加载状态 */
+        .loading-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(255,255,255,0.8); display:flex; align-items:center; justify-content:center; z-index:100; }
+        .loading-overlay.hidden { display:none; }
+        .loading-spinner { font-size:24px; color:#2563eb; }
+
+        /* ========== 环境胶囊切换器（统一规范） ========== */
+        .env-switcher { display:flex; align-items:center; gap:10px; padding:10px 16px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px; }
+        .env-switcher .env-label { font-size:13px; color:#64748b; font-weight:600; margin-right:4px; }
+        .env-pill { display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border-radius:999px; cursor:pointer; font-size:13px; font-weight:500; color:#475569; background:#f1f5f9; border:1px solid transparent; transition:all .2s ease; user-select:none; }
+        .env-pill:hover { box-shadow:0 2px 6px rgba(0,0,0,.08); }
+        .env-pill.active { background:#1e40af; color:#fff; border-color:#1e40af; box-shadow:0 2px 8px rgba(30,64,175,.25); }
+        .env-pill .dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:#cbd5e1; }
+        .env-pill.active .dot { background:#fff; }
+        .env-pill .dot.green { background:#16a34a; }
+        .env-pill .dot.yellow { background:#eab308; }
+        .env-pill .dot.blue { background:#2563eb; }
+        .env-pill .dot.purple { background:#9333ea; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper" style="position:relative">
+
+    <!-- ====== 加载状态 ====== -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"><i class="fa fa-spinner fa-spin fa-2x"></i></div>
+    </div>
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-level-up" style="color:#2563eb;margin-right:8px"></i>版本晋升管理</h2>
+            <div class="page-desc">
+                首页 / 投产管理 / 版本晋升管理 · 管理接口/文件服务版本在不同环境间的晋升流程
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/environment/overview.html', ['首页','投产管理','环境总览'], {})"><i class="fa fa-arrow-left"></i> 返回总览</button>
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+        </div>
+    </div>
+
+    <!-- ===== 环境胶囊切换器 ===== -->
+    <div class="env-switcher" id="envSwitcher">
+        <span class="env-label">环境:</span>
+        <span class="env-pill active" data-env="all">全部</span>
+        <span class="env-pill" data-env="prod">PROD · 生产 <span class="dot green"></span></span>
+        <span class="env-pill" data-env="sit">SIT · 测试 <span class="dot yellow"></span></span>
+        <span class="env-pill" data-env="uat">UAT · 验收 <span class="dot blue"></span></span>
+        <span class="env-pill" data-env="dev">DEV · 开发 <span class="dot purple"></span></span>
+    </div>
+
+    <!-- ====== 晋升流程图 ====== -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-sitemap"></i> 版本晋升流程</div>
+        </div>
+        <div class="card-body">
+            <div class="promo-flow">
+                <div class="promo-step active">
+                    <div class="step-icon"><i class="fa fa-spinner fa-spin"></i></div>
+                    <div><strong>DEV 开发</strong></div>
+                    <div style="font-size:11px">有版本待晋升</div>
+                </div>
+                <div class="promo-arrow"><i class="fa fa-long-arrow-right"></i></div>
+                <div class="promo-step active">
+                    <div class="step-icon"><i class="fa fa-spinner fa-spin"></i></div>
+                    <div><strong>SIT 集成测试</strong></div>
+                    <div style="font-size:11px">有版本待晋升</div>
+                </div>
+                <div class="promo-arrow"><i class="fa fa-long-arrow-right"></i></div>
+                <div class="promo-step">
+                    <div class="step-icon"><i class="fa fa-clock-o"></i></div>
+                    <div><strong>UAT 用户验收</strong></div>
+                    <div style="font-size:11px">待晋升</div>
+                </div>
+                <div class="promo-arrow"><i class="fa fa-long-arrow-right"></i></div>
+                <div class="promo-step">
+                    <div class="step-icon"><i class="fa fa-lock"></i></div>
+                    <div><strong>PROD 生产</strong></div>
+                    <div style="font-size:11px">待投产</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 待晋升版本列表 ====== -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-list"></i> 待晋升版本</div>
+            <div class="card-action"><span style="font-size:12px;color:#64748b" id="pendingCount">3 个版本待晋升</span></div>
+        </div>
+        <div class="card-body" id="promoList">
+            <!-- 卡片 1：UAT → PROD -->
+            <div class="promo-card" data-card="API-CDP-0089">
+                <div class="header">
+                    <div>
+                        <div class="title">API-CDP-0089 贷款综合信息查询 v2.1.0</div>
+                        <div class="meta">系统：信贷管理系统 · 负责人：刘工 · 创建时间：2026-06-10</div>
+                    </div>
+                    <span class="promo-status"><span class="tag tag-warning" style="font-size:11px">UAT 待晋升</span></span>
+                </div>
+                <div class="meta">当前版本：v2.0.3 (PROD) → 目标版本：v2.1.0 (UAT) → 计划晋升至 PROD</div>
+                <div class="tags">
+                    <span class="tag tag-note" style="font-size:11px">接口变更</span>
+                    <span class="tag tag-note" style="font-size:11px">字段新增</span>
+                    <span class="tag tag-danger" style="font-size:11px">影响生产</span>
+                </div>
+                <div class="checklist-summary">
+                    <i class="fa fa-check-square-o" style="color:#10b981"></i> 晋升前检查：8项中 5项已通过
+                </div>
+                <div class="card-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-primary" style="font-size:12px;padding:4px 12px" onclick="executePromotion('API-CDP-0089','v2.1.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 执行晋升</button>
+                    <a class="btn-link" style="font-size:12px;cursor:pointer" onclick="viewPromotionDetail('API-CDP-0089')"><i class="fa fa-file-text-o"></i> 查看详情</a>
+                </div>
+            </div>
+
+            <!-- 卡片 2：SIT → UAT -->
+            <div class="promo-card" data-card="API-PAY-0056">
+                <div class="header">
+                    <div>
+                        <div class="title">API-PAY-0056 大额支付接口 v3.0.0</div>
+                        <div class="meta">系统：支付清算系统 · 负责人：陈工 · 创建时间：2026-06-08</div>
+                    </div>
+                    <span class="promo-status"><span class="tag tag-warning" style="font-size:11px">SIT 待晋升</span></span>
+                </div>
+                <div class="meta">当前版本：v2.5.1 (PROD) → 目标版本：v3.0.0 (SIT) → 计划晋升至 UAT</div>
+                <div class="tags">
+                    <span class="tag tag-note" style="font-size:11px">接口升级</span>
+                    <span class="tag tag-note" style="font-size:11px">协议变更</span>
+                </div>
+                <div class="checklist-summary">
+                    <i class="fa fa-check-square-o" style="color:#10b981"></i> 晋升前检查：8项中 3项已通过
+                </div>
+                <div class="card-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-primary" style="font-size:12px;padding:4px 12px" onclick="executePromotion('API-PAY-0056','v3.0.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 执行晋升</button>
+                    <a class="btn-link" style="font-size:12px;cursor:pointer" onclick="viewPromotionDetail('API-PAY-0056')"><i class="fa fa-file-text-o"></i> 查看详情</a>
+                </div>
+            </div>
+
+            <!-- 卡片 3：DEV → SIT -->
+            <div class="promo-card" data-card="FILE-RECON-0156">
+                <div class="header">
+                    <div>
+                        <div class="title">FILE-RECON-0156 银联清分对账文件 v1.5.0</div>
+                        <div class="meta">系统：支付清算系统 · 负责人：赵工 · 创建时间：2026-06-05</div>
+                    </div>
+                    <span class="promo-status"><span class="tag tag-info" style="font-size:11px">DEV 待晋升</span></span>
+                </div>
+                <div class="meta">当前版本：v1.4.2 (PROD) → 目标版本：v1.5.0 (DEV) → 计划晋升至 SIT</div>
+                <div class="tags">
+                    <span class="tag tag-note" style="font-size:11px">文件格式变更</span>
+                    <span class="tag tag-note" style="font-size:11px">字段新增</span>
+                </div>
+                <div class="checklist-summary">
+                    <i class="fa fa-check-square-o" style="color:#10b981"></i> 晋升前检查：8项中 2项已通过
+                </div>
+                <div class="card-actions" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-primary" style="font-size:12px;padding:4px 12px" onclick="executePromotion('FILE-RECON-0156','v1.5.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 执行晋升</button>
+                    <a class="btn-link" style="font-size:12px;cursor:pointer" onclick="viewPromotionDetail('FILE-RECON-0156')"><i class="fa fa-file-text-o"></i> 查看详情</a>
+                </div>
+            </div>
+
+            <!-- 空状态（隐藏，当无待晋升版本时显示） -->
+            <div class="empty-state" id="emptyState" style="display:none">
+                <i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>
+                暂无待晋升版本
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 晋升前检查（参考） ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-tasks"></i> 晋升前检查（参考）</div>
+        </div>
+        <div class="card-body">
+            <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">
+                <i class="fa fa-info-circle"></i> 以下为版本晋升至下一环境的通用检查项参考，具体通过情况请点击各版本卡片的"查看详情"
+            </div>
+            <div class="checklist">
+                <div class="check-item done"><i class="fa fa-check-square-o" style="color:#10b981"></i> 单元测试通过率 ≥ 90%</div>
+                <div class="check-item done"><i class="fa fa-check-square-o" style="color:#10b981"></i> 集成测试无阻塞缺陷</div>
+                <div class="check-item done"><i class="fa fa-check-square-o" style="color:#10b981"></i> 性能测试满足 SLA 要求</div>
+                <div class="check-item pending"><i class="fa fa-square-o" style="color:#f59e0b"></i> 安全扫描无高危漏洞</div>
+                <div class="check-item pending"><i class="fa fa-square-o" style="color:#f59e0b"></i> 用户验收测试通过</div>
+                <div class="check-item pending"><i class="fa fa-square-o" style="color:#f59e0b"></i> 生产环境配置已确认</div>
+                <div class="check-item pending"><i class="fa fa-square-o" style="color:#f59e0b"></i> 回滚方案已准备</div>
+                <div class="check-item pending"><i class="fa fa-square-o" style="color:#f59e0b"></i> 变更通知已发送</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast 提示 -->
+<div class="pr-toast" id="prToast">操作成功</div>
+
+<script>
+/* ============================================================
+ * 执行版本晋升（二次确认 + 模拟执行）
+ * @param {string} apiCode - 接口/文件服务编码
+ * @param {string} version - 目标版本号
+ * @param {string} fromEnv - 源环境
+ * @param {string} toEnv - 目标环境
+ * ============================================================ */
+function executePromotion(apiCode, version, fromEnv, toEnv) {
+    /* 一次确认 */
+    if (!confirm('确认将 ' + apiCode + ' ' + version + ' 从 ' + fromEnv + ' 晋升至 ' + toEnv + '？')) return;
+    /* 二次确认 */
+    if (!confirm('二次确认：晋升操作将更新 ' + toEnv + ' 环境部署，确认执行？')) return;
+
+    showToast(apiCode + ' ' + version + ' 晋升 ' + fromEnv + '→' + toEnv + ' 执行中...', 'info');
+
+    /* 模拟晋升过程 */
+    setTimeout(function() {
+        showToast(apiCode + ' ' + version + ' 已成功晋升至 ' + toEnv, 'success');
+        /* 更新卡片状态 */
+        var card = document.querySelector('[data-card="' + apiCode + '"]');
+        if (card) {
+            var statusEl = card.querySelector('.promo-status');
+            if (statusEl) statusEl.innerHTML = '<span class="tag tag-success">已晋升至' + toEnv + '</span>';
+            var actionEl = card.querySelector('.card-actions');
+            if (actionEl) actionEl.innerHTML = '<span style="color:#52c41a"><i class="fa fa-check-circle"></i> 晋升完成</span>';
+        }
+        /* 更新待晋升计数 */
+        updatePendingCount();
+    }, 2000);
+}
+
+/* ============================================================
+ * 查看版本详情（根据编码前缀区分跳转目标）
+ * ============================================================ */
+function viewPromotionDetail(apiCode) {
+    if (apiCode && (apiCode.indexOf('FILE') >= 0 || apiCode.indexOf('MSG') >= 0)) {
+        govNav('pages/interface/file-detail.html', ['首页','投产管理','版本晋升管理','文件接口详情'], {code:apiCode});
+    } else {
+        govNav('pages/interface/api-detail.html', ['首页','投产管理','版本晋升管理','接口详情'], {code:apiCode});
+    }
+}
+
+/* ============================================================
+ * 更新待晋升版本计数
+ * ============================================================ */
+function updatePendingCount() {
+    var cards = document.querySelectorAll('.promo-card');
+    var pending = 0;
+    cards.forEach(function(card) {
+        var statusEl = card.querySelector('.promo-status');
+        if (statusEl && statusEl.innerHTML.indexOf('已晋升') === -1) {
+            pending++;
+        }
+    });
+    var countEl = document.getElementById('pendingCount');
+    if (countEl) countEl.textContent = pending + ' 个版本待晋升';
+
+    /* 全部晋升完成时显示空状态 */
+    var emptyEl = document.getElementById('emptyState');
+    if (emptyEl) emptyEl.style.display = (pending === 0) ? 'block' : 'none';
+}
+
+/* ====== 根据卡片状态标签设置 data-env 属性 ====== */
+function initCardEnv() {
+    document.querySelectorAll('.promo-card').forEach(function(card) {
+        var statusEl = card.querySelector('.promo-status');
+        if (!statusEl) return;
+        var text = statusEl.textContent;
+        if (text.indexOf('UAT') >= 0) card.setAttribute('data-env', 'uat');
+        else if (text.indexOf('SIT') >= 0) card.setAttribute('data-env', 'sit');
+        else if (text.indexOf('DEV') >= 0) card.setAttribute('data-env', 'dev');
+        else if (text.indexOf('PROD') >= 0) card.setAttribute('data-env', 'prod');
+    });
+}
+initCardEnv();
+
+/* ====== 环境切换器 ====== */
+document.querySelectorAll('#envSwitcher .env-pill').forEach(function(pill) {
+    pill.addEventListener('click', function() {
+        document.querySelectorAll('#envSwitcher .env-pill').forEach(function(p) { p.classList.remove('active'); });
+        this.classList.add('active');
+        var env = this.getAttribute('data-env');
+        /* 根据环境筛选版本卡片 */
+        var cards = document.querySelectorAll('.promo-card');
+        var visibleCount = 0;
+        cards.forEach(function(card) {
+            if (env === 'all' || card.getAttribute('data-env') === env) {
+                card.style.display = '';
+                var statusEl = card.querySelector('.promo-status');
+                if (statusEl && statusEl.innerHTML.indexOf('已晋升') === -1) visibleCount++;
+            } else {
+                card.style.display = 'none';
+            }
+        });
+        /* 更新待晋升计数 */
+        var countEl = document.getElementById('pendingCount');
+        if (countEl) countEl.textContent = visibleCount + ' 个版本待晋升';
+        /* 空状态切换 */
+        var emptyEl = document.getElementById('emptyState');
+        if (emptyEl) emptyEl.style.display = visibleCount === 0 ? 'block' : 'none';
+        var envName = env === 'all' ? '全部' : env === 'prod' ? 'PROD · 生产' : env === 'sit' ? 'SIT · 测试' : env === 'uat' ? 'UAT · 验收' : 'DEV · 开发';
+        showToast('已切换到 ' + envName + ' 环境');
+    });
+});
+
+/* ============================================================
+ * 页面启动：模拟加载延迟后隐藏加载状态
+ * ============================================================ */
+(function() {
+    setTimeout(function() {
+        var overlay = document.getElementById('loadingOverlay');
+        if (overlay) overlay.classList.add('hidden');
+    }, 600);
+})();
+</script>
+</body>
+</html>

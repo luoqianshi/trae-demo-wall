@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自定义字段治理 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        /* ====== 统计卡片 ====== */
+        .gov-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px; }
+        .gov-stat { background:#fff; border:1px solid var(--border-color,#e2e8f0); border-radius:var(--radius,6px); padding:16px 14px; text-align:center; }
+        .gov-stat .label { font-size:12px; color:var(--text-secondary,#64748b); margin-bottom:6px; }
+        .gov-stat .value { font-size:26px; font-weight:700; font-family:'Segoe UI',sans-serif; }
+        .gov-stat .sub { font-size:11px; color:var(--text-secondary,#64748b); margin-top:4px; }
+
+        /* ====== Tab 切换 ====== */
+        .tab-bar { display:flex; border-bottom:1px solid #e2e8f0; margin-bottom:16px; }
+        .tab-item { padding:10px 20px; font-size:13px; color:#64748b; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; }
+        .tab-item:hover { color:#2563eb; }
+        .tab-item.active { color:#2563eb; border-bottom-color:#2563eb; font-weight:600; }
+        .tab-panel { display:none; }
+        .tab-panel.active { display:block; }
+
+        /* ====== 治理状态标签 ====== */
+        .gov-status { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+        .gov-status-pending { background:#fef3c7; color:#92400e; }
+        .gov-status-promoted { background:#d1fae5; color:#065f46; }
+        .gov-status-mapped { background:#dbeafe; color:#1e40af; }
+        .gov-status-ignored { background:#f1f5f9; color:#64748b; }
+
+        /* ====== 来源系统标签 ====== */
+        .src-sys { font-family:'Segoe UI',monospace; font-size:12px; color:#2563eb; }
+        .src-domain { font-size:11px; color:#64748b; }
+
+        /* ====== 标准符合度条 ====== */
+        .compliance-bar { height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden; width:80px; margin:0 auto; }
+        .compliance-bar-inner { height:100%; border-radius:3px; }
+        .compliance-text { font-size:11px; color:#64748b; margin-top:4px; }
+
+        /* ====== 提升弹窗 ====== */
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:9999; }
+        .modal-overlay.show { display:block; }
+        .modal-box { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:8px; width:560px; max-height: 80vh; height: auto; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,.15); }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid #e2e8f0; }
+        .modal-header h3 { font-size:15px; color:#1e293b; margin:0; }
+        .modal-body { padding:20px; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid #e2e8f0; }
+
+        .match-suggest { background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:12px 16px; margin-bottom:12px; font-size:13px; color:#1e40af; }
+        .match-suggest i { margin-right:6px; }
+        .match-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#fff; border:1px solid #e2e8f0; border-radius:4px; margin-top:8px; }
+        .match-item:hover { border-color:#93c5fd; }
+        .match-item .mi-info { font-size:13px; }
+        .match-item .mi-code { font-family:monospace; color:#2563eb; font-weight:600; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2 id="pageTitle"><i class="fa fa-shield" style="color:var(--primary);margin-right:8px"></i>自定义字段治理</h2>
+            <div class="page-desc" id="pageDesc">
+                首页 / 服务治理 / 自定义字段治理 - 展示全行自定义字段分布、治理状态及提升为全行标准的记录
+            </div>
+        </div>
+        <div class="action-group" id="actionGroup">
+            <button class="btn btn-default" onclick="showToast('治理清单导出中...')"><i class="fa fa-download"></i> 导出清单</button>
+            <button class="btn btn-primary" onclick="batchPromote()"><i class="fa fa-level-up"></i> 批量提升</button>
+        </div>
+    </div>
+
+    <!-- ====== 治理概览统计 ====== -->
+    <div class="gov-stats">
+        <div class="gov-stat">
+            <div class="label">自定义字段总数</div>
+            <div class="value" style="color:#3b82f6" id="statTotalField">286</div>
+            <div class="sub">覆盖 5 大业务域</div>
+        </div>
+        <div class="gov-stat">
+            <div class="label">待提升字段数</div>
+            <div class="value" style="color:#f59e0b" id="statPendingField">86</div>
+            <div class="sub">本月新增 12</div>
+        </div>
+        <div class="gov-stat">
+            <div class="label">已提升字段数</div>
+            <div class="value" style="color:#10b981" id="statPromotedField">92</div>
+            <div class="sub">本月提升 8</div>
+        </div>
+        <div class="gov-stat">
+            <div class="label">标准符合率</div>
+            <div class="value" style="color:#2563eb" id="statFieldRate">68.2%</div>
+            <div class="sub">目标 85%</div>
+        </div>
+    </div>
+
+    <!-- ====== Tab 切换 ====== -->
+    <div class="tab-bar">
+        <div class="tab-item active" data-tab="fields" onclick="switchTab('fields')">自定义字段列表</div>
+        <div class="tab-item" data-tab="codevalues" onclick="switchTab('codevalues')">码值管理</div>
+        <div class="tab-item" data-tab="history" onclick="switchTab('history')">提升记录</div>
+    </div>
+
+    <!-- ====== Tab 1：自定义字段列表 ====== -->
+    <div class="tab-panel active" id="tab-fields">
+        <div class="filter-bar">
+            <div class="form-row">
+                <div class="form-item">
+                    <label>系统</label>
+                    <select class="form-control" id="fieldFilterSystem">
+                        <option value="">全部</option>
+                        <option>核心账务系统</option>
+                        <option>客户管理系统</option>
+                        <option>信贷管理系统</option>
+                        <option>支付清算系统</option>
+                        <option>手机银行系统</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>业务域</label>
+                    <select class="form-control" id="fieldFilterDomain">
+                        <option value="">全部</option>
+                        <option>客户信息</option>
+                        <option>存款业务</option>
+                        <option>贷款业务</option>
+                        <option>支付结算</option>
+                        <option>渠道接入</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>字段状态</label>
+                    <select class="form-control" id="fieldFilterStatus">
+                        <option value="">全部</option>
+                        <option>待提升</option>
+                        <option>已提升</option>
+                        <option>已映射</option>
+                        <option>暂不处理</option>
+                    </select>
+                </div>
+                <div class="form-item" style="flex:1">
+                    <label>关键词</label>
+                    <input type="text" class="form-control" id="fieldFilterKeyword" placeholder="字段编码 / 字段名称 / 来源系统">
+                </div>
+                <div class="form-item" style="min-width:auto">
+                    <button class="btn btn-primary" onclick="filterFields()"><i class="fa fa-search"></i> 查询</button>
+                    <button class="btn btn-default" onclick="resetFieldFilter()"><i class="fa fa-eraser"></i> 重置</button>
+                </div>
+            </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+            <div class="card-header">
+                <div class="card-title">自定义字段列表<span style="font-size:12px;color:#64748b;font-weight:400">（共 86 条）</span></div>
+            </div>
+            <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px" class="col-check"><input type="checkbox" onchange="toggleAll(this,'fieldTableBody')"></th>
+                            <th style="width:140px">字段编码</th>
+                            <th style="width:120px">字段名称</th>
+                            <th style="width:120px">来源系统</th>
+                            <th style="width:100px">业务域</th>
+                            <th style="width:90px" class="text-center">使用次数</th>
+                            <th style="width:110px" class="text-center">标准符合度</th>
+                            <th style="width:90px" class="text-center">治理状态</th>
+                            <th style="width:180px" class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fieldTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination">
+                <div class="page-info">共 <span class="text-primary">86</span> 条记录</div>
+                <div class="page-list">
+                    <button class="page-item" onclick="goToPage(1,'fields')"><i class="fa fa-angle-left"></i></button>
+                    <button class="page-item active" onclick="goToPage(1,'fields')">1</button>
+                    <button class="page-item" onclick="goToPage(2,'fields')">2</button>
+                    <button class="page-item" onclick="goToPage(3,'fields')">3</button>
+                    <button class="page-item" onclick="goToPage(4,'fields')">4</button>
+                    <button class="page-item" onclick="goToPage(5,'fields')">…</button>
+                    <button class="page-item" onclick="goToPage(9,'fields')">9</button>
+                    <button class="page-item" onclick="goToPage(2,'fields')"><i class="fa fa-angle-right"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Tab 2：码值管理 ====== -->
+    <div class="tab-panel" id="tab-codevalues">
+        <div class="filter-bar">
+            <div class="form-row">
+                <div class="form-item">
+                    <label>字段编码</label>
+                    <select class="form-control" id="cvFilterField">
+                        <option value="">全部</option>
+                        <option>loan_status</option>
+                        <option>risk_level</option>
+                        <option>notify_flag</option>
+                        <option>card_type</option>
+                        <option>verify_status</option>
+                        <option>txn_channel</option>
+                        <option>transfer_type</option>
+                        <option>cust_level</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>码值状态</label>
+                    <select class="form-control" id="cvFilterStatus">
+                        <option value="">全部</option>
+                        <option>待治理</option>
+                        <option>已提升</option>
+                        <option>暂不处理</option>
+                    </select>
+                </div>
+                <div class="form-item" style="flex:1">
+                    <label>关键词</label>
+                    <input type="text" class="form-control" id="cvFilterKeyword" placeholder="码值 / 码值含义 / 字段名称">
+                </div>
+                <div class="form-item" style="min-width:auto">
+                    <button class="btn btn-primary" onclick="filterCodeValues()"><i class="fa fa-search"></i> 查询</button>
+                    <button class="btn btn-default" onclick="resetCvFilter()"><i class="fa fa-eraser"></i> 重置</button>
+                </div>
+            </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+            <div class="card-header">
+                <div class="card-title">码值管理列表<span style="font-size:12px;color:#64748b;font-weight:400">（共 142 条）</span></div>
+            </div>
+            <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:40px" class="col-check"><input type="checkbox" onchange="toggleAll(this,'cvTableBody')"></th>
+                            <th style="width:140px">字段编码</th>
+                            <th style="width:120px">字段名称</th>
+                            <th style="width:90px" class="text-center">码值</th>
+                            <th style="width:140px">码值含义</th>
+                            <th style="width:120px">来源系统</th>
+                            <th style="width:90px" class="text-center">状态</th>
+                            <th style="width:180px" class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cvTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination">
+                <div class="page-info">共 <span class="text-primary">142</span> 条记录</div>
+                <div class="page-list">
+                    <button class="page-item" onclick="goToPage(1,'codevalues')"><i class="fa fa-angle-left"></i></button>
+                    <button class="page-item active" onclick="goToPage(1,'codevalues')">1</button>
+                    <button class="page-item" onclick="goToPage(2,'codevalues')">2</button>
+                    <button class="page-item" onclick="goToPage(3,'codevalues')">3</button>
+                    <button class="page-item" onclick="goToPage(4,'codevalues')">…</button>
+                    <button class="page-item" onclick="goToPage(15,'codevalues')">15</button>
+                    <button class="page-item" onclick="goToPage(2,'codevalues')"><i class="fa fa-angle-right"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Tab 3：提升记录 ====== -->
+    <div class="tab-panel" id="tab-history">
+        <div class="card" style="margin-bottom:0">
+            <div class="card-header">
+                <div class="card-title">提升为标准字段记录<span style="font-size:12px;color:#64748b;font-weight:400">（累计 92 条）</span></div>
+                <div class="card-action">
+                    <button class="btn btn-default btn-sm" id="tab3ExportBtn" onclick="showToast('提升记录导出中...')"><i class="fa fa-download"></i> 导出记录</button>
+                </div>
+            </div>
+            <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:140px">原字段编码</th>
+                            <th style="width:140px">标准字段编码</th>
+                            <th style="width:120px">字段名称</th>
+                            <th style="width:120px">来源系统</th>
+                            <th style="width:140px" class="text-center">提升时间</th>
+                            <th style="width:100px">提升人</th>
+                            <th style="width:90px" class="text-center">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination">
+                <div class="page-info">共 <span class="text-primary">92</span> 条记录</div>
+                <div class="page-list">
+                    <button class="page-item" onclick="goToPage(1,'history')"><i class="fa fa-angle-left"></i></button>
+                    <button class="page-item active" onclick="goToPage(1,'history')">1</button>
+                    <button class="page-item" onclick="goToPage(2,'history')">2</button>
+                    <button class="page-item" onclick="goToPage(3,'history')">3</button>
+                    <button class="page-item" onclick="goToPage(4,'history')">…</button>
+                    <button class="page-item" onclick="goToPage(10,'history')">10</button>
+                    <button class="page-item" onclick="goToPage(2,'history')"><i class="fa fa-angle-right"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 提升为标准字段弹窗 ====== -->
+<div class="modal-overlay" id="promoteFieldModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa fa-level-up" style="color:#2563eb;margin-right:6px"></i>申请纳入全行标准</h3>
+            <a href="javascript:;" onclick="closePromoteFieldModal()" style="font-size:18px;color:#94a3b8"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div class="match-suggest">
+                <i class="fa fa-magic"></i>
+                <strong>智能匹配结果</strong>：根据字段编码、名称与使用场景，系统推荐以下可能匹配的标准字段
+            </div>
+            <div id="matchResults">
+                <div class="match-item">
+                    <div class="mi-info">
+                        <span class="mi-code">CUST_ID</span>
+                        <span style="margin-left:8px;color:#64748b">客户编号</span>
+                        <span style="margin-left:8px;font-size:11px;color:#94a3b8">VARCHAR(20) · 行内标准</span>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="confirmPromoteField('CUST_ID','客户编号')">选择关联</button>
+                </div>
+                <div class="match-item">
+                    <div class="mi-info">
+                        <span class="mi-code">CUSTOMER_NO</span>
+                        <span style="margin-left:8px;color:#64748b">客户号</span>
+                        <span style="margin-left:8px;font-size:11px;color:#94a3b8">VARCHAR(20) · 行内标准</span>
+                    </div>
+                    <button class="btn btn-default btn-sm" onclick="confirmPromoteField('CUSTOMER_NO','客户号')">选择关联</button>
+                </div>
+            </div>
+            <div style="margin-top:16px;padding-top:16px;border-top:1px dashed #e2e8f0">
+                <div style="font-size:13px;color:#334155;font-weight:600;margin-bottom:8px">
+                    <i class="fa fa-plus-circle" style="color:#2563eb"></i> 或创建新的标准字段
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:12px">标准字段编码</label>
+                        <input type="text" class="form-control" placeholder="如：CUST_MOBILE_NO" style="font-size:13px">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:12px">标准字段名称</label>
+                        <input type="text" class="form-control" placeholder="如：客户手机号" style="font-size:13px">
+                    </div>
+                </div>
+                <div style="margin-top:8px">
+                    <button class="btn btn-default btn-sm" onclick="confirmPromoteField()"><i class="fa fa-check"></i> 创建并关联</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closePromoteFieldModal()" style="padding:6px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;font-size:12px">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 提升为标准码值弹窗 ====== -->
+<div class="modal-overlay" id="promoteCvModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa fa-level-up" style="color:#2563eb;margin-right:6px"></i>提升为标准码值</h3>
+            <a href="javascript:;" onclick="closePromoteCvModal()" style="font-size:18px;color:#94a3b8"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;margin-bottom:16px">
+                <div style="font-size:13px;color:#334155;font-weight:600;margin-bottom:8px">待提升的码值信息</div>
+                <div id="cvPreviewArea" style="font-size:12px;color:#475569;line-height:1.8"></div>
+            </div>
+            <div style="font-size:13px;color:#334155;font-weight:600;margin-bottom:8px">
+                <i class="fa fa-list-ul" style="color:#2563eb"></i> 关联到已有标准枚举类型
+            </div>
+            <select class="form-control" style="margin-bottom:12px" id="existingEnumSelect">
+                <option value="">请选择标准枚举类型...</option>
+                <option>DICT_ID_TYPE / 证件类型代码</option>
+                <option>DICT_CHANNEL / 渠道代码</option>
+                <option>DICT_CURRENCY / 币种代码</option>
+                <option>DICT_BIZ_TYPE / 业务类型</option>
+                <option>DICT_RET_CODE / 返回码</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="confirmPromoteCv()"><i class="fa fa-check"></i> 确认关联</button>
+            <div style="margin-top:16px;padding-top:16px;border-top:1px dashed #e2e8f0">
+                <div style="font-size:13px;color:#334155;font-weight:600;margin-bottom:8px">
+                    <i class="fa fa-plus-circle" style="color:#2563eb"></i> 或创建新的标准枚举类型
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:12px">枚举类型编码</label>
+                        <input type="text" class="form-control" placeholder="如：DICT_GENDER" style="font-size:13px">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0">
+                        <label style="font-size:12px">枚举类型名称</label>
+                        <input type="text" class="form-control" placeholder="如：性别代码" style="font-size:13px">
+                    </div>
+                </div>
+                <div style="margin-top:8px">
+                    <button class="btn btn-default btn-sm" onclick="confirmPromoteCv()"><i class="fa fa-check"></i> 创建并迁移码值</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closePromoteCvModal()" style="padding:6px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;font-size:12px">取消</button>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+(function () {
+    'use strict';
+
+    /** 解析URL参数 */
+    function getParam(key) {
+        var params = new URLSearchParams(window.location.search);
+        return params.get(key);
+    }
+
+    /** 只读模式处理 */
+    var isReadonly = getParam('mode') === 'readonly';
+    if (isReadonly) {
+        var titleEl = document.getElementById('pageTitle');
+        var descEl = document.getElementById('pageDesc');
+        var actionEl = document.getElementById('actionGroup');
+        if (titleEl) titleEl.innerHTML = '<i class="fa fa-search" style="color:var(--primary);margin-right:8px"></i>自定义字段治理（只读）';
+        if (descEl) descEl.textContent = '首页 / 服务治理 / 自定义字段治理（只读）- 查看全行自定义字段分布与治理状态';
+        if (actionEl) actionEl.style.display = 'none';
+        // 只读模式下隐藏 Tab3 导出记录按钮
+        var tab3Export = document.getElementById('tab3ExportBtn');
+        if (tab3Export) tab3Export.style.display = 'none';
+        // 只读模式下隐藏所有 checkbox 列
+        var colCheckStyle = document.createElement('style');
+        colCheckStyle.textContent = '.col-check { display: none !important; }';
+        document.head.appendChild(colCheckStyle);
+    }
+
+    /* ============================================================
+     * Tab 切换
+     * ============================================================ */
+    window.switchTab = function(tabName) {
+        document.querySelectorAll('.tab-item').forEach(function(t) { t.classList.remove('active'); });
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.querySelector('[data-tab="' + tabName + '"]').classList.add('active');
+        document.getElementById('tab-' + tabName).classList.add('active');
+    };
+
+    /* ============================================================
+     * 全选 / 取消全选
+     * ============================================================ */
+    window.toggleAll = function(checkbox, tbodyId) {
+        var checks = document.querySelectorAll('#' + tbodyId + ' input[type="checkbox"]');
+        checks.forEach(function(c) { c.checked = checkbox.checked; });
+    };
+
+    /* ============================================================
+     * Mock 数据：自定义字段列表
+     * ============================================================ */
+    var customFields = [
+        { code: 'cust_mobile', name: '客户手机号', system: '客户管理系统', domain: '客户信息', usage: 24, compliance: 92, status: 'pending' },
+        { code: 'loan_status', name: '贷款状态', system: '信贷管理系统', domain: '贷款业务', usage: 18, compliance: 78, status: 'pending' },
+        { code: 'txn_channel', name: '交易渠道', system: '支付清算系统', domain: '支付结算', usage: 31, compliance: 88, status: 'promoted' },
+        { code: 'risk_level', name: '风险等级', system: '信贷管理系统', domain: '贷款业务', usage: 12, compliance: 65, status: 'mapped' },
+        { code: 'account_alias', name: '账户别名', system: '核心账务系统', domain: '存款业务', usage: 9, compliance: 45, status: 'pending' },
+        { code: 'notify_flag', name: '通知标志', system: '手机银行系统', domain: '渠道接入', usage: 15, compliance: 70, status: 'pending' },
+        { code: 'credit_score', name: '信用评分', system: '信贷管理系统', domain: '贷款业务', usage: 8, compliance: 95, status: 'promoted' },
+        { code: 'transfer_limit', name: '转账限额', system: '支付清算系统', domain: '支付结算', usage: 22, compliance: 60, status: 'pending' },
+        { code: 'card_type', name: '卡类型', system: '核心账务系统', domain: '存款业务', usage: 17, compliance: 55, status: 'ignored' },
+        { code: 'verify_status', name: '验证状态', system: '手机银行系统', domain: '渠道接入', usage: 11, compliance: 72, status: 'pending' }
+    ];
+
+    /* ============================================================
+     * Mock 数据：码值管理
+     * ============================================================ */
+    var customCodeValues = [
+        { fieldCode: 'loan_status', fieldName: '贷款状态', code: 'PENDING', meaning: '待审批', system: '信贷管理系统', status: 'pending' },
+        { fieldCode: 'loan_status', fieldName: '贷款状态', code: 'APPROVED', meaning: '已批准', system: '信贷管理系统', status: 'pending' },
+        { fieldCode: 'risk_level', fieldName: '风险等级', code: 'LOW', meaning: '低', system: '信贷管理系统', status: 'pending' },
+        { fieldCode: 'risk_level', fieldName: '风险等级', code: 'HIGH', meaning: '高', system: '信贷管理系统', status: 'pending' },
+        { fieldCode: 'notify_flag', fieldName: '通知标志', code: 'Y', meaning: '通知', system: '手机银行系统', status: 'pending' },
+        { fieldCode: 'notify_flag', fieldName: '通知标志', code: 'N', meaning: '不通知', system: '手机银行系统', status: 'pending' },
+        { fieldCode: 'card_type', fieldName: '卡类型', code: 'DEBIT', meaning: '借记卡', system: '核心账务系统', status: 'ignored' },
+        { fieldCode: 'card_type', fieldName: '卡类型', code: 'CREDIT', meaning: '信用卡', system: '核心账务系统', status: 'ignored' },
+        { fieldCode: 'txn_channel', fieldName: '交易渠道', code: 'MOBILE', meaning: '手机银行', system: '支付清算系统', status: 'promoted' },
+        { fieldCode: 'txn_channel', fieldName: '交易渠道', code: 'WEB', meaning: '网上银行', system: '支付清算系统', status: 'promoted' }
+    ];
+
+    /* ============================================================
+     * Mock 数据：提升记录
+     * ============================================================ */
+    var promoteHistory = [
+        { origCode: 'txn_channel', stdCode: 'DICT_CHANNEL', name: '交易渠道', system: '支付清算系统', time: '2026-06-22 14:30', promoter: '张治理', status: 'success' },
+        { origCode: 'credit_score', stdCode: 'CREDIT_SCORE', name: '信用评分', system: '信贷管理系统', time: '2026-06-20 10:15', promoter: '张治理', status: 'success' },
+        { origCode: 'id_verify_type', stdCode: 'DICT_ID_TYPE', name: '证件类型', system: '手机银行系统', time: '2026-06-18 16:42', promoter: '李标准', status: 'success' },
+        { origCode: 'currency_code', stdCode: 'DICT_CURRENCY', name: '币种代码', system: '支付清算系统', time: '2026-06-15 09:20', promoter: '张治理', status: 'success' },
+        { origCode: 'account_status', stdCode: 'DICT_ACCT_STATUS', name: '账户状态', system: '核心账务系统', time: '2026-06-12 11:05', promoter: '李标准', status: 'success' },
+        { origCode: 'biz_type', stdCode: 'DICT_BIZ_TYPE', name: '业务类型', system: '支付清算系统', time: '2026-06-10 15:30', promoter: '张治理', status: 'success' },
+        { origCode: 'gender_code', stdCode: 'DICT_GENDER', name: '性别代码', system: '客户管理系统', time: '2026-06-08 10:00', promoter: '李标准', status: 'success' },
+        { origCode: 'ret_code', stdCode: 'DICT_RET_CODE', name: '返回码', system: '手机银行系统', time: '2026-06-05 14:15', promoter: '张治理', status: 'success' }
+    ];
+
+    /* ============================================================
+     * 渲染治理状态标签
+     * ============================================================ */
+    function renderStatus(status) {
+        var map = {
+            pending:  { text: '待提升', cls: 'gov-status-pending' },
+            promoted: { text: '已提升', cls: 'gov-status-promoted' },
+            mapped:   { text: '已映射', cls: 'gov-status-mapped' },
+            ignored:  { text: '暂不处理', cls: 'gov-status-ignored' }
+        };
+        var s = map[status] || map.pending;
+        return '<span class="gov-status ' + s.cls + '">' + s.text + '</span>';
+    }
+
+    /* ============================================================
+     * 渲染标准符合度
+     * ============================================================ */
+    function renderCompliance(rate) {
+        var color = rate >= 80 ? '#10b981' : (rate >= 60 ? '#f59e0b' : '#ef4444');
+        return '<div class="compliance-bar"><div class="compliance-bar-inner" style="width:' + rate + '%;background:' + color + '"></div></div>' +
+               '<div class="compliance-text">' + rate + '%</div>';
+    }
+
+    /* ============================================================
+     * 渲染操作按钮（只读模式下隐藏操作按钮）
+     * ============================================================ */
+    function renderFieldActions(field, isReadonlyMode) {
+        if (isReadonlyMode) {
+            return '<span class="text-center" style="color:#94a3b8;font-size:12px">-</span>';
+        }
+        var html = '<a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewFieldDetail(\'' + field.code + '\')"><i class="fa fa-eye"></i> 查看详情</a>';
+        if (field.status === 'pending') {
+            html += '<a class="btn-link" style="padding:0 4px;cursor:pointer;color:#f59e0b" onclick="markPending(\'' + field.code + '\')"><i class="fa fa-flag"></i> 标记为待提升</a>';
+        }
+        html += '<a class="btn-link" style="padding:0 4px;cursor:pointer;color:#2563eb" onclick="openPromoteFieldModal(\'' + field.code + '\',\'' + field.name + '\')"><i class="fa fa-level-up"></i> 申请纳入标准</a>';
+        return html;
+    }
+
+    function renderCvActions(cv, isReadonlyMode) {
+        if (isReadonlyMode) {
+            return '<span class="text-center" style="color:#94a3b8;font-size:12px">-</span>';
+        }
+        var html = '<a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewCvDetail(\'' + cv.fieldCode + '\')"><i class="fa fa-eye"></i> 查看</a>';
+        if (cv.status === 'pending') {
+            html += '<a class="btn-link" style="padding:0 4px;cursor:pointer;color:#2563eb" onclick="openPromoteCvModal(\'' + cv.fieldCode + '\',\'' + cv.fieldName + '\')"><i class="fa fa-level-up"></i> 提升为标准码值</a>';
+        }
+        return html;
+    }
+
+    /* ============================================================
+     * 渲染自定义字段列表
+     * ============================================================ */
+    function renderFieldTable() {
+        var tbody = document.getElementById('fieldTableBody');
+        if (!customFields || customFields.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8"><i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>暂无数据</td></tr>';
+            return;
+        }
+        tbody.innerHTML = customFields.map(function(f) {
+            return '<tr data-system="' + f.system + '" data-domain="' + f.domain + '" data-status="' + f.status + '">' +
+                '<td class="col-check"><input type="checkbox" class="row-check" value="' + f.code + '"></td>' +
+                '<td style="font-family:monospace;font-weight:600;color:#2563eb">' + f.code + '</td>' +
+                '<td>' + f.name + '</td>' +
+                '<td><span class="src-sys">' + f.system + '</span></td>' +
+                '<td><span class="src-domain">' + f.domain + '</span></td>' +
+                '<td class="text-center num">' + f.usage + '</td>' +
+                '<td class="text-center">' + renderCompliance(f.compliance) + '</td>' +
+                '<td class="text-center">' + renderStatus(f.status) + '</td>' +
+                '<td class="text-center">' + renderFieldActions(f, isReadonly) + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    /* ============================================================
+     * 渲染码值管理列表
+     * ============================================================ */
+    function renderCvTable() {
+        var tbody = document.getElementById('cvTableBody');
+        if (!customCodeValues || customCodeValues.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8"><i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>暂无数据</td></tr>';
+            return;
+        }
+        tbody.innerHTML = customCodeValues.map(function(cv) {
+            return '<tr data-field="' + cv.fieldCode + '" data-status="' + cv.status + '">' +
+                '<td class="col-check"><input type="checkbox" class="row-check" value="' + cv.fieldCode + '_' + cv.code + '"></td>' +
+                '<td style="font-family:monospace;font-weight:600;color:#2563eb">' + cv.fieldCode + '</td>' +
+                '<td>' + cv.fieldName + '</td>' +
+                '<td class="text-center" style="font-family:monospace">' + cv.code + '</td>' +
+                '<td>' + cv.meaning + '</td>' +
+                '<td><span class="src-sys">' + cv.system + '</span></td>' +
+                '<td class="text-center">' + renderStatus(cv.status) + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    /* ============================================================
+     * 渲染提升记录列表
+     * ============================================================ */
+    function renderHistoryTable() {
+        var tbody = document.getElementById('historyTableBody');
+        if (!promoteHistory || promoteHistory.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8"><i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>暂无数据</td></tr>';
+            return;
+        }
+        tbody.innerHTML = promoteHistory.map(function(h) {
+            return '<tr>' +
+                '<td style="font-family:monospace;font-weight:600;color:#2563eb">' + h.origCode + '</td>' +
+                '<td style="font-family:monospace;font-size:12px;color:#059669">' + h.stdCode + '</td>' +
+                '<td>' + h.name + '</td>' +
+                '<td><span class="src-sys">' + h.system + '</span></td>' +
+                '<td class="text-center" style="font-size:12px;color:#64748b">' + h.time + '</td>' +
+                '<td>' + h.promoter + '</td>' +
+                '<td class="text-center"><span class="gov-status gov-status-promoted">已完成</span></td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    /* ============================================================
+     * 提升为标准字段弹窗
+     * ============================================================ */
+    window.openPromoteFieldModal = function(fieldCode, fieldName) {
+        document.getElementById('promoteFieldModal').classList.add('show');
+    };
+    window.closePromoteFieldModal = function() {
+        document.getElementById('promoteFieldModal').classList.remove('show');
+    };
+    window.confirmPromoteField = function(stdCode, stdName) {
+        if (stdCode && stdName) {
+            showToast('字段纳入标准申请已提交：关联至 ' + stdCode + ' / ' + stdName);
+        } else {
+            showToast('字段纳入标准申请已提交');
+        }
+        closePromoteFieldModal();
+    };
+
+    /* ============================================================
+     * 提升为标准码值弹窗
+     * ============================================================ */
+    window.openPromoteCvModal = function(fieldCode, fieldName) {
+        // 渲染码值预览
+        var previews = customCodeValues.filter(function(c) { return c.fieldCode === fieldCode; })
+            .map(function(c) { return c.code + '(' + c.meaning + ')'; }).join(' / ');
+        document.getElementById('cvPreviewArea').textContent = previews || '暂无码值信息';
+        document.getElementById('promoteCvModal').classList.add('show');
+    };
+    window.closePromoteCvModal = function() {
+        document.getElementById('promoteCvModal').classList.remove('show');
+    };
+    window.confirmPromoteCv = function() {
+        showToast('码值纳入标准申请已提交');
+        closePromoteCvModal();
+    };
+
+    /* ============================================================
+     * 标记为待提升
+     * ============================================================ */
+    window.markPending = function(fieldCode) {
+        showToast('字段 ' + fieldCode + ' 已标记为待提升');
+    };
+
+    /* ============================================================
+     * 加载状态
+     * ============================================================ */
+    function showLoading(tableId, colCount) {
+        var tbody = document.getElementById(tableId);
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="' + colCount + '" style="text-align:center;padding:40px;color:#94a3b8"><i class="fa fa-spinner fa-pulse"></i> 加载中...</td></tr>';
+        }
+    }
+
+    /* ============================================================
+     * 筛选：自定义字段列表
+     * ============================================================ */
+    window.filterFields = function() {
+        var system = document.getElementById('fieldFilterSystem').value;
+        var domain = document.getElementById('fieldFilterDomain').value;
+        var status = document.getElementById('fieldFilterStatus').value;
+        var keyword = (document.getElementById('fieldFilterKeyword').value || '').toLowerCase();
+        var statusMap = { '待提升': 'pending', '已提升': 'promoted', '已映射': 'mapped', '暂不处理': 'ignored' };
+        var rows = document.querySelectorAll('#fieldTableBody tr');
+        var visible = 0;
+        rows.forEach(function(row) {
+            var show = true;
+            if (system && row.getAttribute('data-system') !== system) show = false;
+            if (domain && row.getAttribute('data-domain') !== domain) show = false;
+            if (status && row.getAttribute('data-status') !== (statusMap[status] || status)) show = false;
+            if (keyword && row.textContent.toLowerCase().indexOf(keyword) === -1) show = false;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        showToast('筛选完成，共 ' + visible + ' 条记录');
+    };
+    window.resetFieldFilter = function() {
+        ['fieldFilterSystem', 'fieldFilterDomain', 'fieldFilterStatus', 'fieldFilterKeyword'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        var rows = document.querySelectorAll('#fieldTableBody tr');
+        rows.forEach(function(row) { row.style.display = ''; });
+        showToast('已重置筛选条件');
+    };
+
+    /* ============================================================
+     * 筛选：码值管理
+     * ============================================================ */
+    window.filterCodeValues = function() {
+        var field = document.getElementById('cvFilterField').value;
+        var status = document.getElementById('cvFilterStatus').value;
+        var keyword = (document.getElementById('cvFilterKeyword').value || '').toLowerCase();
+        var statusMap = { '待治理': 'pending', '已提升': 'promoted', '暂不处理': 'ignored' };
+        var rows = document.querySelectorAll('#cvTableBody tr');
+        var visible = 0;
+        rows.forEach(function(row) {
+            var show = true;
+            if (field && row.getAttribute('data-field') !== field) show = false;
+            if (status && row.getAttribute('data-status') !== (statusMap[status] || status)) show = false;
+            if (keyword && row.textContent.toLowerCase().indexOf(keyword) === -1) show = false;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        showToast('筛选完成，共 ' + visible + ' 条记录');
+    };
+    window.resetCvFilter = function() {
+        ['cvFilterField', 'cvFilterStatus', 'cvFilterKeyword'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        var rows = document.querySelectorAll('#cvTableBody tr');
+        rows.forEach(function(row) { row.style.display = ''; });
+        showToast('已重置筛选条件');
+    };
+
+    /* ============================================================
+     * 分页
+     * ============================================================ */
+    window.goToPage = function(page, tab) {
+        showToast('已跳转到第 ' + page + ' 页');
+        var panelId = tab === 'fields' ? 'tab-fields' : (tab === 'codevalues' ? 'tab-codevalues' : 'tab-history');
+        var btns = document.querySelectorAll('#' + panelId + ' .pagination .page-list button');
+        btns.forEach(function(btn) {
+            btn.classList.remove('active');
+            if (parseInt(btn.textContent) === page) btn.classList.add('active');
+        });
+    };
+
+    /* ============================================================
+     * 批量提升
+     * ============================================================ */
+    window.batchPromote = function() {
+        var checked = document.querySelectorAll('input.row-check:checked');
+        if (checked.length === 0) { showToast('请先选择需要提升的字段', 'warning'); return; }
+        if (!confirm('确认将选中的 ' + checked.length + ' 个字段申请纳入全行标准？')) return;
+        showToast('已提交 ' + checked.length + ' 个字段的纳入标准申请');
+    };
+
+    /* ============================================================
+     * 查看详情
+     * ============================================================ */
+    window.viewFieldDetail = function(fieldCode) {
+        govNav('pages/datadict/field-detail.html', ['首页', '数据字典', '标准字段', '字段详情'], { fieldId: fieldCode });
+    };
+    window.viewCvDetail = function(fieldCode) {
+        govNav('pages/datadict/enum-mgmt.html', ['首页', '数据字典', '枚举管理'], { fieldCode: fieldCode });
+    };
+
+    /* ============================================================
+     * 初始化渲染（含加载状态）
+     * ============================================================ */
+    showLoading('fieldTableBody', 9);
+    showLoading('cvTableBody', 8);
+    showLoading('historyTableBody', 7);
+    setTimeout(function() {
+        renderFieldTable();
+        renderCvTable();
+        renderHistoryTable();
+    }, 200);
+
+})();
+</script>
+</body>
+</html>

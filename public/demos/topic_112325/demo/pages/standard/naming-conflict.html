@@ -1,0 +1,679 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>命名冲突检查 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .conflict-row { border-left:4px solid #dc2626; background:#fef2f2; }
+        .conflict-row.warn { border-left-color:#d97706; background:#fffbeb; }
+        .conflict-row.info { border-left-color:#2563eb; background:#eff6ff; }
+        .conflict-files { font-family:Consolas,monospace; font-size:12px; color:#991b1b; line-height:1.8; }
+        .scan-status { padding:16px; background:linear-gradient(135deg,#1e40af,#2563eb); color:#fff; border-radius:8px; }
+        .scan-status .ss-item { display:inline-block; margin-right:32px; }
+        .scan-status .ss-label { font-size:12px; opacity:.85; }
+        .scan-status .ss-value { font-size:24px; font-weight:700; margin-top:2px; }
+        .progress-bar { height:8px; background:rgba(255,255,255,.2); border-radius:4px; overflow:hidden; margin-top:10px; }
+        .progress-bar .pb-fill { height:100%; background:#fff; border-radius:4px; transition:width .5s; }
+
+        /* ====== 统一弹窗样式 ====== */
+        .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:1000; display:flex; align-items:center; justify-content:center; }
+        .modal-box { background:#fff; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,.15); display:flex; flex-direction:column; max-height: 85vh; height: auto; }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+        .modal-header h3 { font-size:16px; color:var(--text-primary,#1e293b); margin:0; }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border); flex-shrink:0; }
+        .modal-close { font-size:18px; color:var(--text-light,#94a3b8); text-decoration:none; line-height:1; }
+
+        /* ====== 表单网格样式 ====== */
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .form-grid .form-field { display:flex; flex-direction:column; gap:6px; }
+        .form-grid .form-field.full { grid-column:1 / -1; }
+        .form-grid .form-field label { font-size:13px; color:var(--text-secondary,#64748b); font-weight:500; }
+        .form-grid .form-field input,
+        .form-grid .form-field select,
+        .form-grid .form-field textarea { padding:8px 12px; border:1px solid var(--border,#e2e8f0); border-radius:4px; font-size:13px; font-family:inherit; }
+        .form-grid .form-field textarea { resize:vertical; min-height:90px; }
+        .checkbox-group { display:flex; gap:16px; flex-wrap:wrap; padding-top:4px; }
+        .checkbox-group label { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-primary,#1e293b); cursor:pointer; font-weight:normal; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-exclamation-circle" style="color:var(--primary);margin-right:8px"></i>命名冲突检查</h2>
+            <div class="page-desc">首页 / 服务治理 / 命名冲突检查 · 扫描所有文件的命名规范与冲突情况</div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="openHistoryModal()"><i class="fa fa-history"></i> 历史检测</button>
+            <button class="btn btn-default" onclick="openDetectConfigModal()"><i class="fa fa-gear"></i> 检测配置</button>
+            <button class="btn btn-primary" style="background:#16a34a" onclick="startConflictDetection(this, '命名冲突手动检测')"><i class="fa fa-play-circle"></i> 启动手动检测</button>
+            <button class="btn btn-primary" style="background:#dc2626" onclick="startConflictDetection(this, '命名冲突自动检测')"><i class="fa fa-refresh"></i> 启动自动检测</button>
+        </div>
+    </div>
+
+    <!-- 扫描状态 -->
+    <div class="scan-status">
+        <div class="ss-item">
+            <div class="ss-label"><i class="fa fa-calendar-o"></i> 最近检测时间</div>
+            <div class="ss-value">2026-06-04 09:00</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label"><i class="fa fa-files-o"></i> 已扫描文件数</div>
+            <div class="ss-value">12,486</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label"><i class="fa fa-bolt"></i> 严重冲突</div>
+            <div class="ss-value" style="color:#fca5a5">8</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label"><i class="fa fa-exclamation-triangle"></i> 一般冲突</div>
+            <div class="ss-value" style="color:#fcd34d">24</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label"><i class="fa fa-info-circle"></i> 命名提示</div>
+            <div class="ss-value" style="color:#bfdbfe">156</div>
+        </div>
+        <div style="float:right; text-align:right">
+            <div class="ss-label">下次自动检测</div>
+            <div class="ss-value" style="font-size:18px">2026-06-05 09:00</div>
+        </div>
+        <div class="progress-bar" style="clear:both"><div class="pb-fill" style="width:72%"></div></div>
+        <div style="margin-top:4px; font-size:11px; opacity:.8">今日进度 · 已扫描 12,486 / 17,320 文件</div>
+    </div>
+
+    <!-- 筛选 -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item"><label>冲突类型</label><select class="form-control" id="filterConflictType"><option>全部</option><option>文件名重复</option><option>命名规范不符</option><option>日期格式错误</option><option>系统标识不存在</option></select></div>
+            <div class="form-item"><label>严重程度</label><select class="form-control" id="filterConflictSeverity"><option>全部</option><option>严重</option><option>警告</option><option>提示</option></select></div>
+            <div class="form-item"><label>涉及系统</label><select class="form-control" id="filterConflictSystem"><option>全部</option><option>财务系统</option><option>订单系统</option><option>客户系统</option><option>清算系统</option></select></div>
+            <div class="form-item"><label>时间范围</label><input class="form-control" id="filterConflictDate" placeholder="选择日期范围"></div>
+            <div class="form-item" style="gap:8px"><button class="btn btn-primary" onclick="filterConflicts()"><i class="fa fa-search"></i> 查询</button><button class="btn btn-default" onclick="resetConflictFilter()"><i class="fa fa-eraser"></i> 重置</button></div>
+        </div>
+    </div>
+
+    <!-- 冲突列表 -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-list"></i> 冲突检测结果（共 188 条）</div>
+            <div class="card-action"><a href="javascript:;" onclick="batchProcessConflicts()"><i class="fa fa-tasks"></i> 批量处理</a><a href="javascript:;" onclick="showToast('正在导出冲突检测报告...')"><i class="fa fa-download"></i> 导出报告</a></div>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" id="conflictCheckAll" onclick="toggleSelectAll(this)"></th>
+                        <th style="width:80px">严重程度</th>
+                        <th>冲突文件</th>
+                        <th>冲突原因</th>
+                        <th>涉及系统</th>
+                        <th>建议解决方式</th>
+                        <th class="text-center">发现时间</th>
+                        <th class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="conflict-row">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-danger">严重</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>① FIN_DRPT_20260604_001.csv <span style="color:#64748b">(send/fin/)</span></div>
+                                <div>② fin_daily_2026_06_04.csv <span style="color:#64748b">(receive/fin/)</span></div>
+                            </div>
+                        </td>
+                        <td style="color:#991b1b"><i class="fa fa-times-circle"></i> 两份文件内容相同但命名不统一，存在重复提交和识别风险</td>
+                        <td>财务系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 保留符合规范的①，删除②；或合并为单一文件</td>
+                        <td class="text-center">06-04 09:15</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-danger">严重</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>report_20260604.xlsx</div>
+                            </div>
+                        </td>
+                        <td style="color:#991b1b"><i class="fa fa-times-circle"></i> 文件命名缺少系统标识前缀，不符合 {SYS}_{TYPE}_{DATE}_{SEQ}.{EXT} 规范</td>
+                        <td>财务系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 重命名为 FIN_RPT_20260604_001.xlsx</td>
+                        <td class="text-center">06-04 09:12</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row warn">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-warning">警告</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>ORD-DET-20260603-001.csv</div>
+                            </div>
+                        </td>
+                        <td style="color:#92400e"><i class="fa fa-warning"></i> 分隔符使用了短横线"-"，规范要求使用下划线"_"</td>
+                        <td>订单系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 重命名为 ORD_DET_20260603_001.csv</td>
+                        <td class="text-center">06-04 09:10</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row warn">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-warning">警告</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>① CLR_SET_20260604_001.dat</div>
+                                <div>② CLR_SET_20260604_001.dat.tmp</div>
+                            </div>
+                        </td>
+                        <td style="color:#92400e"><i class="fa fa-warning"></i> 临时文件 .tmp 未在处理完成后清理，可能表示处理中断</td>
+                        <td>清算系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 检查处理状态，确认完成后删除 .tmp 文件</td>
+                        <td class="text-center">06-04 09:08</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row warn">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-warning">警告</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>customer_info_2026-06-04.txt</div>
+                            </div>
+                        </td>
+                        <td style="color:#92400e"><i class="fa fa-warning"></i> 日期格式使用YYYY-MM-DD（含短横线），规范要求YYYYMMDD</td>
+                        <td>客户系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 重命名为 CRM_CUST_20260604_001.txt</td>
+                        <td class="text-center">06-04 09:05</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row info">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-info">提示</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>HR_PAY_202606_1.xlsx</div>
+                            </div>
+                        </td>
+                        <td style="color:#1e40af"><i class="fa fa-info-circle"></i> 序号使用1位而非3位，建议补零为 HR_PAY_202606_001.xlsx</td>
+                        <td>人力资源</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 重命名为 3位序号格式以统一规范</td>
+                        <td class="text-center">06-04 09:02</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-danger">严重</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>blacklist.xml</div>
+                            </div>
+                        </td>
+                        <td style="color:#991b1b"><i class="fa fa-times-circle"></i> 系统标识"RSK"不存在于当前业务系统清单中，可能是非法或手工文件</td>
+                        <td>风控系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 验证来源，若合法则补充业务系统，否则删除</td>
+                        <td class="text-center">06-04 09:00</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row warn">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-warning">警告</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>FIN_DRPT_20260603_001.CSV</div>
+                            </div>
+                        </td>
+                        <td style="color:#92400e"><i class="fa fa-warning"></i> 扩展名使用大写，规范要求统一小写 .csv</td>
+                        <td>财务系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 重命名文件扩展名为小写</td>
+                        <td class="text-center">06-04 08:58</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                    <tr class="conflict-row info">
+                        <td><input type="checkbox"></td>
+                        <td class="text-center"><span class="tag tag-info">提示</span></td>
+                        <td>
+                            <div class="conflict-files">
+                                <div>ORD_DET_20260602_05.csv</div>
+                            </div>
+                        </td>
+                        <td style="color:#1e40af"><i class="fa fa-info-circle"></i> 文件序号超过每日预期（>3），请确认是否为业务需要</td>
+                        <td>订单系统</td>
+                        <td style="color:#16a34a"><i class="fa fa-lightbulb-o"></i> 联系业务方确认文件内容；若合理则无变更</td>
+                        <td class="text-center">06-04 08:55</td>
+                        <td class="text-center op-col"><a href="javascript:;" onclick="showToast('查看冲突详情')"><i class="fa fa-eye"></i> 查看详情</a><a href="javascript:;" onclick="showToast('打开冲突处理')"><i class="fa fa-wrench"></i> 解决</a></td>
+                    </tr>
+                </tbody>
+            </table>
+            <!-- 空数据状态（默认隐藏，筛选无结果时显示） -->
+            <div id="emptyState" style="display:none;text-align:center;padding:48px 0;color:#94a3b8">
+                <i class="fa fa-inbox" style="font-size:48px;display:block;margin-bottom:12px;color:#cbd5e1"></i>
+                <div style="font-size:14px">暂无冲突数据</div>
+                <div style="font-size:12px;margin-top:4px">当前筛选条件下未检测到命名冲突，可调整筛选条件或重新检测</div>
+            </div>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 188 条记录 · 当前显示第 1-9 条</div>
+            <div class="page-list">
+                <button id="conflictPrevBtn" onclick="goToConflictPage('prev')"><i class="fa fa-angle-left"></i></button>
+                <button class="active" onclick="goToConflictPage(1)">1</button>
+                <button onclick="goToConflictPage(2)">2</button>
+                <button onclick="goToConflictPage(3)">3</button>
+                <button class="disabled" disabled>...</button>
+                <button onclick="goToConflictPage(21)">21</button>
+                <button onclick="goToConflictPage('next')"><i class="fa fa-angle-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 检测规则说明 -->
+    <div class="card" style="margin-top:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-cogs"></i> 检测规则说明（共 6 项检查）</div>
+        </div>
+        <div class="card-body">
+            <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:12px">
+                <div style="padding:12px; background:#fef2f2; border-left:3px solid #dc2626; border-radius:4px">
+                    <div style="font-weight:600; color:#991b1b; margin-bottom:6px"><i class="fa fa-shield"></i> 规则1：系统标识校验</div>
+                    <div style="font-size:13px; color:#334155">验证文件名前缀是否属于已登记的业务系统</div>
+                </div>
+                <div style="padding:12px; background:#fef2f2; border-left:3px solid #dc2626; border-radius:4px">
+                    <div style="font-weight:600; color:#991b1b; margin-bottom:6px"><i class="fa fa-shield"></i> 规则2：文件名唯一性</div>
+                    <div style="font-size:13px; color:#334155">防止同一日期出现多份不同命名的相同业务文件</div>
+                </div>
+                <div style="padding:12px; background:#fffbeb; border-left:3px solid #d97706; border-radius:4px">
+                    <div style="font-weight:600; color:#92400e; margin-bottom:6px"><i class="fa fa-shield"></i> 规则3：分隔符类型检查</div>
+                    <div style="font-size:13px; color:#334155">必须使用下划线"_"，禁止使用短横线"-"或中文连接符</div>
+                </div>
+                <div style="padding:12px; background:#fffbeb; border-left:3px solid #d97706; border-radius:4px">
+                    <div style="font-weight:600; color:#92400e; margin-bottom:6px"><i class="fa fa-shield"></i> 规则4：日期格式</div>
+                    <div style="font-size:13px; color:#334155">日期必须为YYYYMMDD格式，不允许YYYY-MM-DD</div>
+                </div>
+                <div style="padding:12px; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px">
+                    <div style="font-weight:600; color:#1e40af; margin-bottom:6px"><i class="fa fa-shield"></i> 规则5：序号位数</div>
+                    <div style="font-size:13px; color:#334155">序号必须使用3位十进制数字自动补零（001、002…）</div>
+                </div>
+                <div style="padding:12px; background:#eff6ff; border-left:3px solid #2563eb; border-radius:4px">
+                    <div style="font-weight:600; color:#1e40af; margin-bottom:6px"><i class="fa fa-shield"></i> 规则6：扩展名大小写</div>
+                    <div style="font-size:13px; color:#334155">扩展名必须使用小写（.csv / .txt / .xlsx / .dat / .xml）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 检测配置弹窗 ====== -->
+<div class="modal-overlay" id="detectConfigModal" style="display:none">
+    <div class="modal-box" style="width:640px;max-width:92vw">
+        <div class="modal-header">
+            <h3><i class="fa fa-gear" style="color:var(--primary);margin-right:6px"></i>检测配置 - 命名规则</h3>
+            <a href="javascript:;" class="modal-close" onclick="closeDetectConfigModal()"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div class="form-grid">
+                <div class="form-field full">
+                    <label>系统标识清单（每行一个系统标识）</label>
+                    <textarea id="cfgSystemList" placeholder="CORE&#10;MBL&#10;CRM&#10;FIN">CORE
+MBL
+CRM
+FIN
+ORD
+CLR
+RSK</textarea>
+                </div>
+                <div class="form-field">
+                    <label>分隔符规则</label>
+                    <select id="cfgSeparator">
+                        <option value="下划线">下划线（_）</option>
+                        <option value="连字符">连字符（-）</option>
+                        <option value="点号">点号（.）</option>
+                        <option value="无分隔符">无分隔符</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>日期格式</label>
+                    <select id="cfgDateFormat">
+                        <option value="YYYYMMDD">YYYYMMDD</option>
+                        <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                        <option value="YYYYMM">YYYYMM</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>序号位数</label>
+                    <select id="cfgSeqDigits">
+                        <option value="2">2位</option>
+                        <option value="3" selected>3位</option>
+                        <option value="4">4位</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>扩展名规则（多选）</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="cfgExtRule" value="必须小写" checked> 必须小写</label>
+                        <label><input type="checkbox" name="cfgExtRule" value="必须大写"> 必须大写</label>
+                        <label><input type="checkbox" name="cfgExtRule" value="不限制"> 不限制</label>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:6px;font-size:12px;color:var(--text-secondary)">
+                <i class="fa fa-info-circle"></i> 命名规范示例：{系统标识}{分隔符}{业务类型}{分隔符}{日期}{分隔符}{序号}.{扩展名}，如 CORE_DRPT_20260604_001.csv
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeDetectConfigModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveDetectConfig()">保存配置</button>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 历史检测弹窗 ====== -->
+<div class="modal-overlay" id="historyModal" style="display:none">
+    <div class="modal-box" style="width:760px;max-width:92vw">
+        <div class="modal-header">
+            <h3><i class="fa fa-history" style="color:var(--primary);margin-right:6px"></i>历史检测记录</h3>
+            <a href="javascript:;" class="modal-close" onclick="closeHistoryModal()"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>检测时间</th>
+                        <th>检测范围</th>
+                        <th class="text-center">冲突数</th>
+                        <th class="text-center">已解决</th>
+                        <th class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="historyListBody"></tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeHistoryModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+
+/* ====== 冲突类型与"冲突原因"列的关键字映射（用于按冲突类型筛选） ====== */
+var CONFLICT_TYPE_KEYWORDS = {
+    '文件名重复': ['重复', '相同'],
+    '命名规范不符': ['规范', '缺少', '分隔符', '扩展名', '序号', '大写'],
+    '日期格式错误': ['日期', 'YYYY'],
+    '系统标识不存在': ['系统标识', '不存在']
+};
+
+/* ====== 查询：按筛选条件（冲突类型/严重程度/涉及系统）过滤表格行 ====== */
+function filterConflicts() {
+    var type = document.getElementById('filterConflictType').value;
+    var severity = document.getElementById('filterConflictSeverity').value;
+    var system = document.getElementById('filterConflictSystem').value;
+    var rows = document.querySelectorAll('.data-table tbody tr.conflict-row');
+    var visibleCount = 0;
+    rows.forEach(function(row) {
+        var cells = row.querySelectorAll('td');
+        var severityText = cells[1] ? cells[1].textContent.trim() : '';
+        var reasonText = cells[3] ? cells[3].textContent.trim() : '';
+        var systemText = cells[4] ? cells[4].textContent.trim() : '';
+        var show = true;
+        // 严重程度：匹配标签文案
+        if (severity && severity !== '全部' && severityText.indexOf(severity) < 0) show = false;
+        // 涉及系统：匹配第5列文案
+        if (system && system !== '全部' && systemText.indexOf(system) < 0) show = false;
+        // 冲突类型：按关键字匹配冲突原因
+        if (type && type !== '全部') {
+            var keywords = CONFLICT_TYPE_KEYWORDS[type] || [type];
+            var matched = false;
+            for (var i = 0; i < keywords.length; i++) {
+                if (reasonText.indexOf(keywords[i]) >= 0) { matched = true; break; }
+            }
+            if (!matched) show = false;
+        }
+        row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
+    });
+    var emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+    showToast('查询完成，共匹配 ' + visibleCount + ' 条冲突');
+}
+
+/* ====== 重置：清空筛选条件并恢复全部行 ====== */
+function resetConflictFilter() {
+    document.getElementById('filterConflictType').value = '全部';
+    document.getElementById('filterConflictSeverity').value = '全部';
+    document.getElementById('filterConflictSystem').value = '全部';
+    var dateInput = document.getElementById('filterConflictDate');
+    if (dateInput) dateInput.value = '';
+    var rows = document.querySelectorAll('.data-table tbody tr.conflict-row');
+    rows.forEach(function(row) { row.style.display = ''; });
+    var emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = 'none';
+    // 取消全选状态
+    var master = document.getElementById('conflictCheckAll');
+    if (master) master.checked = false;
+    showToast('已重置筛选条件');
+}
+
+/* ====== 全选/取消全选：勾选或取消所有行的复选框 ====== */
+function toggleSelectAll(master) {
+    var rowChecks = document.querySelectorAll('.data-table tbody tr.conflict-row input[type="checkbox"]');
+    var visibleChecks = 0;
+    rowChecks.forEach(function(cb) {
+        // 仅操作可见行
+        var row = cb.closest('tr');
+        if (!row || row.style.display !== 'none') {
+            cb.checked = master.checked;
+            visibleChecks++;
+        }
+    });
+    showToast(master.checked ? '已全选 ' + visibleChecks + ' 条冲突' : '已取消全选');
+}
+
+/* ====== 分页：切换 active 样式 ====== */
+function goToConflictPage(page) {
+    var btns = document.querySelectorAll('.pagination .page-list button');
+    var currentActive = 1;
+    btns.forEach(function(b) {
+        if (b.classList.contains('active')) {
+            var n = parseInt(b.textContent);
+            if (!isNaN(n)) currentActive = n;
+        }
+    });
+    var target;
+    if (page === 'prev') target = currentActive - 1;
+    else if (page === 'next') target = currentActive + 1;
+    else target = parseInt(page);
+    if (isNaN(target) || target < 1 || target > 21) { showToast('已到达分页边界'); return; }
+    btns.forEach(function(b) {
+        b.classList.remove('active');
+        var n = parseInt(b.textContent);
+        if (!isNaN(n) && n === target) b.classList.add('active');
+    });
+    // 首页禁用上一页
+    var prevBtn = document.getElementById('conflictPrevBtn');
+    if (prevBtn) prevBtn.disabled = (target === 1);
+    showToast('已跳转到第 ' + target + ' 页');
+}
+
+/* ====== 查看详情：弹出模态框显示冲突详情 ====== */
+function viewConflictDetail(btn) {
+    var row = btn.closest('tr');
+    if (!row) { showToast('未找到冲突行'); return; }
+    var cells = row.querySelectorAll('td');
+    // 列顺序：0复选框 1严重程度 2冲突文件 3冲突原因 4涉及系统 5建议解决 6发现时间 7操作
+    var severity = cells[1] ? cells[1].innerHTML : '-';
+    var filesHtml = cells[2] ? cells[2].innerHTML : '-';
+    var reason = cells[3] ? cells[3].textContent.trim() : '-';
+    var system = cells[4] ? cells[4].textContent.trim() : '-';
+    var suggestion = cells[5] ? cells[5].textContent.trim() : '-';
+    var time = cells[6] ? cells[6].textContent.trim() : '-';
+    // 构建遮罩与模态框
+    var overlay = document.createElement('div');
+    overlay.id = '_conflictDetailModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99998;display:flex;align-items:center;justify-content:center';
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:8px;width:560px;max-width:90vw;max-height: 80vh; height: auto;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.2)';
+    modal.innerHTML =
+        '<div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">' +
+            '<div style="font-size:16px;font-weight:600;color:#1e293b"><i class="fa fa-eye" style="color:#2563eb;margin-right:8px"></i>冲突详情</div>' +
+            '<a href="javascript:;" onclick="document.getElementById(\'_conflictDetailModal\').remove()" style="color:#94a3b8;font-size:22px;text-decoration:none;line-height:1">&times;</a>' +
+        '</div>' +
+        '<div style="padding:20px">' +
+            '<div style="display:grid;grid-template-columns:90px 1fr;gap:12px 16px;font-size:13px;line-height:1.8">' +
+                '<div style="color:#64748b">严重程度</div><div>' + severity + '</div>' +
+                '<div style="color:#64748b">冲突文件</div><div style="font-family:Consolas,monospace;color:#991b1b">' + filesHtml + '</div>' +
+                '<div style="color:#64748b">冲突原因</div><div style="color:#334155">' + reason + '</div>' +
+                '<div style="color:#64748b">涉及系统</div><div style="color:#334155">' + system + '</div>' +
+                '<div style="color:#64748b">建议解决</div><div style="color:#16a34a">' + suggestion + '</div>' +
+                '<div style="color:#64748b">发现时间</div><div style="color:#334155">' + time + '</div>' +
+            '</div>' +
+        '</div>' +
+        '<div style="padding:12px 20px;border-top:1px solid #e2e8f0;text-align:right">' +
+            '<button class="btn btn-default" onclick="document.getElementById(\'_conflictDetailModal\').remove()">关闭</button>' +
+        '</div>';
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+}
+
+/* ====== 解决：confirm确认后更新行状态为"已解决" ====== */
+function resolveConflict(btn) {
+    var row = btn.closest('tr');
+    if (!row) { showToast('未找到冲突行'); return; }
+    var cells = row.querySelectorAll('td');
+    var files = cells[2] ? cells[2].textContent.trim().replace(/\s+/g, ' ').slice(0, 50) : '该冲突';
+    if (!confirm('确认将该冲突项标记为"已解决"?\n\n涉及文件: ' + files + '\n\n确认后行状态将更新为已解决。')) return;
+    // 严重程度列（第2列）更新为"已解决"绿色标签
+    var severityCell = cells[1];
+    if (severityCell) {
+        severityCell.innerHTML = '<span class="tag tag-success">已解决</span>';
+    }
+    // 操作列（第8列）更新为"已解决"状态，隐藏按钮
+    var opCell = cells[7];
+    if (opCell) {
+        opCell.innerHTML = '<span style="color:#16a34a;font-size:12px"><i class="fa fa-check-circle"></i> 已解决</span>';
+    }
+    // 移除冲突高亮，改为已解决样式
+    row.classList.remove('warn', 'info');
+    row.style.background = '#f0fdf4';
+    row.style.borderLeft = '4px solid #16a34a';
+    row.style.opacity = '0.75';
+    showToast('冲突已标记为已解决');
+}
+
+/* ====== 启动检测：保持showToast但添加loading动画效果 ====== */
+function startConflictDetection(btn, detectName) {
+    if (!confirm('确认启动' + detectName + '?\n\n将立即扫描所有文件的命名规范与冲突情况。')) return;
+    var originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 检测中...';
+    setTimeout(function() {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.innerHTML = originalHtml;
+        showToast(detectName + '已启动');
+    }, 1800);
+}
+
+/* ====== 检测配置弹窗 ====== */
+function openDetectConfigModal() {
+    document.getElementById('detectConfigModal').style.display = 'flex';
+}
+function closeDetectConfigModal() {
+    document.getElementById('detectConfigModal').style.display = 'none';
+}
+// 保存检测配置
+function saveDetectConfig() {
+    var systemList = document.getElementById('cfgSystemList').value.trim();
+    if (!systemList) { showToast('请填写系统标识清单'); return; }
+    closeDetectConfigModal();
+    showToast('命名规则配置已保存');
+}
+
+/* ====== 历史检测弹窗 ====== */
+// 历史检测记录 mock 数据
+var detectHistoryData = [
+    { time: '2026-06-04 09:00', scope: '全部系统', count: 188, resolved: 32 },
+    { time: '2026-06-03 09:00', scope: '全部系统', count: 205, resolved: 28 },
+    { time: '2026-06-02 09:00', scope: '财务系统/订单系统', count: 56, resolved: 18 },
+    { time: '2026-06-01 09:00', scope: '全部系统', count: 198, resolved: 25 },
+    { time: '2026-05-31 09:00', scope: '客户系统/清算系统', count: 42, resolved: 12 },
+    { time: '2026-05-30 09:00', scope: '全部系统', count: 210, resolved: 30 },
+    { time: '2026-05-29 09:00', scope: '财务系统', count: 35, resolved: 8 }
+];
+// 渲染历史检测列表
+function renderHistoryList() {
+    var tbody = document.getElementById('historyListBody');
+    var html = detectHistoryData.map(function(item, idx) {
+        return '<tr>' +
+            '<td>' + item.time + '</td>' +
+            '<td>' + item.scope + '</td>' +
+            '<td class="text-center" style="color:#dc2626;font-weight:600">' + item.count + '</td>' +
+            '<td class="text-center" style="color:#16a34a;font-weight:600">' + item.resolved + '</td>' +
+            '<td class="text-center op-col"><a href="javascript:;" onclick="viewHistoryDetail(' + idx + ')">查看详情</a></td>' +
+        '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+}
+function openHistoryModal() {
+    renderHistoryList();
+    document.getElementById('historyModal').style.display = 'flex';
+}
+function closeHistoryModal() {
+    document.getElementById('historyModal').style.display = 'none';
+}
+// 查看历史检测详情
+function viewHistoryDetail(idx) {
+    var item = detectHistoryData[idx];
+    closeHistoryModal();
+    showToast('查看 ' + item.time + ' 检测详情：共 ' + item.count + ' 个冲突，已解决 ' + item.resolved + ' 个');
+}
+
+/* ====== 批量处理：需先勾选冲突项，再将选中行标记为已解决 ====== */
+function batchProcessConflicts() {
+    var checked = document.querySelectorAll('.data-table tbody tr.conflict-row input[type="checkbox"]:checked');
+    if (checked.length === 0) {
+        showToast('请先选择需要批量处理的冲突项');
+        return;
+    }
+    checked.forEach(function(cb) {
+        var row = cb.closest('tr');
+        if (!row) return;
+        var cells = row.querySelectorAll('td');
+        // 严重程度列（第2列）更新为"已解决"
+        if (cells[1]) cells[1].innerHTML = '<span class="tag tag-success">已解决</span>';
+        // 操作列（第8列）更新为已解决状态
+        if (cells[7]) cells[7].innerHTML = '<span style="color:#16a34a;font-size:12px"><i class="fa fa-check-circle"></i> 已解决</span>';
+        row.classList.remove('warn', 'info');
+        row.style.background = '#f0fdf4';
+        row.style.borderLeft = '4px solid #16a34a';
+        row.style.opacity = '0.75';
+        cb.checked = false;
+    });
+    // 取消全选状态
+    var master = document.getElementById('conflictCheckAll');
+    if (master) master.checked = false;
+    showToast('已批量处理选中的 ' + checked.length + ' 个冲突');
+}
+
+/* ====== 统一绑定"查看详情/解决"按钮到真实交互函数（共9行，批量处理避免逐个修改） ====== */
+(function() {
+    document.querySelectorAll('a[onclick*="查看冲突详情"]').forEach(function(a) {
+        a.setAttribute('onclick', "viewConflictDetail(this)");
+    });
+    document.querySelectorAll('a[onclick*="打开冲突处理"]').forEach(function(a) {
+        a.setAttribute('onclick', "resolveConflict(this)");
+    });
+})();
+</script>
+</body>
+</html>

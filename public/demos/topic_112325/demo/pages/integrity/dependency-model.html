@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>接口依赖关系建模 - 规则引擎管理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .dep-layout { display: flex; gap: 16px; margin-bottom: 16px; }
+        .dep-tree { width: 300px; flex-shrink: 0; }
+        .dep-graph { flex: 1; }
+        .tree-node { padding: 8px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+        .tree-node:hover { background: #eff6ff; }
+        .tree-node.active { background: #dbeafe; color: var(--primary); font-weight: 600; }
+        .tree-children { padding-left: 20px; }
+        .tree-l1 { font-weight: 600; color: var(--text-primary); }
+        .tree-l2 { color: var(--text-secondary); }
+        .tree-l3 { color: var(--text-light); font-size: 12px; }
+        .dep-type-legend { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .svg-container { background: #fafbfc; border: 1px solid var(--border); border-radius: 6px; min-height: 380px; position: relative; }
+        .dep-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+
+        /* ===== 统一弹窗样式 ===== */
+        .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:1000; align-items:center; justify-content:center; }
+        .modal-box { background:#fff; border-radius:8px; width:560px; max-width:90vw; max-height: 85vh; height: auto; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.15); }
+        .modal-header { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .modal-title { font-size:16px; font-weight:600; color:var(--text-primary); }
+        .modal-close { font-size:18px; color:var(--text-light); cursor:pointer; }
+        .modal-close:hover { color:var(--text-primary); }
+        .modal-body { padding:20px; }
+        .modal-footer { padding:12px 20px; border-top:1px solid var(--border); text-align:right; display:flex; justify-content:flex-end; gap:8px; align-items:center; }
+
+        /* ===== 图谱交互 ===== */
+        .dep-node { cursor: grab; }
+        .dep-node:hover .dep-node-rect { stroke:#fff; stroke-width:2; filter: brightness(1.08); }
+        .dep-node:active { cursor: grabbing; }
+        .dep-edge-hit { cursor: pointer; }
+        .dep-edge-hit:hover + line { stroke-width: 3; }
+        .graph-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; background:#fafbfc; border-radius:6px; }
+        .graph-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; color:var(--text-light); }
+        .graph-tip { position:absolute; left:12px; bottom:10px; font-size:11px; color:var(--text-light); background:rgba(255,255,255,0.8); padding:3px 8px; border-radius:10px; }
+        #dragHint { position:fixed; z-index:9999; display:none; background:#1e293b; color:#fff; font-size:12px; padding:5px 10px; border-radius:14px; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+        .form-hint { font-size:12px; color:var(--text-light); margin-top:4px; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-sitemap" style="color:var(--primary);margin-right:8px"></i>接口依赖关系建模</h2>
+            <div class="page-desc">
+                首页 / 规则引擎管理 / 接口依赖关系建模 - 以业务活动为维度，建模接口间的依赖关系，识别完整性缺口
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="exportDepGraph()"><i class="fa fa-download"></i> 导出依赖图</button>
+            <button class="btn btn-primary" onclick="openDepModal('new-manual', {})"><i class="fa fa-plus-circle"></i> 新建依赖关系</button>
+        </div>
+    </div>
+
+    <!-- ====== 依赖类型图例 ====== -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-body">
+            <div class="dep-type-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#1e40af"></div> 业务时序依赖</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#059669"></div> 服务生命周期依赖</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#d97706"></div> 功能对等依赖</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> 数据关联依赖</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#dc2626"></div> 权限配套依赖</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 左侧树 + 右侧图 ====== -->
+    <div class="dep-layout">
+        <!-- 左侧业务活动树 -->
+        <div class="card dep-tree">
+            <div class="card-header">
+                <div class="card-title">业务活动导航</div>
+            </div>
+            <div class="card-body" style="padding:8px">
+                <div class="tree-node tree-l1" onclick="selectActivity(this)"><i class="fa fa-folder-open"></i> 客户管理</div>
+                <div class="tree-children">
+                    <div class="tree-node tree-l2" onclick="selectActivity(this)"><i class="fa fa-folder"></i> 客户信息维护</div>
+                    <div class="tree-children">
+                        <div class="tree-node tree-l3 active" data-activity="个人客户开户" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 个人客户开户</div>
+                        <div class="tree-node tree-l3" data-activity="对公客户开户" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 对公客户开户</div>
+                        <div class="tree-node tree-l3" data-activity="客户资料变更" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 客户资料变更</div>
+                    </div>
+                    <div class="tree-node tree-l2" onclick="selectActivity(this)"><i class="fa fa-folder"></i> 客户查询服务</div>
+                    <div class="tree-children">
+                        <div class="tree-node tree-l3" data-activity="客户基本信息查询" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 客户基本信息查询</div>
+                        <div class="tree-node tree-l3" data-activity="客户账户查询" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 客户账户查询</div>
+                    </div>
+                </div>
+                <div class="tree-node tree-l1" onclick="selectActivity(this)"><i class="fa fa-folder-open"></i> 贷款管理</div>
+                <div class="tree-children">
+                    <div class="tree-node tree-l2" onclick="selectActivity(this)"><i class="fa fa-folder"></i> 贷款申请</div>
+                    <div class="tree-children">
+                        <div class="tree-node tree-l3" data-activity="个人贷款申请" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 个人贷款申请</div>
+                        <div class="tree-node tree-l3" data-activity="对公贷款申请" onclick="selectActivity(this)"><i class="fa fa-file-text-o"></i> 对公贷款申请</div>
+                    </div>
+                    <div class="tree-node tree-l2" onclick="selectActivity(this)"><i class="fa fa-folder"></i> 贷款审批</div>
+                </div>
+                <div class="tree-node tree-l1" onclick="selectActivity(this)"><i class="fa fa-folder-open"></i> 账务处理</div>
+                <div class="tree-node tree-l1" onclick="selectActivity(this)"><i class="fa fa-folder-open"></i> 风险管理</div>
+            </div>
+        </div>
+
+        <!-- 右侧依赖关系图 -->
+        <div class="card dep-graph">
+            <div class="card-header">
+                <div class="card-title" id="graphTitle">个人客户开户 - 接口依赖关系图</div>
+                <div class="card-action">
+                    <a href="javascript:;" onclick="fullscreenGraph()"><i class="fa fa-arrows-alt"></i> 全屏</a>
+                    <a href="javascript:;" onclick="refreshLayout()"><i class="fa fa-refresh"></i> 刷新布局</a>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="svg-container">
+                    <svg id="depSvg" width="100%" height="380" viewBox="0 0 800 380">
+                        <defs>
+                            <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#1e40af"/></marker>
+                            <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#059669"/></marker>
+                            <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#d97706"/></marker>
+                            <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#7c3aed"/></marker>
+                            <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#dc2626"/></marker>
+                        </defs>
+                        <g id="edgesLayer"></g>
+                        <g id="nodesLayer"></g>
+                        <line id="dragLine" stroke="#1e40af" stroke-width="2" stroke-dasharray="5,4" opacity="0.75" style="display:none;pointer-events:none" marker-end="url(#arrow-blue)"/>
+                    </svg>
+                    <div class="graph-tip"><i class="fa fa-info-circle"></i> 按住节点拖拽到目标节点可建立依赖；点击连线可编辑</div>
+                    <div id="graphLoading" class="graph-loading">
+                        <i class="fa fa-spinner fa-pulse fa-2x fa-fw" style="color:var(--primary);"></i>
+                        <p style="margin-top:12px;color:var(--text-secondary);font-size:13px;">依赖关系图加载中...</p>
+                    </div>
+                    <div id="graphEmpty" class="graph-empty" style="display:none">
+                        <i class="fa fa-inbox" style="font-size:36px;margin-bottom:8px"></i>
+                        <p style="font-size:13px;">该业务活动暂无依赖关系数据，请在画布上拖拽节点创建</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 依赖关系表格 ====== -->
+    <div class="card" style="margin-bottom:0">
+        <div class="card-header">
+            <div class="card-title">依赖关系明细</div>
+            <div class="card-action">
+                <a href="javascript:;" onclick="openDepModal('new-manual', {})"><i class="fa fa-plus"></i> 新增依赖</a>
+                <a href="javascript:;" onclick="batchDelete()"><i class="fa fa-trash-o"></i> 批量删除</a>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" id="depCheckAll" onclick="toggleAllDep(this)"></th>
+                        <th style="width:180px">上游接口</th>
+                        <th style="width:180px">下游接口</th>
+                        <th style="width:130px">依赖类型</th>
+                        <th style="width:90px" class="text-center">强制级别</th>
+                        <th>说明</th>
+                        <th style="width:120px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="depTableBody">
+                    <tr id="loadingRow">
+                        <td colspan="7" style="text-align:center; padding:40px 20px;">
+                            <div style="display:inline-block;">
+                                <i class="fa fa-spinner fa-pulse fa-2x fa-fw" style="color:var(--primary);"></i>
+                                <p style="margin-top:12px;color:var(--text-secondary);font-size:13px;">数据加载中...</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="errorState" style="display:none; text-align:center; padding:40px 20px;">
+            <i class="fa fa-exclamation-circle" style="font-size:36px;color:var(--danger);"></i>
+            <p style="margin-top:12px;color:var(--text-secondary);font-size:13px;">数据加载失败</p>
+            <button class="btn btn-default" style="margin-top:12px;" onclick="location.reload()"><i class="fa fa-refresh"></i> 重新加载</button>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary" id="depCount">10</span> 条记录</div>
+            <div class="page-list">
+                <button disabled onclick="prevPage()"><i class="fa fa-angle-left"></i></button>
+                <button class="active" onclick="goToPage(1)">1</button>
+                <button disabled onclick="nextPage()"><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px">
+                    <option>10 条/页</option>
+                    <option>20 条/页</option>
+                    <option>50 条/页</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 依赖关系 新建/编辑 弹窗 ====== -->
+<div class="modal-overlay" id="depModal">
+    <div class="modal-box" style="width:520px">
+        <div class="modal-header">
+            <span class="modal-title" id="depModalTitle">新建依赖关系</span>
+            <a class="modal-close" onclick="closeDepModal()"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">上游接口 <span style="color:var(--danger)">*</span></label>
+                <select id="depSource" class="form-control"></select>
+                <div class="form-hint" id="depSourceHint" style="display:none">由画布拖拽起点自动填入</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">下游接口 <span style="color:var(--danger)">*</span></label>
+                <select id="depTarget" class="form-control"></select>
+                <div class="form-hint" id="depTargetHint" style="display:none">由画布拖拽终点自动填入</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">依赖类型 <span style="color:var(--danger)">*</span></label>
+                <select id="depType" class="form-control">
+                    <option value="业务时序依赖">业务时序依赖</option>
+                    <option value="服务生命周期依赖">服务生命周期依赖</option>
+                    <option value="功能对等依赖">功能对等依赖</option>
+                    <option value="数据关联依赖">数据关联依赖</option>
+                    <option value="权限配套依赖">权限配套依赖</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">依赖描述</label>
+                <textarea id="depDesc" class="form-control" rows="3" placeholder="请输入依赖关系说明"></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeDepModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmDepModal()"><i class="fa fa-check"></i> 确认</button>
+        </div>
+    </div>
+</div>
+
+<div id="dragHint"><i class="fa fa-arrow-right"></i> 拖拽到目标节点建立依赖</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+// ====== 依赖类型元数据（颜色/虚线/标签/箭头） ======
+var DEP_TYPE_META = {
+    '业务时序依赖':       { color: '#1e40af', dash: '',     tag: 'tag-info',    marker: 'arrow-blue'   },
+    '服务生命周期依赖':   { color: '#059669', dash: '6,3',  tag: 'tag-success', marker: 'arrow-green'  },
+    '功能对等依赖':       { color: '#d97706', dash: '6,3',  tag: 'tag-warning', marker: 'arrow-orange' },
+    '数据关联依赖':       { color: '#7c3aed', dash: '4,4',  tag: 'tag-purple',  marker: 'arrow-purple' },
+    '权限配套依赖':       { color: '#dc2626', dash: '4,4',  tag: 'tag-danger',  marker: 'arrow-red'    }
+};
+// 强制级别 -> 标签样式
+var DEP_LEVEL_META = { 'MUST': 'tag-danger', 'SHOULD': 'tag-warning', 'MAY': 'tag-default' };
+
+// ====== 节点数据（保留原有 9 个节点：坐标、颜色、名称） ======
+var DEP_NODES = [
+    { id: 'CUST_INFO_VALIDATE',  name: '客户信息校验',   cx: 150, cy: 60,  fill: '#1e40af' },
+    { id: 'ACCT_OPEN_SUBMIT',    name: '开户申请提交',   cx: 420, cy: 60,  fill: '#1e40af' },
+    { id: 'ACCT_CREATE',         name: '账户创建',       cx: 640, cy: 60,  fill: '#1e40af' },
+    { id: 'ID_VERIFY_QUERY',     name: '实名认证查询',   cx: 150, cy: 170, fill: '#059669' },
+    { id: 'RISK_LEVEL_QUERY',    name: '风险评级查询',   cx: 420, cy: 170, fill: '#d97706' },
+    { id: 'CUST_PROFILE_SYNC',   name: '客户画像同步',   cx: 640, cy: 170, fill: '#7c3aed' },
+    { id: 'PERM_OPEN_APPLY',     name: '权限开通申请',   cx: 150, cy: 280, fill: '#dc2626' },
+    { id: 'SMS_NOTIFY_SEND',     name: '短信通知发送',   cx: 420, cy: 280, fill: '#475569' },
+    { id: 'OPEN_RESULT_NOTIFY',  name: '开户结果通知',   cx: 640, cy: 280, fill: '#475569' }
+];
+var NODE_W = 100, NODE_H = 40; // 节点矩形尺寸
+
+// ====== 依赖关系数据（保留原有 10 条，新增 4 条画布连线） ======
+var DEP_EDGES = [
+    { id: 'edge_1',  source: 'CUST_INFO_VALIDATE', target: 'ACCT_OPEN_SUBMIT',  type: '业务时序依赖',     level: 'MUST',   desc: '开户前必须完成客户信息校验',     activity: '个人客户开户' },
+    { id: 'edge_2',  source: 'ACCT_OPEN_SUBMIT',   target: 'ACCT_CREATE',       type: '业务时序依赖',     level: 'MUST',   desc: '开户申请通过后才能创建账户',     activity: '个人客户开户' },
+    { id: 'edge_3',  source: 'CUST_INFO_VALIDATE', target: 'ID_VERIFY_QUERY',   type: '服务生命周期依赖', level: 'MUST',   desc: '客户信息校验依赖实名认证服务可用', activity: '个人客户开户' },
+    { id: 'edge_4',  source: 'ACCT_OPEN_SUBMIT',   target: 'RISK_LEVEL_QUERY',  type: '功能对等依赖',     level: 'SHOULD', desc: '开户申请应同步查询客户风险评级',  activity: '个人客户开户' },
+    { id: 'edge_5',  source: 'CUST_INFO_VALIDATE', target: 'CUST_PROFILE_SYNC', type: '数据关联依赖',     level: 'SHOULD', desc: '客户信息校验后应同步客户画像数据', activity: '个人客户开户' },
+    { id: 'edge_6',  source: 'ACCT_OPEN_SUBMIT',   target: 'PERM_OPEN_APPLY',   type: '权限配套依赖',     level: 'MUST',   desc: '开户完成后必须开通相关权限',     activity: '个人客户开户' },
+    { id: 'edge_7',  source: 'ACCT_CREATE',        target: 'SMS_NOTIFY_SEND',   type: '业务时序依赖',     level: 'MAY',    desc: '账户创建后可发送短信通知',       activity: '个人客户开户' },
+    { id: 'edge_8',  source: 'ACCT_CREATE',        target: 'OPEN_RESULT_NOTIFY',type: '业务时序依赖',     level: 'MAY',    desc: '账户创建后可通知开户结果',       activity: '个人客户开户' },
+    { id: 'edge_9',  source: 'ID_VERIFY_QUERY',    target: 'RISK_LEVEL_QUERY',  type: '服务生命周期依赖', level: 'SHOULD', desc: '实名认证服务应先于风险评级可用',   activity: '个人客户开户' },
+    { id: 'edge_10', source: 'RISK_LEVEL_QUERY',   target: 'CUST_PROFILE_SYNC', type: '数据关联依赖',     level: 'MAY',    desc: '风险评级数据可同步至客户画像',    activity: '个人客户开户' }
+];
+
+// ====== 状态变量 ======
+var currentActivity = ['个人客户开户']; // 当前选中的业务活动集合
+var depModalMode = 'new';               // 弹窗模式：new / edit
+var editingEdgeId = null;
+var dragState = null;                   // 拖拽状态：{sourceId, moved}
+var svgEl = null;
+
+// ====== 工具：取节点/边 ======
+function getNode(id) {
+    for (var i = 0; i < DEP_NODES.length; i++) if (DEP_NODES[i].id === id) return DEP_NODES[i];
+    return null;
+}
+function getEdge(id) {
+    for (var i = 0; i < DEP_EDGES.length; i++) if (DEP_EDGES[i].id === id) return DEP_EDGES[i];
+    return null;
+}
+// 过滤当前业务活动可见的边
+function getVisibleEdges() {
+    return DEP_EDGES.filter(function (e) { return currentActivity.indexOf(e.activity) > -1; });
+}
+
+// ====== 坐标转换：浏览器坐标 -> SVG 坐标 ======
+function clientToSvg(clientX, clientY) {
+    if (!svgEl) return { x: clientX, y: clientY };
+    var pt = svgEl.createSVGPoint();
+    pt.x = clientX; pt.y = clientY;
+    var ctm = svgEl.getScreenCTM();
+    if (!ctm) return { x: clientX, y: clientY };
+    var p = pt.matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+}
+
+// ====== 计算连线端点（从节点中心裁剪到矩形边界，避免箭头插入节点） ======
+function edgePoints(src, tgt) {
+    var dx = tgt.cx - src.cx, dy = tgt.cy - src.cy;
+    var hw = NODE_W / 2, hh = NODE_H / 2;
+    var scaleX = Math.abs(dx) < 0.001 ? Infinity : hw / Math.abs(dx);
+    var scaleY = Math.abs(dy) < 0.001 ? Infinity : hh / Math.abs(dy);
+    var scale = Math.min(scaleX, scaleY);
+    return {
+        x1: src.cx + dx * scale, y1: src.cy + dy * scale,
+        x2: tgt.cx - dx * scale, y2: tgt.cy - dy * scale
+    };
+}
+
+// ====== 渲染单个节点 ======
+function renderNode(node) {
+    var rx = node.cx - NODE_W / 2, ry = node.cy - NODE_H / 2;
+    return '<g class="dep-node" data-id="' + node.id + '" onmousedown="onNodeMouseDown(event, \'' + node.id + '\')">' +
+        '<rect class="dep-node-rect" x="' + rx + '" y="' + ry + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="6" fill="' + node.fill + '" opacity="0.9"/>' +
+        '<text x="' + node.cx + '" y="' + (node.cy + 4) + '" text-anchor="middle" fill="#fff" font-size="12" pointer-events="none">' + node.name + '</text>' +
+        '</g>';
+}
+
+// ====== 渲染单条依赖连线（可见线 + 透明点击热区 + 标签） ======
+function renderEdge(edge) {
+    var src = getNode(edge.source), tgt = getNode(edge.target);
+    if (!src || !tgt) return '';
+    var meta = DEP_TYPE_META[edge.type];
+    var p = edgePoints(src, tgt);
+    var midX = (p.x1 + p.x2) / 2, midY = (p.y1 + p.y2) / 2 - 4;
+    var dashAttr = meta.dash ? (' stroke-dasharray="' + meta.dash + '"') : '';
+    return '<g class="dep-edge" data-id="' + edge.id + '">' +
+        '<line x1="' + p.x1 + '" y1="' + p.y1 + '" x2="' + p.x2 + '" y2="' + p.y2 + '" stroke="' + meta.color + '" stroke-width="2"' + dashAttr + ' marker-end="url(#' + meta.marker + ')" pointer-events="none"/>' +
+        '<line class="dep-edge-hit" x1="' + p.x1 + '" y1="' + p.y1 + '" x2="' + p.x2 + '" y2="' + p.y2 + '" stroke="transparent" stroke-width="14" onclick="editEdgeFromLine(\'' + edge.id + '\')"/>' +
+        '<text x="' + midX + '" y="' + midY + '" text-anchor="middle" fill="' + meta.color + '" font-size="10" pointer-events="none">' + edge.type.replace('依赖', '') + '</text>' +
+        '</g>';
+}
+
+// ====== 渲染整个图谱 ======
+function renderGraph() {
+    var edgesLayer = document.getElementById('edgesLayer');
+    var nodesLayer = document.getElementById('nodesLayer');
+    var visible = getVisibleEdges();
+    var nodeIds = {};
+    visible.forEach(function (e) { nodeIds[e.source] = true; nodeIds[e.target] = true; });
+    edgesLayer.innerHTML = visible.map(renderEdge).join('');
+    nodesLayer.innerHTML = DEP_NODES.filter(function (n) { return nodeIds[n.id]; }).map(renderNode).join('');
+    document.getElementById('graphEmpty').style.display = visible.length === 0 ? 'flex' : 'none';
+}
+
+// ====== 渲染表格 ======
+function renderTable() {
+    var tbody = document.getElementById('depTableBody');
+    var visible = getVisibleEdges();
+    if (visible.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>暂无依赖关系数据，请在画布上拖拽节点创建</td></tr>';
+    } else {
+        tbody.innerHTML = visible.map(function (e) {
+            var meta = DEP_TYPE_META[e.type];
+            var levelTag = DEP_LEVEL_META[e.level] || 'tag-default';
+            return '<tr>' +
+                '<td><input type="checkbox" class="row-check" data-id="' + e.id + '"></td>' +
+                '<td style="color:var(--primary);font-weight:600">' + e.source + '</td>' +
+                '<td>' + e.target + '</td>' +
+                '<td><span class="dep-tag ' + meta.tag + '">' + e.type + '</span></td>' +
+                '<td class="text-center"><span class="tag ' + levelTag + '" style="font-size:11px">' + e.level + '</span></td>' +
+                '<td>' + e.desc + '</td>' +
+                '<td class="text-center op-col">' +
+                    '<a class="btn-link" style="padding:0 4px;cursor:pointer" title="编辑" onclick="editEdgeFromTable(\'' + e.id + '\')"><i class="fa fa-edit"></i></a>' +
+                    '<a class="btn-link" style="padding:0 4px;cursor:pointer" title="删除" onclick="deleteEdge(\'' + e.id + '\')"><i class="fa fa-trash-o"></i></a>' +
+                '</td>' +
+            '</tr>';
+        }).join('');
+    }
+    updateCount();
+    var checkAll = document.getElementById('depCheckAll');
+    if (checkAll) checkAll.checked = false;
+}
+
+// ====== 更新记录数 ======
+function updateCount() {
+    var span = document.getElementById('depCount');
+    if (span) span.textContent = getVisibleEdges().length;
+}
+
+// ====== 拖拽连线：鼠标按下节点 ======
+function onNodeMouseDown(e, nodeId) {
+    e.preventDefault();
+    var node = getNode(nodeId);
+    if (!node) return;
+    dragState = { sourceId: nodeId, moved: false };
+    var pt = clientToSvg(e.clientX, e.clientY);
+    var dragLine = document.getElementById('dragLine');
+    dragLine.setAttribute('x1', node.cx);
+    dragLine.setAttribute('y1', node.cy);
+    dragLine.setAttribute('x2', pt.x);
+    dragLine.setAttribute('y2', pt.y);
+    dragLine.style.display = '';
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
+    showDragHint(true, e.clientX, e.clientY);
+}
+
+// ====== 拖拽连线：鼠标移动 ======
+function onDragMove(e) {
+    if (!dragState) return;
+    dragState.moved = true;
+    var pt = clientToSvg(e.clientX, e.clientY);
+    var dragLine = document.getElementById('dragLine');
+    dragLine.setAttribute('x2', pt.x);
+    dragLine.setAttribute('y2', pt.y);
+    showDragHint(true, e.clientX, e.clientY);
+}
+
+// ====== 拖拽连线：鼠标松开 ======
+function onDragEnd(e) {
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragEnd);
+    showDragHint(false);
+    var dragLine = document.getElementById('dragLine');
+    dragLine.style.display = 'none';
+    if (!dragState) return;
+    var pt = clientToSvg(e.clientX, e.clientY);
+    var targetId = getNodeAtPoint(pt.x, pt.y);
+    var sourceId = dragState.sourceId;
+    var moved = dragState.moved;
+    dragState = null;
+    // 拖拽到空白区域或同一节点 -> 取消（仅拖拽过才提示）
+    if (!targetId || targetId === sourceId) {
+        if (moved) showToast('已取消，请拖拽到目标节点上建立依赖关系', 'info');
+        return;
+    }
+    openDepModal('new-drag', { sourceId: sourceId, targetId: targetId });
+}
+
+// ====== 命中测试：判断坐标落在哪个节点上 ======
+function getNodeAtPoint(x, y) {
+    var nodeIds = {};
+    getVisibleEdges().forEach(function (e) { nodeIds[e.source] = true; nodeIds[e.target] = true; });
+    for (var i = 0; i < DEP_NODES.length; i++) {
+        var n = DEP_NODES[i];
+        if (!nodeIds[n.id]) continue;
+        if (x >= n.cx - NODE_W / 2 && x <= n.cx + NODE_W / 2 && y >= n.cy - NODE_H / 2 && y <= n.cy + NODE_H / 2) {
+            return n.id;
+        }
+    }
+    return null;
+}
+
+// ====== 拖拽提示 ======
+function showDragHint(show, x, y) {
+    var hint = document.getElementById('dragHint');
+    hint.style.display = show ? 'block' : 'none';
+    if (show && x !== undefined) {
+        hint.style.left = (x + 14) + 'px';
+        hint.style.top = (y + 14) + 'px';
+    }
+}
+
+// ====== 弹窗：打开（new-drag 拖拽新建 / new-manual 手动新建 / edit 编辑） ======
+function openDepModal(mode, opts) {
+    opts = opts || {};
+    var srcSel = document.getElementById('depSource');
+    var tgtSel = document.getElementById('depTarget');
+    var optionsHtml = DEP_NODES.map(function (n) {
+        return '<option value="' + n.id + '">' + n.id + ' (' + n.name + ')</option>';
+    }).join('');
+    srcSel.innerHTML = optionsHtml;
+    tgtSel.innerHTML = optionsHtml;
+
+    if (mode === 'new-drag') {
+        // 拖拽新建：上游/下游只读，自动填入
+        document.getElementById('depModalTitle').textContent = '新建依赖关系（画布拖拽）';
+        srcSel.value = opts.sourceId; srcSel.disabled = true;
+        tgtSel.value = opts.targetId; tgtSel.disabled = true;
+        document.getElementById('depSourceHint').style.display = '';
+        document.getElementById('depTargetHint').style.display = '';
+        document.getElementById('depType').value = '业务时序依赖';
+        document.getElementById('depDesc').value = '';
+        depModalMode = 'new';
+        editingEdgeId = null;
+    } else if (mode === 'new-manual') {
+        // 手动新建：上游/下游可选择
+        document.getElementById('depModalTitle').textContent = '新建依赖关系';
+        srcSel.disabled = false; tgtSel.disabled = false;
+        srcSel.selectedIndex = 0;
+        tgtSel.selectedIndex = DEP_NODES.length > 1 ? 1 : 0;
+        document.getElementById('depSourceHint').style.display = 'none';
+        document.getElementById('depTargetHint').style.display = 'none';
+        document.getElementById('depType').value = '业务时序依赖';
+        document.getElementById('depDesc').value = '';
+        depModalMode = 'new';
+        editingEdgeId = null;
+    } else if (mode === 'edit') {
+        // 编辑：预填数据，端点只读
+        var edge = getEdge(opts.id);
+        if (!edge) return;
+        document.getElementById('depModalTitle').textContent = '编辑依赖关系';
+        srcSel.value = edge.source; srcSel.disabled = true;
+        tgtSel.value = edge.target; tgtSel.disabled = true;
+        document.getElementById('depSourceHint').style.display = '';
+        document.getElementById('depTargetHint').style.display = '';
+        document.getElementById('depType').value = edge.type;
+        document.getElementById('depDesc').value = edge.desc;
+        depModalMode = 'edit';
+        editingEdgeId = opts.id;
+    }
+    document.getElementById('depModal').style.display = 'flex';
+}
+
+function closeDepModal() {
+    document.getElementById('depModal').style.display = 'none';
+}
+
+// ====== 弹窗：确认（新建/编辑） ======
+function confirmDepModal() {
+    var sourceId = document.getElementById('depSource').value;
+    var targetId = document.getElementById('depTarget').value;
+    var type = document.getElementById('depType').value;
+    var desc = document.getElementById('depDesc').value.trim() || '（无说明）';
+    if (!sourceId || !targetId) { showToast('请选择上游/下游接口', 'warning'); return; }
+    if (sourceId === targetId) { showToast('上游接口与下游接口不能相同', 'warning'); return; }
+    if (!type) { showToast('请选择依赖类型', 'warning'); return; }
+
+    if (depModalMode === 'new') {
+        // 重复校验
+        for (var i = 0; i < DEP_EDGES.length; i++) {
+            if (DEP_EDGES[i].source === sourceId && DEP_EDGES[i].target === targetId && DEP_EDGES[i].activity === currentActivity[0]) {
+                showToast('该依赖关系已存在：' + sourceId + ' → ' + targetId, 'warning');
+                return;
+            }
+        }
+        var newEdge = {
+            id: 'edge_' + Date.now(),
+            source: sourceId, target: targetId, type: type, level: 'SHOULD', desc: desc,
+            activity: currentActivity[0] || '个人客户开户'
+        };
+        DEP_EDGES.push(newEdge);
+        showToast('依赖关系已创建：' + sourceId + ' → ' + targetId);
+    } else {
+        var edge = getEdge(editingEdgeId);
+        if (edge) { edge.type = type; edge.desc = desc; }
+        showToast('依赖关系已更新');
+    }
+    closeDepModal();
+    renderGraph();
+    renderTable();
+}
+
+// ====== 编辑（表格行 & 画布连线） ======
+function editEdgeFromTable(id) { openDepModal('edit', { id: id }); }
+function editEdgeFromLine(id) {
+    openDepModal('edit', { id: id });
+    showToast('已选中依赖关系，可编辑类型与说明', 'info');
+}
+
+// ====== 删除（单条 + 批量） ======
+function deleteEdge(id) {
+    var edge = getEdge(id);
+    if (!edge) return;
+    if (!confirm('确认删除依赖关系 ' + edge.source + ' → ' + edge.target + '？')) return;
+    DEP_EDGES = DEP_EDGES.filter(function (e) { return e.id !== id; });
+    renderGraph();
+    renderTable();
+    showToast('依赖关系已删除');
+}
+function batchDelete() {
+    var checked = document.querySelectorAll('#depTableBody input.row-check:checked');
+    if (checked.length === 0) { showToast('请先勾选要删除的依赖关系', 'warning'); return; }
+    if (!confirm('确认批量删除 ' + checked.length + ' 条依赖关系？')) return;
+    var ids = Array.prototype.map.call(checked, function (cb) { return cb.getAttribute('data-id'); });
+    DEP_EDGES = DEP_EDGES.filter(function (e) { return ids.indexOf(e.id) === -1; });
+    renderGraph();
+    renderTable();
+    showToast('已批量删除 ' + ids.length + ' 条依赖关系');
+}
+
+// ====== 表格全选 ======
+function toggleAllDep(cb) {
+    document.querySelectorAll('#depTableBody input.row-check').forEach(function (c) { c.checked = cb.checked; });
+}
+
+// ====== 树节点联动：过滤画布与表格 ======
+function selectActivity(el) {
+    document.querySelectorAll('.tree-node').forEach(function (n) { n.classList.remove('active'); });
+    el.classList.add('active');
+
+    // 收集点击节点下所有叶子业务活动
+    var activities = [];
+    var leaves = el.querySelectorAll('.tree-node.tree-l3');
+    if (leaves.length === 0) {
+        if (el.classList.contains('tree-l3') && el.getAttribute('data-activity')) {
+            activities.push(el.getAttribute('data-activity'));
+        } else {
+            activities.push('__none__');
+        }
+    } else {
+        leaves.forEach(function (l) {
+            var a = l.getAttribute('data-activity');
+            if (a) activities.push(a);
+        });
+    }
+    currentActivity = activities;
+
+    var titleText = el.textContent.trim();
+    document.getElementById('graphTitle').textContent = titleText + ' - 接口依赖关系图';
+    renderGraph();
+    renderTable();
+
+    var visibleCount = getVisibleEdges().length;
+    if (visibleCount === 0) {
+        showToast('已切换到：' + titleText + '，暂无依赖关系数据', 'info');
+    } else {
+        showToast('已切换到：' + titleText + '，共 ' + visibleCount + ' 条依赖关系');
+    }
+}
+
+// ====== 顶部操作 ======
+function exportDepGraph() { showToast('正在导出依赖关系图...'); }
+function fullscreenGraph() { showToast('全屏查看依赖关系图加载中...'); }
+function refreshLayout() { showToast('已刷新依赖关系图布局'); }
+
+// ====== 分页操作（当前为单页数据，分页按钮为示意） ======
+var currentPage = 1;
+var totalPages = 1;
+
+// 上一页：已是第一页时提示
+function prevPage() {
+    if (currentPage <= 1) { showToast('已是第一页', 'info'); return; }
+    currentPage--;
+    goToPage(currentPage);
+}
+
+// 下一页：已是最后一页时提示
+function nextPage() {
+    if (currentPage >= totalPages) { showToast('已是最后一页', 'info'); return; }
+    currentPage++;
+    goToPage(currentPage);
+}
+
+// 跳转到指定页
+function goToPage(page) {
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    showToast('当前第 ' + page + ' 页', 'info');
+    renderTable();
+}
+
+// ====== 初始化 ======
+window.addEventListener('load', function () {
+    svgEl = document.getElementById('depSvg');
+    // 模拟加载延迟，保留原 loading 体验
+    setTimeout(function () {
+        var loading = document.getElementById('graphLoading');
+        if (loading) loading.style.display = 'none';
+        renderGraph();
+        renderTable();
+    }, 800);
+});
+
+// 点击弹窗遮罩关闭
+document.addEventListener('DOMContentLoaded', function () {
+    var overlay = document.getElementById('depModal');
+    if (overlay) {
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) closeDepModal();
+        });
+    }
+});
+</script>
+</body>
+</html>

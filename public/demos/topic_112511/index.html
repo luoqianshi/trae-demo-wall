@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模拟打工人生活</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+    }
+    #gameContainer {
+      position: relative;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      background: #2d4a3e;
+    }
+    #uiOverlay {
+      position: absolute;
+      top: 0;
+      right: 0;
+      padding: 10px 15px;
+      color: #fff;
+      font-size: 14px;
+      line-height: 1.8;
+      text-shadow: 1px 1px 2px #000;
+      pointer-events: none;
+      z-index: 10;
+      min-width: 140px;
+    }
+    .ui-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 3px;
+    }
+    .bar-container {
+      width: 100px;
+      height: 12px;
+      background: #333;
+      border: 1px solid #666;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      transition: width 0.3s;
+      border-radius: 1px;
+    }
+    .bar-health { background: #e74c3c; }
+    .bar-energy { background: #f39c12; }
+    .bar-ability { background: #3498db; }
+    #controlsHint {
+      position: absolute;
+      bottom: 130px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #aaa;
+      font-size: 12px;
+      text-shadow: 1px 1px 2px #000;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #messagePanel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.85);
+      border: 2px solid #ffd700;
+      padding: 12px 24px;
+      color: #fff;
+      font-size: 14px;
+      max-width: 400px;
+      text-align: center;
+      display: none;
+      z-index: 20;
+      border-radius: 4px;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+    <div id="uiOverlay"></div>
+    <div id="messagePanel"></div>
+    <div id="controlsHint">WASD / 方向键 移动 | 数字键/空格 执行事件 | P 暂停</div>
+  </div>
+
+<script>
+// ============================================================
+// 游戏全局配置
+// ============================================================
+const GAME_CONFIG = {
+  viewportWidth: 960,
+  viewportHeight: 540,
+  mapWidth: 2400,
+  mapHeight: 1600,
+  timeSpeed: 1,
+  minutesPerRealSecond: 10,
+  initialState: {
+    name: '打工人',
+    health: 100,
+    energy: 100,
+    ability: 50,
+    gold: 3000,
+    currentLocation: 'home',
+    day: 1,
+    hour: 8,
+    minute: 0
+  },
+  maxState: { health: 100, energy: 100, ability: 999 },
+  playerSpeed: 3.0,
+  animFrameDuration: 8,
+  colors: {
+    skin: '#f5d0a9',
+    skinShadow: '#e0b888',
+    hair: '#4a3728',
+    shirt: '#3498db',
+    shirtLight: '#5dade2',
+    pants: '#2c3e50',
+    pantsLight: '#34495e',
+    shoes: '#1a1a1a',
+    eye: '#1a1a1a',
+    mouth: '#c0392b',
+    blush: '#e8a0a0'
+  },
+  mapColors: {
+    grass: '#3a7d3a',
+    grassLight: '#4a9d4a',
+    grassDark: '#2a5d2a',
+    road: '#7a7a7a',
+    roadLight: '#8a8a8a',
+    roadMarking: '#bbbbbb',
+    sidewalk: '#9a9a9a',
+    water: '#3a6a9a',
+    tree: '#2d6b2d',
+    treeTrunk: '#5a3a1a',
+    fence: '#8a7a5a'
+  },
+  locationColors: {
+    home: { primary: '#c4956a', roof: '#a07050', door: '#6b4226' },
+    company: { primary: '#7a9aaa', roof: '#5a7a8a', door: '#4a6a7a' },
+    restaurant: { primary: '#d4a050', roof: '#b48040', door: '#8a6020' },
+    mall: { primary: '#8a9aaa', roof: '#6a7a8a', door: '#5a6a7a' },
+    property_center: { primary: '#c4a070', roof: '#a08050', door: '#7a6030' },
+    car_dealer: { primary: '#6a9aaa', roof: '#4a7a8a', door: '#3a6a7a' },
+    hospital: { primary: '#e8e8e8', roof: '#d0d0d0', door: '#a0a0a0' },
+    gym: { primary: '#a05050', roof: '#803030', door: '#602020' },
+    training_center: { primary: '#7a8aaa', roof: '#5a6a8a', door: '#4a5a7a' },
+    park: { primary: '#4a9a4a', roof: '#3a7a3a', door: '#2a5a2a' },
+    coffee_shop: { primary: '#8a6a4a', roof: '#6a4a2a', door: '#5a3a1a' }
+  },
+  timeSlots: [
+    { id: 'midnight', name: '深夜', startHour: 0, endHour: 6, sky: '#0a0a2e' },
+    { id: 'early_morning', name: '清晨', startHour: 6, endHour: 8, sky: '#1a1a4e' },
+    { id: 'morning', name: '上午', startHour: 8, endHour: 12, sky: '#4a90d9' },
+    { id: 'noon', name: '中午', startHour: 12, endHour: 14, sky: '#87ceeb' },
+    { id: 'afternoon', name: '下午', startHour: 14, endHour: 18, sky: '#5dade2' },
+    { id: 'evening', name: '傍晚', startHour: 18, endHour: 20, sky: '#d35400' },
+    { id: 'night', name: '夜晚', startHour: 20, endHour: 24, sky: '#1a1a4e' }
+  ]
+};
+
+// ============================================================
+// 大地图地点、道路、装饰物、水域
+// ============================================================
+const LOCATIONS = {
+  home: { id: 'home', name: '家', description: '温馨的小窝', x: 150, y: 150, w: 200, h: 150, events: ['sleep', 'cook', 'study', 'watch_tv', 'rest'] },
+  company: { id: 'company', name: '公司', description: '打工的地方', x: 1000, y: 75, w: 275, h: 200, events: ['work_normal', 'work_overtime', 'meeting', 'slack_off', 'drink_water'] },
+  restaurant: { id: 'restaurant', name: '餐厅', description: '填饱肚子的地方', x: 125, y: 625, w: 225, h: 150, events: ['eat_fast', 'eat_good', 'eat_fancy', 'drink'] },
+  mall: { id: 'mall', name: '商场', description: '购物消费的地方', x: 850, y: 575, w: 325, h: 225, events: ['buy_clothes', 'buy_electronics', 'buy_furniture', 'buy_property', 'buy_car', 'window_shopping'] },
+  gym: { id: 'gym', name: '健身房', description: '锻炼身体的地方', x: 100, y: 1125, w: 250, h: 175, events: ['run', 'lift_weights', 'swim', 'yoga', 'get_membership'] },
+  hospital: { id: 'hospital', name: '医院', description: '恢复健康的地方', x: 900, y: 1100, w: 300, h: 200, events: ['see_doctor', 'buy_medicine', 'health_check', 'rest_hospital'] },
+  park: { id: 'park', name: '公园', description: '休闲放松的好地方', x: 500, y: 300, w: 400, h: 300, events: ['walk', 'jog', 'sit_bench', 'enjoy_scenery'] },
+  training_center: { id: 'training_center', name: '培训机构', description: '学习提升的地方', x: 1850, y: 100, w: 250, h: 150, events: ['study', 'take_exam', 'attend_lecture'] },
+  coffee_shop: { id: 'coffee_shop', name: '咖啡厅', description: '悠闲的下午茶时光', x: 1825, y: 600, w: 225, h: 150, events: ['drink_coffee', 'read_book', 'part_time_job', 'socialize'] },
+  property_center: { id: 'property_center', name: '房产中心', description: '买房租房的地方', x: 1800, y: 1125, w: 275, h: 175, events: ['view_house', 'buy_house', 'rent_house'] },
+  car_dealer: { id: 'car_dealer', name: '4S店', description: '买车的地方', x: 1325, y: 1350, w: 250, h: 150, events: ['view_car', 'buy_car', 'car_maintenance'] }
+};
+
+const ROADS = [
+  { x1: 0, y1: 800, x2: 2400, y2: 800, w: 60 },
+  { x1: 1200, y1: 0, x2: 1200, y2: 1600, w: 60 },
+  { x1: 350, y1: 225, x2: 500, y2: 225, w: 40 },
+  { x1: 350, y1: 225, x2: 350, y2: 800, w: 40 },
+  { x1: 900, y1: 225, x2: 1000, y2: 225, w: 40 },
+  { x1: 900, y1: 225, x2: 900, y2: 800, w: 40 },
+  { x1: 1275, y1: 175, x2: 1850, y2: 175, w: 40 },
+  { x1: 1975, y1: 250, x2: 1975, y2: 600, w: 40 },
+  { x1: 1938, y1: 750, x2: 1938, y2: 1125, w: 40 },
+  { x1: 1175, y1: 800, x2: 1175, y2: 1100, w: 40 },
+  { x1: 1175, y1: 1200, x2: 1325, y2: 1350, w: 40 },
+  { x1: 350, y1: 700, x2: 850, y2: 700, w: 40 },
+  { x1: 350, y1: 1213, x2: 900, y2: 1213, w: 40 },
+  { x1: 1200, y1: 1213, x2: 1800, y2: 1213, w: 40 },
+  { x1: 700, y1: 600, x2: 850, y2: 600, w: 40 },
+  { x1: 1175, y1: 675, x2: 1825, y2: 675, w: 40 },
+  { x1: 225, y1: 300, x2: 225, y2: 625, w: 40 },
+  { x1: 225, y1: 775, x2: 225, y2: 1125, w: 40 }
+];
+
+const DECORATIONS = [
+  { x: 525, y: 325, type: 'tree' },{ x: 600, y: 375, type: 'tree' },
+  { x: 675, y: 325, type: 'tree' },{ x: 750, y: 400, type: 'tree' },
+  { x: 800, y: 350, type: 'tree' },{ x: 550, y: 450, type: 'tree' },
+  { x: 650, y: 475, type: 'tree' },{ x: 775, y: 450, type: 'tree' },
+  { x: 575, y: 425, type: 'bench' },{ x: 725, y: 425, type: 'bench' },
+  { x: 663, y: 388, type: 'fountain' },
+  { x: 50, y: 50, type: 'tree' },{ x: 400, y: 50, type: 'tree' },
+  { x: 800, y: 50, type: 'tree' },{ x: 1500, y: 50, type: 'tree' },
+  { x: 1700, y: 50, type: 'tree' },{ x: 2125, y: 50, type: 'tree' },
+  { x: 2300, y: 50, type: 'tree' },{ x: 50, y: 500, type: 'tree' },
+  { x: 450, y: 500, type: 'tree' },{ x: 1550, y: 500, type: 'tree' },
+  { x: 2125, y: 500, type: 'tree' },{ x: 50, y: 1000, type: 'tree' },
+  { x: 450, y: 1000, type: 'tree' },{ x: 1550, y: 1000, type: 'tree' },
+  { x: 2125, y: 1000, type: 'tree' },{ x: 50, y: 1450, type: 'tree' },
+  { x: 450, y: 1450, type: 'tree' },{ x: 800, y: 1450, type: 'tree' },
+  { x: 1550, y: 1450, type: 'tree' },{ x: 2125, y: 1450, type: 'tree' },
+  { x: 2300, y: 1450, type: 'tree' },{ x: 1125, y: 300, type: 'tree' },
+  { x: 1275, y: 400, type: 'tree' },{ x: 1625, y: 300, type: 'tree' },
+  { x: 1750, y: 875, type: 'tree' },{ x: 1375, y: 950, type: 'tree' },
+  { x: 625, y: 950, type: 'tree' },{ x: 375, y: 875, type: 'tree' }
+];
+
+const WATERS = [
+  { x: 1300, y: 325, w: 150, h: 100 },
+  { x: 1500, y: 875, w: 125, h: 88 }
+];
+
+// ============================================================
+// 事件配置
+// ============================================================
+const EVENTS = {
+  work_normal: { id: 'work_normal', name: '正常上班', category: 'work', description: '认真工作8小时，获得日薪', durationMinutes: 480, successRate: 0.95, effects: { goldDelta: 200, healthDelta: -5, energyDelta: -35, abilityDelta: 1 }, prerequisites: { minHealth: 20, minEnergy: 30 }, message: '你完成了今天的工作，获得了日薪。' },
+  work_overtime: { id: 'work_overtime', name: '加班', category: 'work', description: '留下来加班，能获得额外收入但消耗大量精力', durationMinutes: 120, successRate: 0.85, effects: { goldDelta: 80, healthDelta: -10, energyDelta: -25, abilityDelta: 2 }, prerequisites: { minHealth: 30, minEnergy: 40 }, repeatPenalty: { consecutiveLimit: 3, penaltyMessage: '连续加班太多了，身体发出警报！' }, message: '加班结束，额外收入到手，但真的很累。' },
+  meeting: { id: 'meeting', name: '参加会议', category: 'work', description: '参加部门会议，提升工作能力', durationMinutes: 60, successRate: 0.9, effects: { goldDelta: 0, healthDelta: -3, energyDelta: -15, abilityDelta: 3 }, prerequisites: { minEnergy: 20 }, message: '会议结束，学到了不少东西。' },
+  slack_off: { id: 'slack_off', name: '摸鱼', category: 'work', description: '偷偷休息一会儿，恢复少量精力', durationMinutes: 30, successRate: 0.7, effects: { goldDelta: -20, healthDelta: 0, energyDelta: 10, abilityDelta: 0 }, prerequisites: { minEnergy: 10 }, message: '偷偷刷了一会儿手机，精神好了点，但如果被老板发现就惨了。' },
+  sleep: { id: 'sleep', name: '睡觉', category: 'life', description: '好好休息一晚，恢复精力和健康', durationMinutes: 480, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 15, energyDelta: 80, abilityDelta: 0 }, repeatPenalty: { consecutiveLimit: 2, penaltyMessage: '睡太久了，你感到头晕目眩...' }, message: '一觉睡到自然醒，感觉精神焕发！' },
+  cook: { id: 'cook', name: '做饭', category: 'life', description: '自己动手做顿好吃的', durationMinutes: 60, successRate: 0.8, effects: { goldDelta: -30, healthDelta: 10, energyDelta: -10, abilityDelta: 0 }, prerequisites: { minEnergy: 15 }, message: '做出了一顿美味的饭菜，既省钱又健康。' },
+  rest: { id: 'rest', name: '休息', category: 'life', description: '坐着休息一会儿', durationMinutes: 30, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 3, energyDelta: 15, abilityDelta: 0 }, message: '休息了一会儿，感觉好了点。' },
+  watch_tv: { id: 'watch_tv', name: '看电视', category: 'life', description: '看会儿电视放松一下', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: 0, healthDelta: -2, energyDelta: 5, abilityDelta: 0 }, message: '追剧时光总是过得飞快。' },
+  eat_fast: { id: 'eat_fast', name: '快餐', category: 'consume', description: '吃顿快餐，便宜快捷', durationMinutes: 20, successRate: 1.0, effects: { goldDelta: -25, healthDelta: -3, energyDelta: 20, abilityDelta: 0 }, prerequisites: { minGold: 25 }, message: '快餐填饱肚子，但感觉不太健康。' },
+  eat_good: { id: 'eat_good', name: '正常用餐', category: 'consume', description: '吃一顿正常的饭菜', durationMinutes: 40, successRate: 1.0, effects: { goldDelta: -50, healthDelta: 5, energyDelta: 25, abilityDelta: 0 }, prerequisites: { minGold: 50 }, message: '一顿营养均衡的饭菜，身心愉悦。' },
+  eat_fancy: { id: 'eat_fancy', name: '大餐', category: 'consume', description: '犒劳自己一顿大餐', durationMinutes: 90, successRate: 1.0, effects: { goldDelta: -150, healthDelta: 8, energyDelta: 30, abilityDelta: 0 }, prerequisites: { minGold: 150 }, message: '美味的大餐让心情变好了！' },
+  drink: { id: 'drink', name: '喝饮料', category: 'consume', description: '买杯饮料解渴', durationMinutes: 5, successRate: 1.0, effects: { goldDelta: -10, healthDelta: -1, energyDelta: 5, abilityDelta: 0 }, prerequisites: { minGold: 10 }, message: '冰凉的饮料下肚，瞬间清醒。' },
+  walk: { id: 'walk', name: '散步', category: 'life', description: '在公园里散散步', durationMinutes: 30, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 5, energyDelta: -5, abilityDelta: 0 }, message: '散步让心情平静了许多。' },
+  jog: { id: 'jog', name: '慢跑', category: 'life', description: '慢跑锻炼身体', durationMinutes: 45, successRate: 0.9, effects: { goldDelta: 0, healthDelta: 10, energyDelta: -20, abilityDelta: 0 }, prerequisites: { minHealth: 30, minEnergy: 25 }, message: '跑完步出了一身汗，感觉身体更强健了。' },
+  sit_bench: { id: 'sit_bench', name: '坐长椅休息', category: 'life', description: '在长椅上休息一会儿', durationMinutes: 20, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 2, energyDelta: 10, abilityDelta: 0 }, message: '坐在长椅上，看着人来人往，很惬意。' },
+  enjoy_scenery: { id: 'enjoy_scenery', name: '欣赏风景', category: 'life', description: '看看公园的风景，放松心情', durationMinutes: 15, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 3, energyDelta: 5, abilityDelta: 0 }, message: '风景如画，让人心旷神怡。' },
+  see_doctor: { id: 'see_doctor', name: '看医生', category: 'life', description: '找医生看病，恢复健康', durationMinutes: 60, successRate: 0.95, effects: { goldDelta: -100, healthDelta: 30, energyDelta: -5, abilityDelta: 0 }, prerequisites: { minGold: 100 }, message: '医生开了药，感觉好多了。' },
+  buy_medicine: { id: 'buy_medicine', name: '买药', category: 'consume', description: '买点常备药', durationMinutes: 10, successRate: 1.0, effects: { goldDelta: -50, healthDelta: 10, energyDelta: 0, abilityDelta: 0 }, prerequisites: { minGold: 50 }, message: '买了一些常备药，以备不时之需。' },
+  run: { id: 'run', name: '跑步', category: 'life', description: '在跑步机上跑步', durationMinutes: 30, successRate: 0.9, effects: { goldDelta: 0, healthDelta: 8, energyDelta: -15, abilityDelta: 0 }, prerequisites: { minHealth: 25, minEnergy: 20 }, message: '跑完步大汗淋漓，很有成就感。' },
+  lift_weights: { id: 'lift_weights', name: '举铁', category: 'life', description: '力量训练', durationMinutes: 45, successRate: 0.85, effects: { goldDelta: 0, healthDelta: 12, energyDelta: -25, abilityDelta: 0 }, prerequisites: { minHealth: 30, minEnergy: 30 }, message: '举铁让你的肌肉更加结实。' },
+  swim: { id: 'swim', name: '游泳', category: 'life', description: '游泳锻炼全身', durationMinutes: 40, successRate: 0.9, effects: { goldDelta: -30, healthDelta: 15, energyDelta: -20, abilityDelta: 0 }, prerequisites: { minHealth: 30, minEnergy: 25, minGold: 30 }, message: '游泳是最佳的全身运动！' },
+  get_membership: { id: 'get_membership', name: '办健身卡', category: 'consume', description: '办一张健身会员卡', durationMinutes: 15, successRate: 1.0, effects: { goldDelta: -500, healthDelta: 0, energyDelta: 0, abilityDelta: 0 }, prerequisites: { minGold: 500 }, message: '办了健身卡，以后健身更便宜了。' },
+  study: { id: 'study', name: '学习', category: 'growth', description: '看书学习，提升工作能力', durationMinutes: 120, successRate: 0.9, effects: { goldDelta: 0, healthDelta: -3, energyDelta: -20, abilityDelta: 5 }, prerequisites: { minEnergy: 20 }, message: '学习让人进步，工作能力提升了。' },
+  drink_water: { id: 'drink_water', name: '喝水', category: 'life', description: '喝杯水休息一下', durationMinutes: 5, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 1, energyDelta: 2, abilityDelta: 0 }, message: '多喝水有益健康。' },
+  take_exam: { id: 'take_exam', name: '考证', category: 'growth', description: '参加职业资格考试', durationMinutes: 180, successRate: 0.7, effects: { goldDelta: -200, healthDelta: -5, energyDelta: -30, abilityDelta: 15 }, prerequisites: { minEnergy: 40, minGold: 200 }, message: '考证成功！工作能力大幅提升。' },
+  attend_lecture: { id: 'attend_lecture', name: '听课', category: 'growth', description: '参加专业讲座', durationMinutes: 90, successRate: 0.9, effects: { goldDelta: -100, healthDelta: -2, energyDelta: -15, abilityDelta: 8 }, prerequisites: { minEnergy: 20, minGold: 100 }, message: '学到了很多专业知识。' },
+  drink_coffee: { id: 'drink_coffee', name: '喝咖啡', category: 'consume', description: '来杯提神的咖啡', durationMinutes: 15, successRate: 1.0, effects: { goldDelta: -30, healthDelta: -1, energyDelta: 20, abilityDelta: 0 }, prerequisites: { minGold: 30 }, message: '咖啡因让精神为之一振！' },
+  read_book: { id: 'read_book', name: '看书', category: 'growth', description: '在咖啡厅安静看书', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: -20, healthDelta: 2, energyDelta: -5, abilityDelta: 3 }, prerequisites: { minGold: 20 }, message: '安静的阅读时光让人放松。' },
+  part_time_job: { id: 'part_time_job', name: '咖啡厅兼职', category: 'work', description: '在咖啡厅做兼职赚外快', durationMinutes: 240, successRate: 0.9, effects: { goldDelta: 150, healthDelta: -5, energyDelta: -25, abilityDelta: 1 }, prerequisites: { minEnergy: 30 }, message: '兼职结束，赚到了额外的收入。' },
+  socialize: { id: 'socialize', name: '社交', category: 'social', description: '和朋友聊天放松', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: -50, healthDelta: 3, energyDelta: 5, abilityDelta: 0 }, prerequisites: { minGold: 50 }, message: '和朋友聊天很开心。' },
+  view_house: { id: 'view_house', name: '看房', category: 'consume', description: '去看看房子', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 0, energyDelta: -10, abilityDelta: 0 }, message: '看了一圈房子，有了心仪的目标。' },
+  buy_house: { id: 'buy_house', name: '买房', category: 'consume', description: '买一套属于自己的房子', durationMinutes: 120, successRate: 1.0, effects: { goldDelta: -500000, healthDelta: 10, energyDelta: -10, abilityDelta: 0 }, prerequisites: { minGold: 500000 }, message: '终于有了自己的房子！睡眠质量提升了。' },
+  rent_house: { id: 'rent_house', name: '租房', category: 'consume', description: '租一套更好的房子', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: -3000, healthDelta: 5, energyDelta: 0, abilityDelta: 0 }, prerequisites: { minGold: 3000 }, message: '搬到了新住处，环境好多了。' },
+  view_car: { id: 'view_car', name: '看车', category: 'consume', description: '去4S店看车', durationMinutes: 45, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 0, energyDelta: -5, abilityDelta: 0 }, message: '看中了几款车，正在考虑中。' },
+  car_maintenance: { id: 'car_maintenance', name: '汽车保养', category: 'consume', description: '给爱车做保养', durationMinutes: 90, successRate: 1.0, effects: { goldDelta: -500, healthDelta: 0, energyDelta: -5, abilityDelta: 0 }, prerequisites: { minGold: 500 }, message: '汽车保养完毕，状态良好。' },
+  buy_clothes: { id: 'buy_clothes', name: '买衣服', category: 'consume', description: '买几件新衣服', durationMinutes: 45, successRate: 1.0, effects: { goldDelta: -300, healthDelta: 3, energyDelta: -5, abilityDelta: 0 }, prerequisites: { minGold: 300 }, message: '新衣服让人心情大好。' },
+  buy_electronics: { id: 'buy_electronics', name: '买电子产品', category: 'consume', description: '买最新款的电子产品', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: -2000, healthDelta: 2, energyDelta: -5, abilityDelta: 2 }, prerequisites: { minGold: 2000 }, message: '新设备让工作效率提升了。' },
+  buy_furniture: { id: 'buy_furniture', name: '买家具', category: 'consume', description: '添置新家具', durationMinutes: 60, successRate: 1.0, effects: { goldDelta: -1500, healthDelta: 5, energyDelta: -10, abilityDelta: 0 }, prerequisites: { minGold: 1500 }, message: '新家具让家更温馨了。' },
+  window_shopping: { id: 'window_shopping', name: '逛街', category: 'consume', description: '随便逛逛，不买也行', durationMinutes: 30, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 2, energyDelta: -5, abilityDelta: 0 }, message: '逛街也很开心。' },
+  buy_property: { id: 'buy_property', name: '买理财产品', category: 'consume', description: '买理财产品', durationMinutes: 30, successRate: 1.0, effects: { goldDelta: -1000, healthDelta: 0, energyDelta: -5, abilityDelta: 0 }, prerequisites: { minGold: 1000 }, message: '购买了理财产品，期待收益。' },
+  buy_car: { id: 'buy_car', name: '买车', category: 'consume', description: '买一辆车', durationMinutes: 120, successRate: 1.0, effects: { goldDelta: -100000, healthDelta: 0, energyDelta: -10, abilityDelta: 0 }, prerequisites: { minGold: 100000 }, message: '终于有车了！通勤更方便了。' },
+  health_check: { id: 'health_check', name: '体检', category: 'life', description: '做一次全面体检', durationMinutes: 90, successRate: 1.0, effects: { goldDelta: -200, healthDelta: 15, energyDelta: -5, abilityDelta: 0 }, prerequisites: { minGold: 200 }, message: '体检结果良好，身体状况不错。' },
+  rest_hospital: { id: 'rest_hospital', name: '在医院休息', category: 'life', description: '在医院休息区坐一会儿', durationMinutes: 20, successRate: 1.0, effects: { goldDelta: 0, healthDelta: 2, energyDelta: 8, abilityDelta: 0 }, message: '在安静的医院休息了一会儿。' },
+  yoga: { id: 'yoga', name: '瑜伽', category: 'life', description: '做瑜伽放松身心', durationMinutes: 60, successRate: 0.9, effects: { goldDelta: -20, healthDelta: 10, energyDelta: -10, abilityDelta: 0 }, prerequisites: { minHealth: 20, minEnergy: 15, minGold: 20 }, message: '瑜伽让身心都得到了放松。' }
+};
+
+// ============================================================
+// 键盘输入
+// ============================================================
+class InputHandler {
+  constructor() {
+    this.keys = {};
+    this.keysPressed = {};
+    this.keysReleased = {};
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (!this.keys[key]) this.keysPressed[key] = true;
+      this.keys[key] = true;
+      if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(key)) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      this.keys[key] = false;
+      this.keysReleased[key] = true;
+    });
+  }
+  isDown(key) { return !!this.keys[key.toLowerCase()]; }
+  isPressed(key) { return !!this.keysPressed[key.toLowerCase()]; }
+  getMovementVector() {
+    let dx = 0, dy = 0;
+    if (this.isDown('w') || this.isDown('arrowup')) dy -= 1;
+    if (this.isDown('s') || this.isDown('arrowdown')) dy += 1;
+    if (this.isDown('a') || this.isDown('arrowleft')) dx -= 1;
+    if (this.isDown('d') || this.isDown('arrowright')) dx += 1;
+    if (dx !== 0 && dy !== 0) { const len = Math.sqrt(dx*dx+dy*dy); dx/=len; dy/=len; }
+    return { dx, dy };
+  }
+  getFacingDirection() {
+    if (this.isDown('w') || this.isDown('arrowup')) return 'up';
+    if (this.isDown('s') || this.isDown('arrowdown')) return 'down';
+    if (this.isDown('a') || this.isDown('arrowleft')) return 'left';
+    if (this.isDown('d') || this.isDown('arrowright')) return 'right';
+    return null;
+  }
+  update() { this.keysPressed = {}; this.keysReleased = {}; }
+}
+
+// ============================================================
+// 像素主角
+// ============================================================
+class Player {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.width = 30; this.height = 50;
+    this.facing = 'down'; this.isMoving = false; this.animFrame = 0; this.animTimer = 0;
+  }
+  update(input, dt, bounds) {
+    const move = input.getMovementVector();
+    const facing = input.getFacingDirection();
+    this.isMoving = move.dx !== 0 || move.dy !== 0;
+    if (facing) this.facing = facing;
+    if (this.isMoving) {
+      this.x += move.dx * GAME_CONFIG.playerSpeed;
+      this.y += move.dy * GAME_CONFIG.playerSpeed;
+      this.animTimer += dt;
+      if (this.animTimer >= GAME_CONFIG.animFrameDuration) { this.animTimer = 0; this.animFrame = (this.animFrame + 1) % 4; }
+    } else { this.animFrame = 0; this.animTimer = 0; }
+    this.x = Math.max(0, Math.min(bounds.width - this.width, this.x));
+    this.y = Math.max(0, Math.min(bounds.height - this.height, this.y));
+  }
+  draw(ctx) {
+    const c = GAME_CONFIG.colors;
+    const px = Math.round(this.x), py = Math.round(this.y);
+    const walkCycle = this.isMoving ? Math.sin(this.animFrame * Math.PI / 2) : 0;
+    const armSwing = walkCycle * 5, legSwing = walkCycle * 5;
+    ctx.save();
+    switch(this.facing) {
+      case 'down': this._drawDown(ctx,px,py,c,armSwing,legSwing); break;
+      case 'up': this._drawUp(ctx,px,py,c,armSwing,legSwing); break;
+      case 'left': this._drawLeft(ctx,px,py,c,armSwing,legSwing); break;
+      case 'right': this._drawRight(ctx,px,py,c,armSwing,legSwing); break;
+    }
+    ctx.restore();
+  }
+  _drawDown(ctx,px,py,c,as,ls) {
+    ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fillRect(px+3,py+45,25,8);
+    ctx.fillStyle=c.pants;ctx.fillRect(px+3+ls,py+30,8,13);ctx.fillRect(px+3+ls,py+43,8,5);
+    ctx.fillRect(px+15-ls,py+30,8,13);ctx.fillRect(px+15-ls,py+43,8,5);
+    ctx.fillStyle=c.shoes;ctx.fillRect(px+3+ls,py+48,8,3);ctx.fillRect(px+15-ls,py+48,8,3);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+5,py+18,20,15);ctx.fillStyle=c.shirtLight;ctx.fillRect(px+8,py+20,15,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px-3,py+18+as,8,13);ctx.fillStyle=c.skin;ctx.fillRect(px-3,py+30+as,8,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+25,py+18-as,8,13);ctx.fillStyle=c.skin;ctx.fillRect(px+25,py+30-as,8,5);
+    ctx.fillStyle=c.skin;ctx.fillRect(px+5,py+3,20,15);
+    ctx.fillStyle=c.hair;ctx.fillRect(px+5,py,20,5);ctx.fillRect(px+3,py+3,5,8);ctx.fillRect(px+23,py+3,5,8);
+    ctx.fillStyle=c.eye;ctx.fillRect(px+8,py+8,5,5);ctx.fillRect(px+18,py+8,5,5);
+    ctx.fillStyle='#fff';ctx.fillRect(px+10,py+8,3,3);ctx.fillRect(px+20,py+8,3,3);
+    ctx.fillStyle=c.mouth;ctx.fillRect(px+13,py+13,5,3);
+    ctx.fillStyle=c.blush;ctx.fillRect(px+8,py+13,3,3);ctx.fillRect(px+20,py+13,3,3);
+  }
+  _drawUp(ctx,px,py,c,as,ls) {
+    ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fillRect(px+3,py+45,25,8);
+    ctx.fillStyle=c.pants;ctx.fillRect(px+3+ls,py+30,8,13);ctx.fillRect(px+3+ls,py+43,8,5);
+    ctx.fillRect(px+15-ls,py+30,8,13);ctx.fillRect(px+15-ls,py+43,8,5);
+    ctx.fillStyle=c.shoes;ctx.fillRect(px+3+ls,py+48,8,3);ctx.fillRect(px+15-ls,py+48,8,3);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+5,py+18,20,15);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px-3,py+18+as,8,13);ctx.fillStyle=c.skin;ctx.fillRect(px-3,py+30+as,8,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+25,py+18-as,8,13);ctx.fillStyle=c.skin;ctx.fillRect(px+25,py+30-as,8,5);
+    ctx.fillStyle=c.skin;ctx.fillRect(px+5,py+3,20,15);
+    ctx.fillStyle=c.hair;ctx.fillRect(px+5,py,20,10);ctx.fillRect(px+3,py+3,5,10);ctx.fillRect(px+23,py+3,5,10);
+    ctx.fillRect(px+8,py+10,15,5);
+  }
+  _drawLeft(ctx,px,py,c,as,ls) {
+    ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fillRect(px+3,py+45,25,8);
+    ctx.fillStyle=c.pantsLight;ctx.fillRect(px+5,py+30,8,13);ctx.fillRect(px+5,py+43,8,5);
+    ctx.fillStyle=c.pants;ctx.fillRect(px+10+ls,py+30,8,13);ctx.fillRect(px+10+ls,py+43,8,5);
+    ctx.fillStyle=c.shoes;ctx.fillRect(px+5,py+48,8,3);ctx.fillRect(px+10+ls,py+48,8,3);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+8,py+18,13,15);ctx.fillStyle=c.shirtLight;ctx.fillRect(px+10,py+20,8,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+3,py+18+as*0.5,5,13);ctx.fillStyle=c.skin;ctx.fillRect(px+3,py+30+as*0.5,5,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+20,py+18-as,5,13);ctx.fillStyle=c.skin;ctx.fillRect(px+20,py+30-as,5,5);
+    ctx.fillStyle=c.skin;ctx.fillRect(px+8,py+3,13,15);
+    ctx.fillStyle=c.hair;ctx.fillRect(px+8,py,13,5);ctx.fillRect(px+18,py+3,5,10);ctx.fillRect(px+8,py+3,5,5);
+    ctx.fillStyle=c.eye;ctx.fillRect(px+10,py+8,5,5);ctx.fillStyle='#fff';ctx.fillRect(px+13,py+8,3,3);
+    ctx.fillStyle=c.skinShadow;ctx.fillRect(px+8,py+10,3,3);
+    ctx.fillStyle=c.mouth;ctx.fillRect(px+10,py+13,5,3);
+  }
+  _drawRight(ctx,px,py,c,as,ls) {
+    ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fillRect(px+3,py+45,25,8);
+    ctx.fillStyle=c.pantsLight;ctx.fillRect(px+13,py+30,8,13);ctx.fillRect(px+13,py+43,8,5);
+    ctx.fillStyle=c.pants;ctx.fillRect(px+8-ls,py+30,8,13);ctx.fillRect(px+8-ls,py+43,8,5);
+    ctx.fillStyle=c.shoes;ctx.fillRect(px+13,py+48,8,3);ctx.fillRect(px+8-ls,py+48,8,3);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+8,py+18,13,15);ctx.fillStyle=c.shirtLight;ctx.fillRect(px+10,py+20,8,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+3,py+18-as,5,13);ctx.fillStyle=c.skin;ctx.fillRect(px+3,py+30-as,5,5);
+    ctx.fillStyle=c.shirt;ctx.fillRect(px+20,py+18+as*0.5,5,13);ctx.fillStyle=c.skin;ctx.fillRect(px+20,py+30+as*0.5,5,5);
+    ctx.fillStyle=c.skin;ctx.fillRect(px+8,py+3,13,15);
+    ctx.fillStyle=c.hair;ctx.fillRect(px+8,py,13,5);ctx.fillRect(px+5,py+3,5,10);ctx.fillRect(px+15,py+3,5,5);
+    ctx.fillStyle=c.eye;ctx.fillRect(px+13,py+8,5,5);ctx.fillStyle='#fff';ctx.fillRect(px+13,py+8,3,3);
+    ctx.fillStyle=c.skinShadow;ctx.fillRect(px+18,py+10,3,3);
+    ctx.fillStyle=c.mouth;ctx.fillRect(px+13,py+13,5,3);
+  }
+}
+
+// ============================================================
+// 渲染引擎
+// ============================================================
+class Renderer {
+  constructor(canvasId) {
+    this.canvas = document.getElementById(canvasId);
+    this.ctx = this.canvas.getContext('2d');
+    this.vw = GAME_CONFIG.viewportWidth;
+    this.vh = GAME_CONFIG.viewportHeight;
+    this.mw = GAME_CONFIG.mapWidth;
+    this.mh = GAME_CONFIG.mapHeight;
+    this.cameraX = 0; this.cameraY = 0;
+    this.setupCanvas();
+    window.addEventListener('resize', () => this.setupCanvas());
+  }
+  setupCanvas() {
+    this.canvas.width = this.vw; this.canvas.height = this.vh;
+    const scale = Math.min(window.innerWidth / this.vw, window.innerHeight / this.vh) * 0.95;
+    this.canvas.style.width = `${this.vw * scale}px`;
+    this.canvas.style.height = `${this.vh * scale}px`;
+    this.ctx.imageSmoothingEnabled = false;
+  }
+  updateCamera(targetX, targetY) {
+    this.cameraX = targetX - this.vw / 2;
+    this.cameraY = targetY - this.vh / 2;
+    this.cameraX = Math.max(0, Math.min(this.mw - this.vw, this.cameraX));
+    this.cameraY = Math.max(0, Math.min(this.mh - this.vh, this.cameraY));
+  }
+  clear() { this.ctx.clearRect(0, 0, this.vw, this.vh); }
+  worldToScreen(wx, wy) { return { x: Math.round(wx - this.cameraX), y: Math.round(wy - this.cameraY) }; }
+  isInViewport(wx, wy, w, h) { return wx+w>=this.cameraX && wx<=this.cameraX+this.vw && wy+h>=this.cameraY && wy<=this.cameraY+this.vh; }
+
+  drawMap(gameState, currentLocationId) {
+    const mc = GAME_CONFIG.mapColors;
+    // 草地
+    for (let y = 0; y < this.mh; y += 50) {
+      for (let x = 0; x < this.mw; x += 50) {
+        if (!this.isInViewport(x,y,50,50)) continue;
+        const s = this.worldToScreen(x,y);
+        this.ctx.fillStyle = ((x+y)%3===0)?mc.grassLight:((x+y)%5===0)?mc.grassDark:mc.grass;
+        this.ctx.fillRect(s.x,s.y,50,50);
+      }
+    }
+    // 水域
+    for (const w of WATERS) {
+      if (!this.isInViewport(w.x,w.y,w.w,w.h)) continue;
+      const s = this.worldToScreen(w.x,w.y);
+      this.ctx.fillStyle = mc.water; this.ctx.fillRect(s.x,s.y,w.w,w.h);
+      const t = Date.now()/1000;
+      this.ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      for (let i=0;i<3;i++) { this.ctx.fillRect(s.x+12+i*45,s.y+12+Math.sin(t+i)*5,25,5); }
+    }
+    // 道路
+    for (const r of ROADS) {
+      if (!this.isInViewport(Math.min(r.x1,r.x2),Math.min(r.y1,r.y2),Math.abs(r.x2-r.x1)+r.w,Math.abs(r.y2-r.y1)+r.w)) continue;
+      const s1=this.worldToScreen(r.x1,r.y1), s2=this.worldToScreen(r.x2,r.y2);
+      this.ctx.strokeStyle=mc.road; this.ctx.lineWidth=r.w; this.ctx.lineCap='square';
+      this.ctx.beginPath(); this.ctx.moveTo(s1.x,s1.y); this.ctx.lineTo(s2.x,s2.y); this.ctx.stroke();
+      this.ctx.strokeStyle=mc.roadLight; this.ctx.lineWidth=5;
+      this.ctx.beginPath(); this.ctx.moveTo(s1.x,s1.y); this.ctx.lineTo(s2.x,s2.y); this.ctx.stroke();
+      if (r.w>=50) {
+        this.ctx.strokeStyle=mc.roadMarking; this.ctx.lineWidth=3; this.ctx.setLineDash([10,10]);
+        this.ctx.beginPath(); this.ctx.moveTo(s1.x,s1.y); this.ctx.lineTo(s2.x,s2.y); this.ctx.stroke();
+        this.ctx.setLineDash([]);
+      }
+    }
+    // 人行道
+    for (const k in LOCATIONS) {
+      const loc=LOCATIONS[k];
+      if (!this.isInViewport(loc.x-10,loc.y-10,loc.w+20,loc.h+20)) continue;
+      const s=this.worldToScreen(loc.x-10,loc.y-10);
+      this.ctx.fillStyle=mc.sidewalk; this.ctx.fillRect(s.x,s.y,loc.w+20,loc.h+20);
+    }
+    // 装饰物
+    for (const d of DECORATIONS) {
+      if (!this.isInViewport(d.x-20,d.y-40,40,50)) continue;
+      const s=this.worldToScreen(d.x,d.y); this.drawDecoration(d,s.x,s.y);
+    }
+    // 建筑
+    for (const k in LOCATIONS) {
+      const loc=LOCATIONS[k];
+      if (!this.isInViewport(loc.x,loc.y,loc.w,loc.h)) continue;
+      const s=this.worldToScreen(loc.x,loc.y);
+      this.drawBuilding(loc,s.x,s.y,k===currentLocationId);
+    }
+    this.drawTimeEffect(gameState);
+  }
+
+  drawDecoration(dec,sx,sy) {
+    const mc=GAME_CONFIG.mapColors;
+    if (dec.type==='tree') {
+      this.ctx.fillStyle=mc.treeTrunk; this.ctx.fillRect(sx,sy+15,10,20);
+      this.ctx.fillStyle=mc.tree; this.ctx.fillRect(sx-10,sy-5,30,25);
+      this.ctx.fillStyle='#3a8a3a'; this.ctx.fillRect(sx-5,sy-15,20,20);
+    }
+    if (dec.type==='bench') {
+      this.ctx.fillStyle='#8a6a4a'; this.ctx.fillRect(sx,sy+5,40,10);
+      this.ctx.fillStyle='#6a4a2a'; this.ctx.fillRect(sx+5,sy+15,5,10); this.ctx.fillRect(sx+30,sy+15,5,10);
+    }
+    if (dec.type==='fountain') {
+      const t=Date.now()/500;
+      this.ctx.fillStyle='#888'; this.ctx.fillRect(sx,sy+15,35,10);
+      this.ctx.fillStyle=mc.water; this.ctx.fillRect(sx+5,sy+5,25,15);
+      this.ctx.fillStyle='#add8e6'; this.ctx.fillRect(sx+13,sy-5+Math.sin(t)*5,10,10);
+    }
+  }
+
+  drawBuilding(loc,sx,sy,isCurrent) {
+    const colors=GAME_CONFIG.locationColors[loc.id]||GAME_CONFIG.locationColors.home;
+    this.ctx.fillStyle=colors.primary; this.ctx.fillRect(sx,sy,loc.w,loc.h);
+    this.ctx.fillStyle=colors.roof; this.ctx.fillRect(sx-8,sy-10,loc.w+15,15); this.ctx.fillRect(sx,sy-20,loc.w,10);
+    this.ctx.strokeStyle='rgba(0,0,0,0.3)'; this.ctx.lineWidth=2; this.ctx.strokeRect(sx,sy,loc.w,loc.h);
+    this.ctx.fillStyle=colors.door; this.ctx.fillRect(sx+loc.w/2-15,sy+loc.h-35,30,35);
+    this.ctx.fillStyle='#ffd700'; this.ctx.fillRect(sx+loc.w/2+5,sy+loc.h-20,5,5);
+    this.ctx.fillStyle='#add8e6';
+    const winW=25,winH=20,winCols=Math.floor((loc.w-25)/45),winRows=Math.floor((loc.h-50)/35);
+    for (let r=0;r<winRows;r++) for (let c=0;c<winCols;c++) {
+      const wx=sx+15+c*45, wy=sy+15+r*35;
+      if (wy+winH<loc.h-35) { this.ctx.fillRect(wx,wy,winW,winH); this.ctx.strokeStyle='rgba(255,255,255,0.3)'; this.ctx.strokeRect(wx,wy,winW,winH); }
+    }
+    this.ctx.fillStyle=isCurrent?'#ffd700':'rgba(255,255,255,0.9)';
+    this.ctx.font='18px monospace'; this.ctx.textAlign='center';
+    this.ctx.fillText(loc.name,sx+loc.w/2,sy-25);
+    if (isCurrent) {
+      const t=Date.now()/800, glow=Math.sin(t)*0.2+0.3;
+      this.ctx.fillStyle=`rgba(255,215,0,${glow})`; this.ctx.fillRect(sx-5,sy-5,loc.w+10,loc.h+10);
+    }
+  }
+
+  drawTimeEffect(gameState) {
+    const slot=GAME_CONFIG.timeSlots.find(s=>gameState.hour>=s.startHour&&gameState.hour<s.endHour);
+    if (slot&&slot.sky) {
+      const r=parseInt(slot.sky.slice(1,3),16), g=parseInt(slot.sky.slice(3,5),16), b=parseInt(slot.sky.slice(5,7),16);
+      let a=0;
+      if(slot.id==='midnight')a=0.35; else if(slot.id==='night')a=0.25; else if(slot.id==='evening')a=0.12; else if(slot.id==='early_morning')a=0.08;
+      if(a>0){this.ctx.fillStyle=`rgba(${r},${g},${b},${a})`;this.ctx.fillRect(0,0,this.vw,this.vh);}
+    }
+  }
+
+  drawEventPanel(events, playerState, selectedIndex) {
+    const panelY=this.vh-120;
+    this.ctx.fillStyle='rgba(0,0,0,0.85)'; this.ctx.fillRect(0,panelY,this.vw,120);
+    this.ctx.strokeStyle='#666'; this.ctx.lineWidth=1; this.ctx.strokeRect(0,panelY,this.vw,120);
+    this.ctx.fillStyle='#fff'; this.ctx.font='20px monospace'; this.ctx.textAlign='left';
+    this.ctx.fillText('可用事件（按数字键选择 / 空格执行）:', 13, panelY+25);
+    let x=13;
+    events.forEach((ev,i) => {
+      if(x+190>this.vw)return;
+      const sel=i===selectedIndex, avail=this.checkEventAvailable(ev,playerState);
+      this.ctx.fillStyle=sel?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.1)';
+      if(!avail)this.ctx.fillStyle='rgba(100,100,100,0.3)';
+      this.ctx.fillRect(x,panelY+35,190,75);
+      this.ctx.strokeStyle=sel?'#fff':'#666'; this.ctx.strokeRect(x,panelY+35,190,75);
+      this.ctx.fillStyle=avail?'#fff':'#888'; this.ctx.font='18px monospace'; this.ctx.textAlign='center';
+      this.ctx.fillText(`${i+1}.${ev.name}`,x+95,panelY+60);
+      this.ctx.font='15px monospace';
+      let pv='';
+      if(ev.effects.goldDelta>0)pv+=`+${ev.effects.goldDelta}G `;
+      if(ev.effects.goldDelta<0)pv+=`${ev.effects.goldDelta}G `;
+      if(ev.effects.energyDelta<0)pv+=`${ev.effects.energyDelta}E`;
+      this.ctx.fillText(pv,x+95,panelY+85);
+      this.ctx.fillText(`${ev.durationMinutes}分钟`,x+95,panelY+100);
+      x+=200;
+    });
+  }
+
+  drawMinimap(player, currentLocationId) {
+    const mmW=160, mmH=86, mmX=this.vw-mmW-10, mmY=10;
+    const sx=mmW/this.mw, sy=mmH/this.mh;
+    this.ctx.fillStyle='rgba(0,0,0,0.6)'; this.ctx.fillRect(mmX,mmY,mmW,mmH);
+    this.ctx.strokeStyle='#666'; this.ctx.strokeRect(mmX,mmY,mmW,mmH);
+    for (const k in LOCATIONS) {
+      const loc=LOCATIONS[k];
+      this.ctx.fillStyle=k===currentLocationId?'#ffd700':'#666';
+      this.ctx.fillRect(mmX+loc.x*sx,mmY+loc.y*sy,Math.max(4,loc.w*sx),Math.max(3,loc.h*sy));
+    }
+    this.ctx.fillStyle='#e74c3c'; this.ctx.fillRect(mmX+player.x*sx-2,mmY+player.y*sy-2,6,6);
+    this.ctx.strokeStyle='rgba(255,255,255,0.5)'; this.ctx.lineWidth=2;
+    this.ctx.strokeRect(mmX+this.cameraX*sx,mmY+this.cameraY*sy,this.vw*sx,this.vh*sy);
+  }
+
+  checkEventAvailable(ev,ps) {
+    if(!ev.prerequisites)return true;
+    const p=ev.prerequisites;
+    if(p.minHealth&&ps.health<p.minHealth)return false;
+    if(p.minEnergy&&ps.energy<p.minEnergy)return false;
+    if(p.minGold&&ps.gold<p.minGold)return false;
+    return true;
+  }
+}
+
+// ============================================================
+// UI 管理器
+// ============================================================
+class UIManager {
+  constructor() {
+    this.uiOverlay = document.getElementById('uiOverlay');
+    this.messagePanel = document.getElementById('messagePanel');
+  }
+  updateStatusPanel(gs) {
+    const max=GAME_CONFIG.maxState;
+    const ts=GAME_CONFIG.timeSlots.find(s=>gs.hour>=s.startHour&&gs.hour<s.endHour);
+    const tn=ts?ts.name:'';
+    const locName = gs.currentLocationName || LOCATIONS[gs.currentLocation]?.name || '未知';
+    this.uiOverlay.innerHTML = `
+      <div class="ui-row"><span>第${gs.day}天</span><span style="color:#aaa;font-size:12px;">${tn} ${String(gs.hour).padStart(2,'0')}:${String(gs.minute).padStart(2,'0')}</span></div>
+      <div class="ui-row"><span style="color:#ffd700;font-size:14px;">${gs.gold} G</span></div>
+      <div class="ui-row"><span style="color:#e74c3c;font-size:13px;">HP</span><div class="bar-container"><div class="bar-fill bar-health" style="width:${(gs.health/max.health*100)}%"></div></div><span style="font-size:12px;">${Math.floor(gs.health)}</span></div>
+      <div class="ui-row"><span style="color:#f39c12;font-size:13px;">EP</span><div class="bar-container"><div class="bar-fill bar-energy" style="width:${(gs.energy/max.energy*100)}%"></div></div><span style="font-size:12px;">${Math.floor(gs.energy)}</span></div>
+      <div class="ui-row"><span style="color:#3498db;font-size:13px;">AP</span><div class="bar-container"><div class="bar-fill bar-ability" style="width:${Math.min(gs.ability/100*100,100)}%"></div></div><span style="font-size:12px;">${Math.floor(gs.ability)}</span></div>
+      <div class="ui-row" style="margin-top:5px;font-size:12px;color:#aaa;"><span>${locName}</span></div>
+    `;
+  }
+  showMessage(text, duration=3000) {
+    this.messagePanel.textContent = text;
+    this.messagePanel.style.display = 'block';
+    if(this.messageTimer)clearTimeout(this.messageTimer);
+    this.messageTimer = setTimeout(()=>{this.messagePanel.style.display='none';},duration);
+  }
+  showEventResult(event, success, result) {
+    let et='';
+    if(result.goldDelta)et+=` 金币${result.goldDelta>0?'+':''}${result.goldDelta}`;
+    if(result.healthDelta)et+=` 健康${result.healthDelta>0?'+':''}${result.healthDelta}`;
+    if(result.energyDelta)et+=` 精力${result.energyDelta>0?'+':''}${result.energyDelta}`;
+    if(result.abilityDelta)et+=` 能力${result.abilityDelta>0?'+':''}${result.abilityDelta}`;
+    this.showMessage(`${event.name} ${success?'成功':'失败'}!${et}\n${event.message||''}`, 4000);
+  }
+  showSceneChange(name) { this.showMessage(`到达: ${name}`, 2000); }
+  showDeathScreen(gs, stat) {
+    this.uiOverlay.innerHTML = `
+      <div style="text-align:center;padding:20px;">
+        <div style="color:#e74c3c;font-size:20px;margin-bottom:10px;">游戏结束</div>
+        <div style="color:#fff;font-size:14px;margin-bottom:8px;">${gs.name} 倒下了...</div>
+        <div style="color:#aaa;font-size:13px;">存活了 ${gs.day} 天</div>
+        <div style="color:#ffd700;font-size:13px;margin-top:5px;">累计获得金币: ${stat.totalGoldEarned}</div>
+        <div style="color:#3498db;font-size:13px;">最高工作能力: ${stat.maxAbilityReached}</div>
+        <div style="margin-top:15px;color:#aaa;font-size:12px;">按 R 重新开始</div>
+      </div>
+    `;
+  }
+}
+
+// ============================================================
+// 游戏主引擎
+// ============================================================
+class Game {
+  constructor() {
+    this.renderer = new Renderer('gameCanvas');
+    this.input = new InputHandler();
+    this.ui = new UIManager();
+    this.player = new Player(250, 225);
+    this.gameState=null; this.statistics=null; this.currentLocation=null;
+    this.availableEvents=[]; this.selectedEventIndex=0;
+    this.isPaused=false; this.isGameOver=false;
+    this.eventHistory={}; this.consecutiveEvents={}; this.lastEventId=null;
+    this.timeAccumulator=0; this.lastTime=0;
+    this.init();
+  }
+  init() {
+    const sd=this.loadSave();
+    if(sd){this.gameState=sd.gameState;this.statistics=sd.statistics;this.eventHistory=sd.eventHistory||{};
+      if(this.gameState.currentScene&&!this.gameState.currentLocation)this.gameState.currentLocation=this.gameState.currentScene;
+    }else this.resetGame();
+    if(!this.gameState.currentLocation||!LOCATIONS[this.gameState.currentLocation])this.gameState.currentLocation='home';
+    this.currentLocation=LOCATIONS[this.gameState.currentLocation];
+    this.player.x=this.currentLocation.x+this.currentLocation.w/2-this.player.width/2;
+    this.player.y=this.currentLocation.y+this.currentLocation.h+12;
+    this.updateAvailableEvents();
+    requestAnimationFrame((t)=>this.loop(t));
+  }
+  resetGame() {
+    const init=GAME_CONFIG.initialState;
+    this.gameState={name:init.name,health:init.health,energy:init.energy,ability:init.ability,gold:init.gold,
+      currentLocation:init.currentLocation,currentLocationName:LOCATIONS[init.currentLocation].name,
+      day:init.day,hour:init.hour,minute:init.minute};
+    this.statistics={totalGoldEarned:0,totalGoldSpent:0,maxAbilityReached:init.ability,hospitalVisits:0};
+    this.eventHistory={};this.consecutiveEvents={};this.lastEventId=null;this.isGameOver=false;
+  }
+  loop(ts) {
+    if(!this.lastTime)this.lastTime=ts;
+    const dt=ts-this.lastTime;this.lastTime=ts;
+    if(!this.isPaused&&!this.isGameOver)this.update(dt);
+    this.render();this.input.update();
+    requestAnimationFrame((t)=>this.loop(t));
+  }
+  update(dt) {
+    this.timeAccumulator+=dt;
+    if(this.timeAccumulator>=1000){this.timeAccumulator-=1000;this.advanceTime(GAME_CONFIG.minutesPerRealSecond);}
+    this.player.update(this.input,1,{width:GAME_CONFIG.mapWidth,height:GAME_CONFIG.mapHeight});
+    this.checkCurrentLocation();
+    this.checkEventInput();
+    if(this.input.isPressed('p')){this.isPaused=!this.isPaused;this.ui.showMessage(this.isPaused?'游戏暂停':'游戏继续',1500);}
+    if(this.isGameOver&&this.input.isPressed('r')){
+      this.resetGame();this.currentLocation=LOCATIONS[this.gameState.currentLocation];
+      this.player.x=this.currentLocation.x+this.currentLocation.w/2-this.player.width/2;
+      this.player.y=this.currentLocation.y+this.currentLocation.h+12;
+      this.updateAvailableEvents();
+    }
+    this.autoSave();
+  }
+  checkCurrentLocation() {
+    const px=this.player.x+this.player.width/2, py=this.player.y+this.player.height/2;
+    let found=null;
+    for(const k in LOCATIONS){const loc=LOCATIONS[k];
+      if(px>=loc.x&&px<=loc.x+loc.w&&py>=loc.y&&py<=loc.y+loc.h){found=k;break;}}
+    if(found&&found!==this.gameState.currentLocation){
+      this.gameState.currentLocation=found;this.currentLocation=LOCATIONS[found];
+      this.gameState.currentLocationName=this.currentLocation.name;
+      this.updateAvailableEvents();this.ui.showSceneChange(this.currentLocation.name);
+    }
+  }
+  advanceTime(min) {
+    this.gameState.minute+=min;
+    while(this.gameState.minute>=60){this.gameState.minute-=60;this.gameState.hour++;}
+    while(this.gameState.hour>=24){this.gameState.hour-=24;this.gameState.day++;this.applyDailyDecay();}
+  }
+  applyDailyDecay() {
+    this.gameState.health-=2;
+    if(this.gameState.hour>=6&&this.gameState.hour<22)this.gameState.energy=Math.min(100,this.gameState.energy+5);
+    this.checkDeath();
+  }
+  updateAvailableEvents() {
+    if(!this.currentLocation){this.availableEvents=[];return;}
+    this.availableEvents=(this.currentLocation.events||[]).map(id=>EVENTS[id]).filter(e=>e!==undefined);
+    this.selectedEventIndex=0;
+  }
+  checkEventInput() {
+    for(let i=1;i<=9;i++){if(this.input.isPressed(String(i))){const idx=i-1;
+      if(idx<this.availableEvents.length){this.selectedEventIndex=idx;this.executeEvent(this.availableEvents[idx]);}}}
+    if(this.input.isPressed(' ')){if(this.selectedEventIndex<this.availableEvents.length)this.executeEvent(this.availableEvents[this.selectedEventIndex]);}
+  }
+  executeEvent(ev) {
+    if(!ev)return;
+    if(ev.prerequisites){const p=ev.prerequisites;
+      if(p.minHealth&&this.gameState.health<p.minHealth){this.ui.showMessage(`健康值不足! 需要${p.minHealth}点健康`);return;}
+      if(p.minEnergy&&this.gameState.energy<p.minEnergy){this.ui.showMessage(`精力值不足! 需要${p.minEnergy}点精力`);return;}
+      if(p.minGold&&this.gameState.gold<p.minGold){this.ui.showMessage(`金币不足! 需要${p.minGold}金币`);return;}
+    }
+    if(ev.repeatPenalty){const cnt=this.consecutiveEvents[ev.id]||0;
+      if(cnt>=ev.repeatPenalty.consecutiveLimit){this.ui.showMessage(ev.repeatPenalty.penaltyMessage,4000);
+        this.gameState.health-=10;this.gameState.energy-=10;this.checkDeath();return;}}
+    const success=Math.random()<(ev.successRate||1), eff=ev.effects||{};
+    let res={goldDelta:0,healthDelta:0,energyDelta:0,abilityDelta:0};
+    if(success){res.goldDelta=eff.goldDelta||0;res.healthDelta=eff.healthDelta||0;res.energyDelta=eff.energyDelta||0;res.abilityDelta=eff.abilityDelta||0;}
+    else{res.healthDelta=-(eff.healthDelta||0)*0.5||-5;res.energyDelta=-(eff.energyDelta||0)*0.3||-5;}
+    this.gameState.gold=Math.max(0,this.gameState.gold+res.goldDelta);
+    this.gameState.health=Math.min(100,Math.max(0,this.gameState.health+res.healthDelta));
+    this.gameState.energy=Math.min(100,Math.max(0,this.gameState.energy+res.energyDelta));
+    this.gameState.ability=Math.max(0,this.gameState.ability+(res.abilityDelta||0));
+    if(ev.durationMinutes)this.advanceTime(ev.durationMinutes);
+    if(res.goldDelta>0)this.statistics.totalGoldEarned+=res.goldDelta;
+    if(res.goldDelta<0)this.statistics.totalGoldSpent+=Math.abs(res.goldDelta);
+    if(this.gameState.ability>this.statistics.maxAbilityReached)this.statistics.maxAbilityReached=this.gameState.ability;
+    this.eventHistory[ev.id]=(this.eventHistory[ev.id]||0)+1;
+    if(this.lastEventId===ev.id){this.consecutiveEvents[ev.id]=(this.consecutiveEvents[ev.id]||0)+1;}
+    else{this.consecutiveEvents={};this.consecutiveEvents[ev.id]=1;}
+    this.lastEventId=ev.id;
+    this.ui.showEventResult(ev,success,res);this.checkDeath();this.saveGame();
+  }
+  checkDeath(){if(this.gameState.health<=0){this.isGameOver=true;this.gameState.health=0;this.ui.showDeathScreen(this.gameState,this.statistics);}}
+  saveGame(){localStorage.setItem('worker_life_save',JSON.stringify({gameState:this.gameState,statistics:this.statistics,eventHistory:this.eventHistory,version:'1.2'}));}
+  loadSave(){try{const d=localStorage.getItem('worker_life_save');if(d)return JSON.parse(d);}catch(e){}return null;}
+  autoSave(){const n=Date.now();if(!this.lastSaveTime||n-this.lastSaveTime>30000){this.saveGame();this.lastSaveTime=n;}}
+  render() {
+    this.renderer.clear();
+    this.renderer.updateCamera(this.player.x+this.player.width/2,this.player.y+this.player.height/2);
+    this.renderer.drawMap(this.gameState,this.gameState.currentLocation);
+    this.renderer.drawMinimap(this.player,this.gameState.currentLocation);
+    const sp=this.renderer.worldToScreen(this.player.x,this.player.y);
+    const ox=this.player.x,oy=this.player.y;
+    this.player.x=sp.x;this.player.y=sp.y;
+    this.player.draw(this.renderer.ctx);
+    this.player.x=ox;this.player.y=oy;
+    this.renderer.drawEventPanel(this.availableEvents,this.gameState,this.selectedEventIndex);
+    this.ui.updateStatusPanel(this.gameState);
+  }
+}
+
+// ============================================================
+// 启动游戏
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => { window.game = new Game(); });
+</script>
+</body>
+</html>

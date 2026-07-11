@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>影响分析 - 追溯与血缘</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .impact-selector { display:flex; align-items:center; gap:14px; padding:14px 18px; background:linear-gradient(135deg, rgba(59,130,246,0.06), rgba(139,92,246,0.06)); border:1px solid rgba(59,130,246,0.2); border-radius:8px; margin-bottom:14px; }
+        .impact-selector label { font-size:12px; color:var(--text-secondary); }
+        .impact-selector select { padding:8px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; min-width:260px; background:#fff; }
+        .impact-selector input { padding:8px 12px; border:1px solid var(--border); border-radius:4px; font-size:12px; }
+        .impact-selector .btn-primary { height:34px; padding:0 18px; font-size:12px; }
+        .impact-card-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px; }
+        .impact-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+        .impact-card .label { font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
+        .impact-card .value { font-size:28px; font-weight:700; color:var(--primary); }
+        .impact-card .sub-info { font-size:11px; color:var(--text-secondary); margin-top:8px; }
+        .impact-card.warn .value { color:#f59e0b; }
+        .impact-card.danger .value { color:#ef4444; }
+        .impact-card.info .value { color:#06b6d4; }
+        .impact-card.success .value { color:#10b981; }
+        .impact-chain-tree { padding:14px; background:#fff; }
+        .chain-row { display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid var(--border); font-size:12px; }
+        .chain-row.header { background:var(--bg); font-weight:600; color:var(--text-primary); font-size:12px; }
+        .chain-row:hover { background:rgba(59,130,246,0.03); }
+        .chain-level { width:80px; color:var(--text-secondary); font-family:'Segoe UI'; }
+        .chain-object { flex:1; color:var(--text-primary); font-weight:500; }
+        .chain-type { width:90px; }
+        .chain-system { width:140px; color:var(--text-secondary); }
+        .chain-degree { width:90px; text-align:center; }
+        .chain-desc { flex:1.5; color:var(--text-secondary); font-size:11px; }
+        .chain-suggestion { width:180px; color:var(--primary); font-size:11px; }
+        .degree-high { color:#ef4444; font-weight:700; }
+        .degree-mid { color:#f59e0b; font-weight:700; }
+        .degree-low { color:#10b981; font-weight:700; }
+        .tree-indent-1 { padding-left:16px; }
+        .tree-indent-2 { padding-left:32px; }
+        .tree-indent-3 { padding-left:48px; }
+        .section-head { padding:12px 14px; font-weight:600; font-size:13px; color:var(--text-primary); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .section-head .tag-count { background:var(--primary); color:#fff; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:500; }
+        .dim-tabs .btn { font-size:12px; }
+        .dim-tabs .btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+        .btn-link { cursor:pointer; color:var(--primary); font-size:11px; text-decoration:none; }
+        .btn-link:hover { text-decoration:underline; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-sitemap" style="color:var(--primary);margin-right:8px"></i>影响分析</h2>
+            <div class="page-desc">
+                首页 / 追溯与血缘 / 影响分析 - 选定接口/文件服务后，分析其下游消费链路上可能受到影响的系统与业务范围，用于变更前预评估
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+            <button class="btn btn-default" onclick="showToast('分析结果已保存', 'success')"><i class="fa fa-file-text-o"></i> 保存分析</button>
+            <button class="btn btn-primary" onclick="generateReport()"><i class="fa fa-download"></i> 生成影响报告</button>
+        </div>
+    </div>
+
+    <!-- ====== 分析对象选择器 ====== -->
+    <div class="dim-tabs" style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-default active" onclick="switchDim('api', this)">接口维度</button>
+        <button class="btn btn-default" onclick="switchDim('file', this)">文件维度</button>
+        <button class="btn btn-default" onclick="switchDim('system', this)">系统维度</button>
+    </div>
+    <div class="impact-selector">
+        <label>分析对象：</label>
+        <select id="analyzeObject" onchange="onParamChange()">
+            <option value="">请选择分析对象</option>
+            <option>API-CUS-0001 客户基本信息查询（核心业务系统）</option>
+            <option>API-DEP-0012 账户余额查询（核心业务系统）</option>
+            <option>FILE-TRX-0045 日终交易流水文件（交易清算系统）</option>
+            <option>API-RISK-0078 反洗钱名单校验（风控系统）</option>
+        </select>
+        <label>变更类型：</label>
+        <select id="changeType" style="min-width:140px" onchange="onParamChange()">
+            <option>字段新增/修改</option>
+            <option>接口参数变更</option>
+            <option>服务下线</option>
+            <option>性能调整</option>
+            <option>版本升级</option>
+        </select>
+        <label>分析深度：</label>
+        <select id="analysisDepth" style="min-width:100px" onchange="onParamChange()">
+            <option>3 层</option>
+            <option selected>5 层</option>
+            <option>全链路</option>
+        </select>
+        <button class="btn btn-primary" onclick="startAnalysis()"><i class="fa fa-search"></i> 开始分析</button>
+    </div>
+
+    <!-- ====== 分析结果卡 ====== -->
+    <div class="impact-card-grid">
+        <div class="impact-card">
+            <div class="label"><i class="fa fa-sitemap" style="color:var(--primary)"></i> 受影响消费方系统</div>
+            <div class="value">18</div>
+            <div class="sub-info">直连 6 个 · 间接 12 个<br>核心系统 3 个 · 重要 7 个 · 一般 8 个</div>
+        </div>
+        <div class="impact-card info">
+            <div class="label"><i class="fa fa-plug" style="color:#06b6d4"></i> 受影响对象</div>
+            <div class="value">52</div>
+            <div class="sub-info">直接依赖 18 个 · 间接依赖 34 个<br>其中 A 级接口 12 个 · B 级 28 个 · C 级 12 个</div>
+        </div>
+        <div class="impact-card warn">
+            <div class="label"><i class="fa fa-exclamation-triangle" style="color:#f59e0b"></i> 预估影响业务活动</div>
+            <div class="value">86</div>
+            <div class="sub-info">跨 7 个业务领域 · 覆盖 12 个业务条线<br>零售 28 · 信贷 34 · 公司 16 · 其他 8</div>
+        </div>
+        <div class="impact-card success">
+            <div class="label"><i class="fa fa-clock-o" style="color:#10b981"></i> 预估回滚窗口</div>
+            <div class="value">7.5<span style="font-size:14px; color:var(--text-secondary); margin-left:4px">天</span></div>
+            <div class="sub-info">建议灰度发布 7 日 · 兼容期 ≥ 30 天<br>需提前通知的消费方: 12 个</div>
+        </div>
+    </div>
+
+    <!-- ====== 影响链 ====== -->
+    <div class="card" style="margin-bottom:14px" id="resultArea">
+        <div class="section-head">
+            <span><i class="fa fa-code-fork"></i> 影响链路分析（按层级展开）</span>
+            <span class="tag-count">共 52 个受影响对象 · 7 层链路</span>
+        </div>
+        <div id="emptyState" style="display:none;text-align:center;padding:60px;color:#94a3b8">
+            <i class="fa fa-search" style="font-size:32px;display:block;margin-bottom:8px"></i>
+            请选择分析对象后点击"开始分析"
+        </div>
+        <div class="table-wrapper" style="border-top:none; border-radius:0">
+            <table class="data-table" style="border-top:none">
+                <thead>
+                    <tr>
+                        <th style="width:80px">层级</th>
+                        <th>受影响对象</th>
+                        <th style="width:100px">对象类型</th>
+                        <th style="width:160px">所属系统</th>
+                        <th style="width:100px" class="text-center">影响程度</th>
+                        <th>影响说明</th>
+                        <th style="width:160px">建议措施</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="color:var(--primary); font-weight:700; font-family:'Segoe UI'">L1 · 直连</td>
+                        <td style="padding-left:10px"><b>贷款受理服务</b><br><span style="font-size:11px;color:var(--text-secondary)">API-CDP-0023</span> &nbsp;<a onclick="viewObjectDetail('API-CDP-0023')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>API 接口</td>
+                        <td>信贷管理系统</td>
+                        <td class="text-center"><span class="degree-high">高</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">直接依赖客户基本信息字段 · 字段新增后需同步改造解析逻辑</td>
+                        <td style="font-size:11px;color:var(--primary)">
+                            <i class="fa fa-bell-o"></i> 提前通知 · 联调测试<br>
+                            <i class="fa fa-calendar-check-o"></i> 预留 14 天改造周期
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="color:var(--primary); font-weight:700; font-family:'Segoe UI'">L1 · 直连</td>
+                        <td style="padding-left:10px"><b>客户风险画像查询</b><br><span style="font-size:11px;color:var(--text-secondary)">API-RISK-0085</span> &nbsp;<a onclick="viewObjectDetail('API-RISK-0085')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>API 接口</td>
+                        <td>风险管理系统</td>
+                        <td class="text-center"><span class="degree-high">高</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">实时调用 · 响应字段为评分模型输入</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-bell-o"></i> 联合回归测试 · 重点监控</td>
+                    </tr>
+                    <tr>
+                        <td style="color:var(--primary); font-weight:700; font-family:'Segoe UI'">L1 · 直连</td>
+                        <td style="padding-left:10px"><b>账户首页展示</b><br><span style="font-size:11px;color:var(--text-secondary)">电子渠道前端</span> &nbsp;<a onclick="viewObjectDetail('电子渠道前端')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>前端页面</td>
+                        <td>电子渠道</td>
+                        <td class="text-center"><span class="degree-mid">中</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">展示字段包含客户姓名/职业等信息</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-code"></i> 前端同步调整</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#8b5cf6; font-weight:700; font-family:'Segoe UI'">L2 · 间接</td>
+                        <td style="padding-left:28px">└ 贷款审批决策 &nbsp;<a onclick="viewObjectDetail('贷款审批决策')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>业务流程</td>
+                        <td>信贷管理系统</td>
+                        <td class="text-center"><span class="degree-mid">中</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">依赖贷款受理服务返回的数据</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-users"></i> 业务评审会</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#8b5cf6; font-weight:700; font-family:'Segoe UI'">L2 · 间接</td>
+                        <td style="padding-left:28px">└ 反洗钱名单比对 &nbsp;<a onclick="viewObjectDetail('反洗钱名单比对')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>API 接口</td>
+                        <td>风控系统</td>
+                        <td class="text-center"><span class="degree-mid">中</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">接收风险画像后进一步比对</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-shield"></i> 安全合规评审</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#8b5cf6; font-weight:700; font-family:'Segoe UI'">L2 · 间接</td>
+                        <td style="padding-left:28px">└ 日终客户对账单 &nbsp;<a onclick="viewObjectDetail('日终客户对账单')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>文件服务</td>
+                        <td>信用卡核心</td>
+                        <td class="text-center"><span class="degree-low">低</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">生成文件时读取客户信息</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-file-text-o"></i> 字段映射评估</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#06b6d4; font-weight:700; font-family:'Segoe UI'">L3 · 下游</td>
+                        <td style="padding-left:46px">└ 监管报送接口 &nbsp;<a onclick="viewObjectDetail('监管报送接口')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>API 接口</td>
+                        <td>监管报送平台</td>
+                        <td class="text-center"><span class="degree-mid">中</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">字段需映射到监管标准字典</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-book"></i> 字典版本同步</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#06b6d4; font-weight:700; font-family:'Segoe UI'">L3 · 下游</td>
+                        <td style="padding-left:46px">└ 客户关系维护 &nbsp;<a onclick="viewObjectDetail('客户关系维护')" style="cursor:pointer;color:var(--primary);font-size:11px">查看详情</a></td>
+                        <td>业务流程</td>
+                        <td>客户关系管理</td>
+                        <td class="text-center"><span class="degree-low">低</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">客户经理视图展示用</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-bullhorn"></i> 通知业务部门</td>
+                    </tr>
+                    <tr>
+                        <td style="color:#64748b; font-weight:700; font-family:'Segoe UI'">L4 ~ L7</td>
+                        <td style="padding-left:64px; color:var(--text-secondary)">└ 其他 44 个对象（会计总账/运营报表/数据仓库等） · 影响程度低 · 建议自动化通知 &nbsp;<a class="btn-link" onclick="expandAllImpacted()" style="cursor:pointer;color:var(--primary);font-size:11px">展开全部</a></td>
+                        <td>混合</td>
+                        <td>10 个系统</td>
+                        <td class="text-center"><span class="degree-low">低</span></td>
+                        <td style="font-size:11px;color:var(--text-secondary)">多为报表类/异步文件类依赖 · 字段级影响较小</td>
+                        <td style="font-size:11px;color:var(--primary)"><i class="fa fa-envelope-o"></i> 变更邮件 · 文档更新</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ====== 操作提示与建议汇总 ====== -->
+    <div class="card">
+        <div class="section-head">
+            <span><i class="fa fa-lightbulb-o"></i> 变更建议汇总</span>
+            <span style="font-size:12px; color:var(--text-secondary); font-weight:400">本次评估结论: <b style="color:#f59e0b">中等复杂度变更</b> · 需 3~4 周联调</span>
+        </div>
+        <table class="data-table" style="border-top:none">
+            <thead>
+                <tr>
+                    <th style="width:80px">#</th>
+                    <th style="width:160px">建议类型</th>
+                    <th>具体内容</th>
+                    <th style="width:140px">责任方</th>
+                    <th style="width:120px" class="text-center">建议完成时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>1</td><td><span class="tag tag-danger" style="font-size:11px">高优</span> 消费方通知</td><td>通知 6 个直连消费方并召开变更评审会，确认各系统改造范围</td><td>核心业务系统组</td><td class="text-center">变更前 21 天</td></tr>
+                <tr><td>2</td><td><span class="tag tag-warning" style="font-size:11px">中优</span> 联调测试</td><td>搭建联调测试环境，提供新版接口 mock · 至少 14 天联调窗口</td><td>测试中心 + 各消费方</td><td class="text-center">变更前 14 天</td></tr>
+                <tr><td>3</td><td><span class="tag tag-info" style="font-size:11px">常规</span> 灰度发布</td><td>建议按 5% → 20% → 50% → 100% 分级灰度 · 每级观察 ≥ 24 小时</td><td>发布管理组</td><td class="text-center">变更当日起 7 日</td></tr>
+                <tr><td>4</td><td><span class="tag tag-info" style="font-size:11px">常规</span> 文档更新</td><td>更新接口文档、数据字典映射、血缘关系信息，保持可追溯</td><td>数据治理组</td><td class="text-center">变更后 3 天</td></tr>
+                <tr><td>5</td><td><span class="tag tag-success" style="font-size:11px">监控</span> 运行监控</td><td>重点关注调用成功率、响应时间、字段解析错误率 · 监控保留 ≥ 30 天</td><td>运维监控中心</td><td class="text-center">持续 30 天</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+<script src="../../js/mock-data.js"></script>
+<script>
+    /**
+     * 生成影响分析报告
+     */
+    function generateReport() {
+        showToast('影响分析报告生成中...');
+        setTimeout(function() {
+            showToast('报告已生成，正在下载...');
+        }, 1500);
+    }
+
+    /**
+     * 开始影响分析 - 校验参数并展示加载状态
+     */
+    function startAnalysis() {
+        var obj = document.getElementById('analyzeObject');
+        if (obj && !obj.value) {
+            showToast('请先选择分析对象', 'warning');
+            return;
+        }
+
+        // 显示加载状态
+        var resultArea = document.getElementById('resultArea');
+        if (resultArea) {
+            // 移除已有的 overlay
+            var oldOverlay = document.getElementById('analysisOverlay');
+            if (oldOverlay) oldOverlay.remove();
+
+            var overlay = document.createElement('div');
+            overlay.id = 'analysisOverlay';
+            overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;' +
+                'background:rgba(255,255,255,0.8);z-index:10;display:flex;' +
+                'align-items:center;justify-content:center';
+            overlay.innerHTML = '<div style="text-align:center;color:#64748b">' +
+                '<i class="fa fa-spinner fa-pulse" style="font-size:32px"></i>' +
+                '<p style="margin-top:12px">正在分析影响范围...</p></div>';
+            resultArea.style.position = 'relative';
+            resultArea.appendChild(overlay);
+        }
+
+        // 模拟分析完成后移除加载状态
+        setTimeout(function() {
+            var ov = document.getElementById('analysisOverlay');
+            if (ov) ov.remove();
+            showToast('影响分析完成');
+        }, 2000);
+    }
+
+    /**
+     * 分析参数变更回调 - 提示用户重新分析
+     */
+    function onParamChange() {
+        showToast('分析参数已变更，请点击"开始分析"重新分析', 'info');
+    }
+
+    /**
+     * 各维度的分析对象选项数据
+     * api: 接口维度 | file: 文件维度 | system: 系统维度
+     */
+    var DIM_OBJECT_DATA = {
+        'api': [
+            { value: 'API-CUS-0001', label: 'API-CUS-0001 客户基本信息查询（核心业务系统）' },
+            { value: 'API-DEP-0012', label: 'API-DEP-0012 账户余额查询（核心业务系统）' },
+            { value: 'API-RISK-0078', label: 'API-RISK-0078 反洗钱名单校验（风控系统）' },
+            { value: 'API-CDP-0023', label: 'API-CDP-0023 贷款受理服务（信贷管理系统）' }
+        ],
+        'file': [
+            { value: 'FILE-TRX-0045', label: 'FILE-TRX-0045 日终交易流水文件（交易清算系统）' },
+            { value: 'FILE-ACCT-0021', label: 'FILE-ACCT-0021 账户明细文件（核心业务系统）' },
+            { value: 'FILE-STMT-0056', label: 'FILE-STMT-0056 客户对账单文件（信用卡核心）' },
+            { value: 'FILE-REG-0089', label: 'FILE-REG-0089 监管报送文件（监管报送平台）' }
+        ],
+        'system': [
+            { value: 'CORE', label: '核心业务系统' },
+            { value: 'CREDIT', label: '信贷管理系统' },
+            { value: 'RISK', label: '风控系统' },
+            { value: 'REG', label: '监管报送平台' },
+            { value: 'CHANNEL', label: '电子渠道系统' }
+        ]
+    };
+
+    /* 当前选中的维度（全局） */
+    var CURRENT_DIM = 'api';
+
+    /**
+     * 切换分析维度 - 更新维度样式 + 联动分析对象下拉框选项
+     * @param {string} dim - 维度: api/file/system
+     * @param {HTMLElement} btn - 当前按钮元素
+     */
+    function switchDim(dim, btn) {
+        // 切换 active 样式
+        document.querySelectorAll('.dim-tabs .btn').forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        CURRENT_DIM = dim;
+        // 联动更新分析对象下拉框选项
+        updateAnalyzeObjectOptions(dim);
+        // 提示当前维度
+        var dimName = dim === 'api' ? '接口' : (dim === 'file' ? '文件' : '系统');
+        showToast('已切换到' + dimName + '维度分析，请重新选择分析对象', 'info');
+    }
+
+    /**
+     * 根据维度更新分析对象下拉框选项
+     * @param {string} dim - 维度: api/file/system
+     */
+    function updateAnalyzeObjectOptions(dim) {
+        var select = document.getElementById('analyzeObject');
+        if (!select) return;
+        var options = DIM_OBJECT_DATA[dim] || [];
+        // 清空并重建选项
+        select.innerHTML = '<option value="">请选择分析对象</option>';
+        options.forEach(function(opt) {
+            var o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            select.appendChild(o);
+        });
+    }
+
+    /**
+     * 展开全部受影响对象
+     */
+    function expandAllImpacted() {
+        showToast('展开全部受影响对象...');
+    }
+
+    /**
+     * 查看受影响对象详情 - 跳转到血缘列表页
+     * @param {string} objId - 对象标识
+     */
+    // 根据对象类型区分跳转：API 走接口详情，FILE/MSG 走文件接口详情，其余走血缘列表
+    function viewObjectDetail(objId) {
+        if (objId && objId.indexOf('API') >= 0) {
+            govNav('pages/interface/api-detail.html',
+                ['首页','追溯与血缘','影响分析','接口详情'],
+                { code: objId });
+        } else if (objId && (objId.indexOf('FILE') >= 0 || objId.indexOf('MSG') >= 0)) {
+            govNav('pages/interface/file-detail.html',
+                ['首页','追溯与血缘','影响分析','文件接口详情'],
+                { code: objId });
+        } else {
+            govNav('pages/lineage/list-view.html',
+                ['首页','追溯与血缘','影响分析','血缘列表'],
+                { object: objId });
+        }
+    }
+</script>
+</body>
+</html>

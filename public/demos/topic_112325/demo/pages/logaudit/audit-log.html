@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>审批日志 - 日志审计</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        /* ========== 统计卡片图标色 ========== */
+        .stat-card .stat-value .unit { font-size: 16px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+
+        /* ========== 操作列固定右侧 ========== */
+        .data-table .op-col {
+            position: sticky;
+            right: 0;
+            z-index: 10;
+            background: #fff;
+            box-shadow: -3px 0 5px rgba(0,0,0,0.06);
+            border-left: 1px solid var(--border-light);
+            white-space: nowrap;
+        }
+        .data-table thead th.op-col {
+            background: #f8fafc;
+            z-index: 12;
+        }
+        .data-table tbody tr:nth-child(even) td.op-col { background: #fafbfc; }
+        .data-table tbody tr:hover td.op-col { background: #eff6ff; }
+        .data-table .op-col .btn { margin-right: 4px; }
+        .data-table .op-col .btn:last-child { margin-right: 0; }
+
+        /* ========== 加载状态 ========== */
+        .loading-state {
+            display: none;
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .loading-state .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            margin: 0 auto 12px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ========== 弹窗 ========== */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: none;
+        }
+        .modal-overlay.show { display: block; }
+        .modal-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            width: 720px;
+            max-width: 92vw;
+            max-height: 88vh; height: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .modal-header h3 { margin: 0; font-size: 16px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+        .modal-close { font-size: 18px; color: var(--text-light); cursor: pointer; transition: color 0.2s; }
+        .modal-close:hover { color: var(--text-primary); }
+        .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
+
+        /* ========== 弹窗基本信息区 ========== */
+        .detail-info-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .detail-info-item {
+            padding: 10px 14px;
+            background: #f8fafc;
+            border-left: 3px solid var(--primary);
+            border-radius: 4px;
+        }
+        .detail-info-item .lbl { font-size: 12px; color: var(--text-secondary); }
+        .detail-info-item .val { font-size: 14px; color: var(--text-primary); margin-top: 4px; font-weight: 500; }
+
+        /* ========== 审批时间线 ========== */
+        .timeline-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .audit-timeline { position: relative; padding-left: 4px; }
+        .audit-timeline .tl-item {
+            position: relative;
+            padding: 0 0 22px 28px;
+            border-left: 2px solid var(--border);
+        }
+        .audit-timeline .tl-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+        .audit-timeline .tl-item::before {
+            content: '';
+            position: absolute;
+            left: -7px;
+            top: 2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 2px var(--primary);
+        }
+        /* 操作类型对应的时间线节点颜色 */
+        .audit-timeline .tl-item.tl-submit::before { background: var(--info); box-shadow: 0 0 0 2px var(--info); }
+        .audit-timeline .tl-item.tl-agree::before { background: var(--success); box-shadow: 0 0 0 2px var(--success); }
+        .audit-timeline .tl-item.tl-reject::before { background: var(--danger); box-shadow: 0 0 0 2px var(--danger); }
+        .audit-timeline .tl-item.tl-return::before { background: var(--warning); box-shadow: 0 0 0 2px var(--warning); }
+        .audit-timeline .tl-item.tl-transfer::before { background: var(--info); box-shadow: 0 0 0 2px var(--info); }
+        .audit-timeline .tl-item.tl-withdraw::before { background: var(--text-light); box-shadow: 0 0 0 2px var(--text-light); }
+
+        .audit-timeline .tl-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .audit-timeline .tl-node { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+        .audit-timeline .tl-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .audit-timeline .tl-meta i { margin-right: 4px; }
+        .audit-timeline .tl-opinion {
+            font-size: 13px;
+            color: var(--text-primary);
+            background: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 4px;
+            line-height: 1.6;
+        }
+
+        /* ========== Toast 轻提示 ========== */
+        .toast-msg {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            color: #fff;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            z-index: 10000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: toastIn 0.25s ease;
+        }
+        @keyframes toastIn { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-file-text-o" style="color:var(--primary);margin-right:8px"></i>审批日志</h2>
+            <div class="page-desc">首页 / 日志审计 / 审批日志 · 记录所有审批流程实例的操作历史，支持按流程类型、状态、操作类型等维度查询审计</div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="showToast('正在导出审批日志...')"><i class="fa fa-download"></i> 导出日志</button>
+            <button class="btn btn-default" onclick="refreshData()"><i class="fa fa-refresh"></i> 刷新</button>
+        </div>
+    </div>
+
+    <!-- ====== 统计卡片行 ====== -->
+    <div class="stat-cards">
+        <div class="stat-card">
+            <div class="stat-icon primary"><i class="fa fa-file-text"></i></div>
+            <div class="stat-label">审批实例总数</div>
+            <div class="stat-value">1,286</div>
+            <div class="stat-foot">累计审批流程实例</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon green"><i class="fa fa-plus-circle"></i></div>
+            <div class="stat-label">本月新增</div>
+            <div class="stat-value">186</div>
+            <div class="stat-foot"><span class="up"><i class="fa fa-arrow-up"></i> 12.5%</span> 较上月</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon orange"><i class="fa fa-clock-o"></i></div>
+            <div class="stat-label">平均审批时长</div>
+            <div class="stat-value">2.3<span class="unit">天</span></div>
+            <div class="stat-foot"><span class="up"><i class="fa fa-arrow-down"></i> 0.5天</span> 较上月</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon blue"><i class="fa fa-check-circle"></i></div>
+            <div class="stat-label">审批通过率</div>
+            <div class="stat-value">89.2<span class="unit">%</span></div>
+            <div class="stat-foot"><span class="up"><i class="fa fa-arrow-up"></i> 2.1%</span> 较上月</div>
+        </div>
+    </div>
+
+    <!-- ====== 筛选操作区 ====== -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item">
+                <label>关键字</label>
+                <input type="text" class="form-control" id="filterKeyword" placeholder="审批实例ID/流程名称/申请人">
+            </div>
+            <div class="form-item">
+                <label>流程类型</label>
+                <select class="form-control" id="filterFlowType">
+                    <option>全部</option>
+                    <option>接口注册审批</option>
+                    <option>服务变更审批</option>
+                    <option>文件接口注册审批</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>审批状态</label>
+                <select class="form-control" id="filterStatus">
+                    <option>全部</option>
+                    <option>进行中</option>
+                    <option>已通过</option>
+                    <option>已拒绝</option>
+                    <option>已撤回</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>操作类型</label>
+                <select class="form-control" id="filterActionType">
+                    <option>全部</option>
+                    <option>同意</option>
+                    <option>拒绝</option>
+                    <option>退回</option>
+                    <option>转办</option>
+                    <option>撤回</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>开始日期</label>
+                <input type="date" class="form-control" id="filterStartDate" value="2026-05-01">
+            </div>
+            <div class="form-item">
+                <label>结束日期</label>
+                <input type="date" class="form-control" id="filterEndDate" value="2026-06-30">
+            </div>
+            <div class="form-item" style="min-width:auto">
+                <button class="btn btn-primary" onclick="applyFilter()"><i class="fa fa-search"></i> 查询</button>
+                <button class="btn btn-default" onclick="resetFilter()"><i class="fa fa-eraser"></i> 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 审批实例列表表格 ====== -->
+    <div class="card" style="margin-bottom:0">
+        <div class="card-header">
+            <div class="card-title">审批实例列表</div>
+            <div class="card-action">
+                <a href="javascript:;" onclick="showToast('导出审批日志')"><i class="fa fa-download"></i> 导出</a>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:130px">审批实例ID</th>
+                        <th style="width:160px">流程名称</th>
+                        <th style="width:70px" class="text-center">流程版本</th>
+                        <th style="width:80px">申请人</th>
+                        <th style="width:110px">申请部门</th>
+                        <th style="width:100px">当前/最终节点</th>
+                        <th style="width:80px" class="text-center">审批状态</th>
+                        <th style="width:140px" class="text-center">提交时间</th>
+                        <th style="width:140px" class="text-center">完成时间</th>
+                        <th style="width:150px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="auditTableBody"></tbody>
+            </table>
+        </div>
+
+        <!-- 加载状态 -->
+        <div class="loading-state" id="loadingState">
+            <div class="spinner"></div>
+            <div>数据加载中，请稍候...</div>
+        </div>
+
+        <!-- 空数据状态 -->
+        <div class="empty-state" id="emptyState" style="display:none">
+            <i class="fa fa-inbox"></i>
+            <p>暂无审批日志数据</p>
+        </div>
+
+        <!-- 分页器 -->
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary" id="totalCount">1,286</span> 条记录</div>
+            <div class="page-list" id="pageList"></div>
+            <div class="page-size">
+                <select class="form-control" id="pageSizeSelect" style="height:32px" onchange="changePageSize(this.value)">
+                    <option value="10">10 条/页</option>
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 审批详情弹窗 ====== -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa fa-file-text-o" style="color:var(--primary)"></i> 审批详情</h3>
+            <span class="modal-close" onclick="closeDetail()"><i class="fa fa-times"></i></span>
+        </div>
+        <div class="modal-body" id="detailModalBody"></div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeDetail()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+/* ================================================================
+ * 审批日志页面逻辑
+ * ================================================================ */
+
+/* ---------- 全局状态 ---------- */
+var currentPage = 1;
+var pageSize = 10;
+var TOTAL_COUNT = 1286;
+
+/* ---------- 审批实例数据（12条示例） ---------- */
+var AUDIT_INSTANCES = [
+    {
+        id: 'APR-2026-0001', flowName: '接口注册审批流程', flowType: '接口注册审批',
+        version: 'V1', applicant: '张明', dept: '核心系统部',
+        currentNode: '最终核准', status: '进行中',
+        submitTime: '2026-06-24 09:15', completeTime: '-',
+        timeline: [
+            { node: '提交', approver: '张明', action: '提交', time: '2026-06-24 09:15', opinion: '申请新增客户信息查询接口' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-06-24 14:30', opinion: '技术方案合理，接口设计规范' },
+            { node: '合规审核', approver: '王合规', action: '同意', time: '2026-06-25 10:00', opinion: '符合合规要求，敏感字段已脱敏' },
+            { node: '业务审核', approver: '赵业务', action: '同意', time: '2026-06-25 15:20', opinion: '业务需求明确，同意注册' }
+        ]
+    },
+    {
+        id: 'APR-2026-0002', flowName: '服务变更审批流程', flowType: '服务变更审批',
+        version: 'V2', applicant: '李华', dept: '渠道管理部',
+        currentNode: '技术审核', status: '进行中',
+        submitTime: '2026-06-23 14:20', completeTime: '-',
+        timeline: [
+            { node: '提交', approver: '李华', action: '提交', time: '2026-06-23 14:20', opinion: '申请变更支付渠道接口超时时间' },
+            { node: '技术审核', approver: '陈工', action: '转办', time: '2026-06-24 09:00', opinion: '转办至安全团队评估变更影响' }
+        ]
+    },
+    {
+        id: 'APR-2026-0003', flowName: '文件接口注册审批流程', flowType: '文件接口注册审批',
+        version: 'V1', applicant: '王芳', dept: '数据管理部',
+        currentNode: '合规审核', status: '进行中',
+        submitTime: '2026-06-22 10:30', completeTime: '-',
+        timeline: [
+            { node: '提交', approver: '王芳', action: '提交', time: '2026-06-22 10:30', opinion: '申请新增日终对账文件接口' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-06-22 16:00', opinion: '文件格式规范，传输协议安全' }
+        ]
+    },
+    {
+        id: 'APR-2026-0004', flowName: '接口注册审批流程', flowType: '接口注册审批',
+        version: 'V1', applicant: '赵强', dept: '零售业务部',
+        currentNode: '已完成', status: '已通过',
+        submitTime: '2026-06-20 09:00', completeTime: '2026-06-22 16:30',
+        timeline: [
+            { node: '提交', approver: '赵强', action: '提交', time: '2026-06-20 09:00', opinion: '申请新增理财产品查询接口' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-06-20 15:00', opinion: '技术方案可行，参数设计合理' },
+            { node: '合规审核', approver: '王合规', action: '同意', time: '2026-06-21 10:30', opinion: '合规审查通过' },
+            { node: '业务审核', approver: '赵业务', action: '同意', time: '2026-06-21 16:00', opinion: '业务需求合理' },
+            { node: '最终核准', approver: '周总', action: '同意', time: '2026-06-22 16:30', opinion: '同意注册' }
+        ]
+    },
+    {
+        id: 'APR-2026-0005', flowName: '服务变更审批流程', flowType: '服务变更审批',
+        version: 'V1', applicant: '陈伟', dept: '核心系统部',
+        currentNode: '已完成', status: '已通过',
+        submitTime: '2026-06-18 11:15', completeTime: '2026-06-20 10:45',
+        timeline: [
+            { node: '提交', approver: '陈伟', action: '提交', time: '2026-06-18 11:15', opinion: '申请变更核心交易接口版本号' },
+            { node: '技术审核', approver: '陈工', action: '同意', time: '2026-06-18 16:00', opinion: '变更方案合理，兼容性良好' },
+            { node: '业务审核', approver: '赵业务', action: '同意', time: '2026-06-19 14:00', opinion: '业务影响可控' },
+            { node: '最终核准', approver: '周总', action: '同意', time: '2026-06-20 10:45', opinion: '同意变更' }
+        ]
+    },
+    {
+        id: 'APR-2026-0006', flowName: '文件接口注册审批流程', flowType: '文件接口注册审批',
+        version: 'V2', applicant: '刘洋', dept: '数据管理部',
+        currentNode: '已完成', status: '已通过',
+        submitTime: '2026-06-15 14:00', completeTime: '2026-06-17 09:30',
+        timeline: [
+            { node: '提交', approver: '刘洋', action: '提交', time: '2026-06-15 14:00', opinion: '申请新增征信报告文件接口' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-06-15 17:30', opinion: '文件传输加密方案完善' },
+            { node: '合规审核', approver: '王合规', action: '同意', time: '2026-06-16 11:00', opinion: '征信数据使用合规' },
+            { node: '最终核准', approver: '周总', action: '同意', time: '2026-06-17 09:30', opinion: '同意注册' }
+        ]
+    },
+    {
+        id: 'APR-2026-0007', flowName: '接口注册审批流程', flowType: '接口注册审批',
+        version: 'V2', applicant: '孙磊', dept: '渠道管理部',
+        currentNode: '已完成', status: '已通过',
+        submitTime: '2026-06-10 09:30', completeTime: '2026-06-12 15:00',
+        timeline: [
+            { node: '提交', approver: '孙磊', action: '提交', time: '2026-06-10 09:30', opinion: '申请新增线上开户接口V2' },
+            { node: '技术审核', approver: '陈工', action: '退回', time: '2026-06-10 16:00', opinion: '请求参数缺少幂等键，请补充后重新提交' },
+            { node: '技术审核', approver: '陈工', action: '同意', time: '2026-06-11 10:00', opinion: '已补充幂等键，审核通过' },
+            { node: '合规审核', approver: '王合规', action: '同意', time: '2026-06-11 15:30', opinion: '合规审查通过' },
+            { node: '业务审核', approver: '赵业务', action: '同意', time: '2026-06-12 10:00', opinion: '业务需求合理' },
+            { node: '最终核准', approver: '周总', action: '同意', time: '2026-06-12 15:00', opinion: '同意注册' }
+        ]
+    },
+    {
+        id: 'APR-2026-0008', flowName: '服务变更审批流程', flowType: '服务变更审批',
+        version: 'V1', applicant: '周梅', dept: '零售业务部',
+        currentNode: '已完成', status: '已通过',
+        submitTime: '2026-06-05 10:00', completeTime: '2026-06-07 14:20',
+        timeline: [
+            { node: '提交', approver: '周梅', action: '提交', time: '2026-06-05 10:00', opinion: '申请变更贷款利率查询接口字段' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-06-05 15:00', opinion: '字段变更不影响现有调用方' },
+            { node: '业务审核', approver: '赵业务', action: '同意', time: '2026-06-06 11:00', opinion: '业务变更合理' },
+            { node: '最终核准', approver: '周总', action: '同意', time: '2026-06-07 14:20', opinion: '同意变更' }
+        ]
+    },
+    {
+        id: 'APR-2026-0009', flowName: '接口注册审批流程', flowType: '接口注册审批',
+        version: 'V1', applicant: '吴鹏', dept: '核心系统部',
+        currentNode: '已完成', status: '已拒绝',
+        submitTime: '2026-06-03 13:45', completeTime: '2026-06-05 11:00',
+        timeline: [
+            { node: '提交', approver: '吴鹏', action: '提交', time: '2026-06-03 13:45', opinion: '申请新增内部转账接口' },
+            { node: '技术审核', approver: '陈工', action: '同意', time: '2026-06-03 17:00', opinion: '技术方案可行' },
+            { node: '合规审核', approver: '王合规', action: '拒绝', time: '2026-06-05 11:00', opinion: '接口涉及资金划转，缺少风控审批环节，不予通过' }
+        ]
+    },
+    {
+        id: 'APR-2026-0010', flowName: '文件接口注册审批流程', flowType: '文件接口注册审批',
+        version: 'V1', applicant: '郑洁', dept: '数据管理部',
+        currentNode: '已完成', status: '已拒绝',
+        submitTime: '2026-05-28 09:20', completeTime: '2026-05-30 16:30',
+        timeline: [
+            { node: '提交', approver: '郑洁', action: '提交', time: '2026-05-28 09:20', opinion: '申请新增客户明细文件下载接口' },
+            { node: '技术审核', approver: '李工', action: '同意', time: '2026-05-28 15:00', opinion: '技术方案可行' },
+            { node: '合规审核', approver: '王合规', action: '同意', time: '2026-05-29 10:00', opinion: '合规审查通过' },
+            { node: '最终核准', approver: '周总', action: '拒绝', time: '2026-05-30 16:30', opinion: '客户明细数据敏感度较高，建议通过专线方式获取，不予开放接口' }
+        ]
+    },
+    {
+        id: 'APR-2026-0011', flowName: '服务变更审批流程', flowType: '服务变更审批',
+        version: 'V1', applicant: '张明', dept: '核心系统部',
+        currentNode: '已完成', status: '已撤回',
+        submitTime: '2026-05-20 14:30', completeTime: '2026-05-21 10:00',
+        timeline: [
+            { node: '提交', approver: '张明', action: '提交', time: '2026-05-20 14:30', opinion: '申请变更账户查询接口返回字段' },
+            { node: '技术审核', approver: '陈工', action: '退回', time: '2026-05-20 17:00', opinion: '变更方案需补充影响评估报告' },
+            { node: '提交', approver: '张明', action: '撤回', time: '2026-05-21 10:00', opinion: '需求调整，撤回本次申请' }
+        ]
+    },
+    {
+        id: 'APR-2026-0012', flowName: '接口注册审批流程', flowType: '接口注册审批',
+        version: 'V1', applicant: '李华', dept: '渠道管理部',
+        currentNode: '已完成', status: '已撤回',
+        submitTime: '2026-05-10 10:15', completeTime: '2026-05-11 09:00',
+        timeline: [
+            { node: '提交', approver: '李华', action: '提交', time: '2026-05-10 10:15', opinion: '申请新增短信通知接口' },
+            { node: '提交', approver: '李华', action: '撤回', time: '2026-05-11 09:00', opinion: '与业务方确认后暂缓申请，主动撤回' }
+        ]
+    }
+];
+
+/* ---------- 状态标签映射 ---------- */
+function statusTag(status) {
+    var map = {
+        '进行中': { cls: 'tag-info', icon: 'fa-clock-o' },
+        '已通过': { cls: 'tag-success', icon: 'fa-check-circle' },
+        '已拒绝': { cls: 'tag-danger', icon: 'fa-times-circle' },
+        '已撤回': { cls: 'tag-default', icon: 'fa-ban' }
+    };
+    return map[status] || { cls: 'tag-default', icon: 'fa-circle' };
+}
+
+/* ---------- 操作类型标签映射 ---------- */
+function actionTag(action) {
+    var map = {
+        '同意': { cls: 'tag-success', tlCls: 'tl-agree' },
+        '拒绝': { cls: 'tag-danger', tlCls: 'tl-reject' },
+        '退回': { cls: 'tag-warning', tlCls: 'tl-return' },
+        '转办': { cls: 'tag-info', tlCls: 'tl-transfer' },
+        '撤回': { cls: 'tag-default', tlCls: 'tl-withdraw' },
+        '提交': { cls: 'tag-info', tlCls: 'tl-submit' }
+    };
+    return map[action] || { cls: 'tag-default', tlCls: 'tl-submit' };
+}
+
+/* ---------- 筛选逻辑 ---------- */
+function getFilteredInstances() {
+    var keyword = document.getElementById('filterKeyword').value.trim().toLowerCase();
+    var flowType = document.getElementById('filterFlowType').value;
+    var status = document.getElementById('filterStatus').value;
+    var actionType = document.getElementById('filterActionType').value;
+    var startDate = document.getElementById('filterStartDate').value;
+    var endDate = document.getElementById('filterEndDate').value;
+
+    return AUDIT_INSTANCES.filter(function(inst) {
+        // 关键字匹配：ID/流程名称/申请人
+        if (keyword) {
+            var matched = inst.id.toLowerCase().indexOf(keyword) >= 0 ||
+                          inst.flowName.toLowerCase().indexOf(keyword) >= 0 ||
+                          inst.applicant.toLowerCase().indexOf(keyword) >= 0;
+            if (!matched) return false;
+        }
+        // 流程类型筛选
+        if (flowType !== '全部' && inst.flowType !== flowType) return false;
+        // 审批状态筛选
+        if (status !== '全部' && inst.status !== status) return false;
+        // 操作类型筛选：检查时间线中是否包含该操作
+        if (actionType !== '全部') {
+            var hasAction = inst.timeline.some(function(t) { return t.action === actionType; });
+            if (!hasAction) return false;
+        }
+        // 时间范围筛选（按提交日期）
+        var submitDate = inst.submitTime.substring(0, 10);
+        if (startDate && submitDate < startDate) return false;
+        if (endDate && submitDate > endDate) return false;
+        return true;
+    });
+}
+
+/* ---------- 渲染表格行 ---------- */
+function renderRow(inst) {
+    var st = statusTag(inst.status);
+    var statusHtml = '<span class="tag ' + st.cls + '" style="font-size:11px"><i class="fa ' + st.icon + '"></i> ' + inst.status + '</span>';
+    var completeTimeHtml = inst.completeTime === '-'
+        ? '<span style="color:var(--text-light)">-</span>'
+        : '<span style="font-size:12px;color:var(--text-secondary)">' + inst.completeTime + '</span>';
+
+    return '<tr>'
+        + '<td style="font-family:\'Segoe UI\';color:var(--text-secondary)">' + inst.id + '</td>'
+        + '<td>' + inst.flowName + '</td>'
+        + '<td class="text-center"><span class="tag tag-default" style="font-size:11px">' + inst.version + '</span></td>'
+        + '<td>' + inst.applicant + '</td>'
+        + '<td>' + inst.dept + '</td>'
+        + '<td>' + inst.currentNode + '</td>'
+        + '<td class="text-center">' + statusHtml + '</td>'
+        + '<td class="text-center" style="font-size:12px;color:var(--text-secondary)">' + inst.submitTime + '</td>'
+        + '<td class="text-center">' + completeTimeHtml + '</td>'
+        + '<td class="text-center op-col">'
+        + '<button class="btn btn-sm btn-primary" onclick="showDetail(\'' + inst.id + '\')"><i class="fa fa-eye"></i> 详情</button>'
+        + '<button class="btn btn-link" onclick="showDetail(\'' + inst.id + '\')"><i class="fa fa-list-alt"></i> 审批记录</button>'
+        + '</td></tr>';
+}
+
+/* ---------- 渲染表格 ---------- */
+function renderTable() {
+    var filtered = getFilteredInstances();
+    var tbody = document.getElementById('auditTableBody');
+    var emptyState = document.getElementById('emptyState');
+    var loadingState = document.getElementById('loadingState');
+
+    // 隐藏加载状态
+    loadingState.style.display = 'none';
+
+    // 按当前页截取数据
+    var startIdx = (currentPage - 1) * pageSize;
+    var pageData = filtered.slice(startIdx, startIdx + pageSize);
+
+    if (pageData.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.style.display = 'block';
+    } else {
+        emptyState.style.display = 'none';
+        tbody.innerHTML = pageData.map(renderRow).join('');
+    }
+
+    renderPagination();
+}
+
+/* ---------- 渲染分页器 ---------- */
+function renderPagination() {
+    var totalPages = Math.ceil(TOTAL_COUNT / pageSize);
+    var pageList = document.getElementById('pageList');
+    var html = '';
+
+    // 上一页按钮
+    html += '<button onclick="goToPage(' + (currentPage - 1) + ')"' + (currentPage <= 1 ? ' disabled' : '') + '><i class="fa fa-angle-left"></i></button>';
+
+    // 计算页码窗口
+    var start = Math.max(1, currentPage - 2);
+    var end = Math.min(totalPages, currentPage + 2);
+
+    // 第一页 + 省略号
+    if (start > 1) {
+        html += '<button onclick="goToPage(1)">1</button>';
+        if (start > 2) html += '<button disabled>...</button>';
+    }
+
+    // 页码窗口
+    for (var i = start; i <= end; i++) {
+        html += '<button class="' + (i === currentPage ? 'active' : '') + '" onclick="goToPage(' + i + ')">' + i + '</button>';
+    }
+
+    // 省略号 + 最后一页
+    if (end < totalPages) {
+        if (end < totalPages - 1) html += '<button disabled>...</button>';
+        html += '<button onclick="goToPage(' + totalPages + ')">' + totalPages + '</button>';
+    }
+
+    // 下一页按钮
+    html += '<button onclick="goToPage(' + (currentPage + 1) + ')"' + (currentPage >= totalPages ? ' disabled' : '') + '><i class="fa fa-angle-right"></i></button>';
+
+    pageList.innerHTML = html;
+}
+
+/* ---------- 分页跳转 ---------- */
+function goToPage(page) {
+    var totalPages = Math.ceil(TOTAL_COUNT / pageSize);
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+
+    // 演示数据仅12条，超出范围时显示加载后空状态
+    var filtered = getFilteredInstances();
+    var startIdx = (currentPage - 1) * pageSize;
+    if (startIdx >= filtered.length) {
+        showLoading();
+        setTimeout(function() { renderTable(); }, 400);
+    } else {
+        renderTable();
+    }
+}
+
+/* ---------- 切换每页条数 ---------- */
+function changePageSize(value) {
+    pageSize = parseInt(value, 10);
+    currentPage = 1;
+    renderTable();
+}
+
+/* ---------- 筛选查询 ---------- */
+function applyFilter() {
+    currentPage = 1;
+    showLoading();
+    setTimeout(function() { renderTable(); }, 500);
+}
+
+/* ---------- 重置筛选 ---------- */
+function resetFilter() {
+    document.getElementById('filterKeyword').value = '';
+    document.getElementById('filterFlowType').value = '全部';
+    document.getElementById('filterStatus').value = '全部';
+    document.getElementById('filterActionType').value = '全部';
+    document.getElementById('filterStartDate').value = '2026-05-01';
+    document.getElementById('filterEndDate').value = '2026-06-30';
+    currentPage = 1;
+    showLoading();
+    setTimeout(function() { renderTable(); }, 400);
+    showToast('已重置查询条件');
+}
+
+/* ---------- 刷新数据 ---------- */
+function refreshData() {
+    showLoading();
+    setTimeout(function() { renderTable(); }, 500);
+    showToast('审批日志已刷新');
+}
+
+/* ---------- 显示加载状态 ---------- */
+function showLoading() {
+    document.getElementById('loadingState').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('auditTableBody').innerHTML = '';
+}
+
+/* ---------- 审批详情弹窗 ---------- */
+function showDetail(id) {
+    // 查找对应审批实例
+    var inst = AUDIT_INSTANCES.find(function(item) { return item.id === id; });
+    if (!inst) {
+        showToast('未找到审批实例 ' + id);
+        return;
+    }
+
+    var st = statusTag(inst.status);
+    var body = document.getElementById('detailModalBody');
+
+    // 构建基本信息区
+    var infoHtml = '<div class="detail-info-grid">'
+        + '<div class="detail-info-item"><div class="lbl">审批实例ID</div><div class="val" style="font-family:\'Segoe UI\'">' + inst.id + '</div></div>'
+        + '<div class="detail-info-item"><div class="lbl">流程名称</div><div class="val">' + inst.flowName + '</div></div>'
+        + '<div class="detail-info-item"><div class="lbl">流程版本</div><div class="val">' + inst.version + '</div></div>'
+        + '<div class="detail-info-item"><div class="lbl">申请人</div><div class="val">' + inst.applicant + '（' + inst.dept + '）</div></div>'
+        + '<div class="detail-info-item"><div class="lbl">提交时间</div><div class="val">' + inst.submitTime + '</div></div>'
+        + '<div class="detail-info-item"><div class="lbl">审批状态</div><div class="val"><span class="tag ' + st.cls + '"><i class="fa ' + st.icon + '"></i> ' + inst.status + '</span></div></div>'
+        + '</div>';
+
+    // 构建时间线
+    var timelineHtml = '<div class="timeline-section-title"><i class="fa fa-sitemap"></i> 审批流程时间线</div>';
+    timelineHtml += '<div class="audit-timeline">';
+    timelineHtml += inst.timeline.map(function(t) {
+        var act = actionTag(t.action);
+        return '<div class="tl-item ' + act.tlCls + '">'
+            + '<div class="tl-header">'
+            + '  <span class="tl-node">' + t.node + '</span>'
+            + '  <span class="tag ' + act.cls + '" style="font-size:11px">' + t.action + '</span>'
+            + '</div>'
+            + '<div class="tl-meta">'
+            + '  <span><i class="fa fa-user"></i>' + t.approver + '</span>'
+            + '  <span><i class="fa fa-clock-o"></i>' + t.time + '</span>'
+            + '</div>'
+            + '<div class="tl-opinion">' + t.opinion + '</div>'
+            + '</div>';
+    }).join('');
+    timelineHtml += '</div>';
+
+    body.innerHTML = infoHtml + timelineHtml;
+    document.getElementById('detailModal').classList.add('show');
+}
+
+/* ---------- 关闭详情弹窗 ---------- */
+function closeDetail() {
+    document.getElementById('detailModal').classList.remove('show');
+}
+
+
+/* ---------- 页面初始化 ---------- */
+document.addEventListener('DOMContentLoaded', function() {
+    renderTable();
+});
+</script>
+</body>
+</html>

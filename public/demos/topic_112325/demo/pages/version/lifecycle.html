@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>版本生命周期 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .lifecycle-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+        .lc-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 20px; text-align: center; position: relative; overflow: hidden; }
+        .lc-card .lc-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; margin: 0 auto 10px; }
+        .lc-card .lc-val { font-size: 32px; font-weight: 700; font-family: 'Segoe UI'; line-height: 1.2; }
+        .lc-card .lc-label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+        .flow-steps { display: flex; align-items: center; gap: 0; margin: 20px 0; justify-content: center; }
+        .flow-step { display: flex; flex-direction: column; align-items: center; padding: 12px 20px; border-radius: 8px; min-width: 120px; }
+        .flow-step .step-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #fff; margin-bottom: 8px; }
+        .flow-step .step-name { font-size: 13px; font-weight: 600; }
+        .flow-step .step-time { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+        .flow-arrow { font-size: 20px; color: var(--text-light); margin: 0 8px; }
+        .warn-row { background: #fff5f5 !important; }
+
+        /* ====== 环境晋升时间轴样式 ====== */
+        .promo-timeline { display:flex; align-items:stretch; justify-content:space-between; gap:0; padding:20px 14px; position:relative; }
+        .promo-timeline::before { content:""; position:absolute; left:8%; right:8%; top:40px; height:2px; background:linear-gradient(90deg, #3b82f6 0%, #f59e0b 33%, #10b981 66%, #dc2626 100%); z-index:1; }
+        .tl-node { flex:1; display:flex; flex-direction:column; align-items:center; position:relative; z-index:2; }
+        .tl-dot { width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; background:var(--primary); box-shadow:0 2px 8px rgba(0,0,0,0.15); border:3px solid #fff; margin-bottom:8px; }
+        .tl-dot.c-draft  { background:#94a3b8; }
+        .tl-dot.c-dev    { background:#3b82f6; }
+        .tl-dot.c-sit    { background:#f59e0b; }
+        .tl-dot.c-uat    { background:#10b981; }
+        .tl-dot.c-prod   { background:#dc2626; }
+        .tl-name { font-size:13px; font-weight:700; color:var(--text-primary); }
+        .tl-date { font-size:11px; color:var(--text-secondary); margin-top:2px; font-family:'Segoe UI'; }
+        .tl-ver { font-family:'Segoe UI'; font-size:12px; color:var(--primary); margin-top:4px; background:#eff6ff; padding:2px 8px; border-radius:4px; font-weight:600; }
+
+        /* 节点右侧箭头 */
+        .tl-arrow { position:absolute; top:32px; right:-8px; color:var(--text-light); font-size:14px; z-index:3; background:#fff; }
+        .tl-node:last-child .tl-arrow { display:none; }
+
+        /* ====== 环境胶囊切换器 + 横幅 ====== */
+        .env-switcher { display:flex; align-items:center; gap:10px; padding:10px 16px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px; }
+        .env-switcher .env-label { font-size:13px; color:#64748b; font-weight:600; }
+        .env-pill { display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border-radius:999px; cursor:pointer; font-size:13px; font-weight:500; color:#475569; background:#f1f5f9; border:1px solid transparent; transition:all .2s ease; user-select:none; }
+        .env-pill:hover { box-shadow:0 2px 6px rgba(0,0,0,.08); }
+        .env-pill.active { background:#1e40af; color:#fff; border-color:#1e40af; box-shadow:0 2px 8px rgba(30,64,175,.25); }
+        .env-pill .dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:#cbd5e1; }
+        .env-pill.active .dot { background:#fff; }
+        .env-pill .dot.green { background:#16a34a; }
+        .env-pill .dot.yellow { background:#eab308; }
+        .env-pill .dot.blue { background:#2563eb; }
+        .env-pill .dot.purple { background:#9333ea; }
+        .env-pill.active .dot.green, .env-pill.active .dot.yellow, .env-pill.active .dot.blue, .env-pill.active .dot.purple { opacity:0.9; }
+        .env-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; background:linear-gradient(90deg,#eff6ff,#f0fdfa); border:1px solid #bfdbfe; border-radius:8px; margin-bottom:14px; font-size:13px; color:#1e40af; }
+        .env-banner .bn-left { display:flex; align-items:center; gap:10px; }
+        .env-banner .bn-left i { font-size:16px; color:#2563eb; }
+
+        /* 聚焦环境时间轴高亮样式 */
+        .tl-node.focused { background:#eff6ff; border:2px solid #2563eb; border-radius:12px; padding:6px 4px; box-shadow:0 4px 12px rgba(37,99,235,0.15); }
+        .tl-node.dimmed { opacity:0.35; }
+
+        /* 晋升记录表格行隐藏 */
+        tr.env-hidden { display:none; }
+
+        /* ====== 空状态样式 ====== */
+        .empty-row td { text-align:center; padding:48px 0; color:var(--text-light); }
+        .empty-row .empty-icon { font-size:48px; margin-bottom:12px; display:block; color:var(--text-light); }
+        .empty-row .empty-text { font-size:14px; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-code-fork" style="color:var(--primary);margin-right:8px"></i>版本生命周期</h2>
+            <div class="page-desc">
+                首页 / 服务治理 / 版本生命周期 - 管理接口版本状态流转，监控即将废弃版本，推动版本治理
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="doExport()"><i class="fa fa-download"></i> 导出</button>
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+        </div>
+    </div>
+
+    <!-- ====== 环境胶囊切换器（V15: 顺序改为 DEV→SIT→UAT→PROD） ====== -->
+    <div class="env-switcher" id="envSwitcher">
+        <span class="env-label">环境:</span>
+        <span class="env-pill active" data-env="DEV">DEV · 开发 <span class="dot purple"></span></span>
+        <span class="env-pill" data-env="SIT">SIT · 集成 <span class="dot yellow"></span></span>
+        <span class="env-pill" data-env="UAT">UAT · 验收 <span class="dot blue"></span></span>
+        <span class="env-pill" data-env="PROD">PROD · 生产 <span class="dot green"></span></span>
+    </div>
+    <div class="env-banner" id="envBanner">
+        <div class="bn-left"><i class="fa fa-info-circle"></i><span id="envBannerText">当前环境: DEV(开发) · 正在展示该环境数据</span></div>
+    </div>
+
+    <!-- ====== 版本状态分布 ====== -->
+    <div class="lifecycle-stats">
+        <div class="lc-card">
+            <div class="lc-icon" style="background:var(--primary)"><i class="fa fa-rocket"></i></div>
+            <div class="lc-val" style="color:var(--primary)">128</div>
+            <div class="lc-label">发布中版本</div>
+        </div>
+        <div class="lc-card">
+            <div class="lc-icon" style="background:var(--success)"><i class="fa fa-check-circle"></i></div>
+            <div class="lc-val" style="color:var(--success)">2,856</div>
+            <div class="lc-label">稳定运行版本</div>
+        </div>
+        <div class="lc-card">
+            <div class="lc-icon" style="background:var(--warning)"><i class="fa fa-exclamation-triangle"></i></div>
+            <div class="lc-val" style="color:var(--warning)">45</div>
+            <div class="lc-label">已废弃版本</div>
+        </div>
+        <div class="lc-card">
+            <div class="lc-icon" style="background:var(--text-secondary)"><i class="fa fa-power-off"></i></div>
+            <div class="lc-val" style="color:var(--text-secondary)">38</div>
+            <div class="lc-label">已下线版本</div>
+        </div>
+    </div>
+
+    <!-- ====== 版本状态流转说明 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">版本状态流转</div>
+        </div>
+        <div class="card-body">
+            <div class="flow-steps">
+                <div class="flow-step" style="background:#eff6ff">
+                    <div class="step-icon" style="background:var(--primary)"><i class="fa fa-rocket"></i></div>
+                    <div class="step-name" style="color:var(--primary)">发布</div>
+                    <div class="step-time">新版本上线</div>
+                </div>
+                <div class="flow-arrow"><i class="fa fa-arrow-right"></i></div>
+                <div class="flow-step" style="background:#f0fdf4">
+                    <div class="step-icon" style="background:var(--success)"><i class="fa fa-check-circle"></i></div>
+                    <div class="step-name" style="color:var(--success)">稳定</div>
+                    <div class="step-time">运行 >= 30天</div>
+                </div>
+                <div class="flow-arrow"><i class="fa fa-arrow-right"></i></div>
+                <div class="flow-step" style="background:#fffbeb">
+                    <div class="step-icon" style="background:var(--warning)"><i class="fa fa-exclamation-triangle"></i></div>
+                    <div class="step-name" style="color:var(--warning)">废弃</div>
+                    <div class="step-time">距下线 <= 30天</div>
+                </div>
+                <div class="flow-arrow"><i class="fa fa-arrow-right"></i></div>
+                <div class="flow-step" style="background:#f8fafc">
+                    <div class="step-icon" style="background:var(--text-secondary)"><i class="fa fa-power-off"></i></div>
+                    <div class="step-name" style="color:var(--text-secondary)">下线</div>
+                    <div class="step-time">正式停用</div>
+                </div>
+            </div>
+            <div style="margin-top:12px;font-size:12px;color:var(--text-secondary);line-height:1.8">
+                <i class="fa fa-info-circle" style="color:var(--info)"></i> 版本发布后进入稳定期（至少30天），当有新版本替代时可标记为废弃状态。废弃版本有30天过渡期，过渡期结束后自动下线。A级接口废弃需经安全主管审批。
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 版本环境晋升时间轴 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">版本环境晋升时间轴（示例：客户基本信息查询 API-CUST-001）</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)">当前版本：<b style="color:var(--primary)">v2.3.8</b> · 最新 SNAP：v2.4.0</span></div>
+        </div>
+        <div class="card-body">
+            <div class="promo-timeline">
+                <!-- 草稿（不属于任何正式环境，始终显示） -->
+                <div class="tl-node" data-env="DRAFT">
+                    <div class="tl-dot c-draft"><i class="fa fa-file-text-o"></i></div>
+                    <div class="tl-name">草稿 Draft</div>
+                    <div class="tl-date">2026-05-20 09:00</div>
+                    <div class="tl-ver">v2.4.0-draft</div>
+                    <span class="tl-arrow"><i class="fa fa-angle-right"></i></span>
+                </div>
+                <!-- DEV -->
+                <div class="tl-node" data-env="DEV">
+                    <div class="tl-dot c-dev"><i class="fa fa-code"></i></div>
+                    <div class="tl-name">开发 DEV</div>
+                    <div class="tl-date">2026-05-25 14:20</div>
+                    <div class="tl-ver">v2.4.0-SNAP</div>
+                    <span class="tl-arrow"><i class="fa fa-angle-right"></i></span>
+                </div>
+                <!-- SIT -->
+                <div class="tl-node" data-env="SIT">
+                    <div class="tl-dot c-sit"><i class="fa fa-flask"></i></div>
+                    <div class="tl-name">集成 SIT</div>
+                    <div class="tl-date">2026-05-30 10:15</div>
+                    <div class="tl-ver">v2.3.10-SNAP</div>
+                    <span class="tl-arrow"><i class="fa fa-angle-right"></i></span>
+                </div>
+                <!-- UAT -->
+                <div class="tl-node" data-env="UAT">
+                    <div class="tl-dot c-uat"><i class="fa fa-check-square-o"></i></div>
+                    <div class="tl-name">验收 UAT</div>
+                    <div class="tl-date">2026-06-03 16:40</div>
+                    <div class="tl-ver">v2.3.9-RC1</div>
+                    <span class="tl-arrow"><i class="fa fa-angle-right"></i></span>
+                </div>
+                <!-- PROD -->
+                <div class="tl-node" data-env="PROD">
+                    <div class="tl-dot c-prod"><i class="fa fa-rocket"></i></div>
+                    <div class="tl-name">生产 PROD</div>
+                    <div class="tl-date">2026-06-05 09:30</div>
+                    <div class="tl-ver">v2.3.8</div>
+                </div>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);text-align:center;margin-top:4px;line-height:1.6">
+                <i class="fa fa-info-circle" style="color:var(--info)"></i>
+                标准晋升流程：开发自测 → 集成联调 → 业务验收 → 生产发布。每段周期通常为 5-10 个工作日，紧急变更可申请快速通道。
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 版本矩阵（晋升记录）====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">版本晋升记录</div>
+            <div class="card-action">
+                <span style="font-size:12px;color:var(--text-secondary)">共 <b style="color:var(--primary)">4</b> 条晋升中 · <b style="color:var(--success)">28</b> 条已通过</span>
+                <span style="font-size:12px;color:#94a3b8;margin-left:8px">（表格展示最近5条）</span>
+                <a class="btn-link" onclick="showAllPromotions()" style="margin-left:8px;cursor:pointer">查看全部</a>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:120px">版本号</th>
+                        <th style="width:110px" class="text-center">源环境</th>
+                        <th style="width:110px" class="text-center">目标环境</th>
+                        <th style="width:120px" class="text-center">晋升状态</th>
+                        <th style="width:120px">操作者</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody id="promoteTbody">
+                    <tr data-from="DEV" data-to="SIT">
+                        <td style="font-family:'Segoe UI';font-weight:700;color:var(--primary);">v2.4.0-DEV</td>
+                        <td class="text-center"><span class="tag tag-default" style="font-size:11px">DEV 开发</span></td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">SIT 集成</span></td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px"><i class="fa fa-clock-o"></i> 待审批</span></td>
+                        <td>张工程师</td>
+                        <td style="color:var(--text-secondary);font-size:12px">新增证件类型扩展码支持，等待架构组评审中</td>
+                    </tr>
+                    <tr data-from="SIT" data-to="UAT">
+                        <td style="font-family:'Segoe UI';font-weight:700;color:var(--primary);">v2.3.10-SNAP</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">SIT 集成</span></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">UAT 验收</span></td>
+                        <td class="text-center"><span class="tag tag-info" style="font-size:11px"><i class="fa fa-spinner"></i> 处理中</span></td>
+                        <td>李主管</td>
+                        <td style="color:var(--text-secondary);font-size:12px">联调通过 128/150 用例，预计 2 日后进入 UAT</td>
+                    </tr>
+                    <tr data-from="UAT" data-to="PROD">
+                        <td style="font-family:'Segoe UI';font-weight:700;color:var(--primary);">v2.3.9-RC1</td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">UAT 验收</span></td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">PROD 生产</span></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px"><i class="fa fa-check"></i> 已通过</span></td>
+                        <td>王架构师</td>
+                        <td style="color:var(--text-secondary);font-size:12px">2026-06-05 09:30 发布，当前生产运行中</td>
+                    </tr>
+                    <tr data-from="UAT" data-to="PROD">
+                        <td style="font-family:'Segoe UI';font-weight:700;color:var(--primary);">v2.3.8</td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">UAT 验收</span></td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">PROD 生产</span></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px"><i class="fa fa-check"></i> 已通过</span></td>
+                        <td>王架构师</td>
+                        <td style="color:var(--text-secondary);font-size:12px">2026-03-15 发布 · 已被 v2.3.9 替代</td>
+                    </tr>
+                    <tr data-from="DEV" data-to="SIT">
+                        <td style="font-family:'Segoe UI';font-weight:700;color:var(--primary);">v2.3.7-beta</td>
+                        <td class="text-center"><span class="tag tag-default" style="font-size:11px">DEV 开发</span></td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">SIT 集成</span></td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px"><i class="fa fa-times"></i> 已驳回</span></td>
+                        <td>张工程师</td>
+                        <td style="color:var(--text-secondary);font-size:12px">安全扫描发现高风险漏洞，驳回修复后重新提交</td>
+                    </tr>
+                    <!-- 空状态行（默认隐藏） -->
+                    <tr class="empty-row" id="promoteEmptyRow" style="display:none">
+                        <td colspan="6">
+                            <i class="fa fa-inbox empty-icon"></i>
+                            <div class="empty-text">暂无晋升记录</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ====== 即将废弃版本列表（V08: 标题移除"不足30天"限定） ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">即将废弃版本</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--danger);font-weight:600">共 8 个版本即将废弃</span></div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" onclick="toggleAll(this)"></th>
+                        <th style="width:140px">接口编码</th>
+                        <th>接口名称</th>
+                        <th style="width:80px" class="text-center">当前版本</th>
+                        <th style="width:80px" class="text-center">替代版本</th>
+                        <th style="width:100px" class="text-center">废弃日期</th>
+                        <th style="width:100px" class="text-center">剩余天数</th>
+                        <th style="width:80px" class="text-center">消费方数</th>
+                        <th style="width:80px" class="text-center">分级</th>
+                        <th style="width:140px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="deprecateTbody">
+                    <!-- V09: 剩余天数基于 2026-06-24 重新计算 -->
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-RISK-001</td>
+                        <td>风险评级查询</td>
+                        <td class="text-center">v1.5</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.1</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-06-25</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">1</td>
+                        <td class="text-center" style="font-weight:600">8</td>
+                        <td class="text-center"><span class="tag tag-level-b" style="font-size:11px">B</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-RISK-001')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-RISK-001')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-CDP-010</td>
+                        <td>贷款进度查询</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v1.5</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-06-28</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">4</td>
+                        <td class="text-center" style="font-weight:600">5</td>
+                        <td class="text-center"><span class="tag tag-level-b" style="font-size:11px">B</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-CDP-010')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-CDP-010')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">FILE-ACCT-003</td>
+                        <td>日终对账文件</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-06-30</td>
+                        <td class="text-center" style="font-weight:700;color:var(--danger);font-family:'Segoe UI'">6</td>
+                        <td class="text-center" style="font-weight:600">12</td>
+                        <td class="text-center"><span class="tag tag-level-b" style="font-size:11px">B</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('FILE-ACCT-003')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('FILE-ACCT-003')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-PAY-006</td>
+                        <td>转账状态查询</td>
+                        <td class="text-center">v1.1</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-07-02</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">8</td>
+                        <td class="text-center" style="font-weight:600">18</td>
+                        <td class="text-center"><span class="tag tag-level-a" style="font-size:11px">A</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-PAY-006')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-PAY-006')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-INVEST-008</td>
+                        <td>理财产品查询</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v1.5</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-07-05</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">11</td>
+                        <td class="text-center" style="font-weight:600">6</td>
+                        <td class="text-center"><span class="tag tag-level-c" style="font-size:11px">C</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-INVEST-008')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-INVEST-008')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-CUST-018</td>
+                        <td>客户账户关联查询</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-07-10</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">16</td>
+                        <td class="text-center" style="font-weight:600">3</td>
+                        <td class="text-center"><span class="tag tag-level-c" style="font-size:11px">C</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-CUST-018')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-CUST-018')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <!-- V07: 补充2行数据使第1页满 -->
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">API-CARD-007</td>
+                        <td>信用卡账单查询</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-07-15</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">21</td>
+                        <td class="text-center" style="font-weight:600">9</td>
+                        <td class="text-center"><span class="tag tag-level-b" style="font-size:11px">B</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('API-CARD-007')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-CARD-007')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr class="warn-row">
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--primary);font-weight:600">MSG-LOAN-015</td>
+                        <td>贷款审批通知</td>
+                        <td class="text-center">v1.2</td>
+                        <td class="text-center" style="color:var(--success);font-weight:600">v2.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-07-20</td>
+                        <td class="text-center" style="font-weight:700;color:var(--warning);font-family:'Segoe UI'">26</td>
+                        <td class="text-center" style="font-weight:600">4</td>
+                        <td class="text-center"><span class="tag tag-level-c" style="font-size:11px">C</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="notifyConsumers('MSG-LOAN-015')"><i class="fa fa-bell"></i> 通知消费方</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('MSG-LOAN-015')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <!-- 空状态行（默认隐藏） -->
+                    <tr class="empty-row" id="deprecateEmptyRow" style="display:none">
+                        <td colspan="10">
+                            <i class="fa fa-inbox empty-icon"></i>
+                            <div class="empty-text">暂无即将废弃的版本</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary">8</span> 条记录 · 当前页 1/1</div>
+            <div class="page-list">
+                <button class="page-item" onclick="goToPage(1)" disabled><i class="fa fa-angle-left"></i></button>
+                <button class="page-item active" onclick="goToPage(1)">1</button>
+                <button class="page-item" onclick="goToPage(1)" disabled><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="changePageSize(this.value)"><option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option></select>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 废弃版本处理操作 ====== -->
+    <div class="card" style="margin-bottom:0;margin-top:16px">
+        <div class="card-header">
+            <div class="card-title">已废弃版本处理</div>
+            <div class="card-action">
+                <a href="javascript:;" onclick="batchNotify()" style="cursor:pointer"><i class="fa fa-bell"></i> 批量通知</a>
+                <a href="javascript:;" onclick="batchOffline()" style="cursor:pointer"><i class="fa fa-power-off"></i> 批量下线</a>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" onclick="toggleAll(this)"></th>
+                        <th style="width:140px">接口编码</th>
+                        <th>接口名称</th>
+                        <th style="width:80px" class="text-center">版本</th>
+                        <th style="width:100px" class="text-center">废弃日期</th>
+                        <th style="width:100px" class="text-center">下线日期</th>
+                        <th style="width:80px" class="text-center">未迁移</th>
+                        <th style="width:80px" class="text-center">状态</th>
+                        <th style="width:140px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="offlineTbody">
+                    <!-- V09: 从即将废弃表移入的已过期行 -->
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">API-CUST-002</td>
+                        <td style="color:var(--text-secondary)">客户信息查询(旧)</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-06-15</td>
+                        <td class="text-center" style="font-size:12px;color:var(--danger);font-weight:600">2026-07-15</td>
+                        <td class="text-center" style="font-weight:600;color:var(--danger)">15</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">过渡中</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="urgeProcess('API-CUST-002')"><i class="fa fa-bell"></i> 催办</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="offlineVersion('API-CUST-002','v1.0')"><i class="fa fa-power-off"></i> 立即下线</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">API-ACCT-005</td>
+                        <td style="color:var(--text-secondary)">账户余额查询(旧)</td>
+                        <td class="text-center">v1.2</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-06-20</td>
+                        <td class="text-center" style="font-size:12px;color:var(--danger);font-weight:600">2026-07-20</td>
+                        <td class="text-center" style="font-weight:600;color:var(--danger)">22</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">过渡中</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="urgeProcess('API-ACCT-005')"><i class="fa fa-bell"></i> 催办</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="offlineVersion('API-ACCT-005','v1.2')"><i class="fa fa-power-off"></i> 立即下线</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">API-CUST-005</td>
+                        <td style="color:var(--text-secondary)">客户基本信息查询(旧)</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-05-15</td>
+                        <td class="text-center" style="font-size:12px;color:var(--danger);font-weight:600">2026-06-15</td>
+                        <td class="text-center" style="font-weight:600;color:var(--danger)">3</td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">过渡中</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="urgeProcess('API-CUST-005')"><i class="fa fa-bell"></i> 催办</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="offlineVersion('API-CUST-005','v1.0')"><i class="fa fa-power-off"></i> 立即下线</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">API-CDP-003</td>
+                        <td style="color:var(--text-secondary)">贷款申请提交(旧)</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-05-01</td>
+                        <td class="text-center" style="font-size:12px;color:var(--danger);font-weight:600">2026-06-01</td>
+                        <td class="text-center" style="font-weight:600;color:var(--danger)">5</td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">已过期</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="urgeProcess('API-CDP-003')"><i class="fa fa-bell"></i> 催办</a><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="offlineVersion('API-CDP-003','v1.0')"><i class="fa fa-power-off"></i> 立即下线</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">FILE-RISK-002</td>
+                        <td style="color:var(--text-secondary)">风险评估数据文件(旧)</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-04-20</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-05-20</td>
+                        <td class="text-center" style="font-weight:600;color:var(--success)">0</td>
+                        <td class="text-center"><span class="tag tag-default" style="font-size:11px">已下线</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('FILE-RISK-002')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox" class="row-check"></td>
+                        <td style="font-family:'Segoe UI';color:var(--text-secondary)">API-PAY-002</td>
+                        <td style="color:var(--text-secondary)">支付状态回调(旧)</td>
+                        <td class="text-center">v1.0</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-04-10</td>
+                        <td class="text-center" style="font-size:12px;color:var(--text-secondary)">2026-05-10</td>
+                        <td class="text-center" style="font-weight:600;color:var(--success)">0</td>
+                        <td class="text-center"><span class="tag tag-default" style="font-size:11px">已下线</span></td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px;cursor:pointer" onclick="viewVersionDetail('API-PAY-002')"><i class="fa fa-eye"></i> 详情</a></td>
+                    </tr>
+                    <!-- 空状态行（默认隐藏） -->
+                    <tr class="empty-row" id="offlineEmptyRow" style="display:none">
+                        <td colspan="9">
+                            <i class="fa fa-inbox empty-icon"></i>
+                            <div class="empty-text">暂无已废弃版本</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary">6</span> 条记录 · 当前页 1/1</div>
+            <div class="page-list">
+                <button class="page-item" disabled><i class="fa fa-angle-left"></i></button>
+                <button class="page-item active">1</button>
+                <button class="page-item" disabled><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="changePageSize(this.value)"><option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option></select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+
+    // ====== 导出 ======
+    function doExport() {
+        showToast('生命周期报告导出中...');
+    }
+
+    // ====== 行内操作 ======
+    function notifyConsumers(apiCode) {
+        if (!confirm('确认通知该接口的所有消费方？')) return;
+        showToast('已通知 ' + apiCode + ' 的所有消费方');
+    }
+
+    // 根据编码前缀区分跳转：FILE/MSG 走文件接口详情，其余走 API 接口详情
+    function viewVersionDetail(apiCode) {
+        if (apiCode && (apiCode.indexOf('FILE') >= 0)) {
+            govNav('pages/interface/file-detail.html', ['首页','版本生命周期','版本详情','文件接口详情'], {code:apiCode});
+        } else {
+            govNav('pages/interface/api-detail.html', ['首页','版本生命周期','版本详情','接口详情'], {code:apiCode});
+        }
+    }
+
+    function urgeProcess(apiCode) {
+        showToast('已发送催办通知');
+    }
+
+    function offlineVersion(apiCode, version) {
+        if (!confirm('确认下线 ' + apiCode + ' (' + version + ')？\n下线后将通知所有消费方，此操作不可撤销。')) return;
+        if (!confirm('二次确认：真的要下线吗？')) return;
+        showToast(apiCode + ' 已提交下线申请', 'warning');
+    }
+
+    // ====== 批量操作 ======
+    function batchNotify() {
+        var checked = document.querySelectorAll('#deprecatedTable input.row-check:checked');
+        if (checked.length === 0) { showToast('请先选择需要通知的版本', 'warning'); return; }
+        showToast('已通知 ' + checked.length + ' 个版本的消费方');
+    }
+
+    function batchOffline() {
+        var checked = document.querySelectorAll('#deprecatedTable input.row-check:checked');
+        if (checked.length === 0) { showToast('请先选择需要下线的版本', 'warning'); return; }
+        if (!confirm('确认批量下线 ' + checked.length + ' 个版本？此操作不可撤销。')) return;
+        showToast('已提交 ' + checked.length + ' 个版本的下线申请', 'warning');
+    }
+
+    // ====== 全选/取消全选 ======
+    function toggleAll(checkbox) {
+        var table = checkbox.closest('table');
+        var rowChecks = table.querySelectorAll('input.row-check');
+        rowChecks.forEach(function(check) { check.checked = checkbox.checked; });
+    }
+
+    // ====== 查看全部晋升记录 ======
+    function showAllPromotions() {
+        showToast('正在加载全部晋升记录...');
+    }
+
+    // ====== 分页 ======
+    function goToPage(n) {
+        showToast('跳转到第 ' + n + ' 页');
+    }
+
+    function changePageSize(size) {
+        showToast('每页显示 ' + size + ' 条');
+    }
+
+    // ====== 环境切换器 ======
+    document.addEventListener('DOMContentLoaded', function () {
+        var pills = document.querySelectorAll('#envSwitcher .env-pill');
+        pills.forEach(function (p) {
+            p.addEventListener('click', function () {
+                switchEnv(this.getAttribute('data-env'));
+            });
+        });
+        // 初次渲染
+        switchEnv('DEV');
+    });
+
+    // V12: SIT 标签统一为"集成"
+    var ENV_LABEL_MAP = {
+        PROD: 'PROD(生产)',
+        SIT:  'SIT(集成)',
+        UAT:  'UAT(验收)',
+        DEV:  'DEV(开发)'
+    };
+
+    function switchEnv(env) {
+        // 1) 切换胶囊激活态
+        document.querySelectorAll('#envSwitcher .env-pill').forEach(function (p) {
+            p.classList.toggle('active', p.getAttribute('data-env') === env);
+        });
+
+        // 2) 更新横幅文字
+        document.getElementById('envBannerText').innerHTML =
+            '当前环境: <b>' + ENV_LABEL_MAP[env] + '</b> · 聚焦命中该环境的版本节点与晋升记录';
+
+        // 3) 时间轴高亮：当前选中环境的节点加 focused 类，其他(非草稿)节点变灰
+        document.querySelectorAll('.promo-timeline .tl-node').forEach(function (node) {
+            var nodeEnv = node.getAttribute('data-env');
+            node.classList.remove('focused', 'dimmed');
+            if (nodeEnv === 'DRAFT') {
+                // 草稿始终保持默认（轻淡）
+                return;
+            }
+            if (nodeEnv === env) {
+                node.classList.add('focused');
+            } else {
+                node.classList.add('dimmed');
+            }
+        });
+
+        // 4) 晋升记录表格按环境过滤
+        document.querySelectorAll('#promoteTbody tr').forEach(function (row) {
+            if (row.classList.contains('empty-row')) return;
+            var from = row.getAttribute('data-from');
+            var to = row.getAttribute('data-to');
+            if (from === env || to === env) {
+                row.classList.remove('env-hidden');
+            } else {
+                row.classList.add('env-hidden');
+            }
+        });
+    }
+</script>
+</body>
+</html>

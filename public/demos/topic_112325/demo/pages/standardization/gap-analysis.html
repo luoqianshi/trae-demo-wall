@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>差距分析报告 - 存量接口改造</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <script src="../../js/nav-helper.js"></script>
+    <style>
+        /* ===== 统计卡片 ===== */
+        .gap-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:16px; }
+        .gap-stat {
+            background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+            padding:16px 14px; text-align:center; border-left:3px solid var(--primary);
+            transition:box-shadow .2s;
+        }
+        .gap-stat:hover { box-shadow:var(--shadow-lg); }
+        .gap-stat .label { font-size:12px; color:var(--text-secondary); margin-bottom:8px; }
+        .gap-stat .value { font-size:26px; font-weight:700; font-family:'Segoe UI',Arial,sans-serif; line-height:1.2; }
+        .gap-stat .sub { font-size:11px; color:var(--text-secondary); margin-top:6px; }
+
+        /* ===== 横向柱状图 ===== */
+        .chart-bar-row { display:flex; align-items:center; margin-bottom:12px; }
+        .chart-bar-row:last-child { margin-bottom:0; }
+        .chart-bar-label { width:140px; font-size:13px; color:var(--text-primary); flex-shrink:0; text-align:right; padding-right:12px; }
+        .chart-bar-outer { flex:1; height:22px; background:#f1f5f9; border-radius:4px; overflow:hidden; }
+        .chart-bar-inner { height:100%; border-radius:4px; transition:width .4s ease; }
+        .chart-bar-value { width:56px; text-align:right; font-weight:700; font-family:'Segoe UI',Arial,sans-serif; margin-left:10px; font-size:13px; }
+
+        /* ===== 展开明细行 ===== */
+        .detail-row { display:none; }
+        .detail-row.show { display:table-row; }
+        .detail-row > td { padding:0 !important; background:#f8fafc !important; border-bottom:1px solid var(--border) !important; }
+        .detail-content { padding:16px 16px 16px 48px; }
+        .detail-title { font-size:13px; font-weight:600; margin-bottom:12px; color:var(--text-secondary); display:flex; align-items:center; gap:6px; }
+        .iface-table { width:100%; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; font-size:13px; background:#fff; }
+        .iface-table th { background:#f1f5f9; padding:10px 14px; font-size:12px; font-weight:600; text-align:left; color:var(--text-primary); border-bottom:1px solid var(--border); white-space:nowrap; }
+        .iface-table th.text-center { text-align:center; }
+        .iface-table td { padding:10px 14px; border-bottom:1px solid var(--border-light); color:var(--text-primary); }
+        .iface-table td.text-center { text-align:center; }
+        .iface-table tr:last-child td { border-bottom:none; }
+        .iface-table tr:hover td { background:#eff6ff; }
+
+        /* ===== 禁用链接 ===== */
+        .btn-link.disabled { color:var(--text-light) !important; cursor:not-allowed; pointer-events:none; }
+
+        /* ===== 筛选切换 ===== */
+        .filter-toggle { cursor:pointer; font-size:13px; color:var(--text-secondary); }
+        .filter-toggle.active { color:var(--primary); font-weight:600; }
+        .filter-toggle:hover { color:var(--primary); }
+
+        /* ===== Toast 提示 ===== */
+        .gap-toast {
+            position:fixed; top:24px; left:50%;
+            transform:translateX(-50%) translateY(-100px);
+            background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+            padding:12px 20px; box-shadow:var(--shadow-lg); font-size:13px;
+            z-index:9999; opacity:0; transition:all .3s ease;
+            display:flex; align-items:center; gap:8px;
+        }
+        .gap-toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
+        .gap-toast.success { border-left:3px solid var(--success); }
+        .gap-toast.success i { color:var(--success); }
+        .gap-toast.info { border-left:3px solid var(--primary); }
+        .gap-toast.info i { color:var(--primary); }
+
+        /* ===== 按钮禁用态 ===== */
+        .btn[disabled] { opacity:0.6; cursor:not-allowed; }
+        .btn[disabled]:hover { transform:none; box-shadow:none; }
+
+        /* ===== 分页按钮 ===== */
+        .page-item {
+            min-width:32px; height:32px; padding:0 10px;
+            border:1px solid var(--border); border-radius:var(--radius);
+            background:#fff; color:var(--text-primary); font-size:13px;
+            cursor:pointer; transition:all .2s;
+        }
+        .page-item:hover { color:var(--primary); border-color:var(--primary); }
+        .page-item.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+        .page-item:disabled { color:var(--text-light); cursor:not-allowed; opacity:0.6; }
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-exclamation-triangle" style="color:var(--primary);margin-right:8px"></i>差距分析报告</h2>
+            <div class="page-desc">
+                首页 / 存量接口改造 / 差距分析报告 - 基于全行字段标准体系，扫描存量接口与字段的标准化缺口，识别非标字段、明确需改造对象
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" id="rescanBtn" onclick="gapRescan()"><i class="fa fa-refresh"></i> 重新扫描</button>
+            <button class="btn btn-primary" onclick="gapExportReport()"><i class="fa fa-download"></i> 导出差距报告</button>
+        </div>
+    </div>
+
+    <!-- ====== 统计卡片（6个） ====== -->
+    <div class="gap-stats" id="gapStats"></div>
+
+    <!-- ====== 按业务域的标准化率柱状图 ====== -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-bar-chart"></i> 按业务域的标准化率排行</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)">共18个数据标准业务域·按标准化率升序</span></div>
+        </div>
+        <div class="card-body" id="chartBody"></div>
+    </div>
+
+    <!-- ====== 差距分析明细表（核心改造区域） ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-list"></i> 差距分析明细</div>
+            <div class="card-action">
+                <a class="filter-toggle" id="filterToggle" onclick="gapToggleFilter()"><i class="fa fa-filter"></i> 仅显示一致性&lt;97.5%</a>
+                <span style="font-size:12px;color:var(--text-secondary);margin-left:12px" id="filterCount"></span>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-left:none;border-right:none;border-top:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>业务域</th>
+                        <th style="width:90px" class="text-center">标准项总数</th>
+                        <th style="width:90px" class="text-center">存量字段数</th>
+                        <th style="width:100px" class="text-center">非标字段数</th>
+                        <th style="width:100px" class="text-center">类型一致性</th>
+                        <th style="width:90px" class="text-center">P0标准项</th>
+                        <th style="width:90px" class="text-center">P1标准项</th>
+                        <th style="width:90px" class="text-center">状态</th>
+                        <th style="width:120px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="gapBody"></tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info" id="gapPageInfo"></div>
+            <div class="page-list" id="gapPageList"></div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="gapChangePageSize(this)">
+                    <option value="10">10 条/页</option>
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    // ===== 业务域数据（18个业务域，基于全行数据字典） =====
+    // 汇总：标准项26,143 | 存量字段120,742 | 非标552 | 类型一致性97.8%
+    const DOMAINS = [
+        {
+            name:'其他', code:'OTHER', standardItems:7433, existingFields:35741, nonStd:238, consistency:96.8, p0:36, p1:210, status:'待改造',
+            interfaces:[
+                { name:'附加信息查询接口', code:'STD-OTHER-0001', nonStd:85, mapStatus:'部分映射', transStatus:'待改造' },
+                { name:'扩展字段维护接口', code:'STD-OTHER-0002', nonStd:78, mapStatus:'未映射', transStatus:'待改造' },
+                { name:'附属业务接口', code:'STD-OTHER-0003', nonStd:75, mapStatus:'已映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'通用基础', code:'COMM', standardItems:5127, existingFields:24651, nonStd:77, consistency:98.5, p0:25, p1:144, status:'改造中',
+            interfaces:[
+                { name:'基础代码查询接口', code:'STD-COMM-0001', nonStd:28, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'通用参数配置接口', code:'STD-COMM-0002', nonStd:26, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'基础字典维护接口', code:'STD-COMM-0003', nonStd:23, mapStatus:'已映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'客户信息', code:'CUST', standardItems:3380, existingFields:16251, nonStd:54, consistency:98.4, p0:17, p1:95, status:'改造中',
+            interfaces:[
+                { name:'客户信息查询接口', code:'STD-CUST-0001', nonStd:20, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'客户信息维护接口', code:'STD-CUST-0002', nonStd:18, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'客户等级变更接口', code:'STD-CUST-0003', nonStd:16, mapStatus:'已映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'账户信息', code:'ACCT', standardItems:2484, existingFields:11944, nonStd:42, consistency:98.3, p0:12, p1:70, status:'改造中',
+            interfaces:[
+                { name:'账户开立接口', code:'STD-ACCT-0001', nonStd:16, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'账户查询接口', code:'STD-ACCT-0002', nonStd:14, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'账户状态变更接口', code:'STD-ACCT-0003', nonStd:12, mapStatus:'未映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'交易信息', code:'TRX', standardItems:2415, existingFields:11613, nonStd:43, consistency:98.2, p0:12, p1:68, status:'改造中',
+            interfaces:[
+                { name:'交易明细查询接口', code:'STD-TRX-0001', nonStd:23, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'交易状态变更接口', code:'STD-TRX-0002', nonStd:20, mapStatus:'部分映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'机构信息', code:'ORG', standardItems:658, existingFields:3164, nonStd:13, consistency:98.1, p0:3, p1:19, status:'改造中',
+            interfaces:[
+                { name:'机构信息查询接口', code:'STD-ORG-0001', nonStd:7, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'机构信息维护接口', code:'STD-ORG-0002', nonStd:6, mapStatus:'部分映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'信贷信息', code:'LOAN', standardItems:610, existingFields:2933, nonStd:12, consistency:98.0, p0:3, p1:17, status:'改造中',
+            interfaces:[
+                { name:'贷款申请接口', code:'STD-LOAN-0001', nonStd:5, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'贷款审批接口', code:'STD-LOAN-0002', nonStd:4, mapStatus:'未映射', transStatus:'待改造' },
+                { name:'贷款放款接口', code:'STD-LOAN-0003', nonStd:3, mapStatus:'已映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'支付结算', code:'PAY', standardItems:608, existingFields:2923, nonStd:13, consistency:97.9, p0:3, p1:17, status:'改造中',
+            interfaces:[
+                { name:'支付指令接口', code:'STD-PAY-0001', nonStd:7, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'清算对账接口', code:'STD-PAY-0002', nonStd:6, mapStatus:'部分映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'人员信息', code:'PERS', standardItems:477, existingFields:2293, nonStd:10, consistency:97.8, p0:2, p1:13, status:'改造中',
+            interfaces:[
+                { name:'员工信息查询接口', code:'STD-PERS-0001', nonStd:5, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'员工信息维护接口', code:'STD-PERS-0002', nonStd:5, mapStatus:'已映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'产品信息', code:'PROD', standardItems:357, existingFields:1716, nonStd:8, consistency:97.7, p0:2, p1:10, status:'改造中',
+            interfaces:[
+                { name:'产品信息查询接口', code:'STD-PROD-0001', nonStd:4, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'产品信息维护接口', code:'STD-PROD-0002', nonStd:4, mapStatus:'部分映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'渠道信息', code:'CHAN', standardItems:284, existingFields:1365, nonStd:7, consistency:97.6, p0:1, p1:8, status:'改造中',
+            interfaces:[
+                { name:'渠道信息查询接口', code:'STD-CHAN-0001', nonStd:4, mapStatus:'部分映射', transStatus:'改造中' },
+                { name:'渠道路由接口', code:'STD-CHAN-0002', nonStd:3, mapStatus:'未映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'合同协议', code:'CONT', standardItems:263, existingFields:1265, nonStd:7, consistency:97.5, p0:1, p1:7, status:'改造中',
+            interfaces:[
+                { name:'合同信息查询接口', code:'STD-CONT-0001', nonStd:4, mapStatus:'已映射', transStatus:'改造中' },
+                { name:'协议信息维护接口', code:'STD-CONT-0002', nonStd:3, mapStatus:'部分映射', transStatus:'改造中' }
+            ]
+        },
+        {
+            name:'理财信息', code:'FIN', standardItems:240, existingFields:1154, nonStd:6, consistency:97.4, p0:1, p1:7, status:'待改造',
+            interfaces:[
+                { name:'理财产品查询接口', code:'STD-FIN-0001', nonStd:3, mapStatus:'部分映射', transStatus:'待改造' },
+                { name:'理财交易接口', code:'STD-FIN-0002', nonStd:3, mapStatus:'未映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'卡信息', code:'CARD', standardItems:239, existingFields:1149, nonStd:6, consistency:97.3, p0:1, p1:7, status:'待改造',
+            interfaces:[
+                { name:'卡片申领接口', code:'STD-CARD-0001', nonStd:3, mapStatus:'未映射', transStatus:'待改造' },
+                { name:'卡片激活接口', code:'STD-CARD-0002', nonStd:3, mapStatus:'部分映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'票据信息', code:'NOTE', standardItems:186, existingFields:894, nonStd:5, consistency:97.2, p0:1, p1:5, status:'待改造',
+            interfaces:[
+                { name:'票据信息查询接口', code:'STD-NOTE-0001', nonStd:3, mapStatus:'部分映射', transStatus:'待改造' },
+                { name:'票据状态变更接口', code:'STD-NOTE-0002', nonStd:2, mapStatus:'未映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'报表统计', code:'RPT', standardItems:137, existingFields:659, nonStd:4, consistency:97.1, p0:1, p1:4, status:'待改造',
+            interfaces:[
+                { name:'报表数据查询接口', code:'STD-RPT-0001', nonStd:2, mapStatus:'未映射', transStatus:'待改造' },
+                { name:'统计数据导出接口', code:'STD-RPT-0002', nonStd:2, mapStatus:'部分映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'凭证信息', code:'VOUCH', standardItems:119, existingFields:572, nonStd:4, consistency:97.0, p0:1, p1:3, status:'待改造',
+            interfaces:[
+                { name:'凭证信息查询接口', code:'STD-VOUCH-0001', nonStd:2, mapStatus:'部分映射', transStatus:'待改造' },
+                { name:'凭证状态变更接口', code:'STD-VOUCH-0002', nonStd:2, mapStatus:'未映射', transStatus:'待改造' }
+            ]
+        },
+        {
+            name:'风控信息', code:'RISK', standardItems:97, existingFields:466, nonStd:3, consistency:96.9, p0:1, p1:3, status:'待改造',
+            interfaces:[
+                { name:'风险评级接口', code:'STD-RISK-0001', nonStd:2, mapStatus:'未映射', transStatus:'待改造' },
+                { name:'风险预警接口', code:'STD-RISK-0002', nonStd:1, mapStatus:'部分映射', transStatus:'待改造' }
+            ]
+        }
+    ];
+
+    // 标准数据项总数（独立指标，非表格汇总）
+    const STANDARD_FIELD_TOTAL = 26143;
+
+    // 状态映射
+    const STATUS_TAG = { '改造中':'tag-warning', '已完成':'tag-success', '待改造':'tag-default' };
+    const MAP_TAG = { '未映射':'tag-danger', '部分映射':'tag-warning', '已映射':'tag-success' };
+    const TRANS_TAG = { '待改造':'tag-default', '改造中':'tag-warning', '已完成':'tag-success' };
+
+    // ===== 状态管理 =====
+    let currentPage = 1;
+    let pageSize = 10;
+    let filterPendingOnly = false;
+    const expandedSet = new Set();
+
+    // ===== 工具函数 =====
+
+    /** 根据类型一致性获取颜色 */
+    function getRateColor(rateStr) {
+        const num = parseFloat(rateStr);
+        if (num >= 98) return 'var(--success)';
+        if (num >= 97.5) return 'var(--primary)';
+        return 'var(--warning)';
+    }
+
+    /** 获取过滤后的业务域列表（仅显示一致性<97.5%） */
+    function getFilteredDomains() {
+        if (filterPendingOnly) {
+            return DOMAINS.filter(d => d.consistency < 97.5);
+        }
+        return DOMAINS;
+    }
+
+
+    // ===== 渲染：统计卡片 =====
+    function renderStats() {
+        const cards = [
+            { label:'已扫描接口数', value:'3,981', sub:'覆盖18个数据标准业务域', color:'var(--text-primary)', border:'var(--primary)' },
+            { label:'标准数据项总数', value:STANDARD_FIELD_TOTAL.toLocaleString(), sub:'共18个数据标准业务域·52个类别词', color:'var(--primary)', border:'var(--primary)' },
+            { label:'非标字段数', value:'552', sub:'100%映射覆盖·97.8%类型一致性', color:'var(--warning)', border:'var(--warning)' },
+            { label:'类型一致性', value:'97.8%', sub:'目标 98%', color:'var(--success)', border:'var(--success)' },
+            { label:'P0核心标准项', value:'123', sub:'首批治理·覆盖约60%字段', color:'var(--danger)', border:'var(--danger)' },
+            { label:'P1重要标准项', value:'707', sub:'第二批治理·覆盖约25%字段', color:'var(--success)', border:'var(--success)' }
+        ];
+
+        document.getElementById('gapStats').innerHTML = cards.map(c => `
+            <div class="gap-stat" style="border-left-color:${c.border}">
+                <div class="label">${c.label}</div>
+                <div class="value" style="color:${c.color}">${c.value}</div>
+                <div class="sub">${c.sub}</div>
+            </div>`).join('');
+    }
+
+    // ===== 渲染：横向柱状图 =====
+    function renderChart() {
+        // 按类型一致性升序排列
+        const sorted = DOMAINS.slice().sort((a, b) => a.consistency - b.consistency);
+        document.getElementById('chartBody').innerHTML = sorted.map(d => {
+            const rate = d.consistency.toFixed(1);
+            const color = getRateColor(rate);
+            return `
+            <div class="chart-bar-row">
+                <div class="chart-bar-label">${d.name}</div>
+                <div class="chart-bar-outer">
+                    <div class="chart-bar-inner" style="width:${rate}%;background:${color}"></div>
+                </div>
+                <div class="chart-bar-value" style="color:${color}">${rate}%</div>
+            </div>`;
+        }).join('');
+    }
+
+    // ===== 渲染：明细表格 =====
+    function renderTable() {
+        const filtered = getFilteredDomains();
+        const start = (currentPage - 1) * pageSize;
+        const pageData = filtered.slice(start, start + pageSize);
+
+        // 空数据占位：当筛选结果为空时显示空状态行
+        if (pageData.length === 0) {
+            document.getElementById('gapBody').innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center" style="padding:48px 0;color:var(--text-secondary)">
+                    <i class="fa fa-inbox" style="font-size:48px;display:block;margin-bottom:12px;color:var(--text-light)"></i>
+                    <div style="font-size:14px">暂无数据</div>
+                    <div style="font-size:12px;margin-top:4px">当前筛选条件下没有匹配的业务域记录</div>
+                </td>
+            </tr>`;
+            return;
+        }
+
+        document.getElementById('gapBody').innerHTML = pageData.map(domain => {
+            const idx = DOMAINS.indexOf(domain);
+            return buildDomainRow(domain, idx) + buildDetailRow(domain, idx);
+        }).join('');
+    }
+
+    /** 构建业务域行 */
+    function buildDomainRow(domain, idx) {
+        const rate = domain.consistency.toFixed(1);
+        const rateColor = getRateColor(rate);
+        const isExpanded = expandedSet.has(idx);
+        const btnText = isExpanded ? '收起接口' : '查看接口';
+        const btnIcon = isExpanded ? 'fa-compress' : 'fa-expand';
+
+        return `
+        <tr>
+            <td style="font-weight:600">${domain.name}</td>
+            <td class="text-center num">${domain.standardItems.toLocaleString()}</td>
+            <td class="text-center num">${domain.existingFields.toLocaleString()}</td>
+            <td class="text-center num" style="color:var(--warning);font-weight:600">${domain.nonStd}</td>
+            <td class="text-center"><b style="color:${rateColor}">${rate}%</b></td>
+            <td class="text-center num" style="color:var(--danger)">${domain.p0}</td>
+            <td class="text-center num" style="color:var(--primary)">${domain.p1}</td>
+            <td class="text-center"><span class="tag ${STATUS_TAG[domain.status]}" style="font-size:11px">${domain.status}</span></td>
+            <td class="text-center">
+                <a class="btn-link" onclick="gapToggleExpand(${idx})"><i class="fa ${btnIcon}"></i> ${btnText}</a>
+            </td>
+        </tr>`;
+    }
+
+    /** 构建明细行（内嵌子表） */
+    function buildDetailRow(domain, idx) {
+        const isExpanded = expandedSet.has(idx);
+        const showClass = isExpanded ? 'show' : '';
+        return `
+        <tr class="detail-row ${showClass}" id="gapDetail-${idx}">
+            <td colspan="9">
+                <div class="detail-content">
+                    <div class="detail-title">
+                        <i class="fa fa-list-alt"></i> ${domain.name} — 接口明细（共 ${domain.interfaces.length} 条）
+                    </div>
+                    ${buildInterfaceTable(domain.interfaces, domain)}
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    /** 构建接口子表 */
+    function buildInterfaceTable(interfaces, domain) {
+        const rows = interfaces.map(iface => {
+            const canViewResult = iface.mapStatus === '已映射';
+            // 仅"已映射"状态可点击查看映射结果
+            const viewResultHtml = canViewResult
+                ? `<a class="btn-link" onclick="gapViewMappingResult()" style="margin-left:8px"><i class="fa fa-file-text-o"></i> 查看映射结果</a>`
+                : `<span class="btn-link disabled" style="margin-left:8px"><i class="fa fa-file-text-o"></i> 查看映射结果</span>`;
+
+            return `
+            <tr>
+                <td>${iface.name}</td>
+                <td style="font-family:'Segoe UI',Arial,sans-serif;font-size:12px;color:var(--text-secondary)">${iface.code}</td>
+                <td class="text-center num" style="color:var(--warning)">${iface.nonStd}</td>
+                <td class="text-center"><span class="tag ${MAP_TAG[iface.mapStatus]}" style="font-size:11px">${iface.mapStatus}</span></td>
+                <td class="text-center"><span class="tag ${TRANS_TAG[iface.transStatus]}" style="font-size:11px">${iface.transStatus}</span></td>
+                <td class="text-center">
+                    <a class="btn-link" onclick="gapGoMapping('${iface.code}', '${domain.code}')"><i class="fa fa-exchange"></i> 去映射</a>
+                    ${viewResultHtml}
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `
+        <table class="iface-table">
+            <thead><tr>
+                <th>接口名称</th>
+                <th style="width:200px">字段编码</th>
+                <th class="text-center" style="width:90px">非标字段数</th>
+                <th class="text-center" style="width:90px">映射状态</th>
+                <th class="text-center" style="width:90px">改造状态</th>
+                <th class="text-center op-col" style="width:220px">操作</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    // ===== 渲染：分页器 =====
+    function renderPagination() {
+        const filtered = getFilteredDomains();
+        const total = filtered.length;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+        // 修正当前页越界
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        let html = '';
+        // 上一页
+        html += `<button class="page-item" onclick="gapGoToPage(${currentPage - 1})"${currentPage <= 1 ? ' disabled' : ''}><i class="fa fa-angle-left"></i></button>`;
+        // 页码
+        for (let i = 1; i <= totalPages; i++) {
+            html += `<button class="page-item${i === currentPage ? ' active' : ''}" onclick="gapGoToPage(${i})">${i}</button>`;
+        }
+        // 下一页
+        html += `<button class="page-item" onclick="gapGoToPage(${currentPage + 1})"${currentPage >= totalPages ? ' disabled' : ''}><i class="fa fa-angle-right"></i></button>`;
+
+        document.getElementById('gapPageList').innerHTML = html;
+        document.getElementById('gapPageInfo').innerHTML = `共 <span class="text-primary">${total}</span> 条`;
+        document.getElementById('filterCount').textContent = `共 ${total} 条`;
+    }
+
+    // ===== 事件处理（暴露到 window 供 onclick 调用） =====
+
+    /** 展开/收起接口明细 */
+    window.gapToggleExpand = function (idx) {
+        const row = document.getElementById(`gapDetail-${idx}`);
+        if (!row) return;
+        if (expandedSet.has(idx)) {
+            expandedSet.delete(idx);
+            row.classList.remove('show');
+        } else {
+            expandedSet.add(idx);
+            row.classList.add('show');
+        }
+        // 重新渲染表格以更新按钮文字
+        renderTable();
+    };
+
+    /** 切换页码 */
+    window.gapGoToPage = function (page) {
+        const filtered = getFilteredDomains();
+        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        if (page < 1 || page > totalPages) return;
+        currentPage = page;
+        renderTable();
+        renderPagination();
+    };
+
+    /** 切换每页条数 */
+    window.gapChangePageSize = function (select) {
+        pageSize = parseInt(select.value, 10);
+        currentPage = 1;
+        renderTable();
+        renderPagination();
+    };
+
+    /** 切换"仅显示一致性<97.5%"筛选 */
+    window.gapToggleFilter = function () {
+        filterPendingOnly = !filterPendingOnly;
+        const toggle = document.getElementById('filterToggle');
+        if (filterPendingOnly) {
+            toggle.classList.add('active');
+            toggle.innerHTML = '<i class="fa fa-filter"></i> 显示全部';
+        } else {
+            toggle.classList.remove('active');
+            toggle.innerHTML = '<i class="fa fa-filter"></i> 仅显示一致性&lt;97.5%';
+        }
+        currentPage = 1;
+        renderTable();
+        renderPagination();
+    };
+
+    /** 重新扫描（带 loading 模拟） */
+    window.gapRescan = function () {
+        const btn = document.getElementById('rescanBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 扫描中...';
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            showToast('扫描完成，共发现552个类型不一致字段，分布于18个数据标准业务域', 'success');
+        }, 2500);
+    };
+
+    /** 导出差距报告（触发 toast 提示） */
+    window.gapExportReport = function () {
+        showToast('差距分析报告导出中，请稍候...', 'info');
+    };
+
+    /** 跳转字段映射配置页（携带接口编码与业务域编码，供目标页定位） */
+    window.gapGoMapping = function (code, sys) {
+        govNav('pages/standardization/mapping.html', ['首页','存量接口改造','字段映射配置'], { code: code, sys: sys });
+    };
+
+    /** 跳转映射结果查看页 */
+    window.gapViewMappingResult = function () {
+        govNav('pages/standardization/mapping-result.html', ['首页','存量接口改造','映射结果查看'], {});
+    };
+
+    // ===== 初始化 =====
+    renderStats();
+    renderChart();
+    renderTable();
+    renderPagination();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,706 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>规范落地检查 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .bar-chart { display: flex; align-items: flex-end; gap: 16px; height: 180px; padding: 0 20px; }
+        .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; }
+        .bar-fill { width: 100%; max-width: 50px; border-radius: 4px 4px 0 0; }
+        .bar-val { font-size: 11px; font-weight: 600; margin-bottom: 4px; font-family: 'Segoe UI'; }
+        .bar-label { font-size: 11px; color: var(--text-secondary); margin-top: 6px; white-space: nowrap; }
+        .progress-cell { display: flex; align-items: center; gap: 8px; }
+        .progress-cell .track { flex: 1; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+        .progress-cell .fill { height: 100%; border-radius: 4px; }
+        .progress-cell .val { font-size: 12px; font-weight: 600; min-width: 40px; text-align: right; }
+
+        /* ====== 统一弹窗样式 ====== */
+        .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:1000; display:flex; align-items:center; justify-content:center; }
+        .modal-box { background:#fff; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,.15); display:flex; flex-direction:column; max-height: 85vh; height: auto; }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+        .modal-header h3 { font-size:16px; color:var(--text-primary,#1e293b); margin:0; }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border); flex-shrink:0; }
+        .modal-close { font-size:18px; color:var(--text-light,#94a3b8); text-decoration:none; line-height:1; }
+
+        /* ====== 表单网格样式 ====== */
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .form-grid .form-field { display:flex; flex-direction:column; gap:6px; }
+        .form-grid .form-field.full { grid-column:1 / -1; }
+        .form-grid .form-field label { font-size:13px; color:var(--text-secondary,#64748b); font-weight:500; }
+        .form-grid .form-field label .req { color:#dc2626; margin-left:2px; }
+        .form-grid .form-field input,
+        .form-grid .form-field select,
+        .form-grid .form-field textarea { padding:8px 12px; border:1px solid var(--border,#e2e8f0); border-radius:4px; font-size:13px; font-family:inherit; }
+        .form-grid .form-field textarea { resize:vertical; min-height:80px; }
+
+        /* ====== 开关样式 ====== */
+        .switch { position:relative; display:inline-block; width:40px; height:22px; vertical-align:middle; }
+        .switch input { opacity:0; width:0; height:0; }
+        .switch .slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e1; border-radius:22px; transition:.3s; }
+        .switch .slider::before { content:''; position:absolute; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.3s; }
+        .switch input:checked + .slider { background:#16a34a; }
+        .switch input:checked + .slider::before { transform:translateX(18px); }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-tasks" style="color:var(--primary);margin-right:8px"></i>规范落地检查</h2>
+            <div class="page-desc">
+                首页 / 服务治理 / 规范落地检查 · 检查各系统对接口规范的执行情况，推动规范落地
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="openCheckRuleModal()"><i class="fa fa-cog"></i> 检查规则配置</button>
+            <button class="btn btn-default" onclick="showToast('正在导出落地检查报告...')"><i class="fa fa-download"></i> 导出报告</button>
+            <button class="btn btn-primary" onclick="startImplementCheck(this, '发起规范落地检查')"><i class="fa fa-play-circle"></i> 发起检查</button>
+        </div>
+    </div>
+
+    <!-- ====== 各系统规范执行率统计 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">各系统规范执行率统计</div>
+            <div class="card-action"><a href="javascript:;" onclick="startImplementCheck(this, '重新检查各系统规范执行率')"><i class="fa fa-refresh"></i> 重新检查</a></div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>系统名称</th>
+                        <th style="width:140px">报文规范执行率</th>
+                        <th style="width:140px">文件命名执行率</th>
+                        <th style="width:140px">文件格式执行率</th>
+                        <th style="width:140px">综合执行率</th>
+                        <th style="width:80px" class="text-center">评级</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="font-weight:600">核心业务系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:95%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">95%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:92%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">92%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:88%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">88%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:92%;background:var(--success)"></div></div><div class="val" style="color:var(--success);font-weight:700">92%</div></div></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">优秀</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">信贷管理系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:88%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">88%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:85%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">85%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:82%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning)">82%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:85%;background:var(--success)"></div></div><div class="val" style="color:var(--success);font-weight:700">85%</div></div></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">良好</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">风险管理系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:90%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">90%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:88%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">88%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:85%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">85%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:88%;background:var(--success)"></div></div><div class="val" style="color:var(--success);font-weight:700">88%</div></div></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">良好</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">会计总账系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:78%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning)">78%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:72%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning)">72%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:68%;background:var(--danger)"></div></div><div class="val" style="color:var(--danger)">68%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:73%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning);font-weight:700">73%</div></div></td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">一般</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">客户关系管理</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:92%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">92%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:90%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">90%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:86%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">86%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:89%;background:var(--success)"></div></div><div class="val" style="color:var(--success);font-weight:700">89%</div></div></td>
+                        <td class="text-center"><span class="tag tag-success" style="font-size:11px">良好</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">支付清算系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:85%;background:var(--success)"></div></div><div class="val" style="color:var(--success)">85%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:82%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning)">82%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:80%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning)">80%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:82%;background:var(--warning)"></div></div><div class="val" style="color:var(--warning);font-weight:700">82%</div></div></td>
+                        <td class="text-center"><span class="tag tag-warning" style="font-size:11px">一般</span></td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600">投资理财系统</td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:65%;background:var(--danger)"></div></div><div class="val" style="color:var(--danger)">65%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:58%;background:var(--danger)"></div></div><div class="val" style="color:var(--danger)">58%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:55%;background:var(--danger)"></div></div><div class="val" style="color:var(--danger)">55%</div></div></td>
+                        <td><div class="progress-cell"><div class="track"><div class="fill" style="width:59%;background:var(--danger)"></div></div><div class="val" style="color:var(--danger);font-weight:700">59%</div></div></td>
+                        <td class="text-center"><span class="tag tag-danger" style="font-size:11px">不达标</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ====== 不合规明细列表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">不合规明细列表</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--danger);font-weight:600">共 45 项不合规</span></div>
+        </div>
+        <div class="filter-bar" style="border-bottom:1px solid var(--border);margin:0">
+            <div class="form-row">
+                <div class="form-item">
+                    <label>系统名称</label>
+                    <select class="form-control" id="filterCheckSystem">
+                        <option>全部</option>
+                        <option>投资理财系统</option>
+                        <option>会计总账系统</option>
+                        <option>支付清算系统</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>检查项</label>
+                    <select class="form-control" id="filterCheckItem">
+                        <option>全部</option>
+                        <option>报文规范</option>
+                        <option>文件命名</option>
+                        <option>文件格式</option>
+                    </select>
+                </div>
+                <div class="form-item" style="min-width:auto">
+                    <button class="btn btn-primary" onclick="filterImplement()"><i class="fa fa-search"></i> 查询</button>
+                    <button class="btn btn-default" onclick="resetImplementFilter()"><i class="fa fa-eraser"></i> 重置</button>
+                </div>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" id="checkSelectAll" onclick="toggleCheckSelectAll(this)"></th>
+                        <th style="width:120px">系统名称</th>
+                        <th style="width:120px">检查项</th>
+                        <th>标准要求</th>
+                        <th>实际值</th>
+                        <th style="width:80px" class="text-center">差距</th>
+                        <th>建议</th>
+                        <th style="width:140px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="checkTableBody">
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">投资理财系统</td>
+                        <td><span class="tag tag-info" style="font-size:11px">报文规范</span></td>
+                        <td>请求报文必须包含serviceCode字段</td>
+                        <td>12个接口缺少serviceCode</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-35%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">补充serviceCode字段</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【投资理财系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">投资理财系统</td>
+                        <td><span class="tag tag-warning" style="font-size:11px">文件命名</span></td>
+                        <td>文件名格式：系统编码_业务类型_日期.扩展名</td>
+                        <td>8个文件服务命名不规范</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-42%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">按规范重命名文件模板</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【投资理财系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">会计总账系统</td>
+                        <td><span class="tag tag-purple" style="font-size:11px">文件格式</span></td>
+                        <td>文件编码统一使用UTF-8</td>
+                        <td>5个文件服务使用GBK编码</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-32%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">将文件编码转为UTF-8</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【会计总账系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">会计总账系统</td>
+                        <td><span class="tag tag-info" style="font-size:11px">报文规范</span></td>
+                        <td>响应报文必须包含resultCode和resultMsg</td>
+                        <td>6个接口响应格式不统一</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-22%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">统一响应报文格式</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【会计总账系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">支付清算系统</td>
+                        <td><span class="tag tag-warning" style="font-size:11px">文件命名</span></td>
+                        <td>文件分隔符统一使用下划线</td>
+                        <td>4个文件服务使用连字符</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-18%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">修改文件命名分隔符</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【支付清算系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">投资理财系统</td>
+                        <td><span class="tag tag-purple" style="font-size:11px">文件格式</span></td>
+                        <td>CSV文件必须包含BOM头</td>
+                        <td>3个CSV文件缺少BOM头</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-45%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">添加UTF-8 BOM头</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【投资理财系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">会计总账系统</td>
+                        <td><span class="tag tag-warning" style="font-size:11px">文件命名</span></td>
+                        <td>日期格式统一使用yyyyMMdd</td>
+                        <td>3个文件使用yyyy-MM-dd格式</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-28%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">统一日期格式</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【会计总账系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                    <tr>
+                        <td><input type="checkbox"></td>
+                        <td style="font-weight:600">支付清算系统</td>
+                        <td><span class="tag tag-info" style="font-size:11px">报文规范</span></td>
+                        <td>接口版本号必须在URL路径中体现</td>
+                        <td>5个接口未在URL中体现版本</td>
+                        <td class="text-center" style="color:var(--danger);font-weight:600">-15%</td>
+                        <td style="font-size:12px;color:var(--text-secondary)">在URL中添加版本号</td>
+                        <td class="text-center"><a class="btn-link" style="padding:0 4px" onclick="showToast('查看不合规详情')"><i class="fa fa-eye"></i> 查看详情</a><a class="btn-link" style="padding:0 4px;color:var(--warning)" onclick="if(confirm('确认向【支付清算系统】下发整改通知？')) showToast('整改通知已下发')"><i class="fa fa-send-o"></i> 下发整改</a></td>
+                    </tr>
+                </tbody>
+            </table>
+            <!-- 空数据状态（默认隐藏，筛选无结果时显示） -->
+            <div id="emptyState" style="display:none;text-align:center;padding:48px 0;color:#94a3b8">
+                <i class="fa fa-inbox" style="font-size:48px;display:block;margin-bottom:12px;color:#cbd5e1"></i>
+                <div style="font-size:14px">暂无不合规数据</div>
+                <div style="font-size:12px;margin-top:4px">当前筛选条件下未发现不合规项，可调整筛选条件或重新检查</div>
+            </div>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary">45</span> 条记录</div>
+            <div class="page-list">
+                <button id="checkPrevBtn" onclick="goToImplementPage('prev')"><i class="fa fa-angle-left"></i></button>
+                <button class="active" onclick="goToImplementPage(1)">1</button>
+                <button onclick="goToImplementPage(2)">2</button>
+                <button onclick="goToImplementPage(3)">3</button>
+                <button class="disabled" disabled>...</button>
+                <button onclick="goToImplementPage(5)">5</button>
+                <button onclick="goToImplementPage('next')"><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px"><option>10 条/页</option><option>20 条/页</option><option>50 条/页</option></select>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 执行率趋势图 ====== -->
+    <div class="card" style="margin-bottom:0">
+        <div class="card-header">
+            <div class="card-title">规范执行率趋势（近6个月）</div>
+        </div>
+        <div class="card-body">
+            <div class="bar-chart">
+                <div class="bar-col"><div class="bar-val">68%</div><div class="bar-fill" style="height:113px;background:var(--warning)"></div><div class="bar-label">1月</div></div>
+                <div class="bar-col"><div class="bar-val">72%</div><div class="bar-fill" style="height:120px;background:var(--warning)"></div><div class="bar-label">2月</div></div>
+                <div class="bar-col"><div class="bar-val">76%</div><div class="bar-fill" style="height:127px;background:var(--success)"></div><div class="bar-label">3月</div></div>
+                <div class="bar-col"><div class="bar-val">79%</div><div class="bar-fill" style="height:132px;background:var(--success)"></div><div class="bar-label">4月</div></div>
+                <div class="bar-col"><div class="bar-val">82%</div><div class="bar-fill" style="height:137px;background:var(--success)"></div><div class="bar-label">5月</div></div>
+                <div class="bar-col"><div class="bar-val">85%</div><div class="bar-fill" style="height:142px;background:var(--primary-light)"></div><div class="bar-label">6月</div></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 检查规则配置弹窗（列表视图 + 表单视图切换） ====== -->
+<div class="modal-overlay" id="checkRuleModal" style="display:none">
+    <div class="modal-box" style="width:880px;max-width:92vw">
+        <!-- 视图A：检查项列表 -->
+        <div id="checkRuleListView" style="display:flex;flex-direction:column;flex:1;min-height:0">
+            <div class="modal-header">
+                <h3><i class="fa fa-cog" style="color:var(--primary);margin-right:6px"></i>检查规则配置</h3>
+                <a href="javascript:;" class="modal-close" onclick="closeCheckRuleModal()"><i class="fa fa-times"></i></a>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:13px;color:var(--text-secondary)">共 <strong id="checkRuleTotalCount">0</strong> 项检查项</span>
+                    <button class="btn btn-primary" onclick="showCheckRuleForm()"><i class="fa fa-plus"></i> 新增检查项</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>检查项名称</th>
+                            <th>标准要求</th>
+                            <th>检查方式</th>
+                            <th>适用对象</th>
+                            <th class="text-center">启用状态</th>
+                            <th class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="checkRuleListBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="closeCheckRuleModal()">关闭</button>
+            </div>
+        </div>
+        <!-- 视图B：检查项表单（新增/编辑） -->
+        <div id="checkRuleFormView" style="display:none;flex-direction:column;flex:1;min-height:0">
+            <div class="modal-header">
+                <h3 id="checkRuleFormTitle"><i class="fa fa-plus" style="color:var(--primary);margin-right:6px"></i>新增检查项</h3>
+                <a href="javascript:;" class="modal-close" onclick="hideCheckRuleForm()"><i class="fa fa-times"></i></a>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label>检查项名称<span class="req">*</span></label>
+                        <input type="text" id="checkRuleName" placeholder="请输入检查项名称">
+                    </div>
+                    <div class="form-field">
+                        <label>检查方式</label>
+                        <select id="checkRuleMethod">
+                            <option>自动检查</option>
+                            <option>人工检查</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>适用对象</label>
+                        <select id="checkRuleScope">
+                            <option>全部接口</option>
+                            <option>文件服务</option>
+                            <option>API接口</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label>启用状态</label>
+                        <label class="switch"><input type="checkbox" id="checkRuleEnabled" checked><span class="slider"></span></label>
+                    </div>
+                    <div class="form-field full">
+                        <label>标准要求</label>
+                        <textarea id="checkRuleStandard" placeholder="请输入标准要求描述"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="hideCheckRuleForm()">取消</button>
+                <button class="btn btn-primary" onclick="saveCheckRule()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+
+/* ====== 查询：按系统名称/检查项过滤不合规明细 ====== */
+function filterImplement() {
+    var system = document.getElementById('filterCheckSystem').value;
+    var item = document.getElementById('filterCheckItem').value;
+    var rows = document.querySelectorAll('#checkTableBody tr');
+    var visibleCount = 0;
+    rows.forEach(function(row) {
+        var cells = row.querySelectorAll('td');
+        var systemText = cells[1] ? cells[1].textContent.trim() : '';
+        var itemText = cells[2] ? cells[2].textContent.trim() : '';
+        var show = true;
+        if (system && system !== '全部' && systemText.indexOf(system) < 0) show = false;
+        if (item && item !== '全部' && itemText.indexOf(item) < 0) show = false;
+        row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
+    });
+    var emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+    showToast('查询完成，共匹配 ' + visibleCount + ' 项不合规');
+}
+
+/* ====== 重置：清空筛选条件并恢复全部行 ====== */
+function resetImplementFilter() {
+    document.getElementById('filterCheckSystem').value = '全部';
+    document.getElementById('filterCheckItem').value = '全部';
+    var rows = document.querySelectorAll('#checkTableBody tr');
+    rows.forEach(function(row) { row.style.display = ''; });
+    var emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = 'none';
+    var master = document.getElementById('checkSelectAll');
+    if (master) master.checked = false;
+    showToast('已重置筛选条件');
+}
+
+/* ====== 全选/取消全选：勾选或取消所有可见行的复选框 ====== */
+function toggleCheckSelectAll(master) {
+    var rowChecks = document.querySelectorAll('#checkTableBody input[type="checkbox"]');
+    var visibleCount = 0;
+    rowChecks.forEach(function(cb) {
+        var row = cb.closest('tr');
+        if (!row || row.style.display !== 'none') {
+            cb.checked = master.checked;
+            visibleCount++;
+        }
+    });
+    showToast(master.checked ? '已全选 ' + visibleCount + ' 项' : '已取消全选');
+}
+
+/* ====== 分页：切换 active 样式 ====== */
+function goToImplementPage(page) {
+    var btns = document.querySelectorAll('.pagination .page-list button');
+    var currentActive = 1;
+    btns.forEach(function(b) {
+        if (b.classList.contains('active')) {
+            var n = parseInt(b.textContent);
+            if (!isNaN(n)) currentActive = n;
+        }
+    });
+    var target;
+    if (page === 'prev') target = currentActive - 1;
+    else if (page === 'next') target = currentActive + 1;
+    else target = parseInt(page);
+    if (isNaN(target) || target < 1 || target > 5) { showToast('已到达分页边界'); return; }
+    btns.forEach(function(b) {
+        b.classList.remove('active');
+        var n = parseInt(b.textContent);
+        if (!isNaN(n) && n === target) b.classList.add('active');
+    });
+    var prevBtn = document.getElementById('checkPrevBtn');
+    if (prevBtn) prevBtn.disabled = (target === 1);
+    showToast('已跳转到第 ' + target + ' 页');
+}
+
+/* ====== 查看详情：弹出模态框显示不合规详情 ====== */
+function viewImplementDetail(btn) {
+    var row = btn.closest('tr');
+    if (!row) { showToast('未找到记录'); return; }
+    var cells = row.querySelectorAll('td');
+    // 列顺序：0复选框 1系统 2检查项 3标准要求 4实际值 5差距 6建议 7操作
+    var system = cells[1] ? cells[1].textContent.trim() : '-';
+    var itemHtml = cells[2] ? cells[2].innerHTML : '-';
+    var standard = cells[3] ? cells[3].textContent.trim() : '-';
+    var actual = cells[4] ? cells[4].textContent.trim() : '-';
+    var gap = cells[5] ? cells[5].textContent.trim() : '-';
+    var suggest = cells[6] ? cells[6].textContent.trim() : '-';
+    // 构建遮罩与模态框
+    var overlay = document.createElement('div');
+    overlay.id = '_implementDetailModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99998;display:flex;align-items:center;justify-content:center';
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:8px;width:560px;max-width:90vw;max-height: 80vh; height: auto;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.2)';
+    modal.innerHTML =
+        '<div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">' +
+            '<div style="font-size:16px;font-weight:600;color:#1e293b"><i class="fa fa-eye" style="color:#2563eb;margin-right:8px"></i>不合规详情</div>' +
+            '<a href="javascript:;" onclick="document.getElementById(\'_implementDetailModal\').remove()" style="color:#94a3b8;font-size:22px;text-decoration:none;line-height:1">&times;</a>' +
+        '</div>' +
+        '<div style="padding:20px">' +
+            '<div style="display:grid;grid-template-columns:90px 1fr;gap:12px 16px;font-size:13px;line-height:1.8">' +
+                '<div style="color:#64748b">系统名称</div><div style="color:#334155;font-weight:600">' + system + '</div>' +
+                '<div style="color:#64748b">检查项</div><div>' + itemHtml + '</div>' +
+                '<div style="color:#64748b">标准要求</div><div style="color:#334155">' + standard + '</div>' +
+                '<div style="color:#64748b">实际值</div><div style="color:#dc2626">' + actual + '</div>' +
+                '<div style="color:#64748b">差距</div><div style="color:#dc2626;font-weight:600">' + gap + '</div>' +
+                '<div style="color:#64748b">整改建议</div><div style="color:#16a34a">' + suggest + '</div>' +
+            '</div>' +
+        '</div>' +
+        '<div style="padding:12px 20px;border-top:1px solid #e2e8f0;text-align:right">' +
+            '<button class="btn btn-default" onclick="document.getElementById(\'_implementDetailModal\').remove()">关闭</button>' +
+        '</div>';
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+}
+
+/* ====== 下发整改：confirm确认后更新行状态为"整改中"，并添加"完成整改"按钮 ====== */
+function issueRectification(btn) {
+    var row = btn.closest('tr');
+    if (!row) { showToast('未找到记录'); return; }
+    var cells = row.querySelectorAll('td');
+    var system = cells[1] ? cells[1].textContent.trim() : '该系统';
+    if (!confirm('确认向【' + system + '】下发整改通知?\n\n确认后该不合规项状态将更新为"整改中"。')) return;
+    // 操作列（第8列）更新为"整改中"状态 + "完成整改"按钮 + "查看详情"
+    var opCell = cells[7];
+    if (opCell) {
+        opCell.innerHTML =
+            '<span style="color:#d97706;font-size:12px;margin-right:6px"><i class="fa fa-cog fa-spin"></i> 整改中</span>' +
+            '<a class="btn-link" style="padding:0 4px;color:var(--success)" onclick="completeRectification(this)"><i class="fa fa-check-circle"></i> 完成整改</a>' +
+            '<a class="btn-link" style="padding:0 4px" onclick="viewImplementDetail(this)"><i class="fa fa-eye"></i> 查看详情</a>';
+    }
+    // 行样式调整为整改中（橙色边框）
+    row.style.background = '#fffbeb';
+    row.style.borderLeft = '4px solid #d97706';
+    row.style.opacity = '0.85';
+    showToast('整改通知已下发至【' + system + '】，状态已更新为"整改中"');
+}
+
+/* ====== 完成整改：confirm确认后将状态推进为"已整改"，操作列只保留"查看"按钮 ======
+ * 参照 compliance.html 的 completeFixIssue 函数实现，确保整改流程闭环：
+ * 待整改 → 整改中 → 已整改
+ */
+function completeRectification(btn) {
+    var row = btn.closest('tr');
+    if (!row) { showToast('未找到记录'); return; }
+    var cells = row.querySelectorAll('td');
+    var system = cells[1] ? cells[1].textContent.trim() : '该系统';
+    if (!confirm('确认将【' + system + '】的整改项标记为"已整改"？\n\n确认后整改流程闭环完成。')) return;
+    // 操作列更新为绿色"已整改"标签 + 只保留"查看"按钮
+    var opCell = cells[7];
+    if (opCell) {
+        opCell.innerHTML =
+            '<span class="tag tag-success" style="font-size:11px;margin-right:6px"><i class="fa fa-check-circle"></i> 已整改</span>' +
+            '<a class="btn-link" style="padding:0 4px" onclick="viewImplementDetail(this)"><i class="fa fa-eye"></i> 查看</a>';
+    }
+    // 行样式调整为已整改（绿色边框）
+    row.style.background = '#f0fdf4';
+    row.style.borderLeft = '4px solid #16a34a';
+    row.style.opacity = '0.7';
+    showToast('【' + system + '】已标记为"已整改"，整改闭环完成');
+}
+
+/* ====== 发起检查/重新检查：保持showToast但添加loading动画效果 ====== */
+function startImplementCheck(el, checkName) {
+    if (!confirm('确认' + checkName + '?\n\n将扫描各系统对接口规范的执行情况。')) return;
+    var originalHtml = el.innerHTML;
+    if (el.disabled !== undefined) el.disabled = true;
+    el.style.opacity = '0.7';
+    el.style.pointerEvents = 'none';
+    el.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 检查中...';
+    setTimeout(function() {
+        if (el.disabled !== undefined) el.disabled = false;
+        el.style.opacity = '';
+        el.style.pointerEvents = '';
+        el.innerHTML = originalHtml;
+        showToast(checkName + '已启动');
+    }, 1800);
+}
+
+/* ====== 检查规则配置 ====== */
+// 检查项 mock 数据
+var checkRules = [
+    { name: '请求报文serviceCode校验', standard: '请求报文必须包含serviceCode字段', method: '自动检查', scope: '全部接口', enabled: true },
+    { name: '响应报文格式校验', standard: '响应报文必须包含resultCode和resultMsg', method: '自动检查', scope: 'API接口', enabled: true },
+    { name: '文件命名规范检查', standard: '文件名格式：系统编码_业务类型_日期.扩展名', method: '自动检查', scope: '文件服务', enabled: true },
+    { name: '文件编码检查', standard: '文件编码统一使用UTF-8', method: '自动检查', scope: '文件服务', enabled: true },
+    { name: '接口版本号检查', standard: '接口版本号必须在URL路径中体现', method: '自动检查', scope: 'API接口', enabled: true },
+    { name: 'CSV文件BOM头检查', standard: 'CSV文件必须包含BOM头', method: '人工检查', scope: '文件服务', enabled: false }
+];
+var editingCheckRuleIndex = -1; // 当前编辑的检查项索引，-1 表示新增
+
+// 渲染检查项列表表格
+function renderCheckRuleList() {
+    var tbody = document.getElementById('checkRuleListBody');
+    var html = checkRules.map(function(rule, idx) {
+        var checkedAttr = rule.enabled ? 'checked' : '';
+        var switchHtml = '<label class="switch"><input type="checkbox" ' + checkedAttr + ' onchange="toggleCheckRule(' + idx + ')"><span class="slider"></span></label>';
+        var methodTag = rule.method === '自动检查'
+            ? '<span class="tag tag-info">自动检查</span>'
+            : '<span class="tag tag-warning">人工检查</span>';
+        return '<tr>' +
+            '<td style="font-weight:600">' + rule.name + '</td>' +
+            '<td style="font-size:12px;color:var(--text-secondary)">' + rule.standard + '</td>' +
+            '<td class="text-center">' + methodTag + '</td>' +
+            '<td>' + rule.scope + '</td>' +
+            '<td class="text-center">' + switchHtml + '</td>' +
+            '<td class="text-center op-col"><a href="javascript:;" onclick="showCheckRuleForm(' + idx + ')">编辑</a><a href="javascript:;" onclick="deleteCheckRule(' + idx + ')" style="color:#dc2626">删除</a></td>' +
+        '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+    document.getElementById('checkRuleTotalCount').textContent = checkRules.length;
+}
+
+// 打开检查规则配置弹窗
+function openCheckRuleModal() {
+    renderCheckRuleList();
+    document.getElementById('checkRuleListView').style.display = 'flex';
+    document.getElementById('checkRuleFormView').style.display = 'none';
+    document.getElementById('checkRuleModal').style.display = 'flex';
+}
+
+// 关闭检查规则配置弹窗
+function closeCheckRuleModal() {
+    document.getElementById('checkRuleModal').style.display = 'none';
+}
+
+// 显示检查项表单（新增或编辑，editIndex 为空表示新增）
+function showCheckRuleForm(editIndex) {
+    editingCheckRuleIndex = (editIndex === undefined) ? -1 : editIndex;
+    if (editingCheckRuleIndex >= 0) {
+        // 编辑：预填表单
+        var rule = checkRules[editingCheckRuleIndex];
+        document.getElementById('checkRuleFormTitle').innerHTML = '<i class="fa fa-edit" style="color:var(--primary);margin-right:6px"></i>编辑检查项';
+        document.getElementById('checkRuleName').value = rule.name;
+        document.getElementById('checkRuleMethod').value = rule.method;
+        document.getElementById('checkRuleScope').value = rule.scope;
+        document.getElementById('checkRuleStandard').value = rule.standard;
+        document.getElementById('checkRuleEnabled').checked = rule.enabled;
+    } else {
+        // 新增：清空表单
+        document.getElementById('checkRuleFormTitle').innerHTML = '<i class="fa fa-plus" style="color:var(--primary);margin-right:6px"></i>新增检查项';
+        document.getElementById('checkRuleName').value = '';
+        document.getElementById('checkRuleMethod').value = '自动检查';
+        document.getElementById('checkRuleScope').value = '全部接口';
+        document.getElementById('checkRuleStandard').value = '';
+        document.getElementById('checkRuleEnabled').checked = true;
+    }
+    document.getElementById('checkRuleListView').style.display = 'none';
+    document.getElementById('checkRuleFormView').style.display = 'flex';
+}
+
+// 隐藏检查项表单，返回列表视图
+function hideCheckRuleForm() {
+    document.getElementById('checkRuleFormView').style.display = 'none';
+    document.getElementById('checkRuleListView').style.display = 'flex';
+}
+
+// 保存检查项（新增或更新）
+function saveCheckRule() {
+    var name = document.getElementById('checkRuleName').value.trim();
+    if (!name) { showToast('请填写检查项名称'); return; }
+    var ruleData = {
+        name: name,
+        method: document.getElementById('checkRuleMethod').value,
+        scope: document.getElementById('checkRuleScope').value,
+        standard: document.getElementById('checkRuleStandard').value.trim(),
+        enabled: document.getElementById('checkRuleEnabled').checked
+    };
+    if (editingCheckRuleIndex >= 0) {
+        checkRules[editingCheckRuleIndex] = ruleData;
+        showToast('检查项「' + name + '」已更新');
+    } else {
+        checkRules.push(ruleData);
+        showToast('检查项「' + name + '」已新增');
+    }
+    renderCheckRuleList();
+    hideCheckRuleForm();
+}
+
+// 删除检查项
+function deleteCheckRule(idx) {
+    if (!confirm('确认删除检查项「' + checkRules[idx].name + '」？')) return;
+    checkRules.splice(idx, 1);
+    renderCheckRuleList();
+    showToast('检查项已删除');
+}
+
+// 启用/停用检查项切换
+function toggleCheckRule(idx) {
+    checkRules[idx].enabled = !checkRules[idx].enabled;
+    renderCheckRuleList();
+    showToast(checkRules[idx].enabled ? '检查项已启用' : '检查项已停用');
+}
+
+/* ====== 统一绑定"查看详情/下发整改"按钮到真实交互函数（共8行，批量处理避免逐个修改） ====== */
+(function() {
+    document.querySelectorAll('a[onclick*="查看不合规详情"]').forEach(function(a) {
+        a.setAttribute('onclick', "viewImplementDetail(this)");
+    });
+    document.querySelectorAll('a[onclick*="下发整改"]').forEach(function(a) {
+        a.setAttribute('onclick', "issueRectification(this)");
+    });
+})();
+</script>
+</body>
+</html>

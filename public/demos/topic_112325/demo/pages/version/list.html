@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>版本列表 - 服务治理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        /* ====== 矩阵视图专用样式 ====== */
+        .matrix-section { display:flex; flex-direction:column; gap:12px; }
+        .legend-bar { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:24px; font-size:12px; color:var(--text-secondary); }
+        .legend-bar .lg-title { font-weight:600; color:var(--text-primary); }
+        .legend-item { display:inline-flex; align-items:center; gap:6px; }
+        .legend-dot { display:inline-block; width:10px; height:10px; border-radius:50%; }
+        .dot-green { background:#52c41a; }
+        .dot-yellow { background:#faad14; }
+        .dot-blue { background:#1890ff; }
+        .dot-gray { background:#cbd5e1; }
+
+        /* 环境列单元格 */
+        .env-cell { min-width:190px; vertical-align:middle; padding:10px 12px !important; }
+        .env-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+        .env-ver { font-family:'Segoe UI'; font-weight:700; font-size:13px; color:var(--text-primary); }
+        .env-ver.empty { color:var(--text-light); font-weight:500; }
+        .env-tag { font-size:10px; padding:1px 8px; white-space:nowrap; }
+        .env-info { font-size:11px; color:var(--text-secondary); line-height:1.6; }
+        .env-info .oper { display:inline-flex; gap:8px; margin-top:2px; }
+        .env-info a.btn-link { padding:0; }
+
+        /* 矩阵表：表头环境列背景色 */
+        .matrix-table th.env-dev { background:#eff6ff; color:var(--primary); }
+        .matrix-table th.env-sit { background:#fff7ed; color:var(--warning); }
+        .matrix-table th.env-uat { background:#f0fdf4; color:var(--success); }
+        .matrix-table th.env-prod { background:#fef2f2; color:var(--danger); }
+
+        /* 接口名称列 */
+        .api-cell a.api-name { font-weight:600; color:var(--text-primary); font-size:13px; display:block; margin-bottom:2px; }
+        .api-cell a.api-name:hover { color:var(--primary); }
+        .api-cell .api-code { font-family:'Segoe UI'; font-size:11px; color:var(--text-secondary); }
+
+        /* 行内操作按钮组 */
+        .row-actions { display:flex; flex-direction:column; gap:4px; align-items:center; }
+        .row-actions a.btn-link { padding:2px 0; font-size:12px; }
+
+        /* 状态 tag 自定义（覆盖或补充） */
+        .tag-stable { background:#f0fdf4; color:#52c41a; border:1px solid #86efac; }
+        .tag-gray { background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; }
+
+        /* 顶部状态概览 */
+        .matrix-summary { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; }
+        .summary-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; display:flex; align-items:center; gap:12px; }
+        .summary-card .sm-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; }
+        .summary-card .sm-val { font-size:20px; font-weight:700; font-family:'Segoe UI'; line-height:1.1; }
+        .summary-card .sm-label { font-size:12px; color:var(--text-secondary); }
+
+        /* ====== 空状态与加载状态样式 ====== */
+        .empty-row td { text-align:center; padding:48px 0; color:var(--text-light); }
+        .empty-row .empty-icon { font-size:48px; margin-bottom:12px; display:block; color:var(--text-light); }
+        .empty-row .empty-text { font-size:14px; }
+        .table-wrapper { position:relative; }
+        .loading-mask { position:absolute; inset:0; background:rgba(255,255,255,0.7); display:none; align-items:center; justify-content:center; z-index:5; }
+        .loading-mask.show { display:flex; }
+        .loading-mask i { font-size:28px; color:var(--primary); }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-code-fork" style="color:var(--primary);margin-right:8px"></i>版本列表</h2>
+            <div class="page-desc">
+                首页 / 服务治理 / 版本列表 - 按接口维度展示各环境的版本与状态，支持版本晋升、对比、历史查看
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/governance/service-governance.html', ['首页','服务治理'])"><i class="fa fa-arrow-left"></i> 返回</button>
+            <button class="btn btn-default" onclick="location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+            <button class="btn btn-default" onclick="batchCompare()"><i class="fa fa-columns"></i> 批量对比</button>
+            <button class="btn btn-primary" onclick="govNav('pages/deploy/change-new.html', ['首页','投产管理','变更单管理','新增变更单'], {action:'new'})"><i class="fa fa-plus"></i> 申请版本变更</button>
+        </div>
+    </div>
+
+    <!-- ====== 筛选操作区 ====== -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item">
+                <label>服务类型</label>
+                <select class="form-control" id="filterServiceType">
+                    <option value="">全部</option><option value="API 接口">API 接口</option><option value="文件服务">文件服务</option><option value="异步消息">异步消息</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>发布状态</label>
+                <select class="form-control" id="filterStatus">
+                    <option value="">全部</option><option value="正式版本">正式版本</option><option value="测试版本">测试版本</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>分级</label>
+                <select class="form-control" id="filterLevel">
+                    <option value="">全部</option><option value="A 级">A 级</option><option value="B 级">B 级</option><option value="C 级">C 级</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>关键词</label>
+                <input type="text" class="form-control" id="filterKeyword" placeholder="接口名称/编码" style="width:180px">
+            </div>
+            <div class="form-item" style="min-width:auto">
+                <button class="btn btn-primary" onclick="doSearch()"><i class="fa fa-search"></i> 查询</button>
+                <button class="btn btn-default" onclick="doReset()"><i class="fa fa-eraser"></i> 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 图例说明 ====== -->
+    <div class="legend-bar">
+        <span class="lg-title">图例说明：</span>
+        <span class="legend-item"><span class="legend-dot dot-green"></span>稳定运行</span>
+        
+        <span class="legend-item"><span class="legend-dot dot-blue"></span>测试中</span>
+        
+        <span class="legend-item"><span class="legend-dot" style="background:#cbd5e1"></span>未部署</span>
+        
+        <span style="margin-left:auto;font-size:11px">共 <b style="color:var(--primary)">10</b> 个接口 · 覆盖 <b style="color:var(--primary)">9</b> 大业务系统</span>
+    </div>
+
+    <!-- ====== 主矩阵表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">接口版本 · 环境矩阵</div>
+            <div class="card-action">
+                <span style="font-size:12px;color:var(--text-secondary)">点击单元格"晋升"可触发版本晋升</span>
+            </div>
+        </div>
+        <div class="table-wrapper" style="border-radius:0;border-left:none;border-right:none;border-top:none">
+            <div class="loading-mask" id="loadingMask"><i class="fa fa-spinner fa-pulse"></i></div>
+            <table class="data-table matrix-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px" class="text-center"><input type="checkbox" id="selectAll" onclick="toggleSelectAll(this)"></th>
+                        <th style="width:220px">接口名称 / 编码</th>
+                        <th style="width:120px">所属系统</th>
+                        <th class="env-dev text-center">DEV 开发</th>
+                        <th class="env-sit text-center">SIT 集成</th>
+                        <th class="env-uat text-center">UAT 验收</th>
+                        <th class="env-prod text-center">PROD 生产</th>
+                        <th style="width:120px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="matrixBody">
+                    <!-- 行1：核心账务 -->
+                    <tr data-code="API-ACCT-005" data-row data-service="API 接口" data-status="测试版本" data-level="A 级" data-name="账户余额查询">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-ACCT-005')">账户余额查询</a>
+                            <span class="api-code">API-ACCT-005</span>
+                        </td>
+                        <td>核心账务系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：张工程师<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-ACCT-005')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-ACCT-005','v3.2.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：张工程师<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-ACCT-005')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-ACCT-005','v3.2.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0-beta</span>
+                                <span class="tag tag-warning env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                测试进度：30%<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-ACCT-005')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-ACCT-005','v3.2.0-beta','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.1.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-03-15<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-ACCT-005')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-ACCT-005','v3.2.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-ACCT-005')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-ACCT-005')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行2：客户管理 -->
+                    <tr data-code="API-CUST-001" data-row data-service="API 接口" data-status="正式版本" data-level="A 级" data-name="客户基本信息查询">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-CUST-001')">客户基本信息查询</a>
+                            <span class="api-code">API-CUST-001</span>
+                        </td>
+                        <td>客户管理系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.3.0-SNAP</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                构建号：#2026060501<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CUST-001')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CUST-001','v3.3.0-SNAP','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：李主管<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CUST-001')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CUST-001','v3.2.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-20<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CUST-001')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CUST-001','v3.2.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.2.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                调用量：1,286 万/月<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CUST-001')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-CUST-001','v3.3.0-SNAP','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-CUST-001')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-CUST-001')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行3：信贷 -->
+                    <tr data-code="API-CDP-010" data-row data-service="API 接口" data-status="测试版本" data-level="A 级" data-name="贷款审批提交">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-CDP-010')">贷款审批提交</a>
+                            <span class="api-code">API-CDP-010</span>
+                        </td>
+                        <td>信贷管理系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.5.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：王架构师<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CDP-010')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CDP-010','v2.5.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.4.2</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                用例执行：128/150<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CDP-010')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CDP-010','v2.4.2','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.4.1-RC1</span>
+                                <span class="tag tag-warning env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                待审批：风险评审<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CDP-010')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-CDP-010','v2.4.1-RC1','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.4.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-04-10<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-CDP-010')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-CDP-010','v2.5.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-CDP-010')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-CDP-010')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行4：支付 -->
+                    <tr data-code="API-PAY-002" data-row data-service="API 接口" data-status="正式版本" data-level="A 级" data-name="实时支付接口">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-PAY-002')">实时支付接口</a>
+                            <span class="api-code">API-PAY-002</span>
+                        </td>
+                        <td>支付清算系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v4.1.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：刘工<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-PAY-002')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-PAY-002','v4.1.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v4.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-28<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-PAY-002')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-PAY-002','v4.0.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v4.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-06-01<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-PAY-002')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-PAY-002','v4.0.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v4.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                调用量：3,521 万/月<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-PAY-002')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-PAY-002','v4.1.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-PAY-002')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-PAY-002')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行5：风险 -->
+                    <tr data-code="API-RISK-001" data-row data-service="API 接口" data-status="测试版本" data-level="B 级" data-name="风险评级评估">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-RISK-001')">风险评级评估</a>
+                            <span class="api-code">API-RISK-001</span>
+                        </td>
+                        <td>风险管理系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.2.0-SNAP</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                新算法：ML-v3<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-RISK-001')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-RISK-001','v2.2.0-SNAP','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.1.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-15<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-RISK-001')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-RISK-001','v2.1.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver empty">-</span>
+                                <span class="tag tag-gray env-tag">未部署</span>
+                            </div>
+                            <div class="env-info">
+                                说明：新版本暂未进入 UAT<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-RISK-001','v2.1.0','SIT')"><i class="fa fa-clock-o"></i> 等待 SIT 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-02-10<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-RISK-001')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-RISK-001','v2.2.0-SNAP','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-RISK-001')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-RISK-001')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行6：对账文件 -->
+                    <tr data-code="FILE-ACCT-003" data-row data-service="文件服务" data-status="测试版本" data-level="B 级" data-name="日终交易流水文件">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('FILE-ACCT-003')">日终交易流水文件</a>
+                            <span class="api-code">FILE-ACCT-003</span>
+                        </td>
+                        <td>对账清算系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.1.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                格式：CSV + 扩展列<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-ACCT-003')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-ACCT-003','v2.1.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.1.0</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                联调：分行 3/5<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-ACCT-003')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-ACCT-003','v2.1.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-01<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-ACCT-003')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-ACCT-003','v2.0.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.0.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                文件量：约 1.2GB/日<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-ACCT-003')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-ACCT-003','v2.1.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('FILE-ACCT-003')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('FILE-ACCT-003')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行7：异步消息 -->
+                    <tr data-code="MSG-CUST-020" data-row data-service="异步消息" data-status="测试版本" data-level="B 级" data-name="客户变更事件推送">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('MSG-CUST-020')">客户变更事件推送</a>
+                            <span class="api-code">MSG-CUST-020</span>
+                        </td>
+                        <td>客户管理系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.8.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：陈工<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('MSG-CUST-020')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('MSG-CUST-020','v1.8.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.7.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-10<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('MSG-CUST-020')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('MSG-CUST-020','v1.7.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.7.0</span>
+                                <span class="tag tag-warning env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                测试进度：50%<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('MSG-CUST-020')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('MSG-CUST-020','v1.7.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.6.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                QPS：约 8,600<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('MSG-CUST-020')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('MSG-CUST-020','v1.8.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('MSG-CUST-020')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('MSG-CUST-020')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行8：理财 -->
+                    <tr data-code="API-INVEST-008" data-row data-service="API 接口" data-status="测试版本" data-level="C 级" data-name="理财产品查询">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-INVEST-008')">理财产品查询</a>
+                            <span class="api-code">API-INVEST-008</span>
+                        </td>
+                        <td>财富管理系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.5.2-SNAP</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                新功能：净值查询<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-INVEST-008')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-INVEST-008','v1.5.2-SNAP','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.5.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-25<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-INVEST-008')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-INVEST-008','v1.5.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver empty">-</span>
+                                <span class="tag tag-gray env-tag">未部署</span>
+                            </div>
+                            <div class="env-info">
+                                说明：等待 SIT 评审<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-INVEST-008','v1.5.0','SIT')"><i class="fa fa-clock-o"></i> 等待 SIT 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.4.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-01-15<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-INVEST-008')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-INVEST-008','v1.5.2-SNAP','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-INVEST-008')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-INVEST-008')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行9：监管报送 -->
+                    <tr data-code="FILE-REG-011" data-row data-service="文件服务" data-status="测试版本" data-level="A 级" data-name="监管报送文件生成">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('FILE-REG-011')">监管报送文件生成</a>
+                            <span class="api-code">FILE-REG-011</span>
+                        </td>
+                        <td>监管报送系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.0.0</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                新规范：1104-2026<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-REG-011')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-REG-011','v3.0.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v3.0.0</span>
+                                <span class="tag tag-info env-tag">测试中</span>
+                            </div>
+                            <div class="env-info">
+                                联调：人行接口<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-REG-011')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-REG-011','v3.0.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.9.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-18<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-REG-011')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-REG-011','v2.9.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v2.9.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                报送周期：T+1<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('FILE-REG-011')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('FILE-REG-011','v3.0.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('FILE-REG-011')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('FILE-REG-011')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 行10：反洗钱 -->
+                    <tr data-code="API-AML-009" data-row data-service="API 接口" data-status="正式版本" data-level="A 级" data-name="可疑交易上报">
+                        <td class="text-center" style="vertical-align:middle"><input type="checkbox" class="row-check"></td>
+                            <td class="api-cell">
+                            <a href="javascript:;" class="api-name" onclick="viewVersionDetail('API-AML-009')">可疑交易上报</a>
+                            <span class="api-code">API-AML-009</span>
+                        </td>
+                        <td>反洗钱系统</td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.3.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布人：赵工<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-AML-009')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-AML-009','v1.3.0','DEV','SIT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.3.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-05-30<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-AML-009')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-AML-009','v1.3.0','SIT','UAT')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.3.0</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-06-03<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-AML-009')"><i class="fa fa-eye"></i> 详情</a>
+                                    <a class="btn-link" href="javascript:;" onclick="onPromote('API-AML-009','v1.3.0','UAT','PROD')"><i class="fa fa-arrow-up"></i> 晋升</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="env-cell">
+                            <div class="env-top">
+                                <span class="env-ver">v1.2.5</span>
+                                <span class="tag tag-stable env-tag">稳定运行</span>
+                            </div>
+                            <div class="env-info">
+                                发布日期：2026-03-22<br>
+                                <div class="oper">
+                                    <a class="btn-link" href="javascript:;" onclick="viewVersionDetail('API-AML-009')"><i class="fa fa-eye"></i> 详情</a>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="text-center op-col">
+                            <div class="row-actions">
+                                <a class="btn-link" href="javascript:;" onclick="onPromote('API-AML-009','v1.3.0','DEV')"><i class="fa fa-rocket"></i> 发起晋升</a>
+                                <a class="btn-link" href="javascript:;" onclick="compareEnvs('API-AML-009')"><i class="fa fa-columns"></i> 对比四环境</a>
+                                <a class="btn-link" href="javascript:;" onclick="viewHistory('API-AML-009')"><i class="fa fa-history"></i> 查看历史</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- 空状态行（默认隐藏） -->
+                    <tr class="empty-row" id="emptyRow" style="display:none">
+                        <td colspan="8">
+                            <i class="fa fa-inbox empty-icon"></i>
+                            <div class="empty-text">暂无匹配的版本数据</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary" id="totalRecords">10</span> 条记录 · 当前页 <span id="currentPage">1</span>/<span id="totalPages">1</span></div>
+            <div class="page-list">
+                <button class="page-item" onclick="goToPage(1)" disabled><i class="fa fa-angle-left"></i></button>
+                <button class="page-item active" onclick="goToPage(1)">1</button>
+                <button class="page-item" onclick="goToPage(1)" disabled><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="changePageSize(this.value)"><option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option></select>
+            </div>
+        </div>
+    </div>
+
+</div>
+<script src="../../js/mock-data.js"></script>
+<script>
+
+    // ====== 版本晋升交互 ======
+    // 点击"晋升/发起晋升"按钮，跳转到版本晋升管理页面走正式审批流程
+    function onPromote(apiCode, version, fromEnv, toEnv) {
+        // 版本晋升应逐级进行，跳转到版本晋升管理页面
+        govNav('pages/environment/promotion.html', ['首页','投产管理','版本晋升管理'], {apiCode:apiCode, version:version, fromEnv:fromEnv});
+    }
+
+    // ====== 筛选函数 ======
+    function doSearch() {
+        var keyword = (document.getElementById('filterKeyword')||{}).value || '';
+        keyword = keyword.toLowerCase();
+        var serviceType = (document.getElementById('filterServiceType')||{}).value || '';
+        var status = (document.getElementById('filterStatus')||{}).value || '';
+        var level = (document.getElementById('filterLevel')||{}).value || '';
+        var rows = document.querySelectorAll('#matrixBody tr[data-row]');
+        var visibleCount = 0;
+        rows.forEach(function(row) {
+            var show = true;
+            if (keyword) {
+                var text = row.textContent.toLowerCase();
+                if (text.indexOf(keyword) === -1) show = false;
+            }
+            if (serviceType && row.getAttribute('data-service') !== serviceType) show = false;
+            if (status && row.getAttribute('data-status') !== status) show = false;
+            if (level && row.getAttribute('data-level') !== level) show = false;
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        });
+        // 控制空状态行显示
+        var emptyRow = document.getElementById('emptyRow');
+        if (emptyRow) emptyRow.style.display = visibleCount === 0 ? '' : 'none';
+        showToast('筛选完成，共 ' + visibleCount + ' 条记录');
+    }
+
+    function doReset() {
+        var ids = ['filterKeyword','filterServiceType','filterStatus','filterLevel'];
+        ids.forEach(function(id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        var rows = document.querySelectorAll('#matrixBody tr[data-row]');
+        rows.forEach(function(row) { row.style.display = ''; });
+        var emptyRow = document.getElementById('emptyRow');
+        if (emptyRow) emptyRow.style.display = 'none';
+        showToast('已重置筛选条件');
+    }
+
+    // ====== 行内操作 ======
+    // 根据编码前缀区分跳转：FILE/MSG 走文件接口详情，其余走 API 接口详情
+    function viewVersionDetail(apiCode) {
+        if (apiCode && (apiCode.indexOf('FILE') >= 0)) {
+            govNav('pages/interface/file-detail.html', ['首页','服务治理','版本列表','文件接口详情'], {code:apiCode});
+        } else {
+            govNav('pages/interface/api-detail.html', ['首页','服务治理','版本列表','接口详情'], {code:apiCode});
+        }
+    }
+
+    function compareEnvs(apiCode) {
+        govNav('pages/environment/overview.html', ['首页','投产管理','环境总览'], {action:'compare', apiCode:apiCode});
+    }
+
+    function viewHistory(apiCode) {
+        govNav('pages/version/lifecycle.html', ['首页','服务治理','版本生命周期'], {apiCode:apiCode});
+    }
+
+    // ====== 分页 ======
+    function goToPage(n) {
+        showToast('跳转到第 ' + n + ' 页');
+    }
+
+    function changePageSize(size) {
+        showToast('每页显示 ' + size + ' 条');
+    }
+
+    // ====== 加载状态控制 ======
+    function showLoading() {
+        var mask = document.getElementById('loadingMask');
+        if (mask) mask.classList.add('show');
+    }
+    function hideLoading() {
+        var mask = document.getElementById('loadingMask');
+        if (mask) mask.classList.remove('show');
+    }
+
+    // URL 参数读取辅助
+    function _getParam(key) {
+        return govGetParam(key);
+    }
+
+    // ====== 批量对比 ======
+    function toggleSelectAll(master) {
+        document.querySelectorAll('#matrixBody .row-check').forEach(cb => cb.checked = master.checked);
+    }
+
+    function batchCompare() {
+    var checked = document.querySelectorAll('#matrixBody .row-check:checked');
+    if (checked.length < 2) {
+        showToast('请选择至少 2 个需要对比的接口');
+        return;
+    }
+    var codes = [];
+    checked.forEach(function(cb) {
+        var row = cb.closest('tr');
+        var code = row ? row.getAttribute('data-code') : '';
+        if (code) codes.push(code);
+    });
+    if (codes.length < 2) {
+        showToast('未获取到有效的接口编码');
+        return;
+    }
+    govNav('pages/version/compare.html', ['首页','服务治理','版本列表','版本对比'], {codes: codes.join(',')});
+}
+</script>
+</body>
+</html>

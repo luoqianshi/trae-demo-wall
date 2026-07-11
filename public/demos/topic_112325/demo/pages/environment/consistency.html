@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>一致性校验 - 投产管理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .cons-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px; }
+        .cons-stat { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:16px 14px; position:relative; transition:box-shadow .2s; }
+        .cons-stat:hover { box-shadow:0 4px 12px rgba(0,0,0,.06); }
+        .cons-stat .label { font-size:12px; color:var(--text-secondary); margin-bottom:6px; }
+        .cons-stat .value { font-size:26px; font-weight:700; font-family:'Segoe UI'; color:var(--text-primary); margin-bottom:4px; }
+        .cons-stat .sub { font-size:11px; color:var(--text-secondary); }
+        .cons-stat i { float:right; font-size:22px; color:var(--primary); margin-top:4px; }
+
+        /* ====== 环境胶囊 + 横幅统一组件 ====== */
+        .env-switcher { display:flex; align-items:center; gap:10px; padding:10px 16px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px; }
+        .env-switcher .env-label { font-size:13px; color:#64748b; font-weight:600; margin-right:4px; }
+        .env-pill { display:inline-flex; align-items:center; gap:8px; padding:8px 16px; border-radius:999px; cursor:pointer; font-size:13px; font-weight:500; color:#475569; background:#f1f5f9; border:1px solid transparent; transition:all .2s ease; user-select:none; }
+        .env-pill:hover { box-shadow:0 2px 6px rgba(0,0,0,.08); }
+        .env-pill.active { background:#1e40af; color:#fff; border-color:#1e40af; box-shadow:0 2px 8px rgba(30,64,175,.25); }
+        .env-pill .dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:#cbd5e1; }
+        .env-pill.active .dot { background:#fff; }
+        .env-pill .dot.green { background:#16a34a; }
+        .env-pill .dot.yellow { background:#eab308; }
+        .env-pill .dot.blue { background:#2563eb; }
+        .env-pill .dot.purple { background:#9333ea; }
+        .env-pill.active .dot.green, .env-pill.active .dot.yellow, .env-pill.active .dot.blue, .env-pill.active .dot.purple { opacity:0.9; }
+        .env-pill .count { font-size:11px; padding:1px 8px; border-radius:999px; background:rgba(0,0,0,0.06); font-weight:500; }
+        .env-pill.active .count { background:rgba(255,255,255,0.18); }
+
+        .env-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; background:linear-gradient(90deg,#eff6ff,#f0fdfa); border:1px solid #bfdbfe; border-radius:8px; margin-bottom:14px; font-size:13px; color:#1e40af; }
+        .env-banner .bn-left { display:flex; align-items:center; gap:10px; flex:1; flex-wrap:wrap; }
+        .env-banner .bn-left i { font-size:16px; color:#2563eb; }
+        .env-banner .bn-right { display:flex; gap:8px; }
+        .env-banner .btn { padding:6px 12px; font-size:12px; border-radius:6px; cursor:pointer; border:1px solid #cbd5e1; background:#fff; color:#1e293b; }
+        .env-banner .btn:hover { background:#f8fafc; }
+        .env-banner .btn.primary { background:#1e40af; color:#fff; border-color:#1e40af; }
+        .env-banner .btn.primary:hover { opacity:0.92; }
+
+        .env-select-group { display:flex; align-items:center; gap:14px; padding:12px 14px; background:linear-gradient(135deg,#ecfdf5,#fff); border-radius:8px; margin-bottom:14px; border:1px solid #d1fae5; }
+        .env-select-group .arrow { font-size:20px; color:#10b981; }
+        .env-select-group label { font-size:12px; color:var(--text-secondary); display:block; margin-bottom:4px; }
+        /* 让下拉/输入框与胶囊风格对齐 */
+        .env-select-group select,
+        .env-select-group input[type="text"] {
+            display:inline-block; padding:8px 12px; border:1px solid #cbd5e1; border-radius:999px;
+            background:#f8fafc; color:#1e293b; font-size:13px; font-weight:500; transition:all .2s; outline:none;
+            min-width:180px;
+        }
+        .env-select-group select:hover { background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.06); }
+        .env-select-group select:focus,
+        .env-select-group input[type="text"]:focus { border-color:#2563eb; background:#fff; }
+
+        /* 子明细行 */
+        tr.child-row { background:#f8fafc; }
+        tr.child-row td { padding:8px 16px; color:var(--text-secondary); font-size:12px; }
+        tr.child-row .indent { display:inline-block; width:24px; }
+        tr.diff-highlight { background:#fef3c7 !important; }
+        .expand-btn { cursor:pointer; color:var(--primary); user-select:none; }
+
+        /* 弹窗 */
+        .cons-modal-mask { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none; align-items:center; justify-content:center; z-index:999; }
+        .cons-modal-mask.show { display:flex; }
+        .cons-modal-card { background:#fff; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,.2); min-width:420px; max-width:520px; }
+        .cons-modal-head { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+        .cons-modal-head h3 { margin:0; font-size:16px; font-weight:600; }
+        .cons-modal-close { background:none; border:none; font-size:18px; color:var(--text-secondary); cursor:pointer; padding:4px 8px; border-radius:4px; }
+        .cons-modal-close:hover { background:#f1f5f9; }
+        .cons-modal-body { padding:16px 20px; font-size:13px; color:var(--text-primary); }
+        .cons-modal-foot { padding:12px 20px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
+
+        /* Toast + Loading */
+        .cons-toast { position:fixed; top:24px; left:50%; transform:translateX(-50%); background:#065f46; color:#fff; padding:10px 20px; border-radius:6px; font-size:13px; z-index:2000; display:none; }
+        .cons-toast.show { display:block; animation:fadeDown .3s ease; }
+        .cons-toast.warn { background:#92400e; }
+        @keyframes fadeDown { from{opacity:0;transform:translate(-50%,-10px);} to{opacity:1;transform:translate(-50%,0);} }
+
+        .loading-bar { height:4px; background:linear-gradient(90deg,transparent,#10b981,transparent); background-size:200% 100%; animation:sliding 1.2s linear infinite; margin-top:8px; display:none; }
+        .loading-bar.show { display:block; }
+        @keyframes sliding { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+        .issue-val { padding:2px 6px; border-radius:4px; font-size:12px; }
+        .issue-val.odd { background:#fef3c7; color:#92400e; font-weight:600; }
+    </style>
+    <script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-check-circle" style="color:var(--primary);margin-right:8px"></i>环境一致性校验</h2>
+            <div class="page-desc">首页 / 投产管理 / 环境总览 / 环境一致性校验 - 定期或临时比对各环境元数据一致性，发现并跟踪不一致项，保障配置一致性</div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/environment/overview.html', ['首页','投产管理','环境总览'], {})"><i class="fa fa-arrow-left"></i> 返回总览</button>
+            <button class="btn btn-default" onclick="showIgnoredItems()"><i class="fa fa-eye-slash"></i> 已忽略项</button>
+            <button class="btn btn-primary" onclick="runFullCheck()"><i class="fa fa-play-circle"></i> 开始全量校验</button>
+            <button class="btn btn-default" onclick="showToast('正在导出校验报告 PDF...', 'info')"><i class="fa fa-file-pdf-o"></i> 导出校验报告</button>
+        </div>
+    </div>
+
+    <!-- ====== 一致性校验横幅（动态）====== -->
+    <div class="env-banner">
+        <div class="bn-left">
+            <i class="fa fa-check-circle-o"></i>
+            <span id="consBanner">基准环境：PROD(生产) · 当前校验：PROD · 共检查 1286 项 · 差异 0 · 一致率 100.0%</span>
+        </div>
+        <div class="bn-right">
+            <button class="btn primary" onclick="runFullCheck()"><i class="fa fa-play-circle"></i> 重新校验</button>
+        </div>
+    </div>
+
+    <!-- ====== 环境范围选择器 ====== -->
+    <div class="env-select-group">
+        <div style="flex:1">
+            <label>源环境</label>
+            <select id="srcEnv" class="form-control">
+                <option value="PROD" selected>PROD · 生产</option>
+                <option value="DEV">DEV · 开发</option>
+                <option value="SIT">SIT · 集成测试</option>
+                <option value="UAT">UAT · 用户验收</option>
+            </select>
+        </div>
+        <div class="arrow"><i class="fa fa-compress"></i></div>
+        <div style="flex:1">
+            <label>基准环境</label>
+            <select id="refEnv" class="form-control">
+                <option value="DEV">DEV · 开发</option>
+                <option value="SIT">SIT · 集成测试</option>
+                <option value="UAT">UAT · 用户验收</option>
+                <option value="PROD" selected>PROD · 生产</option>
+            </select>
+        </div>
+        <div style="flex:1">
+            <label>严重程度</label>
+            <select id="lvlFilter" class="form-control">
+                <option value="ALL">全部</option>
+                <option value="高">仅高风险</option>
+                <option value="中">仅中风险</option>
+                <option value="低">仅低风险</option>
+            </select>
+        </div>
+        <div style="flex:2">
+            <label>关键字</label>
+            <input type="text" id="cKeyword" class="form-control" placeholder="接口名 / 系统名 / 配置项">
+        </div>
+        <div style="align-self:flex-end">
+            <button class="btn btn-primary" style="height:36px" onclick="runFullCheck()"><i class="fa fa-search"></i> 应用筛选</button>
+        </div>
+        <div class="loading-bar" id="consLoading"></div>
+    </div>
+
+    <!-- ====== 4个汇总统计（动态） ====== -->
+    <div class="cons-stats">
+        <div class="cons-stat">
+            <i class="fa fa-check-square-o"></i>
+            <div class="label">已校验接口</div>
+            <div class="value" id="consTotal">—</div>
+            <div class="sub" id="consTotalSub">覆盖 — 个系统</div>
+        </div>
+        <div class="cons-stat">
+            <i class="fa fa-check" style="color:#10b981"></i>
+            <div class="label">一致项</div>
+            <div class="value" id="consSame" style="color:#10b981">—</div>
+            <div class="sub" id="consSameSub">占比 —</div>
+        </div>
+        <div class="cons-stat">
+            <i class="fa fa-exclamation-triangle" style="color:#f59e0b"></i>
+            <div class="label">不一致项</div>
+            <div class="value" id="consDiff" style="color:#f59e0b">—</div>
+            <div class="sub" id="consDiffSub">高 — · 中 — · 低 —</div>
+        </div>
+        <div class="cons-stat">
+            <i class="fa fa-tachometer" style="color:#7c3aed"></i>
+            <div class="label">校验完成率</div>
+            <div class="value" id="consRate" style="color:#7c3aed">—</div>
+            <div class="sub" id="consRateSub">耗时 — · 最近一次 —</div>
+        </div>
+    </div>
+
+    <!-- ====== 系统级一致性汇总 ====== -->
+    <div class="card" style="margin-bottom:14px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-server"></i> 各系统一致性状态（点击行查看该系统的不一致项明细）<span style="font-size:11px;color:#94a3b8;margin-left:8px">（仅展示有差异的系统）</span></div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)" id="sysCountLabel">共 0 个系统</span></div>
+        </div>
+        <div class="table-wrapper" style="border-left:none;border-right:none;border-top:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:30px"></th>
+                        <th>系统名称</th>
+                        <th style="width:110px" class="text-center">已校验数</th>
+                        <th style="width:110px" class="text-center">一致数</th>
+                        <th style="width:110px" class="text-center">不一致数</th>
+                        <th style="width:110px" class="text-center">一致性</th>
+                        <th style="width:170px">最后校验时间</th>
+                        <th style="width:90px" class="text-center">状态</th>
+                        <th style="width:180px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="sysConsBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ====== 不一致项明细表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-exclamation-circle"></i> 不一致项明细（字段级高亮：黄色表示与其他三环境不同）</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)" id="issueCountLabel">共 0 条</span></div>
+        </div>
+        <div class="table-wrapper" style="border-left:none;border-right:none;border-top:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>接口名</th>
+                        <th>配置项</th>
+                        <th style="width:100px" class="text-center" id="hDev">DEV</th>
+                        <th style="width:100px" class="text-center" id="hSit">SIT</th>
+                        <th style="width:100px" class="text-center" id="hUat">UAT</th>
+                        <th style="width:100px" class="text-center" id="hProd">PROD</th>
+                        <th style="width:90px" class="text-center">严重程度</th>
+                        <th>建议</th>
+                        <th style="width:160px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="issueBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- 确认弹窗 -->
+<div class="cons-modal-mask" id="consModal">
+    <div class="cons-modal-card">
+        <div class="cons-modal-head"><h3 id="consModalTitle">操作确认</h3><button class="cons-modal-close" onclick="closeConsModal()">×</button></div>
+        <div class="cons-modal-body" id="consModalBody"></div>
+        <div class="cons-modal-foot">
+            <button class="btn btn-default" onclick="closeConsModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmConsAction()">确认</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="cons-toast" id="consToast"></div>
+
+<script>
+/* ============ mock 数据 ============ */
+const ENV_LABEL = { PROD: 'PROD(生产)', DEV: 'DEV(开发)', SIT: 'SIT(集成测试)', UAT: 'UAT(用户验收)' };
+
+/* 每个源环境 vs 基准环境（PROD）的配置差异规模表 */
+const SRC_DIFF = {
+    PROD: { total: 1286, diff: 0,   rate: 100.0 },
+    DEV:  { total: 1286, diff: 312, rate: 75.7 },
+    SIT:  { total: 1286, diff: 156, rate: 87.9 },
+    UAT:  { total: 1286, diff: 88,  rate: 93.2 }
+};
+
+/* PROD vs PROD：完全一致 */
+const SYS_LIST_PROD = [
+    { name:'核心业务系统', total: 685, same: 685, diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' },
+    { name:'客户管理系统', total: 423, same: 423, diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' },
+    { name:'信贷管理系统', total: 528, same: 528, diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' },
+    { name:'支付清算系统', total: 94,  same: 94,  diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' },
+    { name:'风险管理系统', total: 386, same: 386, diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' },
+    { name:'对账中心',     total: 88,  same: 88,  diff: 0, rate: 100.0, time:'2026-06-08 09:12', status:'正常' }
+];
+
+/* 其他环境 vs PROD：存在差异 */
+const SYS_LIST_NON_PROD = {
+    DEV: [
+        { name:'核心业务系统', total: 685, same: 560, diff: 125, rate: 81.8, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'客户管理系统', total: 423, same: 405, diff: 18, rate: 95.7, time:'2026-06-08 09:10', status:'待处理' },
+        { name:'信贷管理系统', total: 528, same: 492, diff: 36, rate: 93.2, time:'2026-06-08 09:08', status:'待处理' },
+        { name:'支付清算系统', total: 94,  same: 70,  diff: 24, rate: 74.5, time:'2026-06-08 09:08', status:'待处理' },
+        { name:'风险管理系统', total: 386, same: 366, diff: 20, rate: 94.8, time:'2026-06-08 09:08', status:'待处理' },
+        { name:'对账中心',     total: 88,  same: 78,  diff: 10, rate: 88.6, time:'2026-06-08 09:08', status:'处理中' }
+    ],
+    SIT: [
+        { name:'核心业务系统', total: 685, same: 626, diff: 59, rate: 91.4, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'客户管理系统', total: 423, same: 413, diff: 10, rate: 97.6, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'信贷管理系统', total: 528, same: 510, diff: 18, rate: 96.6, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'支付清算系统', total: 94,  same: 86,  diff: 8,  rate: 91.5, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'风险管理系统', total: 386, same: 376, diff: 10, rate: 97.4, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'对账中心',     total: 88,  same: 82,  diff: 6,  rate: 93.2, time:'2026-06-08 09:12', status:'处理中' }
+    ],
+    UAT: [
+        { name:'核心业务系统', total: 685, same: 656, diff: 29, rate: 95.8, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'客户管理系统', total: 423, same: 417, diff: 6,  rate: 98.6, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'信贷管理系统', total: 528, same: 520, diff: 8,  rate: 98.5, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'支付清算系统', total: 94,  same: 90,  diff: 4,  rate: 95.7, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'风险管理系统', total: 386, same: 382, diff: 4,  rate: 99.0, time:'2026-06-08 09:12', status:'待处理' },
+        { name:'对账中心',     total: 88,  same: 84,  diff: 4,  rate: 95.5, time:'2026-06-08 09:12', status:'处理中' }
+    ]
+};
+
+// 每个系统对应的不一致项（mock）
+const SYS_ISSUES = {
+    '核心业务系统': [
+        { api:'API-DEP-0023 账户余额查询', item:'超时时间', dev:'30s', sit:'30s', uat:'60s', prod:'30s', level:'中', advice:'建议统一为 30s' },
+        { api:'API-DEP-0045 账户流水查询', item:'分页大小', dev:'50', sit:'50', uat:'50', prod:'100', level:'中', advice:'PROD 分页与其他环境不同，建议统一' },
+        { api:'API-DEP-0078 转账接口', item:'限额配置', dev:'¥100w', sit:'¥100w', uat:'¥50w', prod:'¥100w', level:'高', advice:'UAT 限额配置偏低' }
+    ],
+    '信贷管理系统': [
+        { api:'API-CDP-0156 额度占用查询', item:'鉴权方式', dev:'OAuth 2.0', sit:'OAuth 2.0', uat:'AppKey+Secret', prod:'OAuth 2.0', level:'高', advice:'UAT 鉴权方式不一致' },
+        { api:'FILE-CDP-0088 贷款发放明细', item:'文件编码', dev:'UTF-8', sit:'UTF-8', uat:'GBK', prod:'UTF-8', level:'高', advice:'统一为 UTF-8' }
+    ],
+    '客户管理系统': [
+        { api:'API-CUS-0101 客户信息查询', item:'调用频率限制', dev:'100 QPS', sit:'100 QPS', uat:'50 QPS', prod:'200 QPS', level:'中', advice:'建议 QPS 与 PROD 对齐' }
+    ],
+    '支付清算系统': [
+        { api:'API-PAY-0115 支付转账接口', item:'接口地址', dev:'/pay/v3', sit:'/pay/v3', uat:'/pay/v3', prod:'/pay/v2', level:'高', advice:'PROD 版本落后' }
+    ],
+    '风险管理系统': [
+        { api:'API-RISK-0047 风险评级查询', item:'返回字段集', dev:'32字段', sit:'32字段', uat:'28字段', prod:'30字段', level:'低', advice:'各环境返回字段集不同' }
+    ],
+    '对账中心': [
+        { api:'API-MCH-0201 商户信息同步', item:'错误码定义', dev:'新版', sit:'新版', uat:'新版', prod:'旧版', level:'低', advice:'PROD 错误码未同步' }
+    ]
+};
+
+// 扁平不一致项列表
+const ALL_ISSUES = [];
+Object.keys(SYS_ISSUES).forEach(sys => {
+    SYS_ISSUES[sys].forEach(issue => ALL_ISSUES.push(Object.assign({ sys }, issue)));
+});
+
+const expandedRows = new Set();
+let pendingAction = null;
+
+/* ============ 渲染：系统级汇总 ============ */
+function renderSystems() {
+    const srcEnv = document.getElementById('srcEnv').value;
+    const refEnv = document.getElementById('refEnv').value;
+    const sysList = (srcEnv === refEnv) ? SYS_LIST_PROD : (SYS_LIST_NON_PROD[srcEnv] || SYS_LIST_PROD);
+    const meta = SRC_DIFF[srcEnv] || SRC_DIFF.PROD;
+
+    // 更新横幅（在顶部插入的 env-banner）
+    const banner = document.getElementById('consBanner');
+    if (banner) {
+        banner.textContent = `基准环境：${ENV_LABEL[refEnv]} · 当前校验：${ENV_LABEL[srcEnv]} · 共检查 ${meta.total} 项 · 差异 ${meta.diff} · 一致率 ${meta.rate}%`;
+    }
+
+    const high = ALL_ISSUES.filter(i => i.level === '高').length;
+    const mid = ALL_ISSUES.filter(i => i.level === '中').length;
+    const low = ALL_ISSUES.filter(i => i.level === '低').length;
+
+    document.getElementById('consTotal').textContent = meta.total;
+    document.getElementById('consTotalSub').textContent = `覆盖 ${sysList.length} 个系统`;
+    document.getElementById('consSame').textContent = meta.total - meta.diff;
+    document.getElementById('consSameSub').textContent = `占比 ${meta.rate}%`;
+    document.getElementById('consDiff').textContent = meta.diff;
+    document.getElementById('consDiffSub').textContent = `高 ${high} · 中 ${mid} · 低 ${low}`;
+    document.getElementById('consRate').textContent = meta.rate + '%';
+    document.getElementById('consRateSub').textContent = '耗时 4m 12s · 最近一次 2026-06-08 09:12';
+    document.getElementById('sysCountLabel').textContent = `共 ${sysList.length} 个系统`;
+
+    const body = document.getElementById('sysConsBody');
+    body.innerHTML = sysList.map((s) => {
+        const rateColor = s.rate >= 97 ? '#10b981' : s.rate >= 95 ? '#3b82f6' : '#f59e0b';
+        const statusTag = s.status === '待处理' ? 'tag-danger' : s.status === '处理中' ? 'tag-warning' : 'tag-success';
+        const isExp = expandedRows.has(s.name);
+        const childRows = isExp ? `
+            <tr class="child-row"><td colspan="9">
+                <div style="padding:8px 4px">
+                    <div style="margin-bottom:6px;font-size:12px;color:var(--text-secondary);font-weight:600">【${s.name}】 不一致项明细（${SYS_ISSUES[s.name]?.length || 0} 条）：</div>
+                    ${(SYS_ISSUES[s.name]||[]).map(i => `
+                        <div style="padding:4px 0; border-bottom:1px dashed var(--border); display:flex; gap:12px">
+                            <span style="flex:1"><i class="fa fa-angle-right" style="color:var(--primary)"></i> ${i.api} · <b>${i.item}</b>：DEV=${i.dev} / SIT=${i.sit} / UAT=${i.uat} / PROD=${i.prod}</span>
+                            <span class="tag ${i.level==='高'?'tag-danger':i.level==='中'?'tag-warning':'tag-info'}" style="font-size:11px">${i.level}风险</span>
+                            <span style="color:var(--text-secondary);font-size:11px">${i.advice}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </td></tr>
+        ` : '';
+        return `
+        <tr>
+            <td class="text-center expand-btn" onclick="toggleRow('${s.name}')"><i class="fa fa-caret-${isExp?'down':'right'}"></i></td>
+            <td><span class="expand-btn" onclick="toggleRow('${s.name}')">${s.name}</span></td>
+            <td class="text-center num">${s.total}</td>
+            <td class="text-center num" style="color:#10b981">${s.same}</td>
+            <td class="text-center num" style="color:#f59e0b">${s.diff}</td>
+            <td class="text-center"><b style="color:${rateColor}">${s.rate}%</b></td>
+            <td>${s.time}</td>
+            <td class="text-center"><span class="tag ${statusTag}" style="font-size:11px">${s.status}</span></td>
+            <td class="text-center">
+                <a class="btn-link" onclick="toggleRow('${s.name}')"><i class="fa fa-eye"></i> 查看详情</a>
+                <a class="btn-link" onclick="showToast('已发起对 ${s.name} 的重新校验', 'info')"><i class="fa fa-refresh"></i> 重新校验</a>
+            </td>
+        </tr>
+        ${childRows}
+        `;
+    }).join('');
+}
+
+function toggleRow(name) {
+    if (expandedRows.has(name)) expandedRows.delete(name);
+    else expandedRows.add(name);
+    renderSystems();
+}
+
+/* ============ 渲染：不一致项明细 ============ */
+function renderIssues() {
+    const srcEnv = document.getElementById('srcEnv').value;
+    const refEnv = document.getElementById('refEnv').value;
+    const lvl = document.getElementById('lvlFilter').value;
+    const kw = document.getElementById('cKeyword').value.trim().toLowerCase();
+
+    // 若源环境 == 基准环境 → 无不一致项，显示"完全一致"空状态
+    if (srcEnv === refEnv) {
+        document.getElementById('issueCountLabel').textContent = '共 0 条';
+        document.getElementById('issueBody').innerHTML =
+            `<tr><td colspan="9" style="padding:30px;text-align:center;color:#10b981">
+                <i class="fa fa-check-circle" style="font-size:32px"></i><br><br>
+                当前环境与基准环境（${ENV_LABEL[refEnv]}）完全一致，无差异项
+            </td></tr>`;
+        return;
+    }
+
+    let list = ALL_ISSUES.slice();
+    if (lvl !== 'ALL') list = list.filter(i => i.level === lvl);
+    if (kw) list = list.filter(i => i.api.toLowerCase().includes(kw) || i.sys.toLowerCase().includes(kw) || i.item.toLowerCase().includes(kw));
+
+    document.getElementById('issueCountLabel').textContent = `共 ${list.length} 条`;
+
+    document.getElementById('issueBody').innerHTML = list.map(i => {
+        const vals = { dev:i.dev, sit:i.sit, uat:i.uat, prod:i.prod };
+        const counts = {};
+        Object.values(vals).forEach(v => counts[v] = (counts[v] || 0) + 1);
+        const highlight = {};
+        Object.keys(vals).forEach(k => highlight[k] = counts[vals[k]] === 1);
+        const lvlTag = i.level === '高' ? 'tag-danger' : i.level === '中' ? 'tag-warning' : 'tag-info';
+        const srcKey = srcEnv.toLowerCase();
+        const isDiffFromProd = vals[srcKey] !== vals.prod;
+        const wrapVal = (v, hl) => hl ? `<span class="issue-val odd">${v}</span>` : `<span class="issue-val">${v}</span>`;
+        return `
+        <tr${isDiffFromProd ? ' style="background:#fffbeb"' : ''}>
+            <td>${i.api} <small style="color:var(--text-secondary);font-size:11px">[${i.sys}]</small></td>
+            <td style="font-weight:500;color:var(--text-primary)">${i.item}</td>
+            <td class="text-center">${wrapVal(i.dev, highlight.dev)}</td>
+            <td class="text-center">${wrapVal(i.sit, highlight.sit)}</td>
+            <td class="text-center">${wrapVal(i.uat, highlight.uat)}</td>
+            <td class="text-center">${wrapVal(i.prod, highlight.prod)}</td>
+            <td class="text-center"><span class="tag ${lvlTag}" style="font-size:11px">${i.level}</span></td>
+            <td style="font-size:12px;color:var(--text-secondary)">${i.advice}</td>
+            <td class="text-center">
+                <a class="btn-link" onclick="openAction('fix','${i.api}','${i.item}')"><i class="fa fa-wrench"></i> 修复</a>
+                <a class="btn-link" style="color:#d97706" onclick="openAction('ignore','${i.api}','${i.item}')"><i class="fa fa-ban"></i> 忽略</a>
+            </td>
+        </tr>`;
+    }).join('') || `<tr><td colspan="9" style="padding:30px;text-align:center;color:var(--text-secondary)"><i class="fa fa-check-circle" style="font-size:32px;color:#10b981"></i><br><br>未发现不一致项</td></tr>`;
+}
+
+/* ============ 操作确认 ============ */
+function openAction(kind, api, item) {
+    pendingAction = { kind, api, item };
+    const srcEnv = document.getElementById('srcEnv').value;
+    const refEnv = document.getElementById('refEnv').value;
+    document.getElementById('consModalTitle').textContent = kind === 'fix' ? '修复确认' : '忽略确认';
+    document.getElementById('consModalBody').innerHTML = kind === 'fix'
+        ? `确定要对 <b>${api}</b> 的 <b>${item}</b> 发起修复流程？<br><br><small style="color:var(--text-secondary)">修复将在 ${ENV_LABEL[srcEnv]} 环境执行，验证通过后同步到 ${ENV_LABEL[refEnv]}。</small>`
+        : `确定要将 <b>${api}</b> 的 <b>${item}</b> 标记为"忽略"？<br><br><small style="color:var(--text-secondary)">该条目将在下次校验时自动跳过，如需恢复请到"已忽略项"中取消。</small>`;
+    document.getElementById('consModal').classList.add('show');
+}
+
+function confirmConsAction() {
+    closeConsModal();
+    showToast(pendingAction.kind === 'fix' ? `已提交修复：${pendingAction.item}` : `已标记忽略：${pendingAction.item}`);
+}
+
+function closeConsModal() { document.getElementById('consModal').classList.remove('show'); }
+
+/* ============ 已忽略项查看（CO-P1-3）============ */
+function showIgnoredItems() {
+    showToast('暂无已忽略项');
+}
+
+/* ============ 全量校验 ============ */
+function runFullCheck() {
+    document.getElementById('consLoading').classList.add('show');
+    setTimeout(() => {
+        renderSystems();
+        renderIssues();
+        document.getElementById('consLoading').classList.remove('show');
+        showToast('已完成 ' + document.getElementById('srcEnv').value + ' vs ' + document.getElementById('refEnv').value + ' 一致性校验');
+    }, 800);
+}
+
+
+/* ============ 初始化 ============ */
+document.getElementById('lvlFilter').addEventListener('change', () => renderIssues());
+document.getElementById('cKeyword').addEventListener('keyup', (e) => { if (e.key === 'Enter') runFullCheck(); });
+document.getElementById('srcEnv').addEventListener('change', () => runFullCheck());
+document.getElementById('refEnv').addEventListener('change', () => runFullCheck());
+runFullCheck();
+</script>
+</body>
+</html>

@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>映射结果查看 - 存量接口改造</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        /* ====== 统计卡片 ====== */
+        .result-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:16px; }
+        .result-stat { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow); transition:all .2s; }
+        .result-stat:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+        .result-stat .rs-icon { width:44px; height:44px; border-radius:var(--radius); display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px; flex-shrink:0; }
+        .result-stat .rs-label { font-size:12px; color:var(--text-secondary); margin-bottom:4px; }
+        .result-stat .rs-value { font-size:26px; font-weight:700; font-family:'Segoe UI',sans-serif; color:var(--text-primary); line-height:1.2; }
+        .result-stat .rs-sub { font-size:11px; color:var(--text-secondary); margin-top:2px; }
+
+        /* ====== 禁用按钮 tooltip ====== */
+        .btn-disabled-tip { position:relative; cursor:not-allowed; opacity:.6; }
+        .btn-disabled-tip:hover .tip-text { visibility:visible; opacity:1; }
+        .btn-disabled-tip .tip-text { visibility:hidden; opacity:0; transition:opacity .2s; position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:#1e293b; color:#fff; padding:6px 12px; border-radius:4px; font-size:12px; white-space:nowrap; z-index:9999; }
+        .btn-disabled-tip .tip-text::after { content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#1e293b; }
+
+        /* ====== 推送状态标签 ====== */
+        .push-status { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+        .push-pending { background:#fef3c7; color:#92400e; }
+        .push-done { background:#d1fae5; color:#065f46; }
+
+        /* ====== 映射详情弹窗 ====== */
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:9999; }
+        .modal-overlay.show { display:block; }
+        .modal-box { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:8px; width:900px; max-width:92vw; max-height: 85vh; height: auto; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,.15); }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+        .modal-header h3 { font-size:15px; color:var(--text-primary); margin:0; }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border); flex-shrink:0; }
+
+        /* ====== 映射明细表箭头 ====== */
+        .map-arrow { color:var(--primary); font-size:16px; text-align:center; }
+        .field-src { font-family:'Segoe UI',monospace; color:#dc2626; font-weight:500; font-size:12px; }
+        .field-tgt { font-family:'Segoe UI',monospace; color:#059669; font-weight:500; font-size:12px; }
+
+        /* ====== 日期范围分隔符 ====== */
+        .date-sep { color:var(--text-secondary); font-size:13px; padding:0 4px; }
+
+        /* ====== 表单网格样式 ====== */
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .form-grid .form-field { display:flex; flex-direction:column; gap:6px; }
+        .form-grid .form-field.full { grid-column:1 / -1; }
+        .form-grid .form-field label { font-size:13px; color:var(--text-secondary); font-weight:500; }
+        .form-grid .form-field label .req { color:#dc2626; margin-left:2px; }
+        .form-grid .form-field input,
+        .form-grid .form-field select,
+        .form-grid .form-field textarea { padding:8px 12px; border:1px solid var(--border); border-radius:4px; font-size:13px; font-family:inherit; }
+        .form-grid .form-field textarea { resize:vertical; min-height:80px; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-check-square-o" style="color:var(--primary);margin-right:8px"></i>映射结果查看</h2>
+            <div class="page-desc">
+                首页 / 存量接口改造 / 映射结果查看 - 查看已完成字段映射的接口列表，支持下载映射配置文件。后期可通过接口推送给 ESB
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-primary" onclick="openCreateMappingModal()"><i class="fa fa-plus"></i> 新建映射</button>
+            <button class="btn btn-default" onclick="batchDownload()"><i class="fa fa-download"></i> 批量下载</button>
+            <button class="btn btn-default btn-disabled-tip">
+                <i class="fa fa-paper-plane"></i> 批量推送 ESB
+                <span class="tip-text">ESB 集成待接入</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ====== 统计卡片 ====== -->
+    <div class="result-stats">
+        <div class="result-stat">
+            <div>
+                <div class="rs-label">已映射接口数</div>
+                <div class="rs-value">32</div>
+                <div class="rs-sub">覆盖 6 个系统</div>
+            </div>
+            <div class="rs-icon" style="background:var(--primary)"><i class="fa fa-plug"></i></div>
+        </div>
+        <div class="result-stat">
+            <div>
+                <div class="rs-label">已映射字段数</div>
+                <div class="rs-value">186</div>
+                <div class="rs-sub">平均 5.8 字段/接口</div>
+            </div>
+            <div class="rs-icon" style="background:var(--secondary)"><i class="fa fa-list-alt"></i></div>
+        </div>
+        <div class="result-stat">
+            <div>
+                <div class="rs-label">待推送 ESB</div>
+                <div class="rs-value" style="color:var(--warning)">32</div>
+                <div class="rs-sub">待集成推送</div>
+            </div>
+            <div class="rs-icon" style="background:var(--warning)"><i class="fa fa-clock-o"></i></div>
+        </div>
+        <div class="result-stat">
+            <div>
+                <div class="rs-label">已推送 ESB</div>
+                <div class="rs-value" style="color:var(--success)">0</div>
+                <div class="rs-sub">ESB 集成开发中</div>
+            </div>
+            <div class="rs-icon" style="background:var(--success)"><i class="fa fa-check-circle"></i></div>
+        </div>
+    </div>
+
+    <!-- ====== 筛选区 ====== -->
+    <div class="filter-bar">
+        <div class="form-row">
+            <div class="form-item">
+                <label>所属系统</label>
+                <select class="form-control" id="filterSystem" onchange="onSystemChange()">
+                    <option value="">全部系统</option>
+                    <option value="核心账务系统">核心账务系统</option>
+                    <option value="客户管理系统">客户管理系统</option>
+                    <option value="信贷管理系统">信贷管理系统</option>
+                    <option value="支付清算系统">支付清算系统</option>
+                    <option value="风险管理系统">风险管理系统</option>
+                    <option value="对账中心">对账中心</option>
+                </select>
+            </div>
+            <div class="form-item">
+                <label>映射完成时间</label>
+                <input type="date" class="form-control" id="filterDateStart" style="flex:1">
+                <span class="date-sep">~</span>
+                <input type="date" class="form-control" id="filterDateEnd" style="flex:1">
+            </div>
+            <div class="form-item" style="min-width:auto">
+                <button class="btn btn-primary" onclick="doSearch()"><i class="fa fa-search"></i> 查询</button>
+                <button class="btn btn-default" onclick="doReset()"><i class="fa fa-eraser"></i> 重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 映射结果列表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-table"></i> 映射结果列表</div>
+            <div class="card-action">
+                <span style="font-size:12px;color:var(--text-secondary)">共 <span class="text-primary" id="totalCount">32</span> 条已映射接口</span>
+            </div>
+        </div>
+        <!-- 表格上方说明：当前展示条数与总记录数 -->
+        <div style="padding:8px 16px;background:#fffbe6;border:1px solid #ffe58f;border-left:none;border-right:none;font-size:12px;color:#8c6d1f">
+            <i class="fa fa-info-circle"></i> 当前展示前 10 条，共 32 条记录
+        </div>
+        <div class="table-wrapper" style="border-left:none;border-right:none;border-top:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
+                        <th>接口名称</th>
+                        <th style="width:160px">接口编码</th>
+                        <th style="width:130px">所属系统</th>
+                        <th style="width:110px" class="text-center">已映射字段数</th>
+                        <th style="width:150px" class="text-center">映射完成时间</th>
+                        <th style="width:100px" class="text-center">推送状态</th>
+                        <th style="width:170px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="resultTableBody"></tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary">32</span> 条</div>
+            <div class="page-list">
+                <button class="page-item" onclick="prevPage()"><i class="fa fa-angle-left"></i></button>
+                <button class="page-item active" onclick="goToPage(1)">1</button>
+                <button class="page-item" onclick="goToPage(2)">2</button>
+                <button class="page-item" onclick="goToPage(3)">3</button>
+                <button class="page-item" onclick="goToPage(4)">4</button>
+                <button class="page-item" onclick="nextPage()"><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="onPageSizeChange(this)">
+                    <option value="10">10 条/页</option>
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 映射详情弹窗 ====== -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa fa-exchange" style="color:var(--primary);margin-right:6px"></i>映射详情 - <span id="modalIfName">接口名称</span></h3>
+            <a href="javascript:;" onclick="closeDetailModal()" style="font-size:18px;color:var(--text-light)"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div style="margin-bottom:12px;padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--radius);font-size:12px;color:var(--primary)">
+                <i class="fa fa-info-circle"></i>
+                <span id="modalIfInfo" style="margin-left:4px">接口编码：— / 所属系统：— / 已映射字段：—</span>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:160px">源字段</th>
+                            <th style="width:120px" class="text-center">源类型</th>
+                            <th style="width:40px" class="text-center">→</th>
+                            <th style="width:160px">目标字段</th>
+                            <th style="width:120px" class="text-center">目标类型</th>
+                            <th style="width:90px" class="text-center">映射类型</th>
+                            <th>转换规则</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeDetailModal()">关闭</button>
+            <button class="btn btn-primary" onclick="downloadFromModal()"><i class="fa fa-download"></i> 下载映射配置</button>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 新建映射弹窗 ====== -->
+<div class="modal-overlay" id="createMappingModal">
+    <div class="modal-box" style="width:600px;max-width:92vw">
+        <div class="modal-header">
+            <h3><i class="fa fa-plus" style="color:var(--primary);margin-right:6px"></i>新建映射</h3>
+            <a href="javascript:;" onclick="closeCreateMappingModal()" style="font-size:18px;color:var(--text-light)"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div class="form-grid">
+                <div class="form-field full">
+                    <label>选择接口<span class="req">*</span></label>
+                    <select id="newMapInterface"></select>
+                </div>
+                <div class="form-field">
+                    <label>标准字段<span class="req">*</span></label>
+                    <select id="newMapStdField">
+                        <option value="account_no">account_no</option>
+                        <option value="balance_amt">balance_amt</option>
+                        <option value="currency_code">currency_code</option>
+                        <option value="account_status">account_status</option>
+                        <option value="cust_full_name">cust_full_name</option>
+                        <option value="cert_id">cert_id</option>
+                        <option value="cust_id">cust_id</option>
+                        <option value="mobile_number">mobile_number</option>
+                        <option value="loan_no">loan_no</option>
+                        <option value="loan_amount">loan_amount</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label>接口字段<span class="req">*</span></label>
+                    <select id="newMapIfField">
+                        <option value="acct_no_old">acct_no_old</option>
+                        <option value="bal_amt">bal_amt</option>
+                        <option value="ccy_cd">ccy_cd</option>
+                        <option value="acct_sts_cd">acct_sts_cd</option>
+                        <option value="cust_name_old">cust_name_old</option>
+                        <option value="certificat_no">certificat_no</option>
+                        <option value="cust_id_old">cust_id_old</option>
+                        <option value="mobile_no">mobile_no</option>
+                        <option value="loan_id_code">loan_id_code</option>
+                        <option value="loan_amt_old">loan_amt_old</option>
+                    </select>
+                </div>
+                <div class="form-field full">
+                    <label>映射类型</label>
+                    <select id="newMapType">
+                        <option value="直接映射">直接映射</option>
+                        <option value="转换映射">转换映射</option>
+                        <option value="枚举映射">枚举映射</option>
+                        <option value="计算映射">计算映射</option>
+                    </select>
+                </div>
+                <div class="form-field full">
+                    <label>转换规则</label>
+                    <textarea id="newMapRule" placeholder="如：CD_0001 → 1"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeCreateMappingModal()">取消</button>
+            <button class="btn btn-primary" onclick="saveNewMapping()">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ============================================================
+     * Mock 数据：已映射接口列表（1-10 条）
+     * ============================================================ */
+    var mappedInterfaces = [
+        { name: '账户余额查询', code: 'API-DEP-0023', sys: '核心账务系统', fieldCount: 8, time: '2026-06-20 14:30', pushStatus: 'pending' },
+        { name: '客户信息查询', code: 'API-CUS-0101', sys: '客户管理系统', fieldCount: 12, time: '2026-06-19 10:15', pushStatus: 'pending' },
+        { name: '贷款发放明细查询', code: 'API-CDP-0088', sys: '信贷管理系统', fieldCount: 15, time: '2026-06-18 16:42', pushStatus: 'pending' },
+        { name: '支付转账接口', code: 'API-PAY-0115', sys: '支付清算系统', fieldCount: 10, time: '2026-06-17 09:20', pushStatus: 'pending' },
+        { name: '风险评估查询', code: 'API-RISK-0047', sys: '风险管理系统', fieldCount: 7, time: '2026-06-16 11:05', pushStatus: 'pending' },
+        { name: '日终对账接口', code: 'API-RCN-0029', sys: '对账中心', fieldCount: 9, time: '2026-06-15 15:30', pushStatus: 'pending' },
+        { name: '账户交易明细查询', code: 'API-DEP-0045', sys: '核心账务系统', fieldCount: 11, time: '2026-06-14 10:00', pushStatus: 'pending' },
+        { name: '客户等级查询', code: 'API-CUS-0203', sys: '客户管理系统', fieldCount: 6, time: '2026-06-13 14:15', pushStatus: 'pending' },
+        { name: '贷款还款计划查询', code: 'API-CDP-0156', sys: '信贷管理系统', fieldCount: 13, time: '2026-06-12 09:45', pushStatus: 'pending' },
+        { name: '清算结果通知', code: 'API-PAY-0208', sys: '支付清算系统', fieldCount: 5, time: '2026-06-11 16:20', pushStatus: 'pending' }
+    ];
+
+    /* ============================================================
+     * Mock 数据：各接口的字段映射明细
+     * ============================================================ */
+    var mappingDetails = {
+        'API-DEP-0023': [
+            { src: 'acct_no_old', srcType: 'VARCHAR(32)', tgt: 'account_no', tgtType: 'VARCHAR(20)', mapType: '一对一', rule: '直接映射，去空格处理' },
+            { src: 'bal_amt', srcType: 'DECIMAL(18,2)', tgt: 'balance_amt', tgtType: 'DECIMAL(18,2)', mapType: '一对一', rule: '直接映射' },
+            { src: 'ccy_cd', srcType: 'CHAR(2)', tgt: 'currency_code', tgtType: 'VARCHAR(3)', mapType: '一对多', rule: '枚举映射：CN→CNY / US→USD' },
+            { src: 'acct_sts_cd', srcType: 'CHAR(1)', tgt: 'account_status', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：0→ACTIVE / 1→FROZEN / 2→CLOSED' },
+            { src: 'last_txn_dt', srcType: 'VARCHAR(8)', tgt: 'last_txn_date', tgtType: 'DATE', mapType: '脚本转换', rule: 'YYYYMMDD → YYYY-MM-DD' },
+            { src: 'open_dt', srcType: 'VARCHAR(8)', tgt: 'open_date', tgtType: 'DATE', mapType: '脚本转换', rule: 'YYYYMMDD → YYYY-MM-DD' },
+            { src: 'acct_typ', srcType: 'CHAR(2)', tgt: 'account_type', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：SA→SAVINGS / CA→CURRENT' },
+            { src: 'branch_no_old', srcType: 'VARCHAR(8)', tgt: 'branch_code', tgtType: 'VARCHAR(6)', mapType: '脚本转换', rule: '截取前 6 位' }
+        ],
+        'API-CUS-0101': [
+            { src: 'cust_name_old', srcType: 'VARCHAR(100)', tgt: 'cust_full_name', tgtType: 'VARCHAR(64)', mapType: '一对一', rule: '直接映射，截取前 64 位' },
+            { src: 'certificat_no', srcType: 'VARCHAR(30)', tgt: 'cert_id', tgtType: 'VARCHAR(20)', mapType: '脚本转换', rule: '字符串截取前 18 位 + 格式校验' },
+            { src: 'cust_id_old', srcType: 'VARCHAR(16)', tgt: 'cust_id', tgtType: 'VARCHAR(16)', mapType: '一对一', rule: '直接映射' },
+            { src: 'mobile_no', srcType: 'VARCHAR(20)', tgt: 'mobile_number', tgtType: 'VARCHAR(11)', mapType: '脚本转换', rule: '去除非数字字符，截取前 11 位' },
+            { src: 'gender_cd', srcType: 'CHAR(1)', tgt: 'gender_code', tgtType: 'VARCHAR(2)', mapType: '一对多', rule: '枚举映射：M→1 / F→2' },
+            { src: 'birth_dt', srcType: 'VARCHAR(8)', tgt: 'birth_date', tgtType: 'DATE', mapType: '脚本转换', rule: 'YYYYMMDD → YYYY-MM-DD' },
+            { src: 'addr_province', srcType: 'VARCHAR(32)', tgt: 'address', tgtType: 'VARCHAR(256)', mapType: '一对多', rule: '与 address_city 合并为完整地址' },
+            { src: 'addr_city', srcType: 'VARCHAR(32)', tgt: 'address', tgtType: 'VARCHAR(256)', mapType: '一对多', rule: '与 address_province 合并' },
+            { src: 'email_addr', srcType: 'VARCHAR(64)', tgt: 'email', tgtType: 'VARCHAR(64)', mapType: '一对一', rule: '直接映射，转小写' },
+            { src: 'cust_lvl_cd', srcType: 'CHAR(2)', tgt: 'cust_level', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：01→VIP / 02→GOLD / 03→NORMAL' },
+            { src: 'reg_dt', srcType: 'VARCHAR(14)', tgt: 'register_time', tgtType: 'DATETIME', mapType: '脚本转换', rule: 'YYYYMMDDHHmmss → DATETIME' },
+            { src: 'status_cd', srcType: 'CHAR(1)', tgt: 'cust_status', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：0→NORMAL / 1→FROZEN' }
+        ],
+        'API-CDP-0088': [
+            { src: 'loan_id_code', srcType: 'VARCHAR(20)', tgt: 'loan_no', tgtType: 'VARCHAR(16)', mapType: '脚本转换', rule: '截取前 16 位' },
+            { src: 'cust_id_old', srcType: 'VARCHAR(16)', tgt: 'cust_id', tgtType: 'VARCHAR(16)', mapType: '一对一', rule: '直接映射' },
+            { src: 'loan_amt_old', srcType: 'DECIMAL(18,2)', tgt: 'loan_amount', tgtType: 'DECIMAL(18,2)', mapType: '一对一', rule: '直接映射' },
+            { src: 'loan_typ_cd', srcType: 'CHAR(2)', tgt: 'loan_type', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：01→MORTGAGE / 02→CREDIT / 03→GUARANTEE' },
+            { src: 'biz_status_code', srcType: 'CHAR(1)', tgt: 'biz_status', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：0→PENDING / 1→APPROVED / 2→REJECTED' },
+            { src: 'rate_val', srcType: 'DECIMAL(6,4)', tgt: 'interest_rate', tgtType: 'DECIMAL(8,6)', mapType: '脚本转换', rule: '数值精度扩展' },
+            { src: 'start_dt', srcType: 'VARCHAR(8)', tgt: 'start_date', tgtType: 'DATE', mapType: '脚本转换', rule: 'YYYYMMDD → YYYY-MM-DD' },
+            { src: 'end_dt', srcType: 'VARCHAR(8)', tgt: 'end_date', tgtType: 'DATE', mapType: '脚本转换', rule: 'YYYYMMDD → YYYY-MM-DD' },
+            { src: 'repay_method_cd', srcType: 'CHAR(2)', tgt: 'repay_method', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举映射：01→EQUAL / 02→PRINCIPAL / 03→BULLET' },
+            { src: 'guarantor_name', srcType: 'VARCHAR(100)', tgt: 'guarantor', tgtType: 'VARCHAR(64)', mapType: '一对一', rule: '截取前 64 位' },
+            { src: 'guarantor_amt', srcType: 'DECIMAL(18,2)', tgt: 'guarantee_amount', tgtType: 'DECIMAL(18,2)', mapType: '一对一', rule: '直接映射' },
+            { src: 'overdue_days', srcType: 'INTEGER', tgt: 'overdue_day_count', tgtType: 'INTEGER', mapType: '一对一', rule: '直接映射' },
+            { src: 'penalty_amt', srcType: 'DECIMAL(18,2)', tgt: 'penalty_amount', tgtType: 'DECIMAL(18,2)', mapType: '一对一', rule: '直接映射' },
+            { src: 'loan_purpose_cd', srcType: 'CHAR(3)', tgt: 'loan_purpose', tgtType: 'VARCHAR(20)', mapType: '一对多', rule: '枚举映射表查询' },
+            { src: 'approval_dt', srcType: 'VARCHAR(14)', tgt: 'approval_time', tgtType: 'DATETIME', mapType: '脚本转换', rule: 'YYYYMMDDHHmmss → DATETIME' }
+        ]
+    };
+
+    /* ============================================================
+     * 默认映射明细（用于没有专属明细的接口）
+     * ============================================================ */
+    var defaultDetails = [
+        { src: 'field_old_01', srcType: 'VARCHAR(32)', tgt: 'std_field_01', tgtType: 'VARCHAR(20)', mapType: '一对一', rule: '直接映射' },
+        { src: 'field_old_02', srcType: 'DECIMAL(18,2)', tgt: 'std_field_02', tgtType: 'DECIMAL(18,2)', mapType: '一对一', rule: '直接映射' },
+        { src: 'field_old_03', srcType: 'CHAR(2)', tgt: 'std_field_03', tgtType: 'VARCHAR(10)', mapType: '一对多', rule: '枚举值映射' },
+        { src: 'field_old_04', srcType: 'VARCHAR(8)', tgt: 'std_field_04', tgtType: 'DATE', mapType: '脚本转换', rule: '日期格式转换' },
+        { src: 'field_old_05', srcType: 'INTEGER', tgt: 'std_field_05', tgtType: 'INTEGER', mapType: '一对一', rule: '直接映射' }
+    ];
+
+    /* ============================================================
+     * 映射类型样式映射
+     * ============================================================ */
+    var typeTagMap = {
+        '一对一': 'tag-info',
+        '一对多': 'tag-warning',
+        '脚本转换': 'tag-danger'
+    };
+
+    /* ============================================================
+     * 总记录数（mock 数据仅渲染前 10 条，实际 32 条）
+     * ============================================================ */
+    var TOTAL_COUNT = 32;
+    var currentPage = 1;
+    var totalPages = 4;
+
+    /* ============================================================
+     * 渲染映射结果列表
+     * ============================================================ */
+    function renderTable() {
+        var tbody = document.getElementById('resultTableBody');
+        tbody.innerHTML = mappedInterfaces.map(function(item) {
+            var pushTag = item.pushStatus === 'done'
+                ? '<span class="push-status push-done">已推送</span>'
+                : '<span class="push-status push-pending">待推送</span>';
+            return '<tr data-system="' + item.sys + '" data-time="' + item.time + '">' +
+                '<td><input type="checkbox" class="row-check" value="' + item.code + '"></td>' +
+                '<td>' + item.name + '</td>' +
+                '<td style="font-family:Segoe UI;color:var(--primary);font-weight:600">' + item.code + '</td>' +
+                '<td>' + item.sys + '</td>' +
+                '<td class="text-center num" style="color:var(--primary);font-weight:600">' + item.fieldCount + '</td>' +
+                '<td class="text-center" style="font-size:12px;color:var(--text-secondary)">' + item.time + '</td>' +
+                '<td class="text-center">' + pushTag + '</td>' +
+                '<td class="text-center">' +
+                    '<a class="btn-link" onclick="downloadMapping(\'' + item.code + '\',\'' + item.name + '\')"><i class="fa fa-download"></i> 下载</a>' +
+                    '<a class="btn-link" onclick="viewDetail(\'' + item.code + '\',\'' + item.name + '\',\'' + item.sys + '\',' + item.fieldCount + ')"><i class="fa fa-eye"></i> 查看详情</a>' +
+                '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    /* ============================================================
+     * 全选 / 取消全选
+     * ============================================================ */
+    window.toggleAll = function(checkbox) {
+        var checks = document.querySelectorAll('.row-check');
+        checks.forEach(function(c) { c.checked = checkbox.checked; });
+    };
+
+    /* ============================================================
+     * 更新空数据状态（筛选无结果时向 tbody 插入空状态行）
+     * ============================================================ */
+    function updateEmptyState(visibleCount) {
+        var tbody = document.getElementById('resultTableBody');
+        // 先移除已存在的空状态行，避免重复
+        var existingEmpty = tbody.querySelector('.empty-row');
+        if (existingEmpty) existingEmpty.remove();
+        // 无可见数据时插入空状态行
+        if (visibleCount === 0) {
+            var emptyRow = document.createElement('tr');
+            emptyRow.className = 'empty-row';
+            emptyRow.innerHTML = '<td colspan="8" style="padding:40px 0;text-align:center;color:#94a3b8">' +
+                '<i class="fa fa-inbox" style="font-size:32px;display:block;margin-bottom:8px"></i>暂无数据</td>';
+            tbody.appendChild(emptyRow);
+        }
+    }
+
+    /* ============================================================
+     * 所属系统筛选 onchange
+     * ============================================================ */
+    window.onSystemChange = function() {
+        var system = document.getElementById('filterSystem').value;
+        // 排除空状态行，仅筛选数据行
+        var rows = document.querySelectorAll('#resultTableBody tr:not(.empty-row)');
+        var visible = 0;
+        rows.forEach(function(row) {
+            var show = !system || row.getAttribute('data-system') === system;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        document.getElementById('totalCount').textContent = visible;
+        updateEmptyState(visible);
+    };
+
+    /* ============================================================
+     * 查询
+     * ============================================================ */
+    window.doSearch = function() {
+        var system = document.getElementById('filterSystem').value;
+        var dateStart = document.getElementById('filterDateStart').value;
+        var dateEnd = document.getElementById('filterDateEnd').value;
+        // 排除空状态行，仅筛选数据行
+        var rows = document.querySelectorAll('#resultTableBody tr:not(.empty-row)');
+        var visible = 0;
+        rows.forEach(function(row) {
+            var show = true;
+            var rowSystem = row.getAttribute('data-system');
+            var rowTime = row.getAttribute('data-time');
+            if (system && rowSystem !== system) show = false;
+            if (dateStart && rowTime < dateStart) show = false;
+            if (dateEnd && rowTime > dateEnd + ' 23:59:59') show = false;
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        document.getElementById('totalCount').textContent = visible;
+        updateEmptyState(visible);
+        showToast('查询完成，共 ' + visible + ' 条结果');
+    };
+
+    /* ============================================================
+     * 重置
+     * ============================================================ */
+    window.doReset = function() {
+        document.getElementById('filterSystem').value = '';
+        document.getElementById('filterDateStart').value = '';
+        document.getElementById('filterDateEnd').value = '';
+        // 排除空状态行，仅重置数据行显示
+        var rows = document.querySelectorAll('#resultTableBody tr:not(.empty-row)');
+        rows.forEach(function(row) { row.style.display = ''; });
+        document.getElementById('totalCount').textContent = TOTAL_COUNT;
+        updateEmptyState(rows.length);
+        showToast('已重置筛选条件');
+    };
+
+    /* ============================================================
+     * 单条下载映射配置
+     * ============================================================ */
+    window.downloadMapping = function(code, name) {
+        showToast('正在下载 ' + name + ' 映射配置');
+    };
+
+    /* ============================================================
+     * 批量下载（ZIP 打包）
+     * ============================================================ */
+    window.batchDownload = function() {
+        var checked = document.querySelectorAll('.row-check:checked');
+        if (checked.length === 0) {
+            showToast('请先选择需要下载的接口', 'warning');
+            return;
+        }
+        showToast('正在打包下载 ' + checked.length + ' 个接口的映射配置（ZIP）');
+    };
+
+    /* ============================================================
+     * 查看映射详情
+     * ============================================================ */
+    window.viewDetail = function(code, name, sys, fieldCount) {
+        document.getElementById('modalIfName').textContent = name;
+        document.getElementById('modalIfInfo').textContent =
+            '接口编码：' + code + ' / 所属系统：' + sys + ' / 已映射字段：' + fieldCount + ' 个';
+        var details = mappingDetails[code] || defaultDetails;
+        var tbody = document.getElementById('detailTableBody');
+        tbody.innerHTML = details.map(function(d) {
+            return '<tr>' +
+                '<td><span class="field-src">' + d.src + '</span></td>' +
+                '<td class="text-center"><span class="tag tag-default" style="font-size:11px">' + d.srcType + '</span></td>' +
+                '<td class="map-arrow"><i class="fa fa-long-arrow-right"></i></td>' +
+                '<td><span class="field-tgt">' + d.tgt + '</span></td>' +
+                '<td class="text-center"><span class="tag tag-default" style="font-size:11px">' + d.tgtType + '</span></td>' +
+                '<td class="text-center"><span class="tag ' + (typeTagMap[d.mapType] || 'tag-default') + '" style="font-size:11px">' + d.mapType + '</span></td>' +
+                '<td style="font-size:12px;color:var(--text-secondary)">' + d.rule + '</td>' +
+                '</tr>';
+        }).join('');
+        document.getElementById('detailModal').classList.add('show');
+    };
+
+    /* ============================================================
+     * 关闭详情弹窗
+     * ============================================================ */
+    window.closeDetailModal = function() {
+        document.getElementById('detailModal').classList.remove('show');
+    };
+
+    /* ============================================================
+     * 弹窗内下载
+     * ============================================================ */
+    window.downloadFromModal = function() {
+        var name = document.getElementById('modalIfName').textContent;
+        showToast('正在下载 ' + name + ' 映射配置');
+    };
+
+    /* ============================================================
+     * 分页跳转
+     * ============================================================ */
+    window.goToPage = function(page) {
+        if (page < 1 || page > totalPages) {
+            showToast('已是当前页范围');
+            return;
+        }
+        currentPage = page;
+        var btns = document.querySelectorAll('.page-list .page-item');
+        btns.forEach(function(btn) { btn.classList.remove('active'); });
+        btns.forEach(function(btn) {
+            if (parseInt(btn.textContent) === page) btn.classList.add('active');
+        });
+        showToast('已跳转到第 ' + page + ' 页');
+    };
+
+    window.prevPage = function() { goToPage(Math.max(1, currentPage - 1)); };
+    window.nextPage = function() { goToPage(Math.min(totalPages, currentPage + 1)); };
+
+    /* ============================================================
+     * 每页条数 onchange
+     * ============================================================ */
+    window.onPageSizeChange = function(select) {
+        showToast('已切换为每页 ' + select.value + ' 条');
+    };
+
+    /* ============================================================
+     * Toast 通用提示（由 nav-helper.js 提供全局实现）
+     * ============================================================ */
+
+    /* ============================================================
+     * 新建映射弹窗
+     * ============================================================ */
+    // 打开新建映射弹窗，从 mappedInterfaces 填充接口下拉
+    window.openCreateMappingModal = function() {
+        var ifSelect = document.getElementById('newMapInterface');
+        ifSelect.innerHTML = mappedInterfaces.map(function(item) {
+            return '<option value="' + item.code + '">' + item.name + '（' + item.code + '）</option>';
+        }).join('');
+        document.getElementById('newMapType').value = '直接映射';
+        document.getElementById('newMapRule').value = '';
+        document.getElementById('createMappingModal').classList.add('show');
+    };
+
+    // 关闭新建映射弹窗
+    window.closeCreateMappingModal = function() {
+        document.getElementById('createMappingModal').classList.remove('show');
+    };
+
+    // 保存新建映射
+    window.saveNewMapping = function() {
+        var ifCode = document.getElementById('newMapInterface').value;
+        var stdField = document.getElementById('newMapStdField').value;
+        var ifField = document.getElementById('newMapIfField').value;
+        var mapType = document.getElementById('newMapType').value;
+        if (!ifCode || !stdField || !ifField) {
+            showToast('请完整填写映射信息', 'warning');
+            return;
+        }
+        closeCreateMappingModal();
+        showToast('映射已新建：' + ifField + ' → ' + stdField + '（' + mapType + '）');
+    };
+
+    /* ============================================================
+     * 初始化
+     * ============================================================ */
+    renderTable();
+
+})();
+</script>
+</body>
+</html>

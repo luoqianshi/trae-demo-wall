@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>10分钟生活圈选房助手</title>
+  <!-- Open Graph 元数据：分享到社交平台时显示标题和描述 -->
+  <meta property="og:title" content="10分钟生活圈选房助手">
+  <meta property="og:description" content="基于地图的可视化选房工具，量化生活便利度，帮你找到步行可达配套设施的房源">
+  <!-- Leaflet.js 地图库样式表（CDN 加载） -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    /* ============================
+       全局重置与 CSS 变量定义
+       ============================ */
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased}
+
+    /* 设计令牌：石板灰蓝 — 从地图瓦片取色 */
+    :root{
+      --bg:#f5f5f4;
+      --surface:#ffffff;
+      --ink:#292524;
+      --muted:#78716c;
+      --accent:#475569;
+      --accent-light:rgba(71,85,105,.08);
+      --accent-hover:#334155;
+      --border:#e7e5e4;
+      --radius:10px;
+      --shadow-sm:0 1px 2px rgba(0,0,0,.03);
+      --transition:all .2s ease;
+    }
+
+    body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);overflow:hidden}
+
+    /* ============================
+       顶部导航栏
+       ============================ */
+    .header{
+      background:var(--surface);
+      padding:14px 24px;
+      display:flex;align-items:center;justify-content:space-between;
+      z-index:100;flex-shrink:0;
+      border-bottom:1px solid var(--border);
+    }
+    .header h1{font-size:.98rem;font-weight:500;color:#64748b;letter-spacing:.02em}
+    .header h1 span{color:#3b82f6;font-weight:600}
+    .header-badge{
+      font-size:.62rem;
+      background:var(--accent-light);
+      color:var(--accent);
+      padding:5px 12px;border-radius:20px;font-weight:600;
+      letter-spacing:.02em;
+    }
+
+    /* ============================
+       主布局：左侧栏 + 右侧地图
+       ============================ */
+    .main{display:flex;flex:1;overflow:hidden}
+
+    /* 左侧控制面板 */
+    .sidebar{
+      width:350px;min-width:350px;
+      background:var(--surface);
+      border-right:1px solid var(--border);
+      display:flex;flex-direction:column;
+      overflow-y:auto;
+      overflow-x:hidden;
+      scrollbar-width:thin;
+      scrollbar-color:#d1d5db transparent;
+    }
+    .sidebar::-webkit-scrollbar{width:4px}
+    .sidebar::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
+    .sidebar::-webkit-scrollbar-thumb:hover{background:#9ca3af}
+
+    .sidebar-section{padding:14px 20px;border-bottom:1px solid var(--border)}
+    .sidebar-section:last-child{border-bottom:none}
+    .section-title{font-size:.8rem;font-weight:500;letter-spacing:.04em;color:#475569;margin-bottom:8px}
+
+    /* 操作提示卡片 */
+    .step-hint{
+      background:var(--bg);
+      border:1px solid var(--border);border-radius:var(--radius);
+      padding:0;margin-bottom:14px;
+      overflow:hidden;
+    }
+    .step-hint{margin-bottom:10px}
+    .step-row{padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:.8rem;color:var(--ink);line-height:1.5}
+    .step-row+.step-row{border-top:1px solid var(--border)}
+    .step-hint strong{color:#3b82f6;font-weight:500}
+    .step-badge{
+      display:inline-block;background:#3b82f6;color:#fff;
+      font-size:.6rem;padding:2px 7px;border-radius:6px;
+      font-weight:700;flex-shrink:0;
+    }
+
+    /* ============================
+       设施/房源类型选择器
+       ============================ */
+    .facility-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start}
+    .facility-row .facility-item{flex:0 0 auto;min-width:auto}
+    .facility-item{
+      display:flex;align-items:center;gap:6px;
+      padding:8px 10px;border-radius:var(--radius);
+      border:1px solid var(--border);
+      cursor:pointer;transition:var(--transition);
+      font-size:.8rem;user-select:none;
+      background:var(--surface);
+    }
+    .facility-item:hover{border-color:var(--accent);background:var(--accent-light)}
+    .facility-item.active{border-color:var(--accent);background:var(--accent-light)}
+    .facility-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:var(--transition)}
+    .dot-subway{background:#3b82f6}.dot-hospital{background:#ef4444}
+    .dot-supermarket{background:#22c55e}.dot-market{background:#f97316}.dot-park{background:#10b981}
+    .dot-library{background:#6366f1}
+    .dot-university{background:#ec4899}
+
+    /* ============================
+       步行时间滑块
+       ============================ */
+    .time-control{display:flex;align-items:center;gap:8px}
+    .time-control label{font-size:.8rem;color:var(--muted);white-space:nowrap;font-weight:400}
+    .time-control input[type="range"]{
+      flex:1;height:4px;
+      -webkit-appearance:none;appearance:none;
+      background:linear-gradient(to right,#3b82f6 0%,#3b82f6 var(--fill,33%),var(--border) var(--fill,33%),var(--border) 100%);
+      border-radius:2px;outline:none;
+    }
+    .time-control input[type="range"]::-webkit-slider-thumb{
+      -webkit-appearance:none;width:16px;height:16px;
+      background:#fff;border:2px solid #3b82f6;border-radius:50%;cursor:pointer;
+      box-shadow:0 1px 4px rgba(59,130,246,.3);
+      transition:transform .15s;
+    }
+    .time-control input[type="range"]::-webkit-slider-thumb:hover{transform:scale(1.15)}
+    .time-control input[type="range"]::-moz-range-thumb{
+      width:14px;height:14px;background:#fff;border:2px solid #3b82f6;
+      border-radius:50%;cursor:pointer;
+    }
+    .time-display{text-align:center;margin-top:6px}
+    .time-display .value{font-size:1.4rem;font-weight:500;color:#3b82f6;letter-spacing:-.02em}
+    .time-display .unit{font-size:.8rem;color:var(--muted);margin-left:2px}
+
+    /* ============================
+       按钮
+       ============================ */
+    .search-btn{
+      width:100%;padding:11px;
+      background:#3b82f6;
+      color:#fff;border:1px solid #3b82f6;border-radius:var(--radius);
+      font-size:.88rem;font-weight:500;cursor:pointer;
+      transition:var(--transition);
+    }
+    .search-btn:hover:not(:disabled){background:#2563eb;border-color:#2563eb}
+    .search-btn:active:not(:disabled){opacity:.85}
+    .search-btn:disabled{background:var(--bg);color:var(--muted);border:1px solid var(--border);cursor:not-allowed}
+    .reset-btn{
+      width:100%;padding:7px;background:transparent;
+      color:#475569;border:1px solid var(--border);
+      border-radius:var(--radius);font-size:.8rem;font-weight:400;
+      cursor:pointer;margin-top:6px;transition:var(--transition);
+    }
+    .reset-btn:hover{color:var(--accent);border-color:var(--accent)}
+
+    /* ============================
+       图例
+       ============================ */
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+    .legend-item{display:flex;align-items:center;gap:4px;font-size:.68rem;color:var(--muted)}
+    .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+    /* ============================
+       地址搜索框
+       ============================ */
+    .search-box{position:relative;margin-bottom:14px}
+    .search-input{
+      width:100%;padding:9px 12px 9px 32px;
+      border:1px solid var(--border);border-radius:var(--radius);
+      font-size:.82rem;color:#64748b;background:var(--bg);
+      outline:none;transition:var(--transition);
+      font-family:inherit;font-weight:400;
+    }
+    .search-input:focus{border-color:#3b82f6;background:var(--surface)}
+    .search-input::placeholder{color:var(--muted)}
+    .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--muted);pointer-events:none}
+    .search-dropdown{
+      position:absolute;top:100%;left:0;right:0;
+      background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius);margin-top:4px;
+      max-height:200px;overflow-y:auto;z-index:500;
+      display:none;box-shadow:0 4px 16px rgba(0,0,0,.08);
+    }
+    .search-dropdown.active{display:block}
+    .search-dropdown-item{
+      padding:8px 12px;cursor:pointer;transition:var(--transition);
+      font-size:.8rem;color:var(--ink);
+    }
+    .search-dropdown-item:hover{background:rgba(59,130,246,.07)}
+
+    /* ============================
+       搜索结果卡片
+       ============================ */
+    .results-title{font-size:.8rem;font-weight:500;color:var(--ink);margin-bottom:8px}
+    .results-list{display:flex;flex-direction:column;gap:8px}
+    .result-card{
+      padding:12px 14px;border:1px solid var(--border);
+      border-radius:var(--radius);cursor:pointer;
+      transition:var(--transition);
+      animation:fadeSlideIn .3s ease both;
+    }
+    .result-card:hover{border-color:var(--muted);background:var(--bg)}
+    @keyframes fadeSlideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .result-card h4{font-size:.85rem;font-weight:700;margin-bottom:4px;color:var(--ink)}
+    .result-card .result-meta{font-size:.73rem;color:var(--muted);line-height:1.5}
+    .result-card .result-tag{
+      display:inline-block;font-size:.65rem;padding:2px 8px;
+      border-radius:10px;margin-top:6px;font-weight:600;letter-spacing:.02em;
+    }
+    .tag-rent{background:rgba(59,130,246,.08);color:#3b82f6}
+    .tag-sale{background:rgba(52,199,89,.1);color:#248a3d}
+    .tag-new{background:rgba(255,149,0,.1);color:#c93400}
+    .empty-hint{text-align:center;color:var(--muted);font-size:.8rem;padding:24px 16px;line-height:1.7}
+
+    /* 匹配度进度条 */
+    .score-bar{height:4px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden}
+    .score-bar-fill{height:100%;border-radius:2px;transition:width .4s ease}
+
+    /* ============================
+       地图容器
+       ============================ */
+    .sidebar *{pointer-events:auto}
+    .map-container{flex:1;position:relative;background:var(--bg)}
+    #map{width:100%;height:100%;cursor:crosshair}
+    .leaflet-container{cursor:crosshair !important;font-family:inherit}
+
+    /* 加载遮罩层 */
+    .loading-overlay{
+      position:absolute;top:0;left:0;right:0;bottom:0;
+      background:rgba(255,255,255,.7);
+      display:none;align-items:center;justify-content:center;
+      flex-direction:column;gap:14px;z-index:1000;
+    }
+    .loading-overlay.active{display:flex}
+    .spinner{width:28px;height:28px;border:2.5px solid var(--border);border-top-color:#475569;border-radius:50%;animation:spin .7s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loading-text{font-size:.82rem;color:var(--muted);font-weight:400}
+
+    /* 选点标记脉冲动画 */
+    @keyframes pulse{
+      0%,100%{box-shadow:0 0 0 3px rgba(59,130,246,.2),0 1px 4px rgba(0,0,0,.1)}
+      50%{box-shadow:0 0 0 8px rgba(59,130,246,.06),0 1px 4px rgba(0,0,0,.1)}
+    }
+    .poi-pulse{animation:pulse 2s ease-in-out infinite}
+
+    /* ============================
+       移动端响应式布局
+       ============================ */
+    @media(max-width:768px){
+      .main{flex-direction:column-reverse}
+      .sidebar{width:100%;min-width:unset;max-height:45vh;border-right:none;border-top:1px solid var(--border)}
+      .map-container{height:55vh}
+      .header h1{font-size:.95rem}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部标题栏 -->
+  <div class="header">
+    <h1><span>10分钟</span>生活圈选房助手</h1>
+    <span class="header-badge">TRAE AI 创造力大赛</span>
+  </div>
+
+  <div class="main">
+    <!-- 左侧控制面板 -->
+    <div class="sidebar">
+      <!-- 操作提示 -->
+      <div class="sidebar-section">
+        <div class="step-hint">
+          <div class="step-row"><span class="step-badge">1</span><span><strong>搜索地址</strong>或<strong>点击地图</strong>选区域</span></div>
+          <div class="step-row"><span class="step-badge">2</span><span>勾选需求，点击<strong>搜索生活圈</strong></span></div>
+        </div>
+        <!-- 地址搜索框 -->
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" class="search-input" id="addrSearch" placeholder="输入地名，如：人民广场" oninput="searchAddress(this.value)" onfocus="searchAddress(this.value)" />
+          <div class="search-dropdown" id="addrDropdown"></div>
+        </div>
+        <!-- 周边设施类型选择 -->
+        <div class="section-title">周边设施</div>
+        <div class="facility-row">
+          <div class="facility-item active" data-type="subway" onclick="toggleFacility(this)"><span class="facility-dot dot-subway"></span>地铁</div>
+          <div class="facility-item active" data-type="hospital" onclick="toggleFacility(this)"><span class="facility-dot dot-hospital"></span>医院</div>
+          <div class="facility-item active" data-type="supermarket" onclick="toggleFacility(this)"><span class="facility-dot dot-supermarket"></span>超市</div>
+          <div class="facility-item active" data-type="park" onclick="toggleFacility(this)"><span class="facility-dot dot-park"></span>公园</div>
+          <div class="facility-item active" data-type="market" onclick="toggleFacility(this)"><span class="facility-dot dot-market"></span>菜市场</div>
+          <div class="facility-item active" data-type="library" onclick="toggleFacility(this)"><span class="facility-dot dot-library"></span>图书馆</div>
+          <div class="facility-item active" data-type="university" onclick="toggleFacility(this)"><span class="facility-dot dot-university"></span>大学</div>
+        </div>
+      </div>
+
+      <!-- 房源类型选择 -->
+      <div class="sidebar-section">
+        <div class="section-title">房源类型</div>
+        <div class="facility-row">
+          <div class="facility-item active" data-htype="rent" onclick="toggleHouseType(this)"><span class="facility-dot" style="background:#3b82f6"></span>租房</div>
+          <div class="facility-item active" data-htype="sale" onclick="toggleHouseType(this)"><span class="facility-dot" style="background:#22c55e"></span>二手房</div>
+          <div class="facility-item active" data-htype="new" onclick="toggleHouseType(this)"><span class="facility-dot" style="background:#f97316"></span>新房</div>
+        </div>
+      </div>
+
+      <!-- 步行时间调节 -->
+      <div class="sidebar-section">
+        <div class="section-title">步行时间</div>
+        <div class="time-control">
+          <label>5分钟</label>
+          <input type="range" id="walkTime" min="5" max="20" value="10" step="5" oninput="updateTimeLabel()">
+          <label>20分钟</label>
+        </div>
+        <div class="time-display">
+          <span class="value" id="walkTimeValue">10</span>
+          <span class="unit">分钟</span>
+        </div>
+        <div class="legend">
+          <div class="legend-item"><span class="legend-dot dot-subway"></span>地铁</div>
+          <div class="legend-item"><span class="legend-dot dot-hospital"></span>医院</div>
+          <div class="legend-item"><span class="legend-dot dot-supermarket"></span>超市</div>
+          <div class="legend-item"><span class="legend-dot dot-market"></span>菜市场</div>
+          <div class="legend-item"><span class="legend-dot dot-park"></span>公园</div>
+          <div class="legend-item"><span class="legend-dot dot-library"></span>图书馆</div>
+          <div class="legend-item"><span class="legend-dot dot-university"></span>大学</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#7c3aed"></span>房源</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>选点</div>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="sidebar-section">
+        <button class="search-btn" id="searchBtn" onclick="startSearch()" disabled>请先选择位置</button>
+        <button class="reset-btn" onclick="resetMap()">重置</button>
+      </div>
+
+      <!-- 搜索结果列表 -->
+      <div class="sidebar-section" style="flex:1;overflow-y:auto;min-height:120px">
+        <div class="results-title" id="resultsTitle">搜索结果</div>
+        <div id="resultsContent">
+          <div class="empty-hint">在地图上点击一个你想住的区域<br>系统会搜索附近的设施和楼盘</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧地图区域 -->
+    <div class="map-container">
+      <div id="map"></div>
+      <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+        <div class="loading-text">正在计算生活圈...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet.js 地图引擎（CDN 加载） -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    /**
+     * ========================================
+     *  10分钟生活圈选房助手 - 核心逻辑
+     * ========================================
+     * 技术栈：Leaflet.js + 高德地图瓦片
+     * 架构：纯前端单文件，无后端依赖
+     * 数据：Demo 模拟数据（上海中心城区）
+     */
+
+    // ============================
+    // 1. 地图初始化
+    // ============================
+    var map = L.map('map', {
+      center: [31.2304, 121.4737],  // 上海市中心坐标
+      zoom: 13,
+      zoomControl: true             // 显示缩放控件
+    });
+
+    /**
+     * 高德地图瓦片图层
+     * 使用 web.rd0 子域名实现负载均衡，style=8 为矢量地图样式
+     * 注意：此瓦片服务为高德公开 CDN，仅限非商业用途
+     */
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+      subdomains: ['1', '2', '3', '4'],
+      attribution: '&copy; 高德地图',
+      maxZoom: 18
+    }).addTo(map);
+
+    // ============================
+    // 2. 全局状态管理
+    // ============================
+    var poiMarkers = [];    // POI 设施标记图层集合
+    var houseMarkers = [];  // 房源标记图层集合
+    var userMarker = null;  // 用户点击位置的标记
+    var selectedLatLng = null;  // 用户选中的经纬度
+
+    // ============================
+    // 3. 地图点击事件：用户选点
+    // ============================
+    map.on('click', function(e) {
+      selectedLatLng = e.latlng;
+
+      // 移除之前放置的选点标记（避免重复标记）
+      if (userMarker) map.removeLayer(userMarker);
+
+      // 创建选点标记（使用 L.divIcon + 内联样式，兼容性最佳）
+      var clickIcon = L.divIcon({
+        className: '',  // 清空默认类名，避免 Leaflet 默认样式干扰
+        html: '<div style="width:28px;height:28px;background:#3b82f6;border:4px solid #fff;border-radius:50%;box-shadow:0 0 0 3px rgba(59,130,246,.35),0 2px 8px rgba(0,0,0,.25);transition:transform .2s;"></div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      userMarker = L.marker(e.latlng, { icon: clickIcon })
+        .addTo(map)
+        .bindPopup('<b>你的选点</b><br>请在左侧选择设施类型后点击搜索');
+
+      // 启用搜索按钮
+      var btn = document.getElementById('searchBtn');
+      btn.disabled = false;
+      btn.textContent = '搜索生活圈';
+
+      // 清除上一次搜索结果
+      clearResults();
+    });
+
+    // ============================
+    // 4. 地址搜索（内置地点库，离线可用）
+    // ============================
+    /**
+     * 上海主要地点库 — 覆盖地标、地铁站、商圈
+     * 用于地址搜索框的自动补全
+     */
+    var locationDB = [
+      // 地标 & 商圈
+      {name:'人民广场',lat:31.2350,lng:121.4740,area:'黄浦区'},
+      {name:'陆家嘴',lat:31.2450,lng:121.4900,area:'浦东新区'},
+      {name:'外滩',lat:31.2400,lng:121.4900,area:'黄浦区'},
+      {name:'豫园',lat:31.2270,lng:121.4920,area:'黄浦区'},
+      {name:'新天地',lat:31.2250,lng:121.4720,area:'黄浦区'},
+      {name:'田子坊',lat:31.2100,lng:121.4650,area:'黄浦区'},
+      {name:'南京东路',lat:31.2280,lng:121.4850,area:'黄浦区'},
+      {name:'南京西路',lat:31.2340,lng:121.4700,area:'静安区'},
+      {name:'淮海中路',lat:31.2250,lng:121.4650,area:'黄浦区'},
+      {name:'武康路',lat:31.2180,lng:121.4350,area:'徐汇区'},
+      {name:'思南公馆',lat:31.2200,lng:121.4700,area:'黄浦区'},
+      {name:'徐家汇',lat:31.2180,lng:121.4650,area:'徐汇区'},
+      {name:'静安寺',lat:31.2300,lng:121.4500,area:'静安区'},
+      {name:'打浦桥',lat:31.2150,lng:121.4750,area:'黄浦区'},
+      {name:'衡山路',lat:31.2150,lng:121.4500,area:'徐汇区'},
+      {name:'大宁',lat:31.2600,lng:121.4650,area:'静安区'},
+      {name:'古北',lat:31.2050,lng:121.3950,area:'长宁区'},
+      {name:'张江',lat:31.2000,lng:121.5900,area:'浦东新区'},
+      {name:'中山公园',lat:31.2200,lng:121.4300,area:'长宁区'},
+      {name:'世纪公园',lat:31.2350,lng:121.5400,area:'浦东新区'},
+      {name:'虹桥路',lat:31.2500,lng:121.4700,area:'长宁区'},
+      // 地铁站
+      {name:'人民广场站',lat:31.2350,lng:121.4740,area:'黄浦区'},
+      {name:'静安寺站',lat:31.2300,lng:121.4500,area:'静安区'},
+      {name:'陆家嘴站',lat:31.2450,lng:121.4900,area:'浦东新区'},
+      {name:'中山公园站',lat:31.2200,lng:121.4300,area:'长宁区'},
+      {name:'世纪大道站',lat:31.2400,lng:121.5100,area:'浦东新区'},
+      {name:'南京东路站',lat:31.2280,lng:121.4850,area:'黄浦区'},
+      {name:'徐家汇站',lat:31.2180,lng:121.4650,area:'徐汇区'},
+      {name:'打浦桥站',lat:31.2150,lng:121.4750,area:'黄浦区'},
+      {name:'虹口足球场站',lat:31.2550,lng:121.4800,area:'虹口区'},
+      {name:'上海体育馆站',lat:31.2100,lng:121.4550,area:'徐汇区'},
+      {name:'东昌路站',lat:31.2380,lng:121.5020,area:'浦东新区'},
+      {name:'宜山路站',lat:31.2050,lng:121.4350,area:'徐汇区'},
+      {name:'延安西路站',lat:31.2320,lng:121.4200,area:'长宁区'},
+      {name:'漕河泾站',lat:31.2150,lng:121.4050,area:'徐汇区'},
+      {name:'四平路站',lat:31.2650,lng:121.5000,area:'杨浦区'},
+      {name:'蓝村路站',lat:31.2350,lng:121.5350,area:'浦东新区'},
+      {name:'杨高南路站',lat:31.2450,lng:121.5200,area:'浦东新区'},
+      {name:'商城路站',lat:31.2250,lng:121.4950,area:'浦东新区'},
+      // 医院
+      {name:'瑞金医院',lat:31.2280,lng:121.4600,area:'黄浦区'},
+      {name:'华山医院',lat:31.2150,lng:121.4450,area:'静安区'},
+      {name:'仁济医院',lat:31.2400,lng:121.4750,area:'黄浦区'},
+      {name:'东方医院',lat:31.2380,lng:121.5000,area:'浦东新区'},
+      {name:'长征医院',lat:31.2480,lng:121.4650,area:'黄浦区'},
+      {name:'华东医院',lat:31.2250,lng:121.4550,area:'静安区'},
+      {name:'第六人民医院',lat:31.2100,lng:121.4350,area:'徐汇区'},
+      {name:'第一人民医院',lat:31.2550,lng:121.4800,area:'虹口区'},
+      // 大学
+      {name:'复旦大学',lat:31.2750,lng:121.5200,area:'杨浦区'},
+      {name:'上海交通大学',lat:31.2000,lng:121.4400,area:'徐汇区'},
+      {name:'同济大学',lat:31.2500,lng:121.5000,area:'杨浦区'},
+      {name:'上海财经大学',lat:31.2800,lng:121.5050,area:'杨浦区'},
+      {name:'华东理工大学',lat:31.2100,lng:121.4500,area:'徐汇区'},
+      {name:'上海师范大学',lat:31.2050,lng:121.4250,area:'徐汇区'},
+      {name:'华东政法大学',lat:31.1900,lng:121.4400,area:'长宁区'},
+      {name:'东华大学',lat:31.2250,lng:121.4150,area:'长宁区'},
+      {name:'上海海洋大学',lat:31.2300,lng:121.5100,area:'浦东新区'},
+      {name:'上海科技大学',lat:31.2350,lng:121.5250,area:'浦东新区'},
+      // 其他
+      {name:'自然博物馆',lat:31.2420,lng:121.4600,area:'静安区'},
+      {name:'鲁迅公园',lat:31.2600,lng:121.4750,area:'虹口区'},
+      {name:'滨江公园',lat:31.2300,lng:121.4900,area:'浦东新区'},
+      {name:'嘉定新城',lat:31.3750,lng:121.2600,area:'嘉定区'},
+      {name:'宝山',lat:31.2800,lng:121.4500,area:'宝山区'},
+      // 区域名搜索
+      {name:'黄浦区',lat:31.2300,lng:121.4850,area:'黄浦区'},
+      {name:'静安区',lat:31.2300,lng:121.4500,area:'静安区'},
+      {name:'徐汇区',lat:31.2100,lng:121.4500,area:'徐汇区'},
+      {name:'长宁区',lat:31.2200,lng:121.4200,area:'长宁区'},
+      {name:'浦东新区',lat:31.2400,lng:121.5100,area:'浦东新区'},
+      {name:'虹口区',lat:31.2600,lng:121.4900,area:'虹口区'},
+      {name:'杨浦区',lat:31.2700,lng:121.5100,area:'杨浦区'},
+      {name:'普陀区',lat:31.2400,lng:121.4100,area:'普陀区'},
+      {name:'嘉定区',lat:31.3750,lng:121.2600,area:'嘉定区'},
+      {name:'宝山区',lat:31.2800,lng:121.4500,area:'宝山区'}
+    ];
+
+    /** 地址搜索：根据输入关键词匹配地点库 */
+    function searchAddress(keyword) {
+      var dropdown = document.getElementById('addrDropdown');
+      if (!keyword || keyword.trim().length === 0) {
+        dropdown.classList.remove('active');
+        dropdown.innerHTML = '';
+        return;
+      }
+
+      var kw = keyword.trim().toLowerCase();
+      var results = locationDB.filter(function(loc) {
+        return loc.name.toLowerCase().indexOf(kw) !== -1 || loc.area.toLowerCase().indexOf(kw) !== -1;
+      });
+
+      if (results.length === 0) {
+        dropdown.classList.remove('active');
+        dropdown.innerHTML = '';
+        return;
+      }
+
+      // 最多显示 8 条
+      if (results.length > 8) results = results.slice(0, 8);
+
+      var html = '';
+      results.forEach(function(loc) {
+        html += '<div class="search-dropdown-item" onclick="selectAddress(' + loc.lat + ',' + loc.lng + ',\'' + loc.name + '\')">';
+        html += '<strong>' + loc.name + '</strong>';
+        html += ' <span style="color:var(--muted);font-size:.72rem;">' + loc.area + '</span>';
+        html += '</div>';
+      });
+      dropdown.innerHTML = html;
+      dropdown.classList.add('active');
+    }
+
+    /** 选中地址后：定位地图 + 放置选点标记 */
+    function selectAddress(lat, lng, name) {
+      // 关闭下拉
+      document.getElementById('addrDropdown').classList.remove('active');
+      document.getElementById('addrSearch').value = name;
+
+      // 移动地图到选中位置
+      map.setView([lat, lng], 15, { animate: true });
+
+      // 模拟点击事件，放置选点标记
+      selectedLatLng = { lat: lat, lng: lng };
+      if (userMarker) map.removeLayer(userMarker);
+
+      var clickIcon = L.divIcon({
+        className: '',
+        html: '<div style="width:28px;height:28px;background:#3b82f6;border:4px solid #fff;border-radius:50%;box-shadow:0 0 0 3px rgba(59,130,246,.35),0 2px 8px rgba(0,0,0,.25);"></div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+      userMarker = L.marker([lat, lng], { icon: clickIcon })
+        .addTo(map)
+        .bindPopup('<b>' + name + '</b><br>请在左侧选择设施类型后点击搜索');
+
+      var btn = document.getElementById('searchBtn');
+      btn.disabled = false;
+      btn.textContent = '搜索生活圈';
+
+      clearResults();
+    }
+
+    // 点击页面其他区域时关闭下拉
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.search-box')) {
+        document.getElementById('addrDropdown').classList.remove('active');
+      }
+    });
+
+    // ============================
+    // 5. UI 交互函数
+    // ============================
+
+    /** 切换设施类型的选中状态 */
+    function toggleFacility(el) { el.classList.toggle('active'); }
+
+    /** 切换房源类型的选中状态 */
+    function toggleHouseType(el) { el.classList.toggle('active'); }
+
+    /** 初始化滑块填充 */
+    updateTimeLabel();
+
+    /** 更新步行时间显示值 + 滑块进度条填充 */
+    function updateTimeLabel() {
+      var slider = document.getElementById('walkTime');
+      var val = slider.value;
+      document.getElementById('walkTimeValue').textContent = val;
+      // 计算填充百分比：(value - min) / (max - min) * 100
+      var pct = ((val - slider.min) / (slider.max - slider.min)) * 100;
+      slider.style.setProperty('--fill', pct + '%');
+    }
+
+    // ============================
+    // 5. 模拟数据：兴趣点 (POI)
+    // ============================
+    /**
+     * 覆盖上海中心城区 5 类设施，共 66 个 POI
+     * 坐标基于真实地理位置微调，用于 Demo 演示
+     */
+    var demoPOIs = {
+      subway: [
+        {lat:31.2350,lng:121.4740,name:'人民广场站'},{lat:31.2300,lng:121.4500,name:'静安寺站'},
+        {lat:31.2450,lng:121.4900,name:'陆家嘴站'},{lat:31.2200,lng:121.4300,name:'中山公园站'},
+        {lat:31.2400,lng:121.5100,name:'世纪大道站'},{lat:31.2280,lng:121.4850,name:'南京东路站'},
+        {lat:31.2180,lng:121.4650,name:'徐家汇站'},{lat:31.2500,lng:121.4700,name:'虹桥路站'},
+        {lat:31.2150,lng:121.4750,name:'打浦桥站'},{lat:31.2420,lng:121.4600,name:'自然博物馆站'},
+        {lat:31.2380,lng:121.5020,name:'东昌路站'},{lat:31.2250,lng:121.4950,name:'商城路站'},
+        {lat:31.2100,lng:121.4550,name:'上海体育馆站'},{lat:31.2320,lng:121.4200,name:'延安西路站'},
+        {lat:31.2550,lng:121.4800,name:'虹口足球场站'},{lat:31.2650,lng:121.5000,name:'四平路站'},
+        {lat:31.2050,lng:121.4350,name:'宜山路站'},{lat:31.2150,lng:121.4050,name:'漕河泾站'},
+        {lat:31.2450,lng:121.5200,name:'杨高南路站'},{lat:31.2350,lng:121.5350,name:'蓝村路站'}
+      ],
+      hospital: [
+        {lat:31.2280,lng:121.4600,name:'瑞金医院'},{lat:31.2400,lng:121.4750,name:'仁济医院'},
+        {lat:31.2150,lng:121.4450,name:'华山医院'},{lat:31.2380,lng:121.5000,name:'东方医院'},
+        {lat:31.2480,lng:121.4650,name:'长征医院'},{lat:31.2250,lng:121.4550,name:'华东医院'},
+        {lat:31.2350,lng:121.4900,name:'浦东医院'},{lat:31.2200,lng:121.4700,name:'徐汇区中心医院'},
+        {lat:31.2100,lng:121.4350,name:'第六人民医院'},{lat:31.2550,lng:121.4800,name:'第一人民医院'},
+        {lat:31.2300,lng:121.4400,name:'静安区中心医院'},{lat:31.2420,lng:121.5100,name:'公利医院'}
+      ],
+      supermarket: [
+        {lat:31.2320,lng:121.4680,name:'盒马鲜生南京西路店'},{lat:31.2380,lng:121.4850,name:'世纪联华浦东店'},
+        {lat:31.2250,lng:121.4420,name:'家乐福静安店'},{lat:31.2450,lng:121.4950,name:'沃尔玛陆家嘴店'},
+        {lat:31.2200,lng:121.4600,name:'大润发徐汇店'},{lat:31.2350,lng:121.4550,name:'农工商超市'},
+        {lat:31.2420,lng:121.4780,name:'盒马鲜生世纪公园店'},{lat:31.2280,lng:121.4900,name:'联华超市'},
+        {lat:31.2150,lng:121.4500,name:'永辉超市'},{lat:31.2500,lng:121.4700,name:'山姆会员店'},
+        {lat:31.2100,lng:121.4400,name:'华润万家'},{lat:31.2400,lng:121.5100,name:'全家便利店中心店'},
+        {lat:31.2350,lng:121.4200,name:'物美超市'},{lat:31.2250,lng:121.4700,name:'好又多超市'}
+      ],
+      market: [
+        {lat:31.2330,lng:121.4650,name:'南京西路菜市场'},{lat:31.2370,lng:121.4800,name:'浦东潍坊菜市场'},
+        {lat:31.2220,lng:121.4480,name:'曹家渡菜市场'},{lat:31.2300,lng:121.4550,name:'静安寺菜市场'},
+        {lat:31.2450,lng:121.4880,name:'梅园菜市场'},{lat:31.2280,lng:121.4700,name:'石门一路菜市场'},
+        {lat:31.2200,lng:121.4600,name:'天平路菜市场'},{lat:31.2350,lng:121.4900,name:'崂山路菜市场'},
+        {lat:31.2150,lng:121.4400,name:'虹桥路菜市场'},{lat:31.2400,lng:121.5000,name:'乳山路菜市场'},
+        {lat:31.2250,lng:121.4300,name:'新华路菜市场'},{lat:31.2500,lng:121.4600,name:'虬江路菜市场'}
+      ],
+      park: [
+        {lat:31.2370,lng:121.4700,name:'人民公园'},{lat:31.2200,lng:121.4550,name:'中山公园'},
+        {lat:31.2350,lng:121.5400,name:'世纪公园'},{lat:31.2400,lng:121.4650,name:'静安公园'},
+        {lat:31.2300,lng:121.4900,name:'滨江公园'},{lat:31.2480,lng:121.4800,name:'虹口公园'},
+        {lat:31.2150,lng:121.4500,name:'衡山公园'},{lat:31.2420,lng:121.5050,name:'陆家嘴中心绿地'},
+        {lat:31.2250,lng:121.4400,name:'华山绿地'},{lat:31.2600,lng:121.4750,name:'鲁迅公园'}
+      ],
+      library: [
+        {lat:31.2300,lng:121.4680,name:'上海图书馆'},{lat:31.2250,lng:121.4450,name:'静安区图书馆'},
+        {lat:31.2180,lng:121.4650,name:'徐汇区图书馆'},{lat:31.2400,lng:121.4850,name:'浦东图书馆'},
+        {lat:31.2350,lng:121.4750,name:'黄浦区图书馆'},{lat:31.2500,lng:121.4650,name:'虹口区图书馆'},
+        {lat:31.2150,lng:121.4300,name:'长宁区图书馆'},{lat:31.2200,lng:121.4550,name:'上海少年儿童图书馆'},
+        {lat:31.2420,lng:121.4900,name:'陆家嘴图书馆'},{lat:31.2280,lng:121.4400,name:'普陀区图书馆'}
+      ],
+      university: [
+        {lat:31.2000,lng:121.4400,name:'上海交通大学'},{lat:31.2500,lng:121.5000,name:'同济大学'},
+        {lat:31.2750,lng:121.5200,name:'复旦大学'},{lat:31.2800,lng:121.5050,name:'上海财经大学'},
+        {lat:31.2100,lng:121.4500,name:'华东理工大学'},{lat:31.2050,lng:121.4250,name:'上海师范大学'},
+        {lat:31.2300,lng:121.5100,name:'上海海洋大学'},{lat:31.1900,lng:121.4400,name:'华东政法大学'},
+        {lat:31.2250,lng:121.4150,name:'东华大学'},{lat:31.2350,lng:121.5250,name:'上海科技大学'}
+      ]
+    };
+
+    /** 各设施类型对应的标记颜色 */
+    var poiColors = {
+      subway: '#3b82f6',
+      hospital: '#ef4444',
+      supermarket: '#22c55e',
+      market: '#f97316',
+      park: '#10b981',
+      library: '#6366f1',
+      university: '#ec4899'
+    };
+
+    // ============================
+    // 6. 模拟数据：房源
+    // ============================
+    /**
+     * 上海中心城区 66 套模拟房源
+     * type: rent(租房) / sale(二手房) / new(新房)
+     */
+    var houses = [
+      {name:'阳光花园',lat:31.2370,lng:121.4550,price:'3200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'滨江公寓',lat:31.2410,lng:121.4920,price:'3500元/月',type:'rent',rooms:'1室1厅'},
+      {name:'静安雅苑',lat:31.2280,lng:121.4480,price:'4200元/月',type:'rent',rooms:'3室1厅'},
+      {name:'浦东人才公寓',lat:31.2450,lng:121.5100,price:'2800元/月',type:'rent',rooms:'1室1厅'},
+      {name:'徐汇馨苑',lat:31.2100,lng:121.4360,price:'3800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'长宁国际花园',lat:31.2200,lng:121.4200,price:'4500元/月',type:'rent',rooms:'2室2厅'},
+      {name:'虹口新城',lat:31.2550,lng:121.4800,price:'3000元/月',type:'rent',rooms:'1室1厅'},
+      {name:'杨浦科创公寓',lat:31.2650,lng:121.5000,price:'2600元/月',type:'rent',rooms:'1室1厅'},
+      {name:'闵行龙柏新村',lat:31.2150,lng:121.4050,price:'2200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'黄浦江畔花园',lat:31.2320,lng:121.4900,price:'580万',type:'sale',rooms:'3室2厅'},
+      {name:'世纪公园壹号',lat:31.2200,lng:121.5350,price:'850万',type:'sale',rooms:'4室2厅'},
+      {name:'新天地雅居',lat:31.2250,lng:121.4720,price:'1200万',type:'sale',rooms:'3室2厅'},
+      {name:'古北新区花园',lat:31.2050,lng:121.3950,price:'650万',type:'sale',rooms:'3室1厅'},
+      {name:'张江科学城公寓',lat:31.2000,lng:121.5900,price:'480万',type:'new',rooms:'2室1厅'},
+      {name:'大宁绿地新苑',lat:31.2600,lng:121.4650,price:'720万',type:'new',rooms:'3室2厅'},
+      {name:'普陀长风新盘',lat:31.2350,lng:121.3950,price:'550万',type:'new',rooms:'2室2厅'},
+      {name:'宝山大华锦绣',lat:31.2800,lng:121.4500,price:'380万',type:'new',rooms:'2室1厅'},
+      {name:'陆家嘴金融公寓',lat:31.2380,lng:121.5020,price:'5000元/月',type:'rent',rooms:'1室1厅'},
+      {name:'中山公园旁小区',lat:31.2220,lng:121.4150,price:'3600元/月',type:'rent',rooms:'2室1厅'},
+      {name:'嘉定新城家园',lat:31.3750,lng:121.2600,price:'1800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'南京西路名邸',lat:31.2340,lng:121.4700,price:'680万',type:'sale',rooms:'2室1厅'},
+      {name:'浦东金茂公寓',lat:31.2390,lng:121.4980,price:'5500元/月',type:'rent',rooms:'2室1厅'},
+      {name:'徐家汇花园',lat:31.1920,lng:121.4380,price:'420万',type:'new',rooms:'2室2厅'},
+      {name:'闸北公园一号',lat:31.2480,lng:121.4580,price:'3100元/月',type:'rent',rooms:'2室1厅'},
+      {name:'人民广场公寓',lat:31.2340,lng:121.4730,price:'4500元/月',type:'rent',rooms:'2室1厅'},
+      {name:'静安寺旁小区',lat:31.2290,lng:121.4490,price:'4800元/月',type:'rent',rooms:'1室1厅'},
+      {name:'世纪大道家园',lat:31.2390,lng:121.5090,price:'3600元/月',type:'rent',rooms:'2室1厅'},
+      {name:'打浦桥新苑',lat:31.2160,lng:121.4740,price:'3300元/月',type:'rent',rooms:'2室1厅'},
+      {name:'虹桥路公寓',lat:31.2510,lng:121.4690,price:'2900元/月',type:'rent',rooms:'1室1厅'},
+      {name:'东昌路小区',lat:31.2370,lng:121.5010,price:'5200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'商城路名苑',lat:31.2240,lng:121.4940,price:'4100元/月',type:'rent',rooms:'3室1厅'},
+      {name:'宜山路花园',lat:31.2090,lng:121.4540,price:'2800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'延安西路公寓',lat:31.2310,lng:121.4190,price:'3400元/月',type:'rent',rooms:'1室1厅'},
+      {name:'四平路小区',lat:31.2640,lng:121.4990,price:'2500元/月',type:'rent',rooms:'2室1厅'},
+      {name:'漕河泾公寓',lat:31.2140,lng:121.4040,price:'2700元/月',type:'rent',rooms:'1室1厅'},
+      {name:'杨高南路花园',lat:31.2440,lng:121.5190,price:'3800元/月',type:'rent',rooms:'2室2厅'},
+      {name:'蓝村路小区',lat:31.2340,lng:121.5340,price:'3500元/月',type:'rent',rooms:'2室1厅'},
+      {name:'瑞金医院旁公寓',lat:31.2270,lng:121.4590,price:'4300元/月',type:'rent',rooms:'2室1厅'},
+      {name:'华山医院家属楼',lat:31.2140,lng:121.4440,price:'4600元/月',type:'rent',rooms:'3室1厅'},
+      {name:'长征医院附近小区',lat:31.2470,lng:121.4640,price:'3200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'东方医院公寓',lat:31.2370,lng:121.4990,price:'4800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'浦东医院旁',lat:31.2340,lng:121.4890,price:'3100元/月',type:'rent',rooms:'1室1厅'},
+      {name:'徐汇中心医院附近',lat:31.2190,lng:121.4690,price:'3500元/月',type:'rent',rooms:'2室1厅'},
+      {name:'静安区中心医院旁',lat:31.2290,lng:121.4390,price:'4000元/月',type:'rent',rooms:'2室1厅'},
+      {name:'公利医院公寓',lat:31.2410,lng:121.5090,price:'2900元/月',type:'rent',rooms:'1室1厅'},
+      {name:'南京西路豪宅',lat:31.2330,lng:121.4670,price:'1500万',type:'sale',rooms:'4室2厅'},
+      {name:'浦东潍坊小区',lat:31.2360,lng:121.4790,price:'720万',type:'sale',rooms:'3室1厅'},
+      {name:'曹家渡新村',lat:31.2210,lng:121.4470,price:'580万',type:'sale',rooms:'2室1厅'},
+      {name:'静安寺豪宅',lat:31.2290,lng:121.4540,price:'1800万',type:'sale',rooms:'3室2厅'},
+      {name:'梅园小区',lat:31.2440,lng:121.4870,price:'650万',type:'sale',rooms:'2室1厅'},
+      {name:'石门一路公寓',lat:31.2270,lng:121.4690,price:'4800元/月',type:'rent',rooms:'1室1厅'},
+      {name:'天平路小区',lat:31.2190,lng:121.4590,price:'3600元/月',type:'rent',rooms:'2室1厅'},
+      {name:'崂山路花园',lat:31.2340,lng:121.4890,price:'4200元/月',type:'rent',rooms:'2室2厅'},
+      {name:'虹桥路公寓',lat:31.2140,lng:121.4390,price:'3300元/月',type:'rent',rooms:'1室1厅'},
+      {name:'乳山路小区',lat:31.2390,lng:121.4990,price:'3800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'新华路花园',lat:31.2240,lng:121.4290,price:'5500元/月',type:'rent',rooms:'3室1厅'},
+      {name:'虬江路小区',lat:31.2490,lng:121.4590,price:'2800元/月',type:'rent',rooms:'2室1厅'},
+      {name:'世纪公园新盘',lat:31.2190,lng:121.5440,price:'890万',type:'new',rooms:'3室2厅'},
+      {name:'陆家嘴滨江',lat:31.2400,lng:121.4910,price:'2000万',type:'sale',rooms:'4室2厅'},
+      {name:'联华超市旁小区',lat:31.2270,lng:121.4890,price:'3200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'永辉超市附近',lat:31.2140,lng:121.4490,price:'3000元/月',type:'rent',rooms:'2室1厅'},
+      {name:'山姆会员店旁',lat:31.2490,lng:121.4690,price:'4200元/月',type:'rent',rooms:'2室1厅'},
+      {name:'华润万家附近',lat:31.2090,lng:121.4390,price:'2600元/月',type:'rent',rooms:'1室1厅'},
+      {name:'全家便利店旁',lat:31.2390,lng:121.5090,price:'3500元/月',type:'rent',rooms:'1室1厅'},
+      {name:'物美超市附近',lat:31.2340,lng:121.4190,price:'3100元/月',type:'rent',rooms:'2室1厅'},
+      {name:'好又多超市旁',lat:31.2240,lng:121.4690,price:'2900元/月',type:'rent',rooms:'1室1厅'}
+    ];
+
+    // ============================
+    // 7. Haversine 距离计算
+    // ============================
+    /**
+     * 基于地球椭球模型的球面距离公式
+     * @param {number} lat1 - 起点纬度
+     * @param {number} lng1 - 起点经度
+     * @param {number} lat2 - 终点纬度
+     * @param {number} lng2 - 终点经度
+     * @returns {number} 两点间距离（米）
+     */
+    function getDistance(lat1, lng1, lat2, lng2) {
+      var R = 6371000; // 地球平均半径（米）
+      var dLat = (lat2 - lat1) * Math.PI / 180;
+      var dLng = (lng2 - lng1) * Math.PI / 180;
+      var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // ============================
+    // 8. 清除搜索结果
+    // ============================
+    function clearResults() {
+      poiMarkers.forEach(function(m) { map.removeLayer(m); });
+      poiMarkers = [];
+      houseMarkers.forEach(function(m) { map.removeLayer(m); });
+      houseMarkers = [];
+    }
+
+    // ============================
+    // 9. 核心搜索逻辑
+    // ============================
+    function startSearch() {
+      // 前置校验：是否已选点
+      if (!selectedLatLng) {
+        alert('请先在地图上点击选择一个位置');
+        return;
+      }
+
+      // 收集用户选中的设施类型
+      var selected = [];
+      document.querySelectorAll('.facility-item.active').forEach(function(el) {
+        if (el.dataset.type) selected.push(el.dataset.type);
+      });
+      if (selected.length === 0) {
+        alert('请至少选择一种设施类型');
+        return;
+      }
+
+      // 收集用户选中的房源类型
+      var houseTypes = [];
+      document.querySelectorAll('.facility-item.active[data-htype]').forEach(function(el) {
+        houseTypes.push(el.dataset.htype);
+      });
+      if (houseTypes.length === 0) {
+        alert('请至少选择一种房源类型');
+        return;
+      }
+
+      // 计算步行半径（平均步行速度约 80米/分钟）
+      var walkMinutes = parseInt(document.getElementById('walkTime').value);
+      var walkRadius = walkMinutes * 80;
+
+      // 显示加载动画，禁用按钮防止重复提交
+      document.getElementById('loading').classList.add('active');
+      document.getElementById('searchBtn').disabled = true;
+      clearResults();
+      // 移除初始点击标记，搜索后会生成带脉冲的选点标记
+      if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+
+      // 异步执行搜索（600ms 延迟让 UI 有时间展示加载状态）
+      setTimeout(function() {
+        try {
+          /**
+           * maxPOIDistance：POI 检索范围
+           * 策略：取步行半径的 3 倍与 2000 米中的较大值
+           * 原因：确保能检索到步行范围内房源附近的 POI
+           */
+          var maxPOIDistance = Math.max(walkRadius * 3, 2000);
+          var foundPOIs = {};
+
+          // 遍历每种选中的设施类型，检索范围内的 POI 并在地图上标记
+          selected.forEach(function(type) {
+            var pois = demoPOIs[type] || [];
+            var color = poiColors[type];
+            foundPOIs[type] = [];
+
+            pois.forEach(function(poi) {
+              var dist = getDistance(selectedLatLng.lat, selectedLatLng.lng, poi.lat, poi.lng);
+              if (dist <= maxPOIDistance) {
+                foundPOIs[type].push(poi);
+
+                // 创建 POI 标记（divIcon + 内联样式，兼容性最佳）
+                var poiIcon = L.divIcon({
+                  className: '',
+                  html: '<div style="width:16px;height:16px;background:' + color + ';border:2.5px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.25);"></div>',
+                  iconSize: [16, 16],
+                  iconAnchor: [8, 8]
+                });
+                var marker = L.marker([poi.lat, poi.lng], { icon: poiIcon })
+                  .addTo(map)
+                  .bindPopup('<b>' + poi.name + '</b><br>距选点约 ' + Math.round(dist) + ' 米');
+                poiMarkers.push(marker);
+              }
+            });
+          });
+
+          // 重新放置用户选点标记（带脉冲动画，视觉层级最高）
+          var userDotIcon = L.divIcon({
+            className: 'poi-pulse',
+            html: '<div style="width:24px;height:24px;background:#3b82f6;border:3.5px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(59,130,246,.25),0 2px 6px rgba(0,0,0,.2);"></div>',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          });
+          var userDot = L.marker([selectedLatLng.lat, selectedLatLng.lng], {
+            icon: userDotIcon,
+            zIndexOffset: 1000
+          }).addTo(map).bindPopup('<b>你的选点</b>');
+          poiMarkers.push(userDot);
+
+          // ============================
+          // 房源匹配算法
+          // ============================
+          /**
+           * 对每套房源计算匹配度：
+           * 1. 按房源类型过滤
+           * 2. 距离选点不超过步行半径（保证"距选点"显示和步行时间一致）
+           * 3. 检查该房源步行范围内是否有各类型 POI
+           * 4. 匹配度 = 满足的设施类型数 / 总需求类型数 × 100%
+           */
+          var matched = [];
+          houses.forEach(function(h) {
+            if (houseTypes.indexOf(h.type) === -1) return;
+
+            var distToClick = getDistance(selectedLatLng.lat, selectedLatLng.lng, h.lat, h.lng);
+            if (distToClick > walkRadius) return;
+
+            var matchCount = 0;
+            selected.forEach(function(type) {
+              var nearPOIs = foundPOIs[type] || [];
+              var hit = nearPOIs.some(function(poi) {
+                return getDistance(h.lat, h.lng, poi.lat, poi.lng) <= walkRadius;
+              });
+              if (hit) matchCount++;
+            });
+
+            if (matchCount > 0) {
+              matched.push({
+                house: h,
+                matchCount: matchCount,
+                total: selected.length,
+                score: Math.round(matchCount / selected.length * 100),
+                dist: Math.round(distToClick)
+              });
+            }
+          });
+
+          // 按匹配度降序 → 距离升序排列
+          matched.sort(function(a, b) {
+            return b.score - a.score || a.dist - b.dist;
+          });
+
+          // 限制最多展示 15 条结果，避免信息过载
+          if (matched.length > 15) matched = matched.slice(0, 15);
+
+          // 自动调整地图视野，包含所有匹配房源
+          if (matched.length > 0) {
+            var bounds = L.latLngBounds([[selectedLatLng.lat, selectedLatLng.lng]]);
+            matched.forEach(function(item) { bounds.extend([item.house.lat, item.house.lng]); });
+            map.fitBounds(bounds, { padding: [50, 50] });
+          }
+
+          // 渲染搜索结果列表
+          displayResults(matched);
+
+          // 在地图上标记匹配的房源
+          matched.forEach(function(item) {
+            var h = item.house;
+            var houseIcon = L.divIcon({
+              className: '',
+              html: '<div style="background:#7c3aed;color:#fff;padding:3px 8px;border-radius:6px;font-size:11px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25);font-weight:600;">' + h.name + '</div>',
+              iconSize: [80, 20],
+              iconAnchor: [40, 10]
+            });
+            var marker = L.marker([h.lat, h.lng], { icon: houseIcon })
+              .addTo(map)
+              .bindPopup('<b>' + h.name + '</b><br>' + h.rooms + ' | ' + h.price + '<br>匹配度: ' + item.score + '%');
+            houseMarkers.push(marker);
+          });
+
+          // 无结果时给出引导提示
+          if (matched.length === 0) {
+            displayResults([]);
+          }
+
+        } catch (e) {
+          console.error('搜索过程出错:', e);
+          // 使用内联提示替代 alert，提升体验
+          document.getElementById('resultsContent').innerHTML =
+            '<div class="empty-hint" style="color:#ef4444;">搜索出错，请刷新页面重试</div>';
+        }
+
+        // 隐藏加载动画，恢复按钮
+        document.getElementById('loading').classList.remove('active');
+        document.getElementById('searchBtn').disabled = false;
+      }, 600);
+    }
+
+    // ============================
+    // 10. 搜索结果渲染
+    // ============================
+    /**
+     * @param {Array} matched - 匹配的房源数组
+     * 每项包含 { house, matchCount, total, score, dist }
+     */
+    function displayResults(matched) {
+      var container = document.getElementById('resultsContent');
+      var titleEl = document.getElementById('resultsTitle');
+
+      if (!matched || matched.length === 0) {
+        titleEl.textContent = '搜索结果';
+        container.innerHTML = '<div class="empty-hint">该位置附近暂无匹配的房源<br>试试扩大步行时间或减少设施要求</div>';
+        return;
+      }
+
+      titleEl.textContent = '找到 ' + matched.length + ' 个匹配房源';
+      var html = '<div class="results-list">';
+
+      matched.forEach(function(item, idx) {
+        var h = item.house;
+        var tagClass = h.type === 'rent' ? 'tag-rent' : (h.type === 'sale' ? 'tag-sale' : 'tag-new');
+        var tagText = h.type === 'rent' ? '租房' : (h.type === 'sale' ? '二手房' : '新房');
+        // 匹配度进度条颜色
+        var barColor = item.score >= 80 ? '#22c55e' : (item.score >= 60 ? '#f59e0b' : '#ef4444');
+        // 逐条延迟动画
+        var delay = idx * 50;
+
+        html += '<div class="result-card" style="animation-delay:' + delay + 'ms" onclick="focusHouse(' + h.lat + ',' + h.lng + ')">';
+        html += '<h4>' + (idx + 1) + '. ' + h.name + '</h4>';
+        html += '<div class="result-meta">' + h.rooms + ' &middot; ' + h.price + '</div>';
+        html += '<div class="result-meta">匹配度 ' + item.score + '%（满足 ' + item.matchCount + '/' + item.total + ' 类设施）&middot; 距选点 ' + item.dist + ' 米</div>';
+        html += '<div class="score-bar"><div class="score-bar-fill" style="width:' + item.score + '%;background:' + barColor + ';"></div></div>';
+        html += '<span class="result-tag ' + tagClass + '">' + tagText + '</span>';
+        html += '</div>';
+      });
+
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    /** 点击结果卡片时，地图平移到对应房源位置 */
+    function focusHouse(lat, lng) {
+      map.setView([lat, lng], 15, { animate: true });
+    }
+
+    // ============================
+    // 11. 重置地图
+    // ============================
+    function resetMap() {
+      clearResults();
+      // 移除用户选点标记
+      if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+      selectedLatLng = null;
+      // 恢复默认视图
+      map.setView([31.2304, 121.4737], 13);
+      // 恢复按钮和结果区域初始状态
+      var btn = document.getElementById('searchBtn');
+      btn.disabled = true;
+      btn.textContent = '请先选择位置';
+      document.getElementById('resultsTitle').textContent = '搜索结果';
+      document.getElementById('resultsContent').innerHTML =
+        '<div class="empty-hint">在地图上点击一个你想住的区域<br>系统会搜索附近的设施和楼盘</div>';
+    }
+  </script>
+</body>
+</html>

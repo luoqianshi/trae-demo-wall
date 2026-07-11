@@ -1,0 +1,429 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配置差异对比 - 投产管理</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        .diff-header { display:flex; align-items:center; gap:16px; padding:16px 20px; background:linear-gradient(90deg,#f8fafc,#fff); border-bottom:1px solid #e2e8f0; margin-bottom:16px; border-radius:8px; }
+        .env-badge { display:flex; align-items:center; gap:8px; padding:8px 16px; border-radius:6px; font-size:14px; font-weight:600; border:1px solid; }
+        .env-badge.dev { background:#eff6ff; color:#1e40af; border-color:#bfdbfe; }
+        .env-badge.sit { background:#f0fdf4; color:#15803d; border-color:#86efac; }
+        .env-badge.uat { background:#fef3c7; color:#92400e; border-color:#fcd34d; }
+        .env-badge.prod { background:#fef2f2; color:#b91c1c; border-color:#fca5a5; }
+        .vs-label { font-size:18px; font-weight:700; color:#94a3b8; }
+
+        .diff-nav { display:flex; gap:8px; margin-bottom:16px; }
+        .diff-nav button { padding:6px 14px; border:1px solid #e2e8f0; background:#fff; border-radius:4px; font-size:13px; cursor:pointer; transition:all 0.15s; }
+        .diff-nav button:hover { background:#f8fafc; }
+        .diff-nav button.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+
+        .diff-table { width:100%; border-collapse:separate; font-size:13px; }
+        .diff-table th { background:#f1f5f9; padding:10px 12px; text-align:left; font-weight:600; border-bottom:1px solid #e2e8f0; }
+        .diff-table td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+        .diff-table tr:hover { background:#f8fafc; }
+        .diff-table .same { color:#64748b; }
+        .diff-table .diff { background:#fffbeb; }
+        .diff-table .diff .old { color:#dc2626; text-decoration:line-through; }
+        .diff-table .diff .new { color:#16a34a; font-weight:600; }
+        .diff-table .only-left { background:#fef2f2; }
+        .diff-table .only-right { background:#f0fdf4; }
+        .diff-tag { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px; font-weight:600; }
+        .diff-tag.modify { background:#fef3c7; color:#92400e; }
+        .diff-tag.add { background:#dcfce7; color:#166534; }
+        .diff-tag.del { background:#fee2e2; color:#b91c1c; }
+        .diff-tag.same { background:#f1f5f9; color:#475569; }
+
+        .summary-bar { display:flex; gap:16px; margin-bottom:16px; }
+        .summary-item { flex:1; padding:12px 16px; border-radius:6px; text-align:center; border:1px solid; }
+        .summary-item.modify { background:#fffbeb; border-color:#fcd34d; }
+        .summary-item.add { background:#f0fdf4; border-color:#86efac; }
+        .summary-item.del { background:#fef2f2; border-color:#fca5a5; }
+        .summary-item.same { background:#f8fafc; border-color:#e2e8f0; }
+        .summary-item .num { font-size:24px; font-weight:700; }
+        .summary-item .label { font-size:12px; color:#64748b; margin-top:4px; }
+
+        /* Toast 提示 */
+        .diff-toast { position:fixed; top:24px; left:50%; transform:translateX(-50%); background:#1e293b; color:#fff; padding:10px 20px; border-radius:6px; font-size:13px; z-index:2000; display:none; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+        .diff-toast.show { display:block; animation:fadeDown .3s ease; }
+        .diff-toast.info { background:#1e40af; }
+        .diff-toast.success { background:#065f46; }
+        .diff-toast.warn { background:#92400e; }
+        @keyframes fadeDown { from{opacity:0;transform:translate(-50%,-10px);} to{opacity:1;transform:translate(-50%,0);} }
+
+        /* 加载条 */
+        .diff-loading-bar { height:4px; background:linear-gradient(90deg,transparent,#2563eb,transparent); background-size:200% 100%; animation:sliding 1.2s linear infinite; margin-top:8px; display:none; }
+        .diff-loading-bar.show { display:block; }
+        @keyframes sliding { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-exchange" style="color:#2563eb;margin-right:8px"></i>配置差异对比</h2>
+            <div class="page-desc">
+                首页 / 投产管理 / 环境总览 / 配置差异对比 - 逐条对比不同环境间的配置项差异
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="govNav('pages/environment/overview.html', ['首页','投产管理','环境总览'], {})"><i class="fa fa-arrow-left"></i> 返回总览</button>
+            <button class="btn btn-default" onclick="showToast('差异报告导出中...', 'info')"><i class="fa fa-download"></i> 导出差异报告</button>
+            <button class="btn btn-primary" onclick="syncDiff()"><i class="fa fa-refresh"></i> 同步差异</button>
+        </div>
+    </div>
+
+    <!-- ====== 环境选择器 ====== -->
+    <div class="diff-header">
+        <div>
+            <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px">源环境</label>
+            <select id="srcEnv" class="form-control" style="width:160px" onchange="onEnvChange()">
+                <option value="DEV">DEV 开发环境</option>
+                <option value="SIT">SIT 集成测试</option>
+                <option value="UAT">UAT 用户验收</option>
+                <option value="PROD">PROD 生产环境</option>
+            </select>
+        </div>
+        <div class="env-badge dev" id="srcBadge"><i class="fa fa-server"></i> DEV 开发环境</div>
+        <div class="vs-label">VS</div>
+        <div class="env-badge uat" id="tgtBadge"><i class="fa fa-server"></i> UAT 用户验收环境</div>
+        <div>
+            <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px">目标环境</label>
+            <select id="tgtEnv" class="form-control" style="width:160px" onchange="onEnvChange()">
+                <option value="UAT">UAT 用户验收</option>
+                <option value="DEV">DEV 开发环境</option>
+                <option value="SIT">SIT 集成测试</option>
+                <option value="PROD">PROD 生产环境</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- 加载状态条 -->
+    <div class="diff-loading-bar" id="diffLoading"></div>
+
+    <!-- ====== 差异统计 ====== -->
+    <div class="summary-bar">
+        <div class="summary-item same">
+            <div class="num" style="color:#475569">42</div>
+            <div class="label">配置一致</div>
+        </div>
+        <div class="summary-item modify">
+            <div class="num" style="color:#92400e">8</div>
+            <div class="label">配置变更</div>
+        </div>
+        <div class="summary-item add">
+            <div class="num" style="color:#15803d">3</div>
+            <div class="label">仅源环境存在</div>
+        </div>
+        <div class="summary-item del">
+            <div class="num" style="color:#b91c1c">2</div>
+            <div class="label">仅目标环境存在</div>
+        </div>
+    </div>
+
+    <!-- ====== 差异分类导航 ====== -->
+    <div class="diff-nav">
+        <button class="active" onclick="filterDiff('all',this)">全部配置 (55)</button>
+        <button onclick="filterDiff('modify',this)">配置变更 (8)</button>
+        <button onclick="filterDiff('add',this)">新增项 (3)</button>
+        <button onclick="filterDiff('del',this)">缺失项 (2)</button>
+        <button onclick="filterDiff('same',this)">一致项 (42)</button>
+    </div>
+
+    <!-- ====== 差异详情表 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-list"></i> 配置项差异详情</div>
+            <div class="card-action">
+                <input type="text" id="diffSearch" class="form-control" placeholder="搜索配置项..." style="width:240px;font-size:12px" oninput="searchDiff(this.value)">
+            </div>
+        </div>
+        <div class="card-body" style="padding:0">
+            <table class="diff-table">
+                <thead>
+                    <tr>
+                        <th style="width:40px">#</th>
+                        <th style="width:100px">差异类型</th>
+                        <th>配置项</th>
+                        <th style="width:35%" id="srcHeader">DEV 环境值</th>
+                        <th style="width:35%" id="tgtHeader">UAT 环境值</th>
+                    </tr>
+                </thead>
+                <tbody id="diffTableBody">
+                    <tr class="diff">
+                        <td>1</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>api.timeout.connect</strong><br><span style="font-size:11px;color:#64748b">接口连接超时</span></td>
+                        <td><span class="old">3000ms</span></td>
+                        <td><span class="new">5000ms</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>2</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>api.timeout.read</strong><br><span style="font-size:11px;color:#64748b">接口读取超时</span></td>
+                        <td><span class="old">10000ms</span></td>
+                        <td><span class="new">15000ms</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>3</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>retry.maxAttempts</strong><br><span style="font-size:11px;color:#64748b">最大重试次数</span></td>
+                        <td><span class="old">3</span></td>
+                        <td><span class="new">5</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>4</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>log.level</strong><br><span style="font-size:11px;color:#64748b">日志级别</span></td>
+                        <td><span class="old">DEBUG</span></td>
+                        <td><span class="new">INFO</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>5</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>cache.ttl</strong><br><span style="font-size:11px;color:#64748b">缓存过期时间</span></td>
+                        <td><span class="old">300s</span></td>
+                        <td><span class="new">600s</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>6</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>db.pool.maxSize</strong><br><span style="font-size:11px;color:#64748b">数据库连接池最大连接数</span></td>
+                        <td><span class="old">50</span></td>
+                        <td><span class="new">100</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>7</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>mq.consumer.threads</strong><br><span style="font-size:11px;color:#64748b">消息队列消费线程数</span></td>
+                        <td><span class="old">4</span></td>
+                        <td><span class="new">8</span></td>
+                    </tr>
+                    <tr class="diff">
+                        <td>8</td>
+                        <td><span class="diff-tag modify">变更</span></td>
+                        <td><strong>security.token.expire</strong><br><span style="font-size:11px;color:#64748b">Token 过期时间</span></td>
+                        <td><span class="old">3600s</span></td>
+                        <td><span class="new">7200s</span></td>
+                    </tr>
+                    <tr class="only-left">
+                        <td>9</td>
+                        <td><span class="diff-tag add">新增</span></td>
+                        <td><strong>feature.newRiskModel</strong><br><span style="font-size:11px;color:#64748b">新风险模型开关</span></td>
+                        <td><span class="new">true</span></td>
+                        <td><span style="color:#94a3b8;font-style:italic">— 未配置 —</span></td>
+                    </tr>
+                    <tr class="only-left">
+                        <td>10</td>
+                        <td><span class="diff-tag add">新增</span></td>
+                        <td><strong>feature.batchQuery</strong><br><span style="font-size:11px;color:#64748b">批量查询功能</span></td>
+                        <td><span class="new">enabled</span></td>
+                        <td><span style="color:#94a3b8;font-style:italic">— 未配置 —</span></td>
+                    </tr>
+                    <tr class="only-left">
+                        <td>11</td>
+                        <td><span class="diff-tag add">新增</span></td>
+                        <td><strong>monitor.alert.webhook</strong><br><span style="font-size:11px;color:#64748b">告警 Webhook 地址</span></td>
+                        <td><span class="new">https://alert.dev.bank/notify</span></td>
+                        <td><span style="color:#94a3b8;font-style:italic">— 未配置 —</span></td>
+                    </tr>
+                    <tr class="only-right">
+                        <td>12</td>
+                        <td><span class="diff-tag del">缺失</span></td>
+                        <td><strong>legacy.api.compatibility</strong><br><span style="font-size:11px;color:#64748b">旧版 API 兼容模式</span></td>
+                        <td><span style="color:#94a3b8;font-style:italic">— 未配置 —</span></td>
+                        <td><span class="old">true</span></td>
+                    </tr>
+                    <tr class="only-right">
+                        <td>13</td>
+                        <td><span class="diff-tag del">缺失</span></td>
+                        <td><strong>debug.trace.enabled</strong><br><span style="font-size:11px;color:#64748b">调试追踪开关</span></td>
+                        <td><span style="color:#94a3b8;font-style:italic">— 未配置 —</span></td>
+                        <td><span class="old">false</span></td>
+                    </tr>
+                    <tr class="same">
+                        <td>14</td>
+                        <td><span class="diff-tag same">一致</span></td>
+                        <td><strong>api.version</strong><br><span style="font-size:11px;color:#64748b">API 版本号</span></td>
+                        <td>v2.3.1</td>
+                        <td>v2.3.1</td>
+                    </tr>
+                    <tr class="same">
+                        <td>15</td>
+                        <td><span class="diff-tag same">一致</span></td>
+                        <td><strong>encoding.default</strong><br><span style="font-size:11px;color:#64748b">默认编码</span></td>
+                        <td>UTF-8</td>
+                        <td>UTF-8</td>
+                    </tr>
+                    <!-- 空状态行（默认隐藏，搜索无结果时显示） -->
+                    <tr id="emptyRow" style="display:none">
+                        <td colspan="5" style="padding:40px;text-align:center;color:#94a3b8">
+                            <i class="fa fa-inbox" style="font-size:36px;display:block;margin-bottom:8px"></i>
+                            暂无匹配的配置项
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ====== 差异影响说明 ====== -->
+    <div class="card" style="margin-top:16px">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-exclamation-triangle"></i> 差异影响说明</div>
+        </div>
+        <div class="card-body" style="font-size:13px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div style="padding:12px;background:#fffbeb;border-radius:6px;border:1px solid #fcd34d">
+                    <div style="font-weight:600;color:#92400e;margin-bottom:6px"><i class="fa fa-clock-o"></i> 超时配置差异</div>
+                    <div style="color:#64748b;font-size:12px">DEV 环境超时时间较短（3s/10s），UAT 环境较长（5s/15s）。迁移至生产环境时需根据实际网络延迟调整。</div>
+                </div>
+                <div style="padding:12px;background:#fffbeb;border-radius:6px;border:1px solid #fcd34d">
+                    <div style="font-weight:600;color:#92400e;margin-bottom:6px"><i class="fa fa-database"></i> 连接池配置差异</div>
+                    <div style="color:#64748b;font-size:12px">UAT 环境数据库连接池最大连接数为 100（DEV 为 50），生产环境建议根据并发量评估后配置。</div>
+                </div>
+                <div style="padding:12px;background:#f0fdf4;border-radius:6px;border:1px solid #86efac">
+                    <div style="font-weight:600;color:#15803d;margin-bottom:6px"><i class="fa fa-plus-circle"></i> 新功能开关</div>
+                    <div style="color:#64748b;font-size:12px">DEV 环境已启用新风险模型和批量查询功能，UAT 环境尚未配置。建议在 UAT 环境验证后同步开启。</div>
+                </div>
+                <div style="padding:12px;background:#fef2f2;border-radius:6px;border:1px solid #fca5a5">
+                    <div style="font-weight:600;color:#b91c1c;margin-bottom:6px"><i class="fa fa-minus-circle"></i> 旧版兼容配置</div>
+                    <div style="color:#64748b;font-size:12px">UAT 环境保留了旧版 API 兼容模式，DEV 环境已移除。需确认所有消费方已完成升级后再移除。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Toast 提示 -->
+<div class="diff-toast" id="diffToast"></div>
+
+<script>
+
+/* ============ 环境切换（DC-P0-2 + DC-P1-5 加载状态）============ */
+function onEnvChange() {
+    var srcEnv = document.getElementById('srcEnv').value;
+    var tgtEnv = document.getElementById('tgtEnv').value;
+
+    // 更新 env-badge 文案
+    var srcBadge = document.getElementById('srcBadge');
+    var tgtBadge = document.getElementById('tgtBadge');
+    if (srcBadge) srcBadge.textContent = srcEnv;
+    if (tgtBadge) tgtBadge.textContent = tgtEnv;
+
+    // 更新表头
+    var srcHeader = document.getElementById('srcHeader');
+    var tgtHeader = document.getElementById('tgtHeader');
+    if (srcHeader) srcHeader.textContent = srcEnv + ' 环境值';
+    if (tgtHeader) tgtHeader.textContent = tgtEnv + ' 环境值';
+
+    // 显示加载状态
+    var loading = document.getElementById('diffLoading');
+    if (loading) loading.classList.add('show');
+    showToast('正在对比 ' + srcEnv + ' 与 ' + tgtEnv + ' 的配置差异...', 'info');
+
+    setTimeout(function() {
+        if (loading) loading.classList.remove('show');
+        showToast('差异对比完成', 'success');
+    }, 1000);
+}
+
+/* ============ 同步差异（DC-P1-1 二次确认流程）============ */
+function syncDiff() {
+    var srcEnv = document.getElementById('srcEnv').value;
+    var tgtEnv = document.getElementById('tgtEnv').value;
+
+    // 第一次确认
+    if (!confirm('确认将 ' + srcEnv + ' 的配置同步到 ' + tgtEnv + '？\n此操作将覆盖 ' + tgtEnv + ' 环境的配置，请谨慎操作。')) return;
+
+    // 第二次确认（不可撤销提醒）
+    if (!confirm('二次确认：同步操作不可撤销，确认执行？')) return;
+
+    showToast('配置同步中...', 'info');
+    setTimeout(function() {
+        showToast(srcEnv + ' → ' + tgtEnv + ' 配置同步完成', 'success');
+    }, 2000);
+}
+
+/* ============ 搜索配置项（DC-P1-3）============ */
+function searchDiff(keyword) {
+    keyword = (keyword || '').toLowerCase().trim();
+    var rows = document.querySelectorAll('#diffTableBody tr');
+    var emptyRow = document.getElementById('emptyRow');
+    var visible = 0;
+
+    rows.forEach(function(row) {
+        // 跳过空状态行
+        if (row.id === 'emptyRow') return;
+
+        if (!keyword) {
+            row.style.display = '';
+            visible++;
+            return;
+        }
+
+        var text = row.textContent.toLowerCase();
+        var show = text.indexOf(keyword) > -1;
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+
+    // 控制空状态行显示
+    if (emptyRow) {
+        emptyRow.style.display = (visible === 0) ? '' : 'none';
+    }
+
+    // 更新统计提示
+    if (keyword) {
+        showToast('找到 ' + visible + ' 条匹配记录');
+    }
+}
+
+/* ============ 差异分类筛选 ============ */
+function filterDiff(type, btn) {
+    document.querySelectorAll('.diff-nav button').forEach(function(b) {
+        b.classList.remove('active');
+    });
+    btn.classList.add('active');
+
+    var rows = document.querySelectorAll('#diffTableBody tr');
+    var emptyRow = document.getElementById('emptyRow');
+    var visible = 0;
+
+    rows.forEach(function(row) {
+        // 跳过空状态行
+        if (row.id === 'emptyRow') return;
+
+        var show = false;
+        if (type === 'all') {
+            show = true;
+        } else if (type === 'modify') {
+            show = row.classList.contains('diff');
+        } else if (type === 'add') {
+            show = row.classList.contains('only-left');
+        } else if (type === 'del') {
+            show = row.classList.contains('only-right');
+        } else if (type === 'same') {
+            show = row.classList.contains('same');
+        }
+
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+
+    // 控制空状态行显示
+    if (emptyRow) {
+        emptyRow.style.display = (visible === 0) ? '' : 'none';
+    }
+}
+</script>
+</body>
+</html>

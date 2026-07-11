@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>影响分析预警 - 工作台</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+<script src="../../js/nav-helper.js"></script>
+<style>
+    /* 空数据状态 */
+    .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
+    .empty-state .empty-icon { font-size:64px; color:#cbd5e1; margin-bottom:16px; }
+    .empty-state .empty-text { font-size:14px; }
+
+    /* 加载中遮罩 */
+    .loading-mask { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center; z-index:9999; transition:opacity 0.3s; }
+    .loading-mask .spinner { font-size:32px; color:var(--primary); }
+    .loading-mask .loading-text { margin-left:12px; color:var(--text-secondary); font-size:14px; }
+
+    /* 已读状态 */
+    .alert-card-read { opacity:0.55; }
+    .read-badge { display:inline-block; background:#e2e8f0; color:#64748b; font-size:11px; padding:1px 6px; border-radius:3px; margin-left:8px; }
+
+    /* 卡片可点击 */
+    .alert-card { cursor:pointer; transition:box-shadow 0.2s; }
+    .alert-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.08); }
+
+    /* 统计卡可点击 */
+    .stat-card { cursor:pointer; transition:transform 0.15s; }
+    .stat-card:hover { transform:translateY(-2px); }
+
+    /* 搜索框 */
+    .search-box { position:relative; }
+    .search-box input { padding-left:30px; }
+    .search-box .search-icon { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#94a3b8; }
+
+    /* 加载更多 */
+    .load-more { text-align:center; padding:16px; }
+    .load-more button { min-width:200px; }
+
+    /* 拓扑提示 */
+    .topology-hint { padding:40px 20px; background:#f8fafc; border-radius:8px; text-align:center; }
+    .topology-hint .hint-text { color:var(--text-secondary); font-size:14px; margin-bottom:16px; }
+
+    /* ========== Modal 弹窗统一样式 ========== */
+    .modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:9998; }
+    .modal-box { background:#fff; border-radius:8px; width:640px; max-width:92vw; max-height: 88vh; height: auto; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+    .modal-header { padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:#fff; z-index:2; }
+    .modal-title { font-size:15px; font-weight:700; color:#1e293b; }
+    .modal-close { cursor:pointer; font-size:20px; color:#64748b; line-height:1; padding:0 4px; }
+    .modal-close:hover { color:#ef4444; }
+    .modal-body { padding:20px; }
+    .modal-footer { padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:10px; position:sticky; bottom:0; background:#fff; }
+    .modal-body .detail-section { margin-bottom:16px; }
+    .modal-body .detail-label { font-size:12px; color:#64748b; font-weight:600; display:block; margin-bottom:6px; }
+    .modal-body .detail-content { font-size:13px; color:#1e293b; line-height:1.8; }
+</style>
+</head>
+<body>
+
+<!-- 加载中遮罩 -->
+<div class="loading-mask" id="loadingMask">
+    <i class="fa fa-spinner fa-pulse spinner"></i>
+    <span class="loading-text">正在加载影响分析预警...</span>
+</div>
+
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-bell" style="color:var(--primary);margin-right:8px"></i>影响分析预警</h2>
+            <div class="page-desc">
+                首页 / 工作台 / 影响分析预警 - 监控与您相关的接口、文件服务变更及血缘影响 · 及时了解对您的业务系统的潜在影响
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="window.location.reload()"><i class="fa fa-refresh"></i> 刷新</button>
+        </div>
+    </div>
+
+    <!-- 说明横幅 -->
+    <div style="background:linear-gradient(90deg,#eff6ff,#fef2f2);border:1px solid #bfdbfe;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#1e40af;display:flex;align-items:center;gap:12px">
+        <i class="fa fa-info-circle" style="font-size:18px;color:#2563eb"></i>
+        <span><b>预警范围：</b>以下预警基于您所在系统的血缘关系自动计算。红色标记表示"需立即关注"，黄色表示"建议关注"，蓝色表示"信息通知"。点击任意一条预警可查看详细影响分析。</span>
+    </div>
+
+    <!-- ====== 顶部统计卡片 ====== -->
+    <div class="stat-grid" style="margin-bottom:16px">
+        <div class="stat-card" style="border-left:4px solid #dc2626" onclick="filterByStat('high')"><div class="stat-icon red"><i class="fa fa-exclamation-circle"></i></div><div class="stat-label">高优先级预警</div><div class="stat-value" style="color:#dc2626">5</div><div class="stat-foot">需立即处理</div></div>
+        <div class="stat-card" style="border-left:4px solid #d97706" onclick="filterByStat('medium')"><div class="stat-icon orange"><i class="fa fa-warning"></i></div><div class="stat-label">中优先级预警</div><div class="stat-value" style="color:#d97706">12</div><div class="stat-foot">建议关注</div></div>
+        <div class="stat-card" style="border-left:4px solid #2563eb" onclick="filterByStat('normal')"><div class="stat-icon primary"><i class="fa fa-info-circle"></i></div><div class="stat-label">普通通知</div><div class="stat-value">28</div><div class="stat-foot">信息更新</div></div>
+        <div class="stat-card" style="border-left:4px solid #7c3aed" onclick="filterByImpact()"><div class="stat-icon" style="background:#f3e8ff;color:#7c3aed"><i class="fa fa-share-alt"></i></div><div class="stat-label">受影响接口</div><div class="stat-value" style="color:#7c3aed">86</div><div class="stat-foot">提供/消费接口</div></div>
+    </div>
+
+    <!-- ====== Tab 切换 ====== -->
+    <div class="tabs" style="margin-bottom:16px">
+        <div class="tab-item active" onclick="switchTab('change')"><i class="fa fa-exchange"></i> 变更影响预警</div>
+        <div class="tab-item" onclick="switchTab('lineage')"><i class="fa fa-sitemap"></i> 血缘影响分析</div>
+        <div class="tab-item" onclick="switchTab('sla')"><i class="fa fa-bar-chart"></i> SLA 与传输预警</div>
+        <div class="tab-item" onclick="switchTab('history')"><i class="fa fa-history"></i> 预警历史</div>
+    </div>
+
+    <!-- ====== Tab 1: 变更影响预警 ====== -->
+    <div class="tab-panel active" id="panel-change">
+        <div class="filter-bar">
+            <div class="form-row">
+                <div class="form-item">
+                    <label>预警级别</label>
+                    <select class="form-control" id="filter-level">
+                        <option value="all">全部</option>
+                        <option value="high">高优先级</option>
+                        <option value="medium">中优先级</option>
+                        <option value="normal">普通通知</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>变更类型</label>
+                    <select class="form-control" id="filter-type">
+                        <option value="all">全部</option>
+                        <option value="field-change">字段变更</option>
+                        <option value="version-upgrade">版本升级</option>
+                        <option value="offline">服务下线</option>
+                        <option value="new-api">新增接口</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>影响范围</label>
+                    <select class="form-control" id="filter-scope">
+                        <option value="all">全部</option>
+                        <option value="consumer">我作为消费方</option>
+                        <option value="provider">我作为提供方</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label>关键词搜索</label>
+                    <div class="search-box">
+                        <i class="fa fa-search search-icon"></i>
+                        <input type="text" class="form-control" id="filter-keyword" placeholder="搜索接口编号、名称..." onkeyup="filterAlerts()">
+                    </div>
+                </div>
+                <div class="form-item" style="gap:8px">
+                    <button class="btn btn-primary" onclick="filterAlerts()"><i class="fa fa-search"></i> 筛选</button>
+                    <button class="btn btn-default" onclick="resetAlertFilters()"><i class="fa fa-eraser"></i> 重置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 预警卡片列表 -->
+        <div id="alert-card-list">
+            <!-- 卡片1：高优先级 - 服务下线 -->
+            <div class="card alert-card" id="alert-ALERT-060518" data-level="high" data-type="offline" data-scope="consumer" data-keyword="API-EBANK-0005 网银客户登录接口 v3.x 即将下线" style="margin-bottom:12px;background:linear-gradient(135deg,#fff,#fff7ed);border:1px solid #fed7aa" onclick="showAlertDetail(this)">
+                <div class="card-header">
+                    <div class="card-title" style="color:#dc2626"><i class="fa fa-exclamation-circle"></i> 【高优先级】API-EBANK-0005 网银客户登录接口 v3.x 即将下线</div>
+                    <div class="card-action">
+                        <span style="color:#64748b;font-size:12px">2026-06-05 10:22 · 已影响 12 个系统</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                        <div><b>变更类型：</b>服务下线</div>
+                        <div><b>影响方式：</b>您是消费方</div>
+                        <div><b>影响系统：</b>电子渠道系统</div>
+                        <div><b>计划下线：</b>2026-07-15</div>
+                        <div><b>替代版本：</b>v4.0 已发布</div>
+                        <div><b>影响调用量：</b>约 8,200 次/日</div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px">
+                        <div style="font-weight:600;margin-bottom:6px;color:var(--primary)"><i class="fa fa-lightbulb-o"></i> 影响分析：</div>
+                        <div style="color:var(--text-secondary);font-size:13px;line-height:1.8">
+                            您所在的电子渠道系统（E-BANK）中共有 5 处代码调用 API-EBANK-0005 v3.x 版本接口。该版本计划于 2026-07-15 正式下线，请求将被网关拒绝。建议在 2026-07-01 前完成 v4.0 版本的升级。v4.0 版本提供更强的认证机制和更好的性能，主要差异：新增 device_id 字段，移除 legacy_session 参数。
+                        </div>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        <button class="btn btn-primary btn-sm" onclick="navTo('pages/lineage/graph-view.html',['首页','追溯与血缘','血缘图谱'],{code:'API-EBANK-0005',type:'API'})"><i class="fa fa-sitemap"></i> 查看完整血缘影响</button>
+                        <button class="btn btn-default btn-sm" onclick="navTo('pages/application/api-call-apply.html',['首页','工作台','我的申请','接口服务调用申请'],{code:'API-EBANK-0005',name:'网银客户登录接口'})"><i class="fa fa-plus-circle"></i> 申请新版本调用</button>
+                        <button class="btn btn-link btn-sm" onclick="subscribeUpdate(this)"><i class="fa fa-envelope-o"></i> 订阅后续更新</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 卡片2：高优先级 - 字段变更 -->
+            <div class="card alert-card" id="alert-ALERT-060517" data-level="high" data-type="field-change" data-scope="consumer" data-keyword="API-CUS-0001 客户基本信息查询 字段变更" style="margin-bottom:12px;background:linear-gradient(135deg,#fff,#fff7ed);border:1px solid #fed7aa" onclick="showAlertDetail(this)">
+                <div class="card-header">
+                    <div class="card-title" style="color:#dc2626"><i class="fa fa-exclamation-circle"></i> 【高优先级】API-CUS-0001 客户基本信息查询字段变更</div>
+                    <div class="card-action">
+                        <span style="color:#64748b;font-size:12px">2026-06-05 14:22 · 影响 8 个下游</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                        <div><b>变更类型：</b>字段变更</div>
+                        <div><b>影响方式：</b>您是消费方</div>
+                        <div><b>提供方系统：</b>核心业务系统</div>
+                        <div><b>变更日期：</b>2026-06-01 生效</div>
+                        <div><b>新增字段：</b>customer_level、customer_tag</div>
+                        <div><b>兼容性：</b>向后兼容</div>
+                    </div>
+                    <div style="padding:12px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:12px">
+                        <div style="font-weight:600;margin-bottom:6px;color:var(--primary)"><i class="fa fa-lightbulb-o"></i> 影响分析：</div>
+                        <div style="color:var(--text-secondary);font-size:13px;line-height:1.8">
+                            本次变更为纯新增字段，现有调用不受影响。如果您的系统需要使用客户等级信息，可在下次发布时直接使用。建议关注后续变更通知，避免未来版本引入破坏性变更。
+                        </div>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        <button class="btn btn-primary btn-sm" onclick="navTo('pages/lineage/graph-view.html',['首页','追溯与血缘','血缘图谱'],{code:'API-CUS-0001',type:'API'})"><i class="fa fa-sitemap"></i> 查看血缘影响</button>
+                        <button class="btn btn-default btn-sm" onclick="govNav('pages/interface/change-history.html',['首页','工作台','影响分析预警','接口变更记录'],{code:'API-CUS-0001',name:'客户基本信息查询'})"><i class="fa fa-history"></i> 查看变更记录</button>
+                        <button class="btn btn-link btn-sm" onclick="markAsRead(this)"><i class="fa fa-check-circle-o"></i> 标记已阅读</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 卡片3：中优先级 - 版本升级 -->
+            <div class="card alert-card" id="alert-ALERT-060428" data-level="medium" data-type="version-upgrade" data-scope="consumer" data-keyword="API-DEP-0012 账户余额查询 v3.1 v3.2 版本升级" style="margin-bottom:12px" onclick="showAlertDetail(this)">
+                <div class="card-header">
+                    <div class="card-title" style="color:#d97706"><i class="fa fa-warning"></i> 【中优先级】API-DEP-0012 账户余额查询 v3.1 → v3.2 版本升级</div>
+                    <div class="card-action">
+                        <span style="color:#64748b;font-size:12px">2026-06-05 10:15 · 影响 6 个系统</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                        <div><b>变更类型：</b>版本升级</div>
+                        <div><b>影响方式：</b>您是消费方</div>
+                        <div><b>提供方：</b>核心业务系统</div>
+                        <div><b>变更日期：</b>2026-06-10</div>
+                        <div><b>新增字段：</b>frozen_amount（冻结金额）</div>
+                        <div><b>兼容性：</b>完全兼容</div>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        <button class="btn btn-default btn-sm" onclick="navTo('pages/lineage/graph-view.html',['首页','追溯与血缘','血缘图谱'],{code:'API-DEP-0012',type:'API'})"><i class="fa fa-sitemap"></i> 查看完整分析</button>
+                        <button class="btn btn-link btn-sm" onclick="markAsRead(this)"><i class="fa fa-check-circle-o"></i> 标记已阅读</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 卡片4：中优先级 - 字段变更 -->
+            <div class="card alert-card" id="alert-ALERT-060420" data-level="medium" data-type="field-change" data-scope="consumer" data-keyword="FILE-RECON-0156 银联清分对账文件 字段顺序调整" style="margin-bottom:12px" onclick="showAlertDetail(this)">
+                <div class="card-header">
+                    <div class="card-title" style="color:#d97706"><i class="fa fa-warning"></i> 【中优先级】FILE-RECON-0156 银联清分对账文件字段顺序调整</div>
+                    <div class="card-action">
+                        <span style="color:#64748b;font-size:12px">2026-06-03 11:30</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                        <div><b>变更类型：</b>字段变更</div>
+                        <div><b>影响方式：</b>您是消费方</div>
+                        <div><b>提供方：</b>支付清算系统</div>
+                        <div><b>变更日期：</b>2026-06-20</div>
+                        <div><b>调整内容：</b>字段顺序调整，新增 3 个字段</div>
+                        <div><b>影响：</b>需调整文件解析逻辑</div>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        <button class="btn btn-default btn-sm" onclick="navTo('pages/standard/file-format.html',['首页','标准规范','文件格式规范'],{code:'FILE-RECON-0156'})"><i class="fa fa-file-text-o"></i> 查阅文件规范</button>
+                        <button class="btn btn-link btn-sm" onclick="markAsRead(this)"><i class="fa fa-check-circle-o"></i> 标记已阅读</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 卡片5：普通通知 - 新增接口 -->
+            <div class="card alert-card" id="alert-ALERT-060412" data-level="normal" data-type="new-api" data-scope="consumer" data-keyword="API-PAY-0021 行内转账接口 异步回调 新增" style="margin-bottom:12px" onclick="showAlertDetail(this)">
+                <div class="card-header">
+                    <div class="card-title" style="color:#2563eb"><i class="fa fa-info-circle"></i> 【普通通知】API-PAY-0021 行内转账接口新增异步回调</div>
+                    <div class="card-action">
+                        <span style="color:#64748b;font-size:12px">2026-06-04 09:12</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+                        <div><b>变更类型：</b>新增接口</div>
+                        <div><b>影响方式：</b>您可作为消费方</div>
+                        <div><b>提供方：</b>支付清算系统</div>
+                        <div><b>生效日期：</b>2026-06-10</div>
+                        <div><b>新接口：</b>API-PAY-0021-CB（异步回调）</div>
+                        <div><b>可选接入：</b>非强制</div>
+                    </div>
+                    <div onclick="event.stopPropagation()">
+                        <button class="btn btn-default btn-sm" onclick="navTo('pages/interface/api-detail.html',['首页','服务目录','接口服务清单'],{code:'API-PAY-0021'})"><i class="fa fa-search"></i> 查看接口详情</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 空数据状态 -->
+        <div class="empty-state" id="emptyState" style="display:none">
+            <div class="empty-icon"><i class="fa fa-inbox"></i></div>
+            <div class="empty-text">暂无影响分析预警</div>
+        </div>
+
+        <!-- 加载更多 -->
+        <div class="load-more" id="loadMoreBtn">
+            <button class="btn btn-default" onclick="showToast('加载更多预警卡片...')"><i class="fa fa-angle-down"></i> 加载更多（共 45 条，已显示 5 条）</button>
+        </div>
+    </div>
+
+    <!-- ====== Tab 2: 血缘影响分析 ====== -->
+    <div class="tab-panel" id="panel-lineage" style="display:none">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-sitemap"></i> 我相关接口的血缘拓扑</div>
+                <div class="card-action">
+                    <a href="javascript:navTo('pages/lineage/graph-view.html',['首页','追溯与血缘','血缘图谱'],{})">查看完整图谱</a>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- 拓扑提示：替代原48px图标占位 -->
+                <div class="topology-hint">
+                    <div class="hint-text"><i class="fa fa-info-circle" style="margin-right:6px;color:var(--primary)"></i>血缘拓扑图需在血缘图谱页面查看</div>
+                    <button class="btn btn-primary" onclick="navTo('pages/lineage/graph-view.html',['首页','追溯与血缘','血缘图谱'],{})"><i class="fa fa-sitemap"></i> 前往血缘图谱</button>
+                </div>
+                <div style="color:var(--text-secondary);margin:16px 0;text-align:center">您所关联的 86 个接口和文件服务，共涉及 23 个业务系统，468 个血缘关系</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>关系类型</th>
+                            <th>数量</th>
+                            <th>说明</th>
+                            <th class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>我作为提供方</td><td class="num">28</td><td>由我系统对外提供的接口和文件服务</td><td class="text-center op-col"><a href="javascript:navTo('pages/lineage/list-view.html',['首页','追溯与血缘','血缘列表'],{role:'provider'})">查看列表</a></td></tr>
+                        <tr><td>我作为消费方</td><td class="num">58</td><td>我系统依赖并调用的外部接口和文件</td><td class="text-center op-col"><a href="javascript:navTo('pages/lineage/list-view.html',['首页','追溯与血缘','血缘列表'],{role:'consumer'})">查看列表</a></td></tr>
+                        <tr><td>上游接口依赖</td><td class="num">186</td><td>我的消费方接口再依赖的上游系统</td><td class="text-center op-col"><a href="javascript:navTo('pages/lineage/list-view.html',['首页','追溯与血缘','血缘列表'],{role:'upstream'})">查看分析</a></td></tr>
+                        <tr><td>下游调用方</td><td class="num">124</td><td>依赖我提供的服务的下游系统</td><td class="text-center op-col"><a href="javascript:navTo('pages/lineage/list-view.html',['首页','追溯与血缘','血缘列表'],{role:'downstream'})">查看分析</a></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Tab 3: SLA 与传输预警 ====== -->
+    <div class="tab-panel" id="panel-sla" style="display:none">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-bar-chart"></i> SLA 指标与传输监控</div>
+            </div>
+            <div class="card-body">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>服务名称</th>
+                            <th>服务类型</th>
+                            <th>今日调用量</th>
+                            <th>平均响应</th>
+                            <th class="text-center">成功率</th>
+                            <th class="text-center">SLA 达标</th>
+                            <th class="text-center">状态</th>
+                            <th class="text-center op-col">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>API-CUS-0001 客户基本信息查询</td><td><span class="tag tag-info">REST API</span></td><td class="num">18,246</td><td>85ms</td><td class="text-center">99.98%</td><td class="text-center"><span class="tag tag-success">达标</span></td><td class="text-center"><span class="tag tag-success">正常</span></td><td class="text-center op-col"><a href="javascript:navTo('pages/report/sla-report.html',['首页','治理总览','SLA报表'],{code:'API-CUS-0001'})">详情</a></td></tr>
+                        <tr><td>API-DEP-0012 账户余额查询</td><td><span class="tag tag-info">REST API</span></td><td class="num">32,812</td><td>128ms</td><td class="text-center">99.82%</td><td class="text-center"><span class="tag tag-warning">关注</span></td><td class="text-center"><span class="tag tag-warning">响应偏高</span></td><td class="text-center op-col"><a href="javascript:navTo('pages/report/sla-report.html',['首页','治理总览','SLA报表'],{code:'API-DEP-0012'})">详情</a></td></tr>
+                        <tr><td>FILE-PAY-0088 大额支付日报表</td><td><span class="tag tag-info">文件传输</span></td><td class="num">1</td><td>2分15秒</td><td class="text-center">100%</td><td class="text-center"><span class="tag tag-success">达标</span></td><td class="text-center"><span class="tag tag-success">正常</span></td><td class="text-center op-col"><a href="javascript:navTo('pages/report/sla-report.html',['首页','治理总览','SLA报表'],{code:'FILE-PAY-0088'})">详情</a></td></tr>
+                        <tr><td>FILE-RECON-0156 银联清分对账文件</td><td><span class="tag tag-info">文件传输</span></td><td class="num">1</td><td>5分42秒</td><td class="text-center">96.2%</td><td class="text-center"><span class="tag tag-danger">不达标</span></td><td class="text-center"><span class="tag tag-danger">延迟告警</span></td><td class="text-center op-col"><a href="javascript:navTo('pages/report/sla-report.html',['首页','治理总览','SLA报表'],{code:'FILE-RECON-0156'})">详情</a></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Tab 4: 预警历史 ====== -->
+    <div class="tab-panel" id="panel-history" style="display:none">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><i class="fa fa-history"></i> 历史预警记录</div>
+                <div class="card-action">
+                    <a href="javascript:showToast('正在导出历史记录...')">导出</a>
+                </div>
+            </div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>预警编号</th>
+                        <th>预警标题</th>
+                        <th class="text-center">级别</th>
+                        <th class="text-center">触发时间</th>
+                        <th class="text-center">状态</th>
+                        <th class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td class="num">ALERT-060518</td><td>API-EBANK-0005 版本即将下线</td><td class="text-center"><span class="tag tag-danger">高</span></td><td class="text-center">2026-06-05 10:22</td><td class="text-center"><span class="tag tag-warning">待处理</span></td><td class="text-center op-col"><a href="javascript:viewAlertDetail('ALERT-060518')">查看</a></td></tr>
+                    <tr><td class="num">ALERT-060517</td><td>API-CUS-0001 字段变更</td><td class="text-center"><span class="tag tag-danger">高</span></td><td class="text-center">2026-06-05 14:22</td><td class="text-center"><span class="tag tag-success">已处理</span></td><td class="text-center op-col"><a href="javascript:viewAlertDetail('ALERT-060517')">查看</a></td></tr>
+                    <tr><td class="num">ALERT-060428</td><td>API-DEP-0012 响应时间偏高</td><td class="text-center"><span class="tag tag-warning">中</span></td><td class="text-center">2026-06-04 18:22</td><td class="text-center"><span class="tag tag-success">已处理</span></td><td class="text-center op-col"><a href="javascript:viewAlertDetail('ALERT-060428')">查看</a></td></tr>
+                    <tr><td class="num">ALERT-060420</td><td>FILE-RECON-0156 文件传输延迟</td><td class="text-center"><span class="tag tag-warning">中</span></td><td class="text-center">2026-06-04 11:30</td><td class="text-center"><span class="tag tag-success">已处理</span></td><td class="text-center op-col"><a href="javascript:viewAlertDetail('ALERT-060420')">查看</a></td></tr>
+                    <tr><td class="num">ALERT-060412</td><td>API-PAY-0021 接口新增功能通知</td><td class="text-center"><span class="tag tag-default">低</span></td><td class="text-center">2026-06-04 09:12</td><td class="text-center"><span class="tag tag-success">已阅读</span></td><td class="text-center op-col"><a href="javascript:viewAlertDetail('ALERT-060412')">查看</a></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- ========== 预警详情 Modal ========== -->
+<div class="modal-overlay" id="alertDetailModal" style="display:none">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span class="modal-title" id="alertDetailTitle">预警详情</span>
+            <span class="modal-close" onclick="closeAlertDetailModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="detail-section">
+                <span class="detail-label">预警级别</span>
+                <span id="alertDetailLevel"></span>
+            </div>
+            <div class="detail-section">
+                <span class="detail-label">影响范围</span>
+                <div id="alertDetailScope" class="detail-content"></div>
+            </div>
+            <div class="detail-section">
+                <span class="detail-label">受影响消费方列表</span>
+                <div id="alertDetailConsumers" class="detail-content"></div>
+            </div>
+            <div class="detail-section">
+                <span class="detail-label">变更前后对比</span>
+                <div id="alertDetailCompare" class="detail-content"></div>
+            </div>
+            <div class="detail-section">
+                <span class="detail-label">处理建议</span>
+                <div id="alertDetailAdvice" class="detail-content" style="padding:10px;background:#f8fafc;border-radius:6px;"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeAlertDetailModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script src="../../js/mock-data.js"></script>
+<script>
+/**
+ * Tab 切换函数
+ * @param {string} tab - Tab标识：change/lineage/sla/history
+ */
+function switchTab(tab) {
+    document.querySelectorAll('.tab-item').forEach(function(el) { el.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(el) { el.classList.remove('active'); el.style.display = 'none'; });
+    var tabMap = { change: 0, lineage: 1, sla: 2, history: 3 };
+    document.querySelectorAll('.tab-item').forEach(function(el, idx) {
+        if (idx === tabMap[tab]) el.classList.add('active');
+    });
+    var panel = document.getElementById('panel-' + tab);
+    if (panel) { panel.classList.add('active'); panel.style.display = 'block'; }
+}
+
+/**
+ * 统一导航函数 — 接受面包屑数组参数
+ * @param {string} url - 目标页面URL
+ * @param {Array} breadcrumb - 面包屑路径数组
+ * @param {object} params - URL参数
+ */
+function navTo(url, breadcrumb, params) {
+    var bc = breadcrumb || ['首页', '工作台', '影响分析预警'];
+    if (window.govNav) { window.govNav(url, bc, params || {}); return; }
+    try {
+        if (window.parent && window.parent.governancePlatform && typeof window.parent.governancePlatform.navigate === 'function') {
+            window.parent.governancePlatform.navigate(url, bc, params || {});
+            return;
+        }
+    } catch (e) { /* fall through */ }
+    var fallback = '../../index.html?nav=' + encodeURIComponent(url);
+    if (params && typeof params === 'object') {
+        var qs = Object.keys(params).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(params[k]);}).join('&');
+        if (qs) fallback += '&' + qs;
+    }
+    try { window.parent.location.href = fallback; } catch(e) { window.location.href = fallback; }
+}
+
+/**
+ * 筛选预警卡片 — 读取筛选区下拉值和关键词，控制卡片显示/隐藏
+ */
+function filterAlerts() {
+    var level = document.getElementById('filter-level').value;
+    var type = document.getElementById('filter-type').value;
+    var scope = document.getElementById('filter-scope').value;
+    var keyword = document.getElementById('filter-keyword').value.toLowerCase().trim();
+
+    var cards = document.querySelectorAll('#alert-card-list .alert-card');
+    var visibleCount = 0;
+
+    cards.forEach(function(card) {
+        var cardLevel = card.getAttribute('data-level');
+        var cardType = card.getAttribute('data-type');
+        var cardScope = card.getAttribute('data-scope');
+        var cardKeyword = (card.getAttribute('data-keyword') || '').toLowerCase();
+
+        var levelMatch = (level === 'all' || level === cardLevel);
+        var typeMatch = (type === 'all' || type === cardType);
+        var scopeMatch = (scope === 'all' || scope === cardScope);
+        var keywordMatch = (keyword === '' || cardKeyword.indexOf(keyword) >= 0);
+
+        if (levelMatch && typeMatch && scopeMatch && keywordMatch) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    // 控制空数据状态和加载更多按钮的显隐
+    var emptyState = document.getElementById('emptyState');
+    var loadMore = document.getElementById('loadMoreBtn');
+    if (visibleCount === 0) {
+        if (emptyState) emptyState.style.display = 'block';
+        if (loadMore) loadMore.style.display = 'none';
+    } else {
+        if (emptyState) emptyState.style.display = 'none';
+        if (loadMore) loadMore.style.display = 'block';
+    }
+}
+
+/**
+ * 重置筛选条件 — 所有下拉恢复"全部"，关键词清空，显示所有卡片
+ */
+function resetAlertFilters() {
+    document.getElementById('filter-level').value = 'all';
+    document.getElementById('filter-type').value = 'all';
+    document.getElementById('filter-scope').value = 'all';
+    document.getElementById('filter-keyword').value = '';
+    filterAlerts();
+}
+
+/**
+ * 统计卡点击联动筛选
+ * @param {string} level - high/medium/normal/all
+ */
+function filterByStat(level) {
+    if (level === 'all') {
+        resetAlertFilters();
+    } else {
+        document.getElementById('filter-level').value = level;
+        document.getElementById('filter-type').value = 'all';
+        document.getElementById('filter-scope').value = 'all';
+        document.getElementById('filter-keyword').value = '';
+        filterAlerts();
+    }
+    // 滚动到筛选区域
+    var filterBar = document.querySelector('.filter-bar');
+    if (filterBar) filterBar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * 受影响接口统计卡点击 — 切换到血缘影响分析Tab并展示受影响接口列表
+ */
+function filterByImpact() {
+    switchTab('lineage');
+    showToast('共86个受影响接口和文件服务');
+    var panel = document.getElementById('panel-lineage');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * 卡片点击查看详情（用alert占位，待接入详情页）
+ * @param {HTMLElement} card - 卡片元素
+ */
+function showAlertDetail(card) {
+    /* 提取预警标题 */
+    var titleEl = card.querySelector('.card-title');
+    var titleText = titleEl ? titleEl.textContent.trim() : '未知预警';
+
+    /* 提取预警级别 */
+    var level = card.getAttribute('data-level') || 'normal';
+    var levelMap = {
+        'high': { text: '高优先级', tag: 'tag-danger' },
+        'medium': { text: '中优先级', tag: 'tag-warning' },
+        'normal': { text: '普通通知', tag: 'tag-info' }
+    };
+    var lv = levelMap[level] || levelMap['normal'];
+
+    /* 提取影响范围信息（grid 中的键值对） */
+    var gridDivs = card.querySelectorAll('.card-body > div:first-child > div');
+    var scopeHtml = '';
+    gridDivs.forEach(function(d) {
+        scopeHtml += '<div style="padding:3px 0;border-bottom:1px dashed #e2e8f0;">' + d.innerHTML + '</div>';
+    });
+
+    /* 提取影响分析文本 */
+    var analysisDivs = card.querySelectorAll('.card-body > div');
+    var analysisText = '';
+    for (var i = 0; i < analysisDivs.length; i++) {
+        var innerDivs = analysisDivs[i].querySelectorAll('div');
+        if (innerDivs.length > 1) {
+            analysisText = innerDivs[innerDivs.length - 1].textContent;
+        }
+    }
+
+    /* 构建受影响消费方列表（mock） */
+    var consumers = ['电子渠道系统', '手机银行APP', '微信银行', '柜面系统', '风控引擎'];
+    var consumerHtml = consumers.map(function(c) {
+        return '<span class="tag tag-default" style="margin:2px;font-size:11px;">' + c + '</span>';
+    }).join('');
+
+    /* 构建变更前后对比（mock） */
+    var compareHtml = '<table class="data-table" style="margin-top:8px;"><thead><tr><th>对比项</th><th>变更前</th><th>变更后</th></tr></thead><tbody>' +
+        '<tr><td>版本</td><td>v3.x</td><td>v4.0</td></tr>' +
+        '<tr><td>认证方式</td><td>Session Token</td><td>JWT + device_id</td></tr>' +
+        '<tr><td>legacy_session</td><td>支持</td><td>已移除</td></tr>' +
+        '<tr><td>device_id</td><td>无</td><td>新增（必填）</td></tr>' +
+        '</tbody></table>';
+
+    /* 填充弹窗内容 */
+    document.getElementById('alertDetailTitle').innerHTML = titleText;
+    document.getElementById('alertDetailLevel').innerHTML = '<span class="tag ' + lv.tag + '">' + lv.text + '</span>';
+    document.getElementById('alertDetailScope').innerHTML = scopeHtml || '<span style="color:#94a3b8;">暂无影响范围信息</span>';
+    document.getElementById('alertDetailConsumers').innerHTML = consumerHtml;
+    document.getElementById('alertDetailCompare').innerHTML = compareHtml;
+    document.getElementById('alertDetailAdvice').innerHTML = analysisText || '建议关注后续变更通知，及时完成版本升级。';
+
+    /* 显示弹窗 */
+    document.getElementById('alertDetailModal').style.display = 'flex';
+}
+
+/**
+ * 关闭预警详情弹窗
+ */
+function closeAlertDetailModal() {
+    document.getElementById('alertDetailModal').style.display = 'none';
+}
+
+/**
+ * 标记已阅读 — 卡片添加"已读"标记并降低透明度
+ * @param {HTMLElement} btn - 按钮元素
+ */
+function markAsRead(btn) {
+    var card = btn.closest('.alert-card');
+    if (!card) return;
+    if (card.classList.contains('alert-card-read')) return;
+
+    card.classList.add('alert-card-read');
+    // 在标题后追加"已读"徽章
+    var title = card.querySelector('.card-title');
+    if (title && !title.querySelector('.read-badge')) {
+        var badge = document.createElement('span');
+        badge.className = 'read-badge';
+        badge.textContent = '已读';
+        title.appendChild(badge);
+    }
+    // 更新按钮状态
+    btn.innerHTML = '<i class="fa fa-check-circle"></i> 已阅读';
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    btn.style.cursor = 'default';
+}
+
+/**
+ * 订阅后续更新 — 按钮文字变为"已订阅"并禁用
+ * @param {HTMLElement} btn - 按钮元素
+ */
+function subscribeUpdate(btn) {
+    btn.innerHTML = '<i class="fa fa-check"></i> 已订阅';
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    btn.style.cursor = 'default';
+}
+
+/**
+ * Tab4"查看"链接 — 跳转回Tab1并滚动到对应预警卡片
+ * @param {string} alertId - 预警编号（如 ALERT-060518）
+ */
+function viewAlertDetail(alertId) {
+    switchTab('change');
+    setTimeout(function() {
+        var card = document.getElementById('alert-' + alertId);
+        if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // 高亮闪烁提示
+            card.style.transition = 'box-shadow 0.3s';
+            card.style.boxShadow = '0 0 0 3px #2563eb';
+            setTimeout(function() { card.style.boxShadow = ''; }, 2000);
+        }
+    }, 100);
+}
+
+/**
+ * 页面加载完成后隐藏加载遮罩
+ */
+window.addEventListener('load', function() {
+    setTimeout(function() {
+        var mask = document.getElementById('loadingMask');
+        if (mask) {
+            mask.style.opacity = '0';
+            setTimeout(function() { mask.style.display = 'none'; }, 300);
+        }
+    }, 500);
+});
+</script>
+</body>
+</html>

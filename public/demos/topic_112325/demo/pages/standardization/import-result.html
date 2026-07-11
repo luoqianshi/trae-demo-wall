@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>改造结果导入 - 存量接口改造</title>
+    <link rel="stylesheet" href="../../css/style.css">
+    <link rel="stylesheet" href="../../css/layout.css">
+    <link rel="stylesheet" href="../../fonts/font-awesome/css/font-awesome.min.css">
+    <style>
+        /* ====== 拖拽上传区 ====== */
+        .upload-zone { border:2px dashed #cbd5e1; border-radius:var(--radius); padding:32px 20px; text-align:center; background:#f8fafc; transition:all .2s; cursor:pointer; }
+        .upload-zone:hover { border-color:var(--primary); background:#eff6ff; }
+        .upload-zone.dragover { border-color:var(--primary); background:#eff6ff; }
+        .upload-zone .upload-icon { font-size:40px; color:#94a3b8; margin-bottom:8px; }
+        .upload-zone .upload-title { font-size:14px; font-weight:600; color:var(--text-primary); margin-top:6px; }
+        .upload-zone .upload-hint { font-size:12px; color:var(--text-secondary); margin-top:4px; }
+        .upload-zone .upload-formats { margin-top:10px; }
+        .upload-zone .upload-formats .fmt-tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; margin:0 2px; }
+        .fmt-xlsx { background:#d1fae5; color:#065f46; }
+        .fmt-csv { background:#dbeafe; color:#1e40af; }
+
+        /* ====== 已上传文件信息 ====== */
+        .file-info-row { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius); margin-top:16px; }
+        .file-info-row .fi-left { display:flex; align-items:center; gap:8px; font-size:13px; }
+        .file-info-row .fi-name { font-weight:600; color:var(--text-primary); }
+        .file-info-row .fi-meta { font-size:12px; color:var(--text-secondary); }
+        .file-info-row .fi-actions { display:flex; align-items:center; gap:8px; }
+
+        /* ====== 导入操作按钮区 ====== */
+        .import-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+
+        /* ====== 预览统计区 ====== */
+        .preview-summary { display:flex; align-items:center; gap:16px; padding:10px 16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:var(--radius); margin-bottom:16px; font-size:13px; }
+        .preview-summary .ps-item { display:flex; align-items:center; gap:4px; }
+        .preview-summary .ps-num { font-weight:700; font-family:'Segoe UI',sans-serif; }
+
+        /* ====== 无效行高亮 ====== */
+        .data-table tbody tr.row-invalid { background:#fef2f2 !important; }
+        .data-table tbody tr.row-invalid:hover { background:#fee2e2 !important; }
+
+        /* ====== 校验结果标签 ====== */
+        .check-valid { color:var(--success); font-weight:600; }
+        .check-invalid { color:var(--danger); font-weight:600; }
+
+        /* ====== 导入状态标签 ====== */
+        .import-status { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+        .is-success { background:#d1fae5; color:#065f46; }
+        .is-partial { background:#fef3c7; color:#92400e; }
+        .is-failed { background:#fee2e2; color:#b91c1c; }
+
+        /* ====== 详情弹窗 ====== */
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:9999; }
+        .modal-overlay.show { display:block; }
+        .modal-box { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:8px; width:820px; max-width:92vw; max-height: 85vh; height: auto; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,.15); }
+        .modal-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
+        .modal-header h3 { font-size:15px; color:var(--text-primary); margin:0; }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--border); flex-shrink:0; }
+
+        /* ====== 空状态提示 ====== */
+        .empty-preview { text-align:center; padding:40px 20px; color:var(--text-light); }
+        .empty-preview i { font-size:36px; margin-bottom:8px; display:block; }
+    </style>
+<script src="../../js/nav-helper.js"></script>
+</head>
+<body>
+<div class="page-wrapper">
+
+    <!-- ====== 页面标题区 ====== -->
+    <div class="page-header">
+        <div class="title-group">
+            <h2><i class="fa fa-cloud-upload" style="color:var(--primary);margin-right:8px"></i>改造结果导入</h2>
+            <div class="page-desc">
+                首页 / 存量接口改造 / 改造结果导入 - 通过 Excel/CSV 文件导入接口改造结果，更新改造状态。后期可通过接口同步 ESB 改造结果
+            </div>
+        </div>
+        <div class="action-group">
+            <button class="btn btn-default" onclick="downloadTemplate()"><i class="fa fa-download"></i> 下载导入模板</button>
+        </div>
+    </div>
+
+    <!-- ====== 导入操作区 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-upload"></i> 文件上传</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)">支持 .xlsx / .csv 格式 · 单文件 ≤ 20MB</span></div>
+        </div>
+        <div class="card-body">
+            <!-- 拖拽上传区 -->
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <i class="fa fa-cloud-upload upload-icon"></i>
+                <div class="upload-title">点击或拖拽文件到此处上传</div>
+                <div class="upload-hint">请使用标准导入模板，否则可能无法解析</div>
+                <div class="upload-formats">
+                    <span class="fmt-tag fmt-xlsx"><i class="fa fa-file-excel-o"></i> .xlsx</span>
+                    <span class="fmt-tag fmt-csv"><i class="fa fa-file-text-o"></i> .csv</span>
+                </div>
+            </div>
+            <input type="file" id="fileInput" style="display:none" accept=".xlsx,.csv" onchange="handleFileSelect(this)">
+
+            <!-- 已上传文件信息（默认隐藏） -->
+            <div id="fileInfoArea" style="display:none">
+                <div class="file-info-row">
+                    <div class="fi-left">
+                        <i class="fa fa-file-excel-o" style="font-size:20px;color:var(--success)"></i>
+                        <div>
+                            <div class="fi-name" id="fileName">—</div>
+                            <div class="fi-meta" id="fileMeta">—</div>
+                        </div>
+                    </div>
+                    <div class="fi-actions">
+                        <span class="tag tag-success" style="font-size:11px" id="parseTag">解析成功</span>
+                        <a class="btn-link" style="color:var(--danger)" onclick="removeFile()"><i class="fa fa-trash-o"></i> 移除</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 导入操作按钮 -->
+            <div class="import-actions">
+                <button class="btn btn-default" onclick="resetUpload()"><i class="fa fa-eraser"></i> 清空</button>
+                <button class="btn btn-primary" id="startImportBtn" disabled style="opacity:.5;cursor:not-allowed" onclick="startImport()"><i class="fa fa-play"></i> 开始导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 导入预览区（导入后显示） ====== -->
+    <div class="card" id="previewCard" style="display:none">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-table"></i> 导入预览</div>
+            <div class="card-action">
+                <span style="font-size:12px;color:var(--text-secondary)" id="previewCountText">—</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <!-- 预览统计区 -->
+            <div class="preview-summary">
+                <div class="ps-item">共 <span class="ps-num" id="psTotal">0</span> 条</div>
+                <div class="ps-item">有效 <span class="ps-num" style="color:var(--success)" id="psValid">0</span> 条</div>
+                <div class="ps-item">无效 <span class="ps-num" style="color:var(--danger)" id="psInvalid">0</span> 条</div>
+            </div>
+
+            <!-- 预览表格 -->
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:50px">序号</th>
+                            <th style="width:160px">接口编码</th>
+                            <th>接口名称</th>
+                            <th style="width:100px" class="text-center">改造状态</th>
+                            <th style="width:130px" class="text-center">完成时间</th>
+                            <th>备注</th>
+                            <th style="width:180px" class="text-center">校验结果</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewTableBody"></tbody>
+                </table>
+            </div>
+
+            <!-- 预览底部操作 -->
+            <div class="import-actions">
+                <button class="btn btn-default" onclick="cancelImport()"><i class="fa fa-times"></i> 取消</button>
+                <button class="btn btn-primary" id="confirmImportBtn" onclick="confirmImport()"><i class="fa fa-check"></i> 确认导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 导入历史记录 ====== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title"><i class="fa fa-history"></i> 导入历史记录</div>
+            <div class="card-action"><span style="font-size:12px;color:var(--text-secondary)">共 <span class="text-primary" id="historyCount">6</span> 条记录</span></div>
+        </div>
+        <div class="table-wrapper" style="border-left:none;border-right:none;border-top:none;border-radius:0">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:120px">批次号</th>
+                        <th style="width:160px">导入时间</th>
+                        <th>文件名</th>
+                        <th style="width:90px" class="text-center">操作人</th>
+                        <th style="width:80px" class="text-center">成功数</th>
+                        <th style="width:80px" class="text-center">失败数</th>
+                        <th style="width:90px" class="text-center">状态</th>
+                        <th style="width:120px" class="text-center op-col">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody"></tbody>
+            </table>
+        </div>
+        <div class="pagination">
+            <div class="page-info">共 <span class="text-primary" id="historyPageInfo">6</span> 条</div>
+            <div class="page-list">
+                <button class="page-item" onclick="goToPage(0)"><i class="fa fa-angle-left"></i></button>
+                <button class="page-item active" onclick="goToPage(1)">1</button>
+                <button class="page-item" onclick="goToPage(0)"><i class="fa fa-angle-right"></i></button>
+            </div>
+            <div class="page-size">
+                <select class="form-control" style="height:32px" onchange="onPageSizeChange(this)">
+                    <option value="10">10 条/页</option>
+                    <option value="20">20 条/页</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====== 导入详情弹窗 ====== -->
+<div class="modal-overlay" id="historyDetailModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h3><i class="fa fa-file-text-o" style="color:var(--primary);margin-right:6px"></i>导入详情 - <span id="modalFileName">—</span></h3>
+            <a href="javascript:;" onclick="closeHistoryModal()" style="font-size:18px;color:var(--text-light)"><i class="fa fa-times"></i></a>
+        </div>
+        <div class="modal-body">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+                <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center">
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">导入时间</div>
+                    <div style="font-size:13px;font-weight:600" id="modalImportTime">—</div>
+                </div>
+                <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center">
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">导入总数</div>
+                    <div style="font-size:18px;font-weight:700;font-family:'Segoe UI';color:var(--primary)" id="modalTotal">—</div>
+                </div>
+                <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center">
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">成功数</div>
+                    <div style="font-size:18px;font-weight:700;font-family:'Segoe UI';color:var(--success)" id="modalSuccess">—</div>
+                </div>
+                <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center">
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">失败数</div>
+                    <div style="font-size:18px;font-weight:700;font-family:'Segoe UI';color:var(--danger)" id="modalFail">—</div>
+                </div>
+            </div>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:50px">序号</th>
+                            <th style="width:160px">接口编码</th>
+                            <th>接口名称</th>
+                            <th style="width:100px" class="text-center">改造状态</th>
+                            <th style="width:120px" class="text-center">导入结果</th>
+                            <th>失败原因</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalDetailBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeHistoryModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    /* ============================================================
+     * Mock 数据：导入预览数据
+     * ============================================================ */
+    var previewData = [
+        { no: 1, code: 'API-DEP-0023', name: '账户余额查询', status: '已完成', time: '2026-06-20', remark: '字段映射已配置', valid: true, reason: '' },
+        { no: 2, code: 'API-CUS-0101', name: '客户信息查询', status: '已完成', time: '2026-06-19', remark: '全部字段已标准化', valid: true, reason: '' },
+        { no: 3, code: 'API-CDP-0088', name: '贷款发放明细查询', status: '已完成', time: '2026-06-18', remark: '含脚本转换规则', valid: true, reason: '' },
+        { no: 4, code: 'API-PAY-0115', name: '支付转账接口', status: '改造中', time: '', remark: '部分字段待映射', valid: true, reason: '' },
+        { no: 5, code: 'API-RISK-0047', name: '风险评估查询', status: '已完成', time: '2026-06-16', remark: '', valid: true, reason: '' },
+        { no: 6, code: '', name: '日终对账接口', status: '已完成', time: '2026-06-15', remark: '', valid: false, reason: '接口编码为空' },
+        { no: 7, code: 'API-DEP-0045', name: '账户交易明细查询', status: '已完成', time: '2026-06-14', remark: '枚举值已映射', valid: true, reason: '' },
+        { no: 8, code: 'API-CUS-0203', name: '客户等级查询', status: '已搁置', time: '', remark: '业务需求变更', valid: true, reason: '' }
+    ];
+
+    /* ============================================================
+     * Mock 数据：导入历史记录（6 条）
+     * ============================================================ */
+    var importHistory = [
+        {
+            batchNo: 'IMP-20260622-001', time: '2026-06-22 14:30', fileName: '改造结果导入_20260622.xlsx', total: 12, success: 11, fail: 1, operator: '张治国', status: 'partial',
+            details: [
+                { code: 'API-DEP-0023', name: '账户余额查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CUS-0101', name: '客户信息查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CDP-0088', name: '贷款发放明细查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-PAY-0115', name: '支付转账接口', status: '改造中', result: '失败', reason: '完成时间为空' },
+                { code: 'API-RISK-0047', name: '风险评估查询', status: '已完成', result: '成功', reason: '' }
+            ]
+        },
+        {
+            batchNo: 'IMP-20260620-002', time: '2026-06-20 10:15', fileName: '信贷系统改造结果.csv', total: 8, success: 8, fail: 0, operator: '李标清', status: 'success',
+            details: [
+                { code: 'API-CDP-0156', name: '贷款还款计划查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CDP-0201', name: '贷款审批查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CDP-0088', name: '贷款发放明细查询', status: '已完成', result: '成功', reason: '' }
+            ]
+        },
+        {
+            batchNo: 'IMP-20260618-003', time: '2026-06-18 16:42', fileName: '支付清算改造结果_0618.xlsx', total: 6, success: 5, fail: 1, operator: '张治国', status: 'partial',
+            details: [
+                { code: 'API-PAY-0115', name: '支付转账接口', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-PAY-0208', name: '清算结果通知', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-PAY-0301', name: '退款接口', status: '改造中', result: '失败', reason: '接口编码不存在' }
+            ]
+        },
+        {
+            batchNo: 'IMP-20260615-004', time: '2026-06-15 09:20', fileName: '核心账务改造结果.csv', total: 10, success: 10, fail: 0, operator: '王运来', status: 'success',
+            details: [
+                { code: 'API-DEP-0023', name: '账户余额查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-DEP-0045', name: '账户交易明细查询', status: '已完成', result: '成功', reason: '' }
+            ]
+        },
+        {
+            batchNo: 'IMP-20260612-005', time: '2026-06-12 11:05', fileName: '客户管理改造结果_0612.xlsx', total: 5, success: 3, fail: 2, operator: '李标清', status: 'partial',
+            details: [
+                { code: 'API-CUS-0101', name: '客户信息查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CUS-0203', name: '客户等级查询', status: '已完成', result: '成功', reason: '' },
+                { code: 'API-CUS-0305', name: '客户风险评级', status: '已搁置', result: '失败', reason: '改造状态值无效' },
+                { code: 'API-CUS-0402', name: '客户标签查询', status: '改造中', result: '失败', reason: '完成时间为空' }
+            ]
+        },
+        {
+            batchNo: 'IMP-20260608-006', time: '2026-06-08 15:30', fileName: '风险系统改造结果.csv', total: 4, success: 0, fail: 4, operator: '张治国', status: 'failed',
+            details: [
+                { code: 'API-RISK-0047', name: '风险评估查询', status: '改造中', result: '失败', reason: '文件格式不匹配模板' },
+                { code: 'API-RISK-0102', name: '风险预警查询', status: '改造中', result: '失败', reason: '文件格式不匹配模板' }
+            ]
+        }
+    ];
+
+    /* ============================================================
+     * 改造状态样式映射
+     * ============================================================ */
+    var statusTagMap = {
+        '已完成': 'tag-success',
+        '改造中': 'tag-warning',
+        '已搁置': 'tag-default'
+    };
+
+    /* ============================================================
+     * 导入状态样式映射
+     * ============================================================ */
+    var importStatusMap = {
+        success: { text: '全部成功', cls: 'is-success' },
+        partial: { text: '部分成功', cls: 'is-partial' },
+        failed: { text: '导入失败', cls: 'is-failed' }
+    };
+
+    /* ============================================================
+     * 文件大小格式化
+     * ============================================================ */
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    /* ============================================================
+     * 文件选择处理
+     * ============================================================ */
+    window.handleFileSelect = function(input) {
+        if (input.files.length === 0) return;
+        var file = input.files[0];
+        var ext = file.name.split('.').pop().toLowerCase();
+        if (ext !== 'xlsx' && ext !== 'csv') {
+            showToast('仅支持 .xlsx 或 .csv 格式文件', 'warning');
+            input.value = '';
+            return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+            showToast('文件大小不能超过 20MB', 'warning');
+            input.value = '';
+            return;
+        }
+        showFileInfo(file.name, formatFileSize(file.size));
+    };
+
+    /* ============================================================
+     * 显示已上传文件信息
+     * ============================================================ */
+    function showFileInfo(name, size) {
+        document.getElementById('fileName').textContent = name;
+        document.getElementById('fileMeta').textContent = size + ' · 待解析';
+        document.getElementById('fileInfoArea').style.display = 'block';
+        var btn = document.getElementById('startImportBtn');
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    }
+
+    /* ============================================================
+     * 移除文件
+     * ============================================================ */
+    window.removeFile = function() {
+        resetUpload();
+        showToast('已移除文件');
+    };
+
+    /* ============================================================
+     * 清空上传
+     * ============================================================ */
+    window.resetUpload = function() {
+        document.getElementById('fileInput').value = '';
+        document.getElementById('fileInfoArea').style.display = 'none';
+        var btn = document.getElementById('startImportBtn');
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        document.getElementById('previewCard').style.display = 'none';
+    };
+
+    /* ============================================================
+     * 开始导入（解析文件并显示预览）
+     * ============================================================ */
+    window.startImport = function() {
+        var btn = document.getElementById('startImportBtn');
+        if (btn.disabled) return;
+        // 添加解析中加载状态
+        var originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'not-allowed';
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 解析中...';
+        // 延迟 500ms 模拟文件解析过程
+        setTimeout(function() {
+            renderPreview();
+            document.getElementById('previewCard').style.display = 'block';
+            document.getElementById('fileMeta').textContent = document.getElementById('fileMeta').textContent.replace('待解析', '解析成功');
+            showToast('文件解析完成，请确认预览数据');
+            document.getElementById('previewCard').scrollIntoView({ behavior: 'smooth' });
+            // 恢复按钮状态
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.innerHTML = originalHtml;
+        }, 500);
+    };
+
+    /* ============================================================
+     * 渲染导入预览
+     * ============================================================ */
+    function renderPreview() {
+        var validCount = previewData.filter(function(d) { return d.valid; }).length;
+        var invalidCount = previewData.length - validCount;
+        document.getElementById('psTotal').textContent = previewData.length;
+        document.getElementById('psValid').textContent = validCount;
+        document.getElementById('psInvalid').textContent = invalidCount;
+        document.getElementById('previewCountText').textContent =
+            '共 ' + previewData.length + ' 条 · 有效 ' + validCount + ' 条 · 无效 ' + invalidCount + ' 条';
+
+        var tbody = document.getElementById('previewTableBody');
+        tbody.innerHTML = previewData.map(function(d) {
+            var rowCls = d.valid ? '' : 'row-invalid';
+            var checkHtml = d.valid
+                ? '<span class="check-valid"><i class="fa fa-check-circle"></i> 有效</span>'
+                : '<span class="check-invalid"><i class="fa fa-exclamation-circle"></i> 无效 - ' + d.reason + '</span>';
+            var statusTag = statusTagMap[d.status] || 'tag-default';
+            var timeText = d.time || '<span style="color:var(--text-light)">—</span>';
+            return '<tr class="' + rowCls + '">' +
+                '<td>' + d.no + '</td>' +
+                '<td style="font-family:Segoe UI;color:var(--primary);font-weight:600">' + (d.code || '<span style="color:var(--danger)">（空）</span>') + '</td>' +
+                '<td>' + d.name + '</td>' +
+                '<td class="text-center"><span class="tag ' + statusTag + '" style="font-size:11px">' + d.status + '</span></td>' +
+                '<td class="text-center" style="font-size:12px">' + timeText + '</td>' +
+                '<td style="font-size:12px;color:var(--text-secondary)">' + (d.remark || '—') + '</td>' +
+                '<td class="text-center" style="font-size:12px">' + checkHtml + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    /* ============================================================
+     * 取消导入
+     * ============================================================ */
+    window.cancelImport = function() {
+        document.getElementById('previewCard').style.display = 'none';
+        showToast('已取消导入');
+    };
+
+    /* ============================================================
+     * 确认导入（含二次确认、加载状态、历史记录更新）
+     * ============================================================ */
+    window.confirmImport = function() {
+        var validCount = previewData.filter(function(d) { return d.valid; }).length;
+        var invalidCount = previewData.length - validCount;
+        // 二次确认，防止误操作
+        if (!confirm('确认导入 ' + validCount + ' 条有效数据？导入后将更新接口改造状态。')) return;
+        // 添加导入中加载状态
+        var btn = document.getElementById('confirmImportBtn');
+        var originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'not-allowed';
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 导入中...';
+        // 延迟 500ms 模拟导入过程
+        setTimeout(function() {
+            // 在 resetUpload 清除前捕获文件名
+            var fileName = document.getElementById('fileName').textContent;
+            // 格式化当前时间为 YYYY-MM-DD HH:mm
+            var now = new Date();
+            var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+            var importTime = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) +
+                ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+            // 生成批次号
+            var batchNo = 'IMP-' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' +
+                pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+            // 构建导入明细数据
+            var details = previewData.map(function(d) {
+                return {
+                    code: d.code,
+                    name: d.name,
+                    status: d.status,
+                    result: d.valid ? '成功' : '失败',
+                    reason: d.valid ? '' : d.reason
+                };
+            });
+            // 向导入历史记录添加新记录
+            var newRecord = {
+                batchNo: batchNo,
+                time: importTime,
+                fileName: fileName,
+                total: previewData.length,
+                success: validCount,
+                fail: invalidCount,
+                operator: '当前用户',
+                status: invalidCount === 0 ? 'success' : 'partial',
+                details: details
+            };
+            importHistory.unshift(newRecord);
+            renderHistory();
+            showToast('导入完成，成功 ' + validCount + ' 条，失败 ' + invalidCount + ' 条');
+            document.getElementById('previewCard').style.display = 'none';
+            resetUpload();
+            // 恢复按钮状态
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.innerHTML = originalHtml;
+        }, 500);
+    };
+
+    /* ============================================================
+     * 下载导入模板
+     * ============================================================ */
+    window.downloadTemplate = function() {
+        showToast('正在下载导入模板 reform-result-template.xlsx');
+    };
+
+    /* ============================================================
+     * 渲染导入历史记录
+     * ============================================================ */
+    function renderHistory() {
+        var tbody = document.getElementById('historyTableBody');
+        tbody.innerHTML = importHistory.map(function(h, idx) {
+            var statusInfo = importStatusMap[h.status] || importStatusMap.failed;
+            return '<tr>' +
+                '<td style="font-family:Segoe UI,monospace;color:var(--primary);font-size:12px">' + h.batchNo + '</td>' +
+                '<td style="font-size:12px">' + h.time + '</td>' +
+                '<td><i class="fa fa-file-excel-o" style="color:var(--success);margin-right:6px"></i>' + h.fileName + '</td>' +
+                '<td class="text-center">' + h.operator + '</td>' +
+                '<td class="text-center num" style="color:var(--success);font-weight:600">' + h.success + '</td>' +
+                '<td class="text-center num" style="color:' + (h.fail > 0 ? 'var(--danger)' : 'var(--text-light)') + ';font-weight:600">' + h.fail + '</td>' +
+                '<td class="text-center"><span class="import-status ' + statusInfo.cls + '">' + statusInfo.text + '</span></td>' +
+                '<td class="text-center"><a class="btn-link" onclick="viewHistoryDetail(' + idx + ')"><i class="fa fa-eye"></i> 查看详情</a></td>' +
+                '</tr>';
+        }).join('');
+        // 同步更新历史记录条数显示
+        var count = importHistory.length;
+        var historyCountEl = document.getElementById('historyCount');
+        if (historyCountEl) historyCountEl.textContent = count;
+        var historyPageInfoEl = document.getElementById('historyPageInfo');
+        if (historyPageInfoEl) historyPageInfoEl.textContent = count;
+    }
+
+    /* ============================================================
+     * 查看导入历史详情
+     * ============================================================ */
+    window.viewHistoryDetail = function(idx) {
+        var h = importHistory[idx];
+        document.getElementById('modalFileName').textContent = h.fileName;
+        document.getElementById('modalImportTime').textContent = h.time;
+        document.getElementById('modalTotal').textContent = h.total;
+        document.getElementById('modalSuccess').textContent = h.success;
+        document.getElementById('modalFail').textContent = h.fail;
+        var tbody = document.getElementById('modalDetailBody');
+        if (h.details.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-preview"><i class="fa fa-inbox"></i>暂无明细数据</td></tr>';
+        } else {
+            tbody.innerHTML = h.details.map(function(d, i) {
+                var statusTag = statusTagMap[d.status] || 'tag-default';
+                var resultHtml = d.result === '成功'
+                    ? '<span class="check-valid"><i class="fa fa-check-circle"></i> 成功</span>'
+                    : '<span class="check-invalid"><i class="fa fa-times-circle"></i> 失败</span>';
+                var reasonHtml = d.reason ? '<span style="color:var(--danger);font-size:12px">' + d.reason + '</span>' : '<span style="color:var(--text-light)">—</span>';
+                return '<tr>' +
+                    '<td>' + (i + 1) + '</td>' +
+                    '<td style="font-family:Segoe UI;color:var(--primary);font-weight:600">' + d.code + '</td>' +
+                    '<td>' + d.name + '</td>' +
+                    '<td class="text-center"><span class="tag ' + statusTag + '" style="font-size:11px">' + d.status + '</span></td>' +
+                    '<td class="text-center" style="font-size:12px">' + resultHtml + '</td>' +
+                    '<td style="font-size:12px">' + reasonHtml + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+        document.getElementById('historyDetailModal').classList.add('show');
+    };
+
+    /* ============================================================
+     * 关闭历史详情弹窗
+     * ============================================================ */
+    window.closeHistoryModal = function() {
+        document.getElementById('historyDetailModal').classList.remove('show');
+    };
+
+    /* ============================================================
+     * 分页跳转
+     * ============================================================ */
+    window.goToPage = function(page) {
+        if (page === 0) {
+            showToast('已是当前页范围');
+            return;
+        }
+        var btns = document.querySelectorAll('.page-list .page-item');
+        btns.forEach(function(btn) { btn.classList.remove('active'); });
+        btns.forEach(function(btn) {
+            if (parseInt(btn.textContent) === page) btn.classList.add('active');
+        });
+        showToast('已跳转到第 ' + page + ' 页');
+    };
+
+    /* ============================================================
+     * 每页条数 onchange
+     * ============================================================ */
+    window.onPageSizeChange = function(select) {
+        showToast('已切换为每页 ' + select.value + ' 条');
+    };
+
+    /* ============================================================
+     * Toast 通用提示（由 nav-helper.js 提供全局实现）
+     * ============================================================ */
+
+    /* ============================================================
+     * 拖拽上传事件绑定
+     * ============================================================ */
+    function bindDragEvents() {
+        var zone = document.getElementById('uploadZone');
+        zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            zone.classList.add('dragover');
+        });
+        zone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+        });
+        zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            if (files.length > 0) {
+                var file = files[0];
+                var ext = file.name.split('.').pop().toLowerCase();
+                if (ext !== 'xlsx' && ext !== 'csv') {
+                    showToast('仅支持 .xlsx 或 .csv 格式文件', 'warning');
+                    return;
+                }
+                if (file.size > 20 * 1024 * 1024) {
+                    showToast('文件大小不能超过 20MB', 'warning');
+                    return;
+                }
+                document.getElementById('fileInput').files = files;
+                showFileInfo(file.name, formatFileSize(file.size));
+            }
+        });
+    }
+
+    /* ============================================================
+     * 初始化
+     * ============================================================ */
+    renderHistory();
+    bindDragEvents();
+
+})();
+</script>
+</body>
+</html>
