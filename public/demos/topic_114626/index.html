@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>回声探路 Echo Path</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #000;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Courier New', monospace;
+    user-select: none;
+    overflow: hidden;
+    padding: 12px;
+  }
+  canvas { display: block; }
+  #ui {
+    position: relative;
+  }
+  #hud {
+    color: #777;
+    font-size: 12px;
+    margin-bottom: 10px;
+    letter-spacing: 3px;
+    text-align: center;
+  }
+  #msg {
+    color: #fff;
+    font-size: 26px;
+    margin-top: 14px;
+    height: 30px;
+    letter-spacing: 8px;
+    text-align: center;
+  }
+  #help {
+    color: #444;
+    font-size: 11px;
+    margin-top: 12px;
+    text-align: center;
+    line-height: 1.9;
+    letter-spacing: 1px;
+  }
+  #help b { color: #777; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="hud">回声探路 · 按 Enter 开始</div>
+  <canvas id="game" width="800" height="600"></canvas>
+  <div id="msg"></div>
+  <div id="help">
+    <b>方向键</b> 每步移动 · 长按自动连续踏步（常规 20px·600ms / 静步 10px·900ms）<br>
+    <b>空格</b> 重踏声波 · <b>Shift</b> 切换常规/静步 · <b>M</b> 小地图 · <b>D</b> 显示墙体
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const VIEW_W = canvas.width, VIEW_H = canvas.height;
+  const MAP_W = 1500, MAP_H = 1500;
+  const WALL_T = 50;
+  const hud = document.getElementById('hud');
+  const msg = document.getElementById('msg');
+
+  // ── 常量 ──────────────────────────────────────────────
+  const STEP_REG      = 20;
+  const STEP_SIL      = 10;
+  const INT_REG       = 600;
+  const INT_SIL       = 900;
+  const RAY_LEN_REG   = 500;
+  const RAY_LEN_SIL   = 200;
+  const RAY_COUNT     = 18;
+  const STOMP_COUNT   = 36;
+  const STOMP_LEN_MUL = 2;
+  const STOMP_INTERVAL= 1200;
+  const MAX_BOUNCES   = 2;
+  const PLAYER_FADE   = 800;
+  const RAY_FADE      = 2000;
+  const EXIT_PULSE    = 1200;
+
+  // ── 声波组管理 ────────────────────────────────────────
+  const MAX_WAVE_GROUPS = 3;
+  const RAY_SPEED     = 3;
+  let waveGroups = [];
+
+  // ── 出口 ──────────────────────────────────────────────
+  const exitPos = { x: 750, y: 200, r: 40 };
+  let exitScannedAt = 0;
+
+  // ═══════════════════════════════════════════════════════
+  //  地图（极简 C 形走廊，3 步到出口）
+  //  起点(750,1400) → 右 → (1000,1400) → 上 → (1000,200) → 左 → (750,200) ✓
+  // ═══════════════════════════════════════════════════════
+  const walls = [
+    // 外边界（4面）
+    { x: 0, y: 0, w: MAP_W, h: WALL_T },                    // 顶
+    { x: 0, y: MAP_H - WALL_T, w: MAP_W, h: WALL_T },       // 底
+    { x: 0, y: 0, w: WALL_T, h: MAP_H },                    // 左
+    { x: MAP_W - WALL_T, y: 0, w: WALL_T, h: MAP_H },       // 右
+
+    // 内墙A（水平）：从左侧到 x=750，留 x=750~1450 缺口（700px）
+    { x: 50, y: 1100, w: 700, h: WALL_T },
+
+    // 内墙B（垂直）：从 y=450 到底部，留 y=50~450 缺口（400px）
+    { x: 1000, y: 450, w: WALL_T, h: 650 },
+  ];
+
+  // 障碍物（沿通道侧壁放置，不阻塞路径）
+  const obstacles = [];
+  (function gen() {
+    const spots = [
+      [400, 1350], [800, 1350],           // 底部走廊
+      [1080, 700], [1080, 1000],           // 右通道
+      [600, 150],                          // 顶部
+    ];
+    const SZ = 30;
+    spots.forEach(([cx, cy]) => {
+      obstacles.push({ x: cx - SZ / 2, y: cy - SZ / 2, w: SZ, h: SZ });
+    });
+  })();
+
+  // ── 状态 ──────────────────────────────────────────────
+  let rays = [];
+  let steps = 0;
+  let isSilent = false;
+  let won = false;
+  let gameStarted = false;
+  let lastMoveTime  = 0;
+  let playerAlpha   = 0;
+  let footToggle    = false;
+  const player = { x: 750, y: 1400, r: 4 };
+  let showMinimap = false;
+  let showWalls = false;
+  let heldKey = null;
+  let lastStepTime = 0;
+
+  // ── 碰撞检测 ──────────────────────────────────────────
+  function pointInWall(x, y) {
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      if (x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
+    }
+    for (let i = 0; i < obstacles.length; i++) {
+      const o = obstacles[i];
+      if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return true;
+    }
+    return false;
+  }
+
+  function canMoveTo(nx, ny) {
+    if (nx < WALL_T + 5 || nx > MAP_W - WALL_T - 5) return false;
+    if (ny < WALL_T + 5 || ny > MAP_H - WALL_T - 5) return false;
+    if (pointInWall(nx, ny)) return false;
+    const r = 5;
+    if (pointInWall(nx - r, ny) || pointInWall(nx + r, ny)) return false;
+    if (pointInWall(nx, ny - r) || pointInWall(nx, ny + r)) return false;
+    return true;
+  }
+
+  // ── 射线-AABB 相交 ───────────────────────────────────
+  function rayHitRect(ox, oy, dx, dy, rect) {
+    const minX = rect.x, maxX = rect.x + rect.w;
+    const minY = rect.y, maxY = rect.y + rect.h;
+    let tmin = -Infinity, tmax = Infinity;
+    let nx = 0, ny = 0;
+    if (Math.abs(dx) < 1e-9) {
+      if (ox < minX || ox > maxX) return null;
+    } else {
+      let t1 = (minX - ox) / dx, t2 = (maxX - ox) / dx;
+      let n1x = -1;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; n1x = 1; }
+      if (t1 > tmin) { tmin = t1; nx = n1x; ny = 0; }
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) return null;
+    }
+    if (Math.abs(dy) < 1e-9) {
+      if (oy < minY || oy > maxY) return null;
+    } else {
+      let t1 = (minY - oy) / dy, t2 = (maxY - oy) / dy;
+      let n1y = -1;
+      if (t1 > t2) { const t = t1; t1 = t2; t2 = t; n1y = 1; }
+      if (t1 > tmin) { tmin = t1; nx = 0; ny = n1y; }
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) return null;
+    }
+    if (tmin < 0) return null;
+    return { t: tmin, hx: ox + dx * tmin, hy: oy + dy * tmin, nx: nx, ny: ny, rect: rect };
+  }
+
+  function findNearestHit(ox, oy, dx, dy, maxDist) {
+    let best = null;
+    for (let i = 0; i < walls.length; i++) {
+      const h = rayHitRect(ox, oy, dx, dy, walls[i]);
+      if (h && h.t > 0.001 && h.t <= maxDist && (!best || h.t < best.t)) best = h;
+    }
+    for (let i = 0; i < obstacles.length; i++) {
+      const h = rayHitRect(ox, oy, dx, dy, obstacles[i]);
+      if (h && h.t > 0.001 && h.t <= maxDist && (!best || h.t < best.t)) best = h;
+    }
+    return best;
+  }
+
+  // ── 射线类 ────────────────────────────────────────────
+  class Ray {
+    constructor(x, y, angle, maxLen, birthTime, groupId) {
+      this.segs = [{ x: x, y: y }];
+      this.x = x; this.y = y;
+      this.dx = Math.cos(angle);
+      this.dy = Math.sin(angle);
+      this.remaining = maxLen;
+      this.birthTime = birthTime;
+      this.dead = false;
+      this.bounces = 0;
+      this.groupId = groupId;
+      this.covered = false;
+      this.coverTime = 0;
+    }
+    markCovered(now) {
+      if (!this.covered) { this.covered = true; this.coverTime = now; }
+    }
+    getEffectiveAge(now) {
+      const age = now - this.birthTime;
+      if (!this.covered) return age;
+      return age + (now - this.coverTime);
+    }
+    update(now) {
+      if (this.dead) return;
+      if (this.getEffectiveAge(now) > RAY_FADE) { this.dead = true; return; }
+      if (this.remaining <= 0) return;
+      const step = Math.min(RAY_SPEED, this.remaining);
+      let ox = this.x, oy = this.y;
+      let nx = ox + this.dx * step;
+      let ny = oy + this.dy * step;
+      const hit = findNearestHit(ox, oy, this.dx, this.dy, step);
+      if (hit) {
+        this.x = hit.hx; this.y = hit.hy;
+        this.segs.push({ x: hit.hx, y: hit.hy });
+        this.remaining -= hit.t;
+        this.bounces++;
+        if (this.bounces > MAX_BOUNCES || this.remaining <= 0) { this.dead = true; return; }
+        const dot = this.dx * hit.nx + this.dy * hit.ny;
+        this.dx = this.dx - 2 * dot * hit.nx;
+        this.dy = this.dy - 2 * dot * hit.ny;
+        this.x += this.dx * 0.5;
+        this.y += this.dy * 0.5;
+        this.segs.push({ x: this.x, y: this.y });
+        return;
+      }
+      this.x = nx; this.y = ny;
+      this.remaining -= step;
+      this.segs.push({ x: nx, y: ny });
+    }
+    draw(cam, now) {
+      const age = this.getEffectiveAge(now);
+      const tempOp = Math.max(0, 1 - age / RAY_FADE);
+      if (tempOp <= 0.01 || this.segs.length < 2) return;
+      const brightFactor = 0.3 + 0.7 * tempOp;
+      for (let i = 1; i < this.segs.length; i++) {
+        const p1 = this.segs[i - 1], p2 = this.segs[i];
+        const ratio1 = (i - 1) / Math.max(1, this.segs.length - 1);
+        const ratio2 = i / Math.max(1, this.segs.length - 1);
+        const op1 = brightFactor * (1 - ratio1 * 0.85);
+        const op2 = brightFactor * (1 - ratio2 * 0.85);
+        const grad = ctx.createLinearGradient(p1.x - cam.x, p1.y - cam.y, p2.x - cam.x, p2.y - cam.y);
+        grad.addColorStop(0, 'rgba(255,255,255,' + op1.toFixed(3) + ')');
+        grad.addColorStop(1, 'rgba(255,255,255,' + op2.toFixed(3) + ')');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(p1.x - cam.x, p1.y - cam.y);
+        ctx.lineTo(p2.x - cam.x, p2.y - cam.y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function emitRays(count, length, now) {
+    // 最多3组，超出移除最旧
+    if (waveGroups.length >= MAX_WAVE_GROUPS) {
+      const oldest = waveGroups.shift();
+      for (let i = rays.length - 1; i >= 0; i--) {
+        if (rays[i].groupId === oldest.id) rays[i].dead = true;
+      }
+    }
+    const groupId = now + '_' + Math.random().toString(36).slice(2, 8);
+    const group = { id: groupId, birthTime: now };
+    // 覆盖检测
+    for (let i = 0; i < rays.length; i++) {
+      const r = rays[i];
+      if (r.dead || r.groupId === groupId) continue;
+      const dx = r.segs[0].x - player.x, dy = r.segs[0].y - player.y;
+      if (dx * dx + dy * dy < 80 * 80) r.markCovered(now);
+    }
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      rays.push(new Ray(player.x, player.y, a, length, now, groupId));
+    }
+    waveGroups.push(group);
+  }
+
+  // ── 摄像机 ────────────────────────────────────────────
+  function getCam() {
+    return { x: player.x - VIEW_W / 2, y: player.y - VIEW_H / 2 };
+  }
+
+  function updatePlayerAlpha(now) {
+    const elapsed = now - lastMoveTime;
+    playerAlpha = Math.max(0, 1 - elapsed / PLAYER_FADE);
+  }
+
+  function drawPlayer(cam) {
+    if (playerAlpha <= 0) return;
+    const a = playerAlpha.toFixed(3);
+    const cx = player.x - cam.x, cy = player.y - cam.y;
+    const sep = 5;
+    const leftA  = footToggle  ? a : (a * 0.3).toFixed(3);
+    const rightA = !footToggle ? a : (a * 0.3).toFixed(3);
+    ctx.fillStyle = 'rgba(255,255,255,' + leftA + ')';
+    ctx.beginPath();
+    ctx.ellipse(cx - sep, cy, 3, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,' + rightA + ')';
+    ctx.beginPath();
+    ctx.ellipse(cx + sep, cy, 3, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── 调试墙体 ──────────────────────────────────────────
+  function drawWallsDebug(cam) {
+    if (!showWalls) return;
+    ctx.strokeStyle = 'rgba(80,80,80,0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      ctx.strokeRect(w.x - cam.x, w.y - cam.y, w.w, w.h);
+    }
+    ctx.strokeStyle = 'rgba(100,100,100,0.3)';
+    for (let i = 0; i < obstacles.length; i++) {
+      const o = obstacles[i];
+      ctx.strokeRect(o.x - cam.x, o.y - cam.y, o.w, o.h);
+    }
+  }
+
+  // ── 小地图 ────────────────────────────────────────────
+  function drawMinimap() {
+    if (!showMinimap) return;
+    const mmW = 240, mmH = 240;
+    const mx = VIEW_W - mmW - 15, my = 15;
+    const sx = mmW / MAP_W, sy = mmH / MAP_H;
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(mx - 4, my - 4, mmW + 8, mmH + 8);
+    ctx.strokeStyle = 'rgba(100,100,100,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx - 4, my - 4, mmW + 8, mmH + 8);
+    // 墙体
+    ctx.fillStyle = 'rgba(100,100,100,0.6)';
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      ctx.fillRect(mx + w.x * sx, my + w.y * sy, w.w * sx, w.h * sy);
+    }
+    // 障碍物
+    ctx.fillStyle = 'rgba(80,80,80,0.5)';
+    for (let i = 0; i < obstacles.length; i++) {
+      const o = obstacles[i];
+      ctx.fillRect(mx + o.x * sx, my + o.y * sy, o.w * sx, o.h * sy);
+    }
+    // 出口
+    ctx.fillStyle = 'rgba(200,200,200,0.9)';
+    ctx.beginPath();
+    ctx.arc(mx + exitPos.x * sx, my + exitPos.y * sy, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // 路径标注
+    ctx.strokeStyle = 'rgba(200,200,200,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(mx + 750 * sx, my + 1400 * sy); // 起点
+    ctx.lineTo(mx + 1000 * sx, my + 1400 * sy); // →右
+    ctx.lineTo(mx + 1000 * sx, my + 200 * sy);  // →上
+    ctx.lineTo(mx + 750 * sx, my + 200 * sy);   // →左
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 玩家
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.beginPath();
+    ctx.arc(mx + player.x * sx, my + player.y * sy, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // 视野框
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx + (player.x - VIEW_W / 2) * sx, my + (player.y - VIEW_H / 2) * sy, VIEW_W * sx, VIEW_H * sy);
+    // 标注
+    ctx.fillStyle = 'rgba(150,150,150,0.7)';
+    ctx.font = '9px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText('小地图 (M)', mx, my - 7);
+    ctx.textAlign = 'right';
+    ctx.fillText('→右→上→左（出口）', mx + mmW, my - 7);
+  }
+
+  // ── 出口光环 ──────────────────────────────────────────
+  function drawExit(cam, now) {
+    const x = exitPos.x - cam.x, y = exitPos.y - cam.y;
+    const scannedAge = now - exitScannedAt;
+    let baseOp = 0.15;
+    let pulse = 0;
+    if (scannedAge < 2000) {
+      const t = (now % EXIT_PULSE) / EXIT_PULSE;
+      pulse = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
+      baseOp = 0.25 + pulse * 0.5;
+    }
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, exitPos.r * 2);
+    grad.addColorStop(0, 'rgba(200,200,200,' + baseOp.toFixed(3) + ')');
+    grad.addColorStop(0.5, 'rgba(200,200,200,' + (baseOp * 0.4).toFixed(3) + ')');
+    grad.addColorStop(1, 'rgba(200,200,200,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, exitPos.r * 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (pulse > 0) {
+      ctx.fillStyle = 'rgba(220,220,220,' + (pulse * 0.6).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // ⟳ 标记
+    ctx.fillStyle = 'rgba(200,200,200,' + baseOp.toFixed(3) + ')';
+    ctx.font = '14px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⟳', x, y + 1);
+  }
+
+  // ── 出口导航箭头 ──────────────────────────────────────
+  function drawExitNav(cam, now) {
+    const ex = exitPos.x - cam.x, ey = exitPos.y - cam.y;
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    const dx = ex - cx, dy = ey - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 80) return;
+    if (ex < 0 || ex > VIEW_W || ey < 0 || ey > VIEW_H) {
+      const angle = Math.atan2(dy, dx);
+      const margin = 40;
+      const halfW = VIEW_W / 2 - margin, halfH = VIEW_H / 2 - margin;
+      let tx, ty;
+      const tan = Math.tan(angle);
+      if (Math.abs(dy) * halfW < Math.abs(dx) * halfH) {
+        tx = dx > 0 ? cx + halfW : cx - halfW;
+        ty = cy + (tx - cx) * tan;
+      } else {
+        ty = dy > 0 ? cy + halfH : cy - halfH;
+        tx = cx + (ty - cy) / tan;
+      }
+      const op = Math.min(0.5, 0.5 * 200 / dist);
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(angle);
+      ctx.strokeStyle = 'rgba(200,200,200,' + op.toFixed(3) + ')';
+      ctx.fillStyle = 'rgba(200,200,200,' + (op * 0.5).toFixed(3) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(-14, -7); ctx.lineTo(-10, 0); ctx.lineTo(-14, 7); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+      const realDist = Math.sqrt((exitPos.x-player.x)**2 + (exitPos.y-player.y)**2);
+      ctx.fillStyle = 'rgba(180,180,180,' + op.toFixed(3) + ')';
+      ctx.font = '11px Courier New';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('出口 ' + Math.round(realDist) + 'px', tx, ty + 18);
+    }
+  }
+
+  // ── 检测声波是否扫到出口 ─────────────────────────────
+  function checkExitScan(x, y) {
+    const dx = x - exitPos.x, dy = y - exitPos.y;
+    if (dx * dx + dy * dy < exitPos.r * exitPos.r) {
+      exitScannedAt = performance.now();
+    }
+  }
+
+  // ── 移动（纯步进，无蓄力残留） ──────────────────────
+  function tryStep(key, now) {
+    const step = isSilent ? STEP_SIL : STEP_REG;
+    let nx = player.x, ny = player.y;
+    switch (key) {
+      case 'ArrowUp':    ny -= step; break;
+      case 'ArrowDown':  ny += step; break;
+      case 'ArrowLeft':  nx -= step; break;
+      case 'ArrowRight': nx += step; break;
+    }
+    if (!canMoveTo(nx, ny)) return false;
+    player.x = nx; player.y = ny;
+    steps++;
+    lastMoveTime = now;
+    footToggle = !footToggle;
+    emitRays(RAY_COUNT, isSilent ? RAY_LEN_SIL : RAY_LEN_REG, now);
+    // 检测胜利
+    const ddx = player.x - exitPos.x, ddy = player.y - exitPos.y;
+    if (ddx * ddx + ddy * ddy < exitPos.r * exitPos.r) {
+      won = true;
+      msg.textContent = '胜  利';
+    }
+    updateHUD();
+    return true;
+  }
+
+  function autoStep(now) {
+    if (!heldKey || won || !gameStarted) return;
+    const interval = isSilent ? INT_SIL : INT_REG;
+    if (now - lastStepTime >= interval) {
+      if (tryStep(heldKey, now)) {
+        lastStepTime = now;
+      } else {
+        // 碰到墙则放弃本次按键
+      }
+    }
+  }
+
+  function updateHUD() {
+    const ddx = exitPos.x - player.x, ddy = exitPos.y - player.y;
+    const dist = Math.round(Math.sqrt(ddx * ddx + ddy * ddy));
+    let dir = '';
+    if (Math.abs(ddx) > Math.abs(ddy)) {
+      dir = ddx > 0 ? '东' : '西';
+    } else {
+      dir = ddy > 0 ? '南' : '北';
+    }
+    hud.textContent = '模式 ' + (isSilent ? '静步' : '常规') +
+      ' · 步数 ' + steps +
+      ' · 出口 ' + dir + ' ' + dist + 'px' +
+      (won ? '  → 已通关！' : '');
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  开始菜单
+  // ═══════════════════════════════════════════════════════
+  function drawStartMenu() {
+    if (gameStarted) return;
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    // 装饰：出口光环作为标题点缀
+    const grad = ctx.createRadialGradient(400, 180, 0, 400, 180, 120);
+    grad.addColorStop(0, 'rgba(200,200,200,0.15)');
+    grad.addColorStop(0.5, 'rgba(200,200,200,0.05)');
+    grad.addColorStop(1, 'rgba(200,200,200,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(400, 180, 120, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 标题
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '28px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('回 声 探 路', 400, 100);
+
+    ctx.fillStyle = 'rgba(150,150,150,0.5)';
+    ctx.font = '11px Courier New';
+    ctx.fillText('ECHO PATH', 400, 130);
+
+    // 装饰线
+    ctx.strokeStyle = 'rgba(200,200,200,0.25)';
+    ctx.lineWidth = 1;
+    const lineY = 160;
+    ctx.beginPath();
+    ctx.moveTo(280, lineY); ctx.lineTo(520, lineY);
+    ctx.stroke();
+
+    // 菜单项
+    const items = [
+      { label: '[ Enter ]  开 始 游 戏', y: 280, desc: '在黑暗中用声波探索出路' },
+      { label: '[ M ]  小 地 图',         y: 350, desc: '按 M 键查看全局俯瞰' },
+      { label: '[ D ]  显 示 墙 体',      y: 400, desc: '按 D 键调试显示墙体位置' },
+      { label: '[ Shift ]  静 步 模 式',   y: 450, desc: '步距减半，声波范围缩小' },
+    ];
+
+    items.forEach(item => {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = '14px Courier New';
+      ctx.fillText(item.label, 400, item.y);
+      ctx.fillStyle = 'rgba(150,150,150,0.5)';
+      ctx.font = '10px Courier New';
+      ctx.fillText(item.desc, 400, item.y + 22);
+    });
+
+    // 控制提示
+    ctx.fillStyle = 'rgba(100,100,100,0.4)';
+    ctx.font = '10px Courier New';
+    const tipY = 530;
+    ctx.fillText('空格 = 重踏声波  ·  方向键 = 移动（长按自动踏步）', 400, tipY);
+    ctx.fillText('地图: 1500×1500  ·  隐藏墙壁  ·  用声波"看见"世界', 400, tipY + 18);
+
+    // 路径提示
+    ctx.strokeStyle = 'rgba(200,200,200,0.15)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(400, 570); ctx.lineTo(400, 590);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(100,100,100,0.3)';
+    ctx.font = '9px Courier New';
+    ctx.fillText('路径  起点 → 右 → 上 → 左（出口）', 400, 580);
+  }
+
+  // ── 键盘控制 ──────────────────────────────────────────
+  const moveKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+
+  document.addEventListener('keydown', function (e) {
+    const now = performance.now();
+
+    // 开始菜单响应 Enter
+    if (!gameStarted) {
+      if (e.key === 'Enter') {
+        gameStarted = true;
+        hud.textContent = '方向键移动声波探路 · 出口在顶部';
+        msg.textContent = '';
+      }
+      return;
+    }
+
+    if (won) return;
+
+    if (e.key === 'Shift') {
+      if (!e.repeat) { isSilent = !isSilent; updateHUD(); }
+      return;
+    }
+    if (e.key === 'm' || e.key === 'M') { showMinimap = !showMinimap; return; }
+    if (e.key === 'd' || e.key === 'D') { showWalls = !showWalls; return; }
+
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (now - lastStepTime < STOMP_INTERVAL) return;
+      lastStepTime = now;
+      const len = (isSilent ? RAY_LEN_SIL : RAY_LEN_REG) * STOMP_LEN_MUL;
+      emitRays(STOMP_COUNT, len, now);
+      return;
+    }
+
+    if (!moveKeys.includes(e.key)) return;
+    e.preventDefault();
+    if (e.repeat) return;
+
+    // 切换新方向时立即走一步
+    if (heldKey !== e.key) {
+      heldKey = e.key;
+      lastStepTime = now;
+      tryStep(heldKey, now);
+    }
+  });
+
+  document.addEventListener('keyup', function (e) {
+    if (heldKey === e.key) {
+      heldKey = null;
+    }
+  });
+
+  // ── 主循环 ────────────────────────────────────────────
+  function loop() {
+    const now = performance.now();
+
+    // 开始菜单
+    if (!gameStarted) {
+      drawStartMenu();
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    const cam = getCam();
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    drawWallsDebug(cam);
+    drawExit(cam, now);
+    drawExitNav(cam, now);
+
+    autoStep(now);
+
+    for (let i = rays.length - 1; i >= 0; i--) {
+      rays[i].update(now);
+      rays[i].draw(cam, now);
+      if (!rays[i].dead) checkExitScan(rays[i].x, rays[i].y);
+      if (rays[i].dead) rays.splice(i, 1);
+    }
+    for (let i = waveGroups.length - 1; i >= 0; i--) {
+      if (!rays.some(r => r.groupId === waveGroups[i].id)) waveGroups.splice(i, 1);
+    }
+
+    updatePlayerAlpha(now);
+    drawPlayer(cam);
+    drawMinimap();
+
+    requestAnimationFrame(loop);
+  }
+
+  updateHUD();
+  loop();
+})();
+</script>
+</body>
+</html>

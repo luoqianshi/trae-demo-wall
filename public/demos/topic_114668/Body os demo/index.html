@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BodyOS · 身体的 Debugger</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="data/data.js"></script>
+  <style>
+    :root {
+      --canvas: #1f1633;
+      --canvas-deep: #160d24;
+      --canvas-soft: #271b42;
+      --canvas-card: #1d1432;
+      --canvas-elevated: #241938;
+      --ink: #f5f5f7;
+      --ink-strong: #ffffff;
+      --body: #c4c4cc;
+      --mute: #7a7a8e;
+      --on-primary: #0a0a0f;
+      --hairline: rgba(255,255,255,0.06);
+      --hairline-violet: rgba(118,103,196,0.15);
+      --hairline-soft: rgba(255,255,255,0.1);
+      --primary: #c2ef4e;
+      --primary-glow: rgba(194,239,78,0.15);
+      --primary-active: #a8d83f;
+      --accent-green: #00d992;
+      --accent-pink: #fa7faa;
+      --accent-violet: #8b7fd9;
+      --accent-blue: #5b9eff;
+      --danger: #ff4757;
+      --danger-soft: rgba(255,71,87,0.1);
+      --warning: #f5a623;
+      --warning-soft: rgba(245,166,35,0.1);
+      --success: #00d992;
+      --success-soft: rgba(0,217,146,0.1);
+      --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px; --r-pill: 9999px;
+      --ease: 0.3s ease;
+      --ease-slow: 0.6s cubic-bezier(0.4,0,0.2,1);
+      --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior: smooth; }
+    body { background:var(--canvas); color:var(--ink); font-family:var(--font-sans); font-size:16px; line-height:1.5; -webkit-font-smoothing:antialiased; overflow-x:hidden; }
+    .container { max-width:1080px; margin:0 auto; padding:0 24px; }
+    ::selection { background:var(--primary); color:var(--on-primary); }
+
+    /* Scroll reveal */
+    .reveal { opacity:0; transform:translateY(40px); transition:opacity 0.8s cubic-bezier(0.4,0,0.2,1), transform 0.8s cubic-bezier(0.4,0,0.2,1); }
+    .reveal.visible { opacity:1; transform:translateY(0); }
+    .d1 { transition-delay:0.1s; } .d2 { transition-delay:0.2s; } .d3 { transition-delay:0.3s; } .d4 { transition-delay:0.4s; } .d5 { transition-delay:0.5s; }
+
+    /* Count-up animation */
+    .count-up { font-variant-numeric: tabular-nums; }
+
+    /* === Nav === */
+    .nav { position:fixed; top:0; left:0; right:0; z-index:100; padding:16px 24px; background:rgba(31,22,51,0.7); backdrop-filter:blur(20px); border-bottom:1px solid var(--hairline); }
+    .nav-inner { max-width:1080px; margin:0 auto; display:flex; align-items:center; }
+    .nav-logo { font-family:var(--font-mono); font-size:15px; font-weight:700; color:var(--primary); letter-spacing:-0.3px; }
+    .nav-links { margin-left:auto; display:flex; gap:28px; }
+    .nav-links a { font-size:13px; font-weight:500; color:var(--body); text-decoration:none; transition:color var(--ease); }
+    .nav-links a:hover { color:var(--ink-strong); }
+    @media(max-width:700px){ .nav-links{ display:none; } }
+
+    /* === Hero === */
+    .hero { min-height:100vh; display:flex; flex-direction:column; justify-content:center; position:relative; overflow:hidden; padding:120px 24px 80px; }
+    .hero-bg { position:absolute; inset:0; pointer-events:none; }
+    .hero-bg::before {
+      content:""; position:absolute; inset:0;
+      background:
+        radial-gradient(ellipse 60% 50% at 30% 40%, rgba(139,127,217,0.12), transparent),
+        radial-gradient(ellipse 50% 40% at 70% 60%, rgba(194,239,78,0.05), transparent);
+    }
+    .hero-bg::after {
+      content:""; position:absolute; inset:0; opacity:0.4;
+      background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+      background-size: 40px 40px;
+    }
+    .hero-content { max-width:820px; position:relative; z-index:1; }
+    .hero-eyebrow { display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--accent-violet); margin-bottom:24px; padding:6px 14px; border:1px solid var(--hairline-violet); border-radius:var(--r-pill); background:rgba(139,127,217,0.06); }
+    .hero-eyebrow .dot { width:6px; height:6px; border-radius:50%; background:var(--primary); box-shadow:0 0 8px var(--primary); animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+    .hero-title { font-size:clamp(40px, 7vw, 76px); font-weight:800; line-height:1.05; letter-spacing:-2px; color:var(--ink-strong); margin-bottom:28px; }
+    .hero-title .hl { background:var(--primary); color:var(--on-primary); padding:2px 12px; border-radius:6px; font-weight:800; white-space:nowrap; }
+    .hero-title .strike { text-decoration:line-through; text-decoration-color:var(--danger); text-decoration-thickness:3px; opacity:0.6; }
+    .hero-sub { font-size:clamp(16px, 2vw, 20px); font-weight:400; line-height:1.7; color:var(--body); margin-bottom:48px; max-width:580px; }
+    .hero-sub .mono { font-family:var(--font-mono); color:var(--primary); font-size:0.9em; }
+    .hero-stats { display:flex; gap:56px; padding:32px 0; border-top:1px solid var(--hairline-violet); border-bottom:1px solid var(--hairline-violet); margin-bottom:40px; }
+    .hero-stat-num { font-family:var(--font-mono); font-size:44px; font-weight:700; color:var(--ink-strong); line-height:1; margin-bottom:6px; }
+    .hero-stat-num .unit { font-size:16px; color:var(--mute); font-weight:400; margin-left:4px; }
+    .hero-stat-label { font-size:13px; color:var(--mute); }
+    .hero-cta { display:inline-flex; align-items:center; gap:8px; background:var(--primary); color:var(--on-primary); font-size:15px; font-weight:600; padding:14px 28px; border-radius:var(--r-sm); border:none; cursor:pointer; text-decoration:none; transition:all var(--ease); }
+    .hero-cta:hover { background:var(--primary-active); transform:translateY(-2px); box-shadow:0 8px 24px var(--primary-glow); }
+    .hero-cta-ghost { display:inline-flex; align-items:center; gap:8px; background:transparent; color:var(--ink); font-size:15px; font-weight:600; padding:14px 28px; border-radius:var(--r-sm); border:1px solid var(--hairline-soft); cursor:pointer; text-decoration:none; margin-left:12px; transition:all var(--ease); }
+    .hero-cta-ghost:hover { border-color:var(--primary); color:var(--primary); }
+    .hero-scroll { position:absolute; bottom:32px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--mute); font-family:var(--font-mono); letter-spacing:2px; }
+    @media(max-width:700px){ .hero-stats{gap:28px;flex-wrap:wrap;} .hero-stat-num{font-size:32px;} }
+
+    /* === Section === */
+    .section { padding:120px 24px; position:relative; }
+    .section-eyebrow { font-size:12px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--accent-violet); margin-bottom:12px; }
+    .section-title { font-size:clamp(32px, 4.5vw, 52px); font-weight:700; line-height:1.15; letter-spacing:-1.2px; color:var(--ink-strong); margin-bottom:12px; }
+    .section-desc { font-size:17px; color:var(--body); max-width:560px; line-height:1.7; }
+
+    /* === Metric cards === */
+    .metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:32px; }
+    .metric-card { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; position:relative; transition:all var(--ease); overflow:hidden; }
+    .metric-card:hover { transform:translateY(-3px); border-color:var(--hairline-soft); background:var(--canvas-elevated); }
+    .metric-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; }
+    .metric-card.alert::before { background:var(--danger); }
+    .metric-card.warn::before { background:var(--warning); }
+    .metric-card.ok::before { background:var(--success); }
+    .mc-label { font-size:12px; color:var(--mute); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+    .mc-value { font-family:var(--font-mono); font-size:36px; font-weight:700; color:var(--ink-strong); line-height:1; margin-bottom:6px; }
+    .mc-value .u { font-size:14px; color:var(--mute); font-weight:400; margin-left:4px; }
+    .mc-baseline { font-size:12px; color:var(--mute); font-family:var(--font-mono); }
+    .mc-baseline .up { color:var(--danger); } .mc-baseline .down { color:var(--warning); }
+    @media(max-width:700px){ .metric-row{grid-template-columns:1fr;} }
+
+    /* === Chart card === */
+    .chart-card { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; }
+    .chart-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
+    .chart-title { font-size:15px; font-weight:600; color:var(--ink); }
+    .tabs { display:flex; gap:4px; background:var(--canvas-deep); padding:4px; border-radius:var(--r-sm); border:1px solid var(--hairline-violet); }
+    .tab { font-size:13px; font-weight:500; padding:8px 16px; border-radius:6px; border:none; background:transparent; color:var(--mute); cursor:pointer; transition:all var(--ease); font-family:var(--font-sans); }
+    .tab.active { background:var(--canvas-soft); color:var(--ink); }
+    .tab:hover:not(.active) { color:var(--body); }
+    #trend-chart { width:100%; height:340px; }
+
+    /* === Day drill === */
+    .day-drill { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; margin-top:16px; transition:all var(--ease); }
+    .day-drill.active { border-color:var(--primary); box-shadow:0 0 0 1px rgba(194,239,78,0.12); }
+    .dd-head { display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+    .dd-date { font-family:var(--font-mono); font-size:16px; font-weight:600; color:var(--primary); }
+    .dd-badge { font-family:var(--font-mono); font-size:11px; padding:4px 12px; border-radius:6px; font-weight:600; }
+    .dd-badge.alert { background:var(--danger-soft); color:var(--danger); }
+    .dd-badge.warn { background:var(--warning-soft); color:var(--warning); }
+    .dd-badge.ok { background:var(--success-soft); color:var(--success); }
+    .dd-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+    .dd-item { background:var(--canvas-soft); border:1px solid var(--hairline-violet); border-radius:var(--r-sm); padding:16px; }
+    .dd-label { font-size:11px; color:var(--mute); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+    .dd-val { font-family:var(--font-mono); font-size:20px; font-weight:600; color:var(--ink-strong); }
+    .dd-val.alert { color:var(--danger); } .dd-val.warn { color:var(--warning); } .dd-val.ok { color:var(--success); }
+    @media(max-width:700px){ .dd-grid{grid-template-columns:repeat(2,1fr);} }
+
+    /* === Correlation matrix === */
+    .corr-section { background:var(--canvas-deep); }
+    .corr-intro { display:grid; grid-template-columns:1fr 1fr; gap:48px; align-items:center; margin-bottom:48px; }
+    @media(max-width:700px){ .corr-intro{grid-template-columns:1fr;} }
+    .corr-sources { display:flex; flex-direction:column; gap:16px; }
+    .corr-source { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:20px; display:flex; align-items:center; gap:16px; transition:all var(--ease); }
+    .corr-source:hover { border-color:var(--hairline-soft); transform:translateX(4px); }
+    .corr-source-icon { width:44px; height:44px; border-radius:var(--r-sm); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
+    .corr-source-icon.health { background:rgba(0,217,146,0.1); }
+    .corr-source-icon.calendar { background:rgba(139,127,217,0.1); }
+    .corr-source-icon.env { background:rgba(91,158,255,0.1); }
+    .corr-source-label { font-size:11px; color:var(--mute); text-transform:uppercase; letter-spacing:0.5px; }
+    .corr-source-name { font-size:15px; font-weight:600; color:var(--ink); }
+    .corr-source-items { font-size:12px; color:var(--mute); margin-top:2px; font-family:var(--font-mono); }
+    .corr-source-tag { margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--warning); }
+
+    .corr-matrix-wrap { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:28px; }
+    .corr-matrix-title { font-size:14px; font-weight:600; color:var(--ink); margin-bottom:20px; display:flex; align-items:center; gap:8px; }
+    .corr-matrix-title .tag { font-family:var(--font-mono); font-size:11px; color:var(--primary); background:var(--primary-glow); padding:2px 8px; border-radius:4px; }
+    .corr-matrix { display:grid; grid-template-columns:120px repeat(4,1fr); gap:4px; }
+    .corr-head { font-size:11px; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:0.5px; text-align:center; padding:8px 4px; }
+    .corr-row-label { font-size:13px; font-weight:500; color:var(--ink); display:flex; align-items:center; padding:0 12px; }
+    .corr-cell { border-radius:6px; padding:16px 8px; text-align:center; cursor:pointer; transition:all var(--ease); position:relative; overflow:hidden; min-height:56px; display:flex; flex-direction:column; justify-content:center; align-items:center; }
+    .corr-cell:hover { transform:scale(1.05); z-index:5; box-shadow:0 4px 16px rgba(0,0,0,0.3); }
+    .corr-val { font-family:var(--font-mono); font-size:16px; font-weight:700; }
+    .corr-val-label { font-size:10px; color:var(--mute); margin-top:2px; }
+
+    /* === Case section === */
+    .case-nav { display:flex; gap:8px; margin-bottom:32px; flex-wrap:wrap; }
+    .case-nav-btn { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-sm); padding:12px 20px; cursor:pointer; transition:all var(--ease); text-align:left; }
+    .case-nav-btn:hover { border-color:var(--hairline-soft); background:var(--canvas-soft); }
+    .case-nav-btn.active { border-color:var(--primary); background:rgba(194,239,78,0.05); }
+    .case-nav-id { font-family:var(--font-mono); font-size:11px; color:var(--accent-violet); margin-bottom:2px; }
+    .case-nav-btn.active .case-nav-id { color:var(--primary); }
+    .case-nav-title { font-size:13px; font-weight:500; color:var(--body); }
+    .case-nav-btn.active .case-nav-title { color:var(--ink-strong); }
+
+    .case-view { display:none; animation:fadeIn 0.5s ease; }
+    .case-view.active { display:block; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(12px);} to{opacity:1;transform:translateY(0);} }
+
+    .case-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:32px; flex-wrap:wrap; }
+    .case-id-big { font-family:var(--font-mono); font-size:14px; font-weight:700; color:var(--accent-violet); padding:4px 12px; border:1px solid var(--hairline-violet); border-radius:6px; background:var(--canvas-card); }
+    .case-title-big { font-size:28px; font-weight:700; color:var(--ink-strong); flex:1; line-height:1.3; }
+    .case-status-big { font-family:var(--font-mono); font-size:12px; padding:6px 14px; border-radius:6px; font-weight:600; }
+    .case-status-big.open { background:var(--danger-soft); color:var(--danger); }
+    .case-status-big.investigating { background:var(--warning-soft); color:var(--warning); }
+
+    .case-anomaly { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; margin-bottom:16px; }
+    .case-section-label { font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--mute); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .case-section-label .num { font-family:var(--font-mono); color:var(--accent-violet); }
+    .case-anomaly-text { font-size:16px; color:var(--ink); line-height:1.7; }
+
+    /* Timeline */
+    .timeline-wrap { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; margin-bottom:16px; }
+    .timeline { position:relative; padding:20px 0 8px; }
+    .timeline-track { position:relative; height:60px; display:flex; align-items:center; }
+    .timeline-line { position:absolute; left:0; right:0; height:2px; background:var(--hairline-soft); border-radius:1px; }
+    .timeline-days { display:flex; justify-content:space-between; width:100%; position:relative; }
+    .timeline-day { width:3px; height:12px; background:var(--hairline-soft); border-radius:2px; position:relative; cursor:pointer; transition:all var(--ease); }
+    .timeline-day.anomaly { background:var(--danger); height:20px; box-shadow:0 0 6px var(--danger); }
+    .timeline-day:hover { transform:scaleY(1.3); }
+    .timeline-day-tip { position:absolute; bottom:28px; left:50%; transform:translateX(-50%); background:var(--canvas-elevated); border:1px solid var(--hairline-soft); border-radius:6px; padding:6px 10px; font-size:10px; font-family:var(--font-mono); color:var(--ink); white-space:nowrap; opacity:0; pointer-events:none; transition:opacity var(--ease); z-index:10; }
+    .timeline-day:hover .timeline-day-tip { opacity:1; }
+    .timeline-labels { display:flex; justify-content:space-between; margin-top:8px; }
+    .timeline-label { font-size:10px; color:var(--mute); font-family:var(--font-mono); }
+
+    /* Suspects */
+    .suspects { display:flex; flex-direction:column; gap:10px; }
+    .suspect { background:var(--canvas-soft); border:1px solid var(--hairline-violet); border-radius:var(--r-md); padding:18px 20px; transition:all var(--ease); position:relative; overflow:hidden; }
+    .suspect.primary { border:2px solid var(--primary); background:linear-gradient(135deg,rgba(194,239,78,0.06),var(--canvas-soft)); }
+    .suspect:hover { transform:translateX(4px); }
+    .suspect-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .suspect-name { font-size:15px; font-weight:600; color:var(--ink); }
+    .suspect-badge { font-family:var(--font-mono); font-size:10px; padding:2px 8px; border-radius:4px; background:var(--primary); color:var(--on-primary); font-weight:600; margin-left:8px; }
+    .suspect-conf { font-family:var(--font-mono); font-size:18px; font-weight:700; }
+    .suspect-conf.high { color:var(--danger); } .suspect-conf.mid { color:var(--warning); } .suspect-conf.low { color:var(--mute); }
+    .suspect-evidence { font-size:13px; color:var(--body); line-height:1.6; }
+    .suspect-bar { margin-top:8px; height:4px; background:var(--canvas-deep); border-radius:var(--r-pill); overflow:hidden; }
+    .suspect-bar-fill { height:100%; border-radius:var(--r-pill); transition:width 0.8s ease; }
+
+    /* Verdict + Action */
+    .case-bottom { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+    @media(max-width:700px){ .case-bottom{grid-template-columns:1fr;} }
+    .verdict-box { background:linear-gradient(135deg,rgba(194,239,78,0.08),transparent); border:1.5px solid var(--primary); border-radius:var(--r-lg); padding:20px 24px; }
+    .verdict-label { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--primary); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+    .verdict-text { font-size:15px; font-weight:600; color:var(--ink-strong); line-height:1.6; }
+    .action-box { background:var(--canvas-soft); border:1px dashed var(--hairline-soft); border-radius:var(--r-lg); padding:20px 24px; }
+    .action-label { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--success); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+    .action-text { font-size:14px; color:var(--ink); line-height:1.7; }
+
+    /* === Before/After === */
+    .compare-section { background:var(--canvas-deep); }
+    .compare-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
+    @media(max-width:700px){ .compare-grid{grid-template-columns:1fr;} }
+    .compare-card { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-lg); padding:24px; }
+    .compare-card.after { border-color:var(--primary); background:linear-gradient(135deg,rgba(194,239,78,0.04),var(--canvas-card)); }
+    .compare-card-label { font-size:12px; font-weight:600; letter-spacing:1px; text-transform:uppercase; margin-bottom:16px; }
+    .compare-card-label.before { color:var(--danger); }
+    .compare-card-label.after { color:var(--success); }
+    .compare-metrics { display:flex; flex-direction:column; gap:16px; }
+    .compare-metric { display:flex; align-items:center; justify-content:space-between; }
+    .compare-metric-label { font-size:14px; color:var(--body); }
+    .compare-metric-value { font-family:var(--font-mono); font-size:24px; font-weight:700; color:var(--ink-strong); }
+    .compare-metric-delta { font-family:var(--font-mono); font-size:13px; font-weight:600; padding:2px 8px; border-radius:4px; margin-left:8px; }
+    .compare-metric-delta.up { background:var(--success-soft); color:var(--success); }
+    .compare-metric-delta.down { background:var(--danger-soft); color:var(--danger); }
+    #compare-chart { width:100%; height:300px; }
+
+    /* === Architecture === */
+    .arch-flow { display:flex; flex-direction:column; gap:20px; align-items:center; }
+    .arch-layer { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+    .arch-node { background:var(--canvas-card); border:1px solid var(--hairline-violet); border-radius:var(--r-md); padding:18px 24px; min-width:160px; text-align:center; transition:all var(--ease); }
+    .arch-node:hover { transform:translateY(-3px); border-color:var(--hairline-soft); }
+    .arch-node.brand { border-color:var(--primary); }
+    .arch-node.mock { border-style:dashed; }
+    .arch-node-label { font-size:11px; color:var(--mute); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+    .arch-node-name { font-size:14px; font-weight:600; color:var(--ink); }
+    .arch-node-tag { font-family:var(--font-mono); font-size:10px; color:var(--warning); margin-top:4px; }
+    .arch-arrow { color:var(--mute); font-size:20px; }
+
+    /* === Footer === */
+    .footer-section { padding:120px 24px 80px; text-align:center; border-top:1px solid var(--hairline-violet); position:relative; overflow:hidden; }
+    .footer-section::before { content:""; position:absolute; inset:0; background:radial-gradient(ellipse 60% 40% at 50% 100%,rgba(194,239,78,0.06),transparent); pointer-events:none; }
+    .footer-title { font-size:clamp(32px,5vw,56px); font-weight:800; line-height:1.15; letter-spacing:-1.5px; color:var(--ink-strong); margin-bottom:20px; position:relative; }
+    .footer-title .hl { background:var(--primary); color:var(--on-primary); padding:2px 12px; border-radius:6px; }
+    .footer-sub { font-size:18px; color:var(--body); margin-bottom:40px; position:relative; }
+    .footer-tag { font-family:var(--font-mono); font-size:11px; color:var(--mute); margin-top:64px; position:relative; }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <span class="nav-logo">BodyOS</span>
+      <div class="nav-links">
+        <a href="#problem">异常检测</a>
+        <a href="#correlation">关联分析</a>
+        <a href="#cases">案件</a>
+        <a href="#compare">干预对比</a>
+        <a href="#arch">架构</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-bg"></div>
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-eyebrow reveal"><span class="dot"></span>Health Detective · 身体的 Debugger</div>
+        <h1 class="hero-title reveal d1">你的 <span class="hl">HRV 在降</span><br>但你不知道为什么</h1>
+        <p class="hero-sub reveal d2">
+          程序员用 <span class="mono">debugger</span> 修 bug，BodyOS 帮你 debug 身体。<br>
+          连接健康数据 + 工作日程 + 环境信息，<br>
+          像侦探一样找出到底是什么在偷偷拖垮你的状态。
+        </p>
+        <div class="hero-stats reveal d3">
+          <div>
+            <div class="hero-stat-num count-up" data-target="30">0</div>
+            <div class="hero-stat-label">天连续监测</div>
+          </div>
+          <div>
+            <div class="hero-stat-num count-up" data-target="4">0</div>
+            <div class="hero-stat-label">个 AI 破案报告</div>
+          </div>
+          <div>
+            <div class="hero-stat-num count-up" data-target="85">0<span class="unit">%</span></div>
+            <div class="hero-stat-label">异常有迹可循</div>
+          </div>
+        </div>
+        <div class="reveal d4">
+          <a href="#problem" class="hero-cta">查看 Demo</a>
+          <a href="#arch" class="hero-cta-ghost">数据架构</a>
+        </div>
+      </div>
+    </div>
+    <div class="hero-scroll">SCROLL ↓</div>
+  </div>
+
+  <!-- Section 2: Problem -->
+  <div class="section" id="problem">
+    <div class="container">
+      <div class="section-header reveal">
+        <div class="section-eyebrow">01 · Anomaly Detection</div>
+        <h2 class="section-title">过去 30 天，有 4 天不对劲</h2>
+        <p class="section-desc">三维度健康趋势监测，红色标记为异常日。点击图表中任意一天，下钻查看完整数据。</p>
+      </div>
+      <div class="metric-row reveal d1">
+        <div class="metric-card alert">
+          <div class="mc-label">平均 HRV</div>
+          <div class="mc-value" id="avg-hrv">—</div>
+          <div class="mc-baseline" id="baseline-hrv">基线 45ms</div>
+        </div>
+        <div class="metric-card alert">
+          <div class="mc-label">平均睡眠分</div>
+          <div class="mc-value" id="avg-sleep">—</div>
+          <div class="mc-baseline" id="baseline-sleep">基线 75</div>
+        </div>
+        <div class="metric-card warn">
+          <div class="mc-label">平均静息心率</div>
+          <div class="mc-value" id="avg-hr">—</div>
+          <div class="mc-baseline" id="baseline-hr">基线 58bpm</div>
+        </div>
+      </div>
+      <div class="chart-card reveal d2">
+        <div class="chart-header">
+          <span class="chart-title">30 天健康趋势</span>
+          <div class="tabs">
+            <button class="tab active" data-metric="hrv">HRV</button>
+            <button class="tab" data-metric="sleep">睡眠</button>
+            <button class="tab" data-metric="hr">心率</button>
+          </div>
+        </div>
+        <div id="trend-chart"></div>
+      </div>
+      <div class="day-drill reveal d3" id="day-drill">
+        <div class="dd-head">
+          <span class="dd-date" id="drill-date">点击图表选择日期</span>
+          <span class="dd-badge" id="drill-badge" style="display:none">—</span>
+        </div>
+        <div class="dd-grid" id="drill-grid">
+          <div class="dd-item"><div class="dd-label">HRV</div><div class="dd-val" id="drill-hrv">—</div></div>
+          <div class="dd-item"><div class="dd-label">睡眠分</div><div class="dd-val" id="drill-sleep">—</div></div>
+          <div class="dd-item"><div class="dd-label">静息心率</div><div class="dd-val" id="drill-hr">—</div></div>
+          <div class="dd-item"><div class="dd-label">会议时长</div><div class="dd-val" id="drill-meeting">—</div></div>
+          <div class="dd-item"><div class="dd-label">咖啡</div><div class="dd-val" id="drill-coffee">—</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3: Correlation Analysis -->
+  <div class="section corr-section" id="correlation">
+    <div class="container">
+      <div class="section-header reveal">
+        <div class="section-eyebrow">02 · Correlation Analysis</div>
+        <h2 class="section-title">数据不会说谎</h2>
+        <p class="section-desc">BodyOS 将三类数据源交叉关联，发现肉眼看不见的规律。这是从 Health Tracker 变成 Health Detective 的关键一步。</p>
+      </div>
+      <div class="corr-intro">
+        <div class="reveal d1">
+          <div class="corr-sources">
+            <div class="corr-source">
+              <div class="corr-source-icon health">❤</div>
+              <div>
+                <div class="corr-source-label">数据源 1</div>
+                <div class="corr-source-name">健康数据</div>
+                <div class="corr-source-items">HRV · 睡眠分 · 静息心率</div>
+              </div>
+              <div class="corr-source-tag">[mock]</div>
+            </div>
+            <div class="corr-source">
+              <div class="corr-source-icon calendar">📅</div>
+              <div>
+                <div class="corr-source-label">数据源 2</div>
+                <div class="corr-source-name">工作日程</div>
+                <div class="corr-source-items">会议时长 · 压力事件</div>
+              </div>
+              <div class="corr-source-tag">[mock]</div>
+            </div>
+            <div class="corr-source">
+              <div class="corr-source-icon env">🌍</div>
+              <div>
+                <div class="corr-source-label">数据源 3</div>
+                <div class="corr-source-name">环境信息</div>
+                <div class="corr-source-items">办公地点 · 咖啡摄入</div>
+              </div>
+              <div class="corr-source-tag">[mock]</div>
+            </div>
+          </div>
+        </div>
+        <div class="reveal d2">
+          <div class="corr-matrix-wrap">
+            <div class="corr-matrix-title">关联热力矩阵 <span class="tag">Pearson r</span></div>
+            <div class="corr-matrix" id="corr-matrix">
+              <!-- JS rendered -->
+            </div>
+            <div style="margin-top:16px;display:flex;gap:16px;font-size:11px;color:var(--mute);font-family:var(--font-mono);">
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:rgba(255,71,87,0.8);border-radius:3px;"></span>强负相关</span>
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:rgba(245,166,35,0.6);border-radius:3px;"></span>弱相关</span>
+              <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:12px;background:rgba(0,217,146,0.6);border-radius:3px;"></span>强正相关</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal d3" id="corr-insight" style="background:var(--canvas-card);border:1px solid var(--primary);border-radius:var(--r-lg);padding:24px 28px;display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;">💡</div>
+        <div>
+          <div style="font-family:var(--font-mono);font-size:12px;color:var(--primary);font-weight:600;margin-bottom:4px;">KEY INSIGHT</div>
+          <div style="font-size:16px;color:var(--ink);line-height:1.6;" id="corr-insight-text">会议时长与 HRV 的关联度为 <strong style="color:var(--danger);">-0.85</strong>，咖啡摄入与睡眠分的关联度为 <strong style="color:var(--danger);">-0.72</strong>。这些关联不是偶然——它们是 BodyOS 破案的关键证据。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 4: Cases -->
+  <div class="section" id="cases">
+    <div class="container">
+      <div class="section-header reveal">
+        <div class="section-eyebrow">03 · AI Investigation</div>
+        <h2 class="section-title">4 个案件，BodyOS 已破案</h2>
+        <p class="section-desc">从数据异常到锁定主因，每个案件都是一个完整的推理过程。点击下方案件编号切换查看。</p>
+      </div>
+      <div class="case-nav reveal d1" id="case-nav">
+        <!-- JS rendered -->
+      </div>
+      <div id="case-views">
+        <!-- JS rendered -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 5: Before/After -->
+  <div class="section compare-section" id="compare">
+    <div class="container">
+      <div class="section-header reveal">
+        <div class="section-eyebrow">04 · Intervention Projection</div>
+        <h2 class="section-title">如果调整，会怎样？</h2>
+        <p class="section-desc">基于 4 个案件的推理结果，模拟按照建议调整后 30 天的健康趋势变化。</p>
+      </div>
+      <div class="compare-grid reveal d1">
+        <div class="compare-card before">
+          <div class="compare-card-label before">不干预 · Current</div>
+          <div class="compare-metrics">
+            <div class="compare-metric"><span class="compare-metric-label">平均 HRV</span><span class="compare-metric-value" id="before-hrv">42<span class="u" style="font-size:14px;color:var(--mute);">ms</span></span></div>
+            <div class="compare-metric"><span class="compare-metric-label">平均睡眠分</span><span class="compare-metric-value" id="before-sleep">67</span></div>
+            <div class="compare-metric"><span class="compare-metric-label">平均静息心率</span><span class="compare-metric-value" id="before-hr">61<span class="u" style="font-size:14px;color:var(--mute);">bpm</span></span></div>
+            <div class="compare-metric"><span class="compare-metric-label">异常天数</span><span class="compare-metric-value" id="before-anomaly">4<span class="u" style="font-size:14px;color:var(--mute);">天</span></span></div>
+          </div>
+        </div>
+        <div class="compare-card after">
+          <div class="compare-card-label after">干预后 · Projected</div>
+          <div class="compare-metrics">
+            <div class="compare-metric"><span class="compare-metric-label">平均 HRV</span><div><span class="compare-metric-value" id="after-hrv">48</span><span class="compare-metric-delta up">+14%</span></div></div>
+            <div class="compare-metric"><span class="compare-metric-label">平均睡眠分</span><div><span class="compare-metric-value" id="after-sleep">76</span><span class="compare-metric-delta up">+13%</span></div></div>
+            <div class="compare-metric"><span class="compare-metric-label">平均静息心率</span><div><span class="compare-metric-value" id="after-hr">58</span><span class="compare-metric-delta up">-3bpm</span></div></div>
+            <div class="compare-metric"><span class="compare-metric-label">异常天数</span><div><span class="compare-metric-value" id="after-anomaly">1</span><span class="compare-metric-delta up">-75%</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card reveal d2">
+        <div class="chart-header"><span class="chart-title">30 天趋势对比 · HRV</span></div>
+        <div id="compare-chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 6: Architecture -->
+  <div class="section" id="arch">
+    <div class="container">
+      <div class="section-header reveal">
+        <div class="section-eyebrow">05 · Architecture</div>
+        <h2 class="section-title">BodyOS 如何工作</h2>
+        <p class="section-desc">三类数据源通过 MCP 协议统一接入，AI 推理引擎做关联分析，输出 Case Reports。</p>
+      </div>
+      <div class="arch-flow reveal d1">
+        <div class="arch-layer">
+          <div class="arch-node mock"><div class="arch-node-label">健康数据</div><div class="arch-node-name">Apple HealthKit</div><div class="arch-node-tag">[mock]</div></div>
+          <div class="arch-node mock"><div class="arch-node-label">工作日程</div><div class="arch-node-name">飞书 Calendar API</div><div class="arch-node-tag">[mock]</div></div>
+          <div class="arch-node mock"><div class="arch-node-label">环境信息</div><div class="arch-node-name">天气 / GPS</div><div class="arch-node-tag">[mock]</div></div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-node brand"><div class="arch-node-label">统一接入</div><div class="arch-node-name">MCP Connector Layer</div><div class="arch-node-tag" style="color:var(--primary);">[concept]</div></div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-node brand"><div class="arch-node-label">推理引擎</div><div class="arch-node-name">AI Detective Engine</div><div class="arch-node-tag" style="color:var(--primary);">[预计算]</div></div>
+        </div>
+        <div class="arch-arrow">↓</div>
+        <div class="arch-layer">
+          <div class="arch-node"><div class="arch-node-label">输出</div><div class="arch-node-name">Case Reports</div><div class="arch-node-tag" style="color:var(--accent-green);">[4 cases]</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-section">
+    <div class="container">
+      <h2 class="footer-title reveal">程序员用 <span class="hl">debugger</span> 修 bug<br>BodyOS 帮你 <span class="hl">debug 身体</span></h2>
+      <p class="footer-sub reveal d1">From Health Tracker → Health Detective。被动监测变主动破案。</p>
+      <div class="reveal d2"><a href="#" class="hero-cta">↑ 回到顶部</a></div>
+      <div class="footer-tag">BodyOS · TRAE Hackathon 2026</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
