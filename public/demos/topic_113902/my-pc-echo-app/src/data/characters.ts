@@ -1,0 +1,371 @@
+import alvenImg from '../assets/characters/alven.jpg';
+import ayatoImg from '../assets/characters/ayato.jpg';
+import hoshinoImg from '../assets/characters/hoshino.jpg';
+import allanImg from '../assets/characters/allan.jpg';
+import kuzuyaImg from '../assets/characters/kuzuya.jpg';
+import rianImg from '../assets/characters/rian.jpg';
+
+export interface Character {
+  id: string;
+  name: string;
+  game: string;
+  avatar: string; // placeholder color for now
+  avatarImage?: string; // 角色肖像图片路径
+  description?: string; // 一句话描述角色的核心气质
+  title?: string; // 角色的称号/头衔
+  entries: Entry[];
+}
+
+export interface Entry {
+  id: string;
+  type: 'highlight' | 'journal' | 'bond';
+  date: string;
+  title: string;
+  content: string;
+  image?: string;
+  location?: string;
+  tags?: string[];
+}
+
+export const mockCharacters: Character[] = [
+  {
+    id: 'char-1',
+    name: '艾尔文',
+    game: '原神',
+    avatar: '#C8A860',
+    avatarImage: alvenImg,
+    description: '银发少年，永远站在风起的地方，追寻一种叫自由的东西',
+    title: '追风之子',
+    entries: [
+      {
+        id: 'e3-new',
+        type: 'bond',
+        date: '2026-02-28',
+        title: '他刻在木剑上的字',
+        content: '他送了我一把木剑，刀背上刻着两个字——\'勇敢\'。我说我不够勇敢。他说：\'拿到它的那一刻，你就已经是了。\'',
+        location: '风起地',
+        tags: ['礼物', '木剑'],
+      },
+      {
+        id: 'e2-new',
+        type: 'journal',
+        date: '2026-02-08',
+        title: '自由是什么颜色',
+        content: '他问我自由是什么颜色的。我说不知道。他张开手臂转了一圈，说\'就是这个颜色\'。那一刻风把他的斗篷吹得很远。',
+        location: '低语森林',
+        tags: ['思考', '自由'],
+      },
+      {
+        id: 'e1',
+        type: 'highlight',
+        date: '2025-12-15',
+        title: '第一次站在风起地的高处',
+        content: '风从四面八方涌来，我看到了整个蒙德。他说这就是自由的味道。',
+        image: '',
+        location: '风起地',
+        tags: ['第一次', '风景'],
+      },
+      {
+        id: 'e2',
+        type: 'journal',
+        date: '2026-01-03',
+        title: '和迪卢克的那场对话',
+        content: '他问我为什么总是回头。我说，因为有些人走在前面，我却总觉得他们在身后。他笑了，说那是牵挂。',
+        location: '蒙德城',
+        tags: ['迪卢克', '对话'],
+      },
+      {
+        id: 'e3',
+        type: 'bond',
+        date: '2026-01-20',
+        title: '温迪送给我的那首歌',
+        content: '他说这首曲子是他旅行时写的，送给我当作纪念。我不知道他还会不会回来，但每次听到风声都会想起这段旋律。',
+        location: '风神像下',
+        tags: ['温迪', '礼物'],
+      },
+      {
+        id: 'e1-new',
+        type: 'highlight',
+        date: '2025-11-20',
+        title: '骑士团的篝火夜',
+        content: '那天晚上所有人围坐在一起，他把最后一块肉串递给我。我问他为什么不吃。他说：\'我在看你笑。\'',
+        location: '陨星谷',
+        tags: ['骑士团', '篝火'],
+      },
+    ],
+  },
+  {
+    id: 'char-2',
+    name: '绫人',
+    game: '原神',
+    avatar: '#7A9E88',
+    avatarImage: ayatoImg,
+    description: '樱花树下的执棋人，用微笑隐藏所有意图',
+    title: '弈棋者',
+    entries: [
+      {
+        id: 'e5-new',
+        type: 'bond',
+        date: '2026-03-28',
+        title: '那把折扇',
+        content: '他在我的生日送了一把折扇。扇面上画了一枝樱花，半开半落。我问他为什么不是全开。他说：\'全开就意味着要谢了。\'',
+        location: '稻妻城',
+        tags: ['礼物', '折扇', '绫人'],
+      },
+      {
+        id: 'e5',
+        type: 'journal',
+        date: '2026-03-01',
+        title: '关于信任这件事',
+        content: '他教会我一件事：信任不是相信对方不会背叛，而是相信即使背叛了，自己也能接受。这个道理很残酷，但很真实。',
+        location: '稻妻城',
+        tags: ['思考', '绫人'],
+      },
+      {
+        id: 'e4-new',
+        type: 'journal',
+        date: '2026-03-15',
+        title: '他眼中的输赢',
+        content: '他赢棋的时候从不笑。输棋的时候反而笑了。我问他为什么。他说：\'因为赢是意料之中，输才是故事。\'',
+        location: '社奉行庭院',
+        tags: ['思考', '绫人', '对弈'],
+      },
+      {
+        id: 'e4',
+        type: 'highlight',
+        date: '2026-02-14',
+        title: '樱花树下的对弈',
+        content: '他下棋从来不用全力，直到那天我说"无聊"。',
+        image: '',
+        location: '社奉行庭院',
+        tags: ['绫人', '对弈'],
+      },
+      {
+        id: 'e4-new2',
+        type: 'highlight',
+        date: '2026-01-25',
+        title: '雨天的侧影',
+        content: '他站在屋檐下等雨停。我没有伞，走过去站在他旁边。他没有让开，只是说了一句：\'站近点，别淋湿了。\'',
+        location: '神无冢',
+        tags: ['绫人', '雨天'],
+      },
+    ],
+  },
+  {
+    id: 'char-3',
+    name: '星野',
+    game: '崩坏：星穹铁道',
+    avatar: '#D4A574',
+    avatarImage: hoshinoImg,
+    description: '在宇宙尽头回望的人，他的"下次见"可能是一千年后',
+    title: '星穹旅客',
+    entries: [
+      {
+        id: 'e6-new2',
+        type: 'bond',
+        date: '2026-04-15',
+        title: '他手绘的星图',
+        content: '那不是真正的星图。是他自己画的，上面歪歪扭扭的标注了一些名字。有他去过的地方，有他想念的人，还有一颗星星旁边写着——\'你在这里\'。',
+        location: '星穹列车',
+        tags: ['星野', '礼物', '星图'],
+      },
+      {
+        id: 'e8',
+        type: 'bond',
+        date: '2026-04-10',
+        title: '他留给我的那张星图',
+        content: '画得歪歪扭扭的，但每颗星都标注了名字。有一颗写着"你"。',
+        tags: ['星野', '礼物', '星图'],
+      },
+      {
+        id: 'e7',
+        type: 'journal',
+        date: '2026-04-02',
+        title: '离开时的最后一句话',
+        content: '他说"下次见"。我知道他的"下次"可能是一千年以后。但我还是说了"好的"。',
+        location: '星穹列车',
+        tags: ['告别', '星野'],
+      },
+      {
+        id: 'e6-new',
+        type: 'highlight',
+        date: '2026-02-20',
+        title: '列车窗外的星海',
+        content: '列车穿过一片星云的时候，他突然拉住我的手。我问怎么了。他说：\'别眨眼，你会错过自己发光的样子。\'我低头一看，星云的光映在我的眼睛里。',
+        location: '星穹列车',
+        tags: ['星野', '星穹列车'],
+      },
+      {
+        id: 'e7-new',
+        type: 'journal',
+        date: '2026-03-28',
+        title: '关于\'下次见\'',
+        content: '他教我认识星座，指着最远的那颗说：\'下次见面的时候，我就从那颗星回来。\'我不知道那颗星离地球多远，但我知道我会在原地等。',
+        location: '仙舟·罗浮',
+        tags: ['星野', '思考', '星空'],
+      },
+      {
+        id: 'e6',
+        type: 'highlight',
+        date: '2026-03-15',
+        title: '仙舟罗浮的星河',
+        content: '整个天空都是星星。我从来没见过这么多的光。他站在我旁边，说"像不像有人把银河倒下来了"。',
+        image: '',
+        location: '仙舟·罗浮',
+        tags: ['第一次', '星河'],
+      },
+    ],
+  },
+  {
+    id: 'char-4',
+    name: '阿兰',
+    game: '幻塔',
+    avatar: '#A08060',
+    avatarImage: allanImg,
+    description: '不是最强的，不是最聪明的，但他总在那里',
+    title: '海岸守望者',
+    entries: [
+      {
+        id: 'e9-new3',
+        type: 'highlight',
+        date: '2026-06-15',
+        title: '他教我游泳的那天',
+        content: '我从小怕水。他说：\'闭上眼睛，我带你走。\'他拉着我的手走进了海里。到膝盖深的时候，我睁开眼——海面比我想象的温柔得多。',
+        location: '班吉海岸',
+        tags: ['阿兰', '第一次', '海'],
+      },
+      {
+        id: 'e9-new2',
+        type: 'bond',
+        date: '2026-06-01',
+        title: '他送的海螺',
+        content: '一个很普通的海螺，贝壳上有细密的纹路。他说\'把它放在耳边，能听到大海的声音\'。我试了，没有海浪声。只有心跳——他不知道我听见的是他的。',
+        location: '班吉海岸',
+        tags: ['礼物', '海螺', '阿兰'],
+      },
+      {
+        id: 'e10',
+        type: 'journal',
+        date: '2026-05-15',
+        title: '为什么总是他',
+        content: '不是最强的，不是最聪明的，但每次我需要一个人的时候，他都在。',
+        location: '镜都',
+        tags: ['阿兰', '思考'],
+      },
+      {
+        id: 'e9',
+        type: 'highlight',
+        date: '2026-05-01',
+        title: '海边的日落',
+        content: '太阳沉下去的那一刻，海面变成了金色。我们什么都没说。',
+        image: '',
+        location: '班吉海岸',
+        tags: ['风景', '日落'],
+      },
+      {
+        id: 'e10-new',
+        type: 'journal',
+        date: '2026-05-20',
+        title: '他说\'不用谢\'',
+        content: '我帮了他一个忙，特别小的一件事。他说\'不用谢\'。我说\'那你要怎么谢我？\'他想了一下，说\'明天你去海边吗？我想给你看一样东西。\'',
+        location: '镜都',
+        tags: ['阿兰', '对话'],
+      },
+    ],
+  },
+  {
+    id: 'char-5',
+    name: '空月',
+    game: '明日方舟',
+    avatar: '#8888AA',
+    avatarImage: kuzuyaImg,
+    description: '暴风雨里说"光不会灭的"的人，偷偷在刀柄上刻下名字缩写',
+    title: '灯塔守望者',
+    entries: [
+      {
+        id: 'e12-new',
+        type: 'bond',
+        date: '2026-06-25',
+        title: '他偷偷修好的那把刀',
+        content: '我那把刀已经碎了很久了，我一直没修，因为碎掉的是一段记忆。有一天打开背包，发现它被重新拼好了，刀柄上多了一道刻痕——是他名字的首字母。附了一张纸条：\'有些东西碎了，不代表不要了。\'',
+        location: '罗德岛',
+        tags: ['空月', '礼物', '刀'],
+      },
+      {
+        id: 'e12',
+        type: 'bond',
+        date: '2026-06-20',
+        title: '他偷偷修好的那把刀',
+        content: '我那把刀已经碎了很久了。有一天打开背包，发现它被修好了，刀柄上多了一道刻痕——是他名字的缩写。',
+        tags: ['空月', '礼物', '刀'],
+      },
+      {
+        id: 'e11',
+        type: 'highlight',
+        date: '2026-06-10',
+        title: '暴风雨中的灯塔',
+        content: '信号塔的光在暴风雨里摇摇欲坠。他说"别怕，光不会灭的"。',
+        image: '',
+        location: '荒野信号塔',
+        tags: ['空月', '暴风雨'],
+      },
+      {
+        id: 'e11-new',
+        type: 'journal',
+        date: '2026-06-15',
+        title: '他说\'光不会灭的\'',
+        content: '信号塔的灯在风暴里忽明忽暗。我问他如果灯灭了怎么办。他说：\'那我就是灯。\'我笑了，说\'那你要少吃点，不然灯太胖了。\'他也笑了。',
+        location: '荒野信号塔',
+        tags: ['空月', '对话', '暴风雨'],
+      },
+    ],
+  },
+  {
+    id: 'char-6',
+    name: '黎安',
+    game: '鸣潮',
+    avatar: '#998877',
+    avatarImage: rianImg,
+    description: '潮退之后他一个个捡起贝壳，说"带回去给你看"',
+    title: '潮汐之子',
+    entries: [
+      {
+        id: 'e13-new3',
+        type: 'highlight',
+        date: '2026-07-15',
+        title: '荧光海上的影子',
+        content: '那天晚上海水发出了蓝色的荧光。他脱了鞋踩进去，水面上出现了发光的脚印。我跟在后面踩，脚印比他的小一圈，但一样亮。那一刻我们走过的路变成了光。',
+        location: '索拉里斯海岸',
+        tags: ['黎安', '风景', '海'],
+      },
+      {
+        id: 'e13-new2',
+        type: 'bond',
+        date: '2026-07-10',
+        title: '他留下的贝壳项链',
+        content: '他在潮退之前把贝壳穿成了一条项链，放在我的口袋里。我没有发现，直到他走了很久以后。每一颗贝壳的纹路都不一样，像是他有意挑过的。',
+        location: '索拉里斯海岸',
+        tags: ['礼物', '贝壳', '黎安'],
+      },
+      {
+        id: 'e13-new',
+        type: 'journal',
+        date: '2026-07-05',
+        title: '他说\'会回来的\'',
+        content: '我问他会走多久。他蹲在沙滩上画了一个圈，说：\'等这个圈被潮水冲掉的时候。\'然后他站了起来，海浪刚好漫过他的脚踝。他说：\'差不多就是现在。\'他转身走进了潮水里。',
+        location: '索拉里斯海岸',
+        tags: ['黎安', '告别', '海'],
+      },
+      {
+        id: 'e13',
+        type: 'highlight',
+        date: '2026-07-01',
+        title: '潮汐退去后的海滩',
+        content: '海滩上留下了很多贝壳。他一个个捡起来，说要带回去给我看。那一刻我觉得他是真的会回来的。',
+        image: '',
+        location: '索拉里斯海岸',
+        tags: ['黎安', '贝壳', '海滩'],
+      },
+    ],
+  },
+];

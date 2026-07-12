@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能调课小助手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0066FF',
+                        secondary: '#00CC99',
+                        purple: '#6633FF',
+                        orange: '#FF6600',
+                        dark: '#1A1A2E',
+                        darker: '#0F0F1A',
+                        danger: '#FF4757',
+                        warning: '#FFA502',
+                        success: '#2ED573',
+                    },
+                    fontFamily: {
+                        sans: ['"Noto Sans SC"', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Noto Sans SC', sans-serif; background: linear-gradient(135deg, #0F0F1A 0%, #1A1A2E 50%, #16213E 100%); min-height: 100vh; }
+        .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .btn-gradient { background: linear-gradient(135deg, #0066FF 0%, #00CC99 100%); transition: all 0.3s; }
+        .btn-gradient:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,102,255,0.4); }
+        .course-card { cursor: pointer; transition: all 0.2s; }
+        .course-card:hover { transform: scale(1.03); z-index: 10; }
+        .course-card.conflict { border: 2px solid #FF4757 !important; animation: pulse 2s infinite; }
+        .course-card.selected { box-shadow: 0 0 0 3px rgba(0,102,255,0.5); z-index: 20; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .ai-loading::after { content: ''; width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #00CC99; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; margin-left: 8px; }
+        .toast { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="text-white">
+    <div class="flex h-screen">
+        <nav class="w-16 md:w-60 glass flex flex-col items-center py-6">
+            <div class="mb-8 flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                    <i data-lucide="calendar-check" class="w-6 h-6"></i>
+                </div>
+                <span class="hidden md:block text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">智能调课</span>
+            </div>
+            <div class="flex flex-col space-y-2 w-full px-3 flex-grow">
+                <button class="nav-btn active flex items-center space-x-3 px-4 py-3 rounded-xl border border-primary/30 bg-primary/10 text-secondary">
+                    <i data-lucide="layout-grid" class="w-5 h-5"></i>
+                    <span class="hidden md:block">课表管理</span>
+                </button>
+                <button class="nav-btn flex items-center space-x-3 px-4 py-3 rounded-xl border border-transparent hover:bg-white/5 transition-all">
+                    <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+                    <span class="hidden md:block">冲突检测</span>
+                </button>
+                <button class="nav-btn flex items-center space-x-3 px-4 py-3 rounded-xl border border-transparent hover:bg-white/5 transition-all">
+                    <i data-lucide="zap" class="w-5 h-5"></i>
+                    <span class="hidden md:block">一键调课</span>
+                </button>
+                <button class="nav-btn flex items-center space-x-3 px-4 py-3 rounded-xl border border-transparent hover:bg-white/5 transition-all">
+                    <i data-lucide="bar-chart-2" class="w-5 h-5"></i>
+                    <span class="hidden md:block">数据统计</span>
+                </button>
+            </div>
+            <div class="mt-auto w-full px-3">
+                <div class="hidden md:flex items-center space-x-3 px-4 py-3 rounded-xl bg-white/5">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple to-orange flex items-center justify-center">
+                        <i data-lucide="user" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <div class="text-sm font-medium">张老师</div>
+                        <div class="text-xs text-gray-400">教务处</div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <main class="flex-grow overflow-y-auto p-6">
+            <header class="flex flex-col md:flex-row items-start md:items-center justify-between mb-6">
+                <div>
+                    <h1 class="text-2xl font-bold">智能调课小助手</h1>
+                    <p class="text-gray-400 mt-1">AI驱动的课程调度解决方案</p>
+                </div>
+                <div class="mt-4 md:mt-0 flex items-center space-x-4">
+                    <div class="flex items-center space-x-2 px-4 py-2 rounded-full bg-danger/20 border border-danger/30">
+                        <i data-lucide="alert-circle" class="w-4 h-4 text-danger"></i>
+                        <span class="text-sm text-danger font-medium" id="conflict-count">3</span>
+                        <span class="text-sm text-gray-300">个冲突待处理</span>
+                    </div>
+                    <button onclick="detectConflicts()" class="btn-gradient px-4 py-2 rounded-full text-white font-medium flex items-center space-x-2">
+                        <i data-lucide="search" class="w-4 h-4"></i>
+                        <span>检测冲突</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="mb-6 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <button onclick="prevWeek()" class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center hover:bg-white/20">
+                        <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                    </button>
+                    <span class="text-lg font-medium">2024年第2周</span>
+                    <button onclick="nextWeek()" class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center hover:bg-white/20">
+                        <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="showView('teacher')" class="view-btn active px-4 py-2 rounded-lg border border-primary/30 bg-primary/10 text-secondary text-sm">按教师</button>
+                    <button onclick="showView('classroom')" class="view-btn px-4 py-2 rounded-lg border border-white/20 text-sm hover:bg-white/10">按教室</button>
+                    <button onclick="showView('student')" class="view-btn px-4 py-2 rounded-lg border border-white/20 text-sm hover:bg-white/10">按学生</button>
+                </div>
+            </div>
+
+            <div class="glass rounded-2xl overflow-hidden mb-6">
+                <div class="grid grid-cols-12 border-b border-white/10">
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium text-gray-400 text-sm">时间</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周一</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周二</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周三</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周四</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周五</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周六</div>
+                    <div class="col-span-1 bg-white/5 p-3 text-center font-medium">周日</div>
+                    <div class="col-span-4 bg-white/5 p-3 text-center font-medium">课程详情</div>
+                </div>
+                <div id="schedule-grid"></div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center space-x-2">
+                        <i data-lucide="users" class="w-5 h-5 text-primary"></i>
+                        <span>教师资源</span>
+                    </h3>
+                    <div id="teacher-list" class="space-y-3"></div>
+                </div>
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center space-x-2">
+                        <i data-lucide="building-2" class="w-5 h-5 text-secondary"></i>
+                        <span>教室资源</span>
+                    </h3>
+                    <div id="classroom-list" class="space-y-3"></div>
+                </div>
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center space-x-2">
+                        <i data-lucide="activity" class="w-5 h-5 text-purple"></i>
+                        <span>调度统计</span>
+                    </h3>
+                    <div class="space-y-4">
+                        <div><div class="flex justify-between text-sm mb-1"><span class="text-gray-400">课程安排率</span><span>85%</span></div><div class="h-2 bg-white/10 rounded-full"><div class="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style="width:85%"></div></div></div>
+                        <div><div class="flex justify-between text-sm mb-1"><span class="text-gray-400">教室利用率</span><span>72%</span></div><div class="h-2 bg-white/10 rounded-full"><div class="h-full bg-gradient-to-r from-secondary to-purple rounded-full" style="width:72%"></div></div></div>
+                        <div><div class="flex justify-between text-sm mb-1"><span class="text-gray-400">教师负荷率</span><span>68%</span></div><div class="h-2 bg-white/10 rounded-full"><div class="h-full bg-gradient-to-r from-purple to-orange rounded-full" style="width:68%"></div></div></div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-white/10">
+                        <h4 class="text-sm font-medium text-gray-400 mb-3">冲突类型分布</h4>
+                        <div class="space-y-2">
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-danger"></div><span class="text-sm text-gray-300 flex-grow">教师时间冲突</span><span class="text-sm font-medium">2</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-warning"></div><span class="text-sm text-gray-300 flex-grow">教室占用冲突</span><span class="text-sm font-medium">1</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-3 h-3 rounded-full bg-purple"></div><span class="text-sm text-gray-300 flex-grow">学生选课冲突</span><span class="text-sm font-medium">0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div id="course-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50 p-4">
+            <div class="bg-darker rounded-2xl w-full max-w-lg p-6 border border-white/10">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-semibold" id="modal-title">课程详情</h3>
+                    <button onclick="closeModal()" class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center hover:bg-white/20">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div id="modal-body" class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div><label class="block text-gray-400 text-sm mb-1">课程名称</label><div id="modal-name" class="text-lg font-medium"></div></div>
+                        <div><label class="block text-gray-400 text-sm mb-1">类型</label><div id="modal-type"></div></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="block text-gray-400 text-sm mb-1">教师</label><div id="modal-teacher" class="text-white"></div></div>
+                        <div><label class="block text-gray-400 text-sm mb-1">教室</label><div id="modal-classroom" class="text-white"></div></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="block text-gray-400 text-sm mb-1">时间</label><div id="modal-time" class="text-white"></div></div>
+                        <div><label class="block text-gray-400 text-sm mb-1">状态</label><div id="modal-status" class="text-white"></div></div>
+                    </div>
+                    <div><label class="block text-gray-400 text-sm mb-1">选课学生</label><div id="modal-students" class="flex flex-wrap gap-2"></div></div>
+                    <div id="modal-conflict" class="hidden mt-4 p-4 rounded-xl bg-danger/20 border border-danger/30">
+                        <div class="flex items-center space-x-2 mb-2"><i data-lucide="alert-triangle" class="w-5 h-5 text-danger"></i><span class="font-medium text-danger">检测到冲突</span></div>
+                        <div id="modal-conflict-details" class="space-y-1"></div>
+                    </div>
+                </div>
+                <div id="modal-recommend" class="hidden space-y-4 mt-6">
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-semibold flex items-center space-x-2"><i data-lucide="sparkles" class="w-5 h-5 text-secondary"></i><span>AI推荐替代方案</span></h4>
+                        <span class="text-xs text-gray-400">点击方案直接替换</span>
+                    </div>
+                    <div id="recommend-list" class="space-y-3"></div>
+                </div>
+                <div class="flex space-x-3 mt-6">
+                    <button onclick="closeModal()" class="flex-grow px-4 py-3 rounded-xl border border-white/20 hover:bg-white/10">取消</button>
+                    <button onclick="generateRecommendations()" id="recommend-btn" class="flex-grow btn-gradient px-4 py-3 rounded-xl text-white font-medium flex items-center justify-center">
+                        <i data-lucide="sparkles" class="w-5 h-5 mr-2"></i><span>智能调课</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-3"></div>
+
+        <div id="tutorial" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+            <div class="bg-darker rounded-2xl max-w-lg w-full p-8 border border-white/10">
+                <div class="text-center mb-8">
+                    <div class="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="sparkles" class="w-8 h-8"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2">欢迎使用智能调课小助手</h2>
+                    <p class="text-gray-400">AI驱动的课程调度解决方案</p>
+                </div>
+                <div class="space-y-4 mb-8">
+                    <div class="flex items-start space-x-4">
+                        <div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center"><i data-lucide="search" class="w-5 h-5 text-primary"></i></div>
+                        <div><h3 class="font-semibold">自动冲突检测</h3><p class="text-sm text-gray-400">系统自动检测教师时间、教室占用和学生选课冲突</p></div>
+                    </div>
+                    <div class="flex items-start space-x-4">
+                        <div class="w-10 h-10 rounded-lg bg-secondary/20 flex items-center justify-center"><i data-lucide="sparkles" class="w-5 h-5 text-secondary"></i></div>
+                        <div><h3 class="font-semibold">AI智能调课</h3><p class="text-sm text-gray-400">点击冲突课程，AI自动生成最优调课方案</p></div>
+                    </div>
+                    <div class="flex items-start space-x-4">
+                        <div class="w-10 h-10 rounded-lg bg-purple/20 flex items-center justify-center"><i data-lucide="zap" class="w-5 h-5 text-purple"></i></div>
+                        <div><h3 class="font-semibold">一键解决</h3><p class="text-sm text-gray-400">选择推荐方案，一键完成调课</p></div>
+                    </div>
+                </div>
+                <button onclick="closeTutorial()" class="w-full btn-gradient py-4 rounded-xl text-white font-semibold">开始体验</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        const timeSlots = ['08:00', '09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+        const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        
+        const teachers = [
+            { id: 't1', name: '李明', courses: 5, load: 75 },
+            { id: 't2', name: '王芳', courses: 4, load: 60 },
+            { id: 't3', name: '张伟', courses: 6, load: 85 },
+            { id: 't4', name: '刘洋', courses: 3, load: 45 },
+        ];
+        
+        const classrooms = [
+            { id: 'c1', name: '教学楼A-101', capacity: 60, usage: 80 },
+            { id: 'c2', name: '教学楼A-102', capacity: 50, usage: 65 },
+            { id: 'c3', name: '实验楼B-201', capacity: 30, usage: 90 },
+            { id: 'c4', name: '综合楼C-301', capacity: 100, usage: 55 },
+        ];
+        
+        let courses = [
+            { id: 'cs1', name: '高等数学', teacher: '李明', classroom: '教学楼A-101', day: 0, time: 0, duration: 2, students: ['2024001','2024002'], type: '必修' },
+            { id: 'cs2', name: '大学英语', teacher: '王芳', classroom: '教学楼A-102', day: 0, time: 2, duration: 2, students: ['2024001','2024003'], type: '必修' },
+            { id: 'cs3', name: '计算机基础', teacher: '张伟', classroom: '实验楼B-201', day: 0, time: 4, duration: 2, students: ['2024002','2024004'], type: '必修' },
+            { id: 'cs4', name: '线性代数', teacher: '李明', classroom: '教学楼A-101', day: 1, time: 0, duration: 2, students: ['2024001','2024002'], type: '必修' },
+            { id: 'cs5', name: '概率论', teacher: '李明', classroom: '教学楼A-102', day: 1, time: 2, duration: 2, students: ['2024003','2024004'], type: '选修' },
+            { id: 'cs6', name: '数据结构', teacher: '张伟', classroom: '实验楼B-201', day: 1, time: 4, duration: 2, students: ['2024002','2024005'], type: '必修' },
+            { id: 'cs7', name: '大学物理', teacher: '刘洋', classroom: '综合楼C-301', day: 2, time: 0, duration: 2, students: ['2024001','2024003'], type: '必修' },
+            { id: 'cs8', name: '操作系统', teacher: '张伟', classroom: '实验楼B-201', day: 2, time: 2, duration: 2, students: ['2024004','2024005'], type: '必修' },
+            { id: 'cs9', name: '高等数学', teacher: '李明', classroom: '教学楼A-101', day: 3, time: 0, duration: 2, students: ['2024001','2024002'], type: '必修' },
+            { id: 'cs10', name: '数据库原理', teacher: '张伟', classroom: '实验楼B-201', day: 3, time: 2, duration: 2, students: ['2024005'], type: '选修' },
+            { id: 'cs11', name: '软件工程', teacher: '王芳', classroom: '教学楼A-102', day: 4, time: 0, duration: 2, students: ['2024003','2024004'], type: '选修' },
+            { id: 'cs12', name: '计算机网络', teacher: '刘洋', classroom: '综合楼C-301', day: 4, time: 2, duration: 2, students: ['2024001','2024005'], type: '必修' },
+        ];
+        
+        const students = [
+            { id: '2024001', name: '张三', major: '计算机科学', schedule: ['cs1','cs2','cs4','cs7','cs9','cs12'] },
+            { id: '2024002', name: '李四', major: '软件工程', schedule: ['cs1','cs3','cs4','cs6','cs9'] },
+            { id: '2024003', name: '王五', major: '人工智能', schedule: ['cs2','cs5','cs7','cs11'] },
+            { id: '2024004', name: '赵六', major: '网络工程', schedule: ['cs3','cs5','cs8','cs11'] },
+            { id: '2024005', name: '钱七', major: '数据科学', schedule: ['cs6','cs8','cs10','cs12'] },
+        ];
+
+        let selectedCourse = null;
+        let conflictCache = {};
+        let currentRecommendations = [];
+
+        function detectConflicts() {
+            conflictCache = {};
+            courses.forEach((course, i) => {
+                courses.slice(i+1).forEach(other => {
+                    const sameDay = course.day === other.day;
+                    const overlap = !(course.time + course.duration <= other.time || other.time + other.duration <= course.time);
+                    if (sameDay && overlap) {
+                        if (course.teacher === other.teacher || course.classroom === other.classroom) {
+                            if (!conflictCache[course.id]) conflictCache[course.id] = [];
+                            if (!conflictCache[other.id]) conflictCache[other.id] = [];
+                            const type = course.teacher === other.teacher ? '教师时间冲突' : '教室占用冲突';
+                            conflictCache[course.id].push({ course: other, type });
+                            conflictCache[other.id].push({ course: course, type });
+                        }
+                    }
+                });
+            });
+            document.getElementById('conflict-count').textContent = Object.keys(conflictCache).length;
+            renderSchedule();
+            showToast('冲突检测完成', `${Object.keys(conflictCache).length} 个冲突已标记`, 'info');
+        }
+
+        function renderSchedule() {
+            const grid = document.getElementById('schedule-grid');
+            grid.innerHTML = '';
+            
+            timeSlots.forEach((time, idx) => {
+                const row = document.createElement('div');
+                row.className = 'grid grid-cols-12';
+                
+                const timeCell = document.createElement('div');
+                timeCell.className = 'col-span-1 p-2 text-center text-sm text-gray-400 border-b border-r border-white/5';
+                timeCell.textContent = time;
+                row.appendChild(timeCell);
+                
+                weekdays.forEach((_, dayIdx) => {
+                    const cell = document.createElement('div');
+                    cell.className = 'col-span-1 p-1 border-b border-r border-white/5 relative';
+                    
+                    const course = courses.find(c => c.day === dayIdx && c.time === idx);
+                    if (course) {
+                        const isConflict = conflictCache[course.id] && conflictCache[course.id].length > 0;
+                        const isSelected = selectedCourse && selectedCourse.id === course.id;
+                        
+                        const card = document.createElement('div');
+                        card.className = `course-card rounded-lg p-2 text-xs ${isConflict ? 'conflict' : ''} ${isSelected ? 'selected' : ''}`;
+                        card.style.background = `linear-gradient(135deg, ${isConflict ? '#FF4757' : '#0066FF'} 0%, ${isConflict ? '#FF6B81' : '#00CC99'} 100%)`;
+                        card.style.height = `${course.duration * 72 - 8}px`;
+                        card.style.position = 'absolute';
+                        card.style.top = '4px';
+                        card.style.left = '4px';
+                        card.style.right = '4px';
+                        
+                        card.innerHTML = `
+                            <div class="flex justify-between mb-1">
+                                <span class="font-medium truncate">${course.name}</span>
+                                <span class="text-[10px] px-1 rounded ${course.type==='必修'?'bg-white/20':'bg-yellow-400/30'}">${course.type}</span>
+                            </div>
+                            <div class="truncate opacity-80">${course.teacher}</div>
+                            <div class="truncate opacity-60">${course.classroom}</div>
+                        `;
+                        card.onclick = () => openModal(course);
+                        cell.appendChild(card);
+                    }
+                    row.appendChild(cell);
+                });
+                
+                const detailCell = document.createElement('div');
+                detailCell.className = 'col-span-4 p-2 border-b border-white/5';
+                if (selectedCourse && selectedCourse.time === idx) {
+                    detailCell.innerHTML = `
+                        <div class="flex items-start space-x-3">
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center flex-shrink-0">
+                                <i data-lucide="book-open" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <div class="font-semibold">${selectedCourse.name}</div>
+                                <div class="text-gray-400 text-sm">${selectedCourse.teacher} | ${selectedCourse.classroom}</div>
+                                <div class="text-gray-500 text-xs">${weekdays[selectedCourse.day]} ${timeSlots[selectedCourse.time]}-${timeSlots[selectedCourse.time+selectedCourse.duration-1]}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                row.appendChild(detailCell);
+                grid.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        function renderResources() {
+            document.getElementById('teacher-list').innerHTML = teachers.map(t => `
+                <div class="glass rounded-xl p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+                    <div><div class="font-medium">${t.name}</div><div class="text-xs text-gray-400">${t.courses}门课程</div></div>
+                    <div class="text-right">
+                        <div class="text-sm font-medium ${t.load>80?'text-danger':t.load>60?'text-warning':'text-success'}">${t.load}%</div>
+                        <div class="w-16 h-1.5 bg-white/10 rounded-full mt-1"><div class="h-full rounded-full ${t.load>80?'bg-danger':t.load>60?'bg-warning':'bg-success'}" style="width:${t.load}%"></div></div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('classroom-list').innerHTML = classrooms.map(c => `
+                <div class="glass rounded-xl p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+                    <div><div class="font-medium">${c.name}</div><div class="text-xs text-gray-400">容量:${c.capacity}人</div></div>
+                    <div class="text-right">
+                        <div class="text-sm font-medium ${c.usage>85?'text-danger':c.usage>70?'text-warning':'text-success'}">${c.usage}%</div>
+                        <div class="w-16 h-1.5 bg-white/10 rounded-full mt-1"><div class="h-full rounded-full ${c.usage>85?'bg-danger':c.usage>70?'bg-warning':'bg-success'}" style="width:${c.usage}%"></div></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openModal(course) {
+            selectedCourse = course;
+            document.getElementById('modal-title').textContent = course.name;
+            document.getElementById('modal-name').textContent = course.name;
+            document.getElementById('modal-teacher').textContent = course.teacher;
+            document.getElementById('modal-classroom').textContent = course.classroom;
+            document.getElementById('modal-time').textContent = `${weekdays[course.day]} ${timeSlots[course.time]}-${timeSlots[course.time+course.duration-1]}`;
+            document.getElementById('modal-type').innerHTML = `<span class="px-2 py-1 rounded-full text-xs ${course.type==='必修'?'bg-danger/20 text-danger':'bg-warning/20 text-warning'}">${course.type}</span>`;
+            
+            document.getElementById('modal-students').innerHTML = course.students.map(sid => {
+                const s = students.find(st => st.id === sid);
+                return `<span class="px-2 py-1 rounded-full text-xs bg-primary/20 text-primary">${s?s.name:sid}</span>`;
+            }).join('');
+            
+            const conflicts = conflictCache[course.id] || [];
+            if (conflicts.length > 0) {
+                document.getElementById('modal-conflict').classList.remove('hidden');
+                document.getElementById('modal-conflict-details').innerHTML = conflicts.map(c => 
+                    `<p class="text-sm text-gray-300">• 与「${c.course.name}」存在${c.type}</p>`
+                ).join('');
+                document.getElementById('modal-status').innerHTML = '<span class="text-danger">存在冲突</span>';
+            } else {
+                document.getElementById('modal-conflict').classList.add('hidden');
+                document.getElementById('modal-status').innerHTML = '<span class="text-success">正常</span>';
+            }
+            
+            document.getElementById('modal-recommend').classList.add('hidden');
+            document.getElementById('recommend-btn').innerHTML = '<i data-lucide="sparkles" class="w-5 h-5 mr-2"></i><span>智能调课</span>';
+            document.getElementById('recommend-btn').disabled = false;
+            lucide.createIcons();
+            
+            document.getElementById('course-modal').classList.remove('hidden');
+            document.getElementById('course-modal').classList.add('flex');
+            renderSchedule();
+        }
+
+        function closeModal() {
+            document.getElementById('course-modal').classList.add('hidden');
+            document.getElementById('course-modal').classList.remove('flex');
+            selectedCourse = null;
+            renderSchedule();
+        }
+
+        function generateRecommendations() {
+            if (!selectedCourse) return;
+            
+            const btn = document.getElementById('recommend-btn');
+            btn.innerHTML = '<span class="ai-loading">AI分析中...</span>';
+            btn.disabled = true;
+            
+            setTimeout(() => {
+                currentRecommendations = getRecommendations(selectedCourse);
+                
+                const list = document.getElementById('recommend-list');
+                list.innerHTML = currentRecommendations.map((rec, idx) => `
+                    <div onclick="applyRecommendation(${idx})" class="glass rounded-xl p-4 cursor-pointer hover:border-primary/50 transition-colors">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-medium">方案 ${idx+1}</span>
+                            <span class="text-xs px-2 py-1 rounded-full ${rec.score>=80?'bg-success/20 text-success':rec.score>=60?'bg-warning/20 text-warning':'bg-danger/20 text-danger'}">匹配度 ${rec.score}%</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div><span class="text-gray-400">时间:</span> ${weekdays[rec.day]} ${timeSlots[rec.time]}</div>
+                            <div><span class="text-gray-400">教室:</span> ${rec.classroom}</div>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-2">${rec.reason}</div>
+                    </div>
+                `).join('');
+                
+                document.getElementById('modal-recommend').classList.remove('hidden');
+                btn.innerHTML = '<i data-lucide="refresh-cw" class="w-5 h-5 mr-2"></i><span>重新生成</span>';
+                btn.disabled = false;
+                lucide.createIcons();
+                showToast('推荐完成', 'AI已生成调课方案', 'success');
+            }, 1200);
+        }
+
+        function getRecommendations(course) {
+            const recommendations = [];
+            const available = [];
+            
+            for (let day = 0; day < 5; day++) {
+                for (let time = 0; time <= timeSlots.length - course.duration; time++) {
+                    if (day === course.day && time >= course.time && time < course.time + course.duration) continue;
+                    
+                    let isAvailable = true;
+                    for (let t = time; t < time + course.duration; t++) {
+                        const conflict = courses.some(c => 
+                            c.id !== course.id && c.day === day && c.time <= t && c.time + c.duration > t &&
+                            (c.teacher === course.teacher || c.classroom === course.classroom)
+                        );
+                        if (conflict) { isAvailable = false; break; }
+                    }
+                    if (isAvailable) available.push({ day, time });
+                }
+            }
+            
+            const rooms = ['教学楼A-101', '教学楼A-102', '实验楼B-201', '综合楼C-301'];
+            const reasons = ['时间段合理，教师空闲', '教室资源充足', '避免与其他课程冲突', '符合教学安排习惯', '学生选课冲突最少'];
+            
+            available.slice(0, 5).forEach((slot, idx) => {
+                recommendations.push({
+                    day: slot.day,
+                    time: slot.time,
+                    classroom: rooms[idx % rooms.length],
+                    score: Math.floor(Math.random() * 25) + 70,
+                    reason: reasons[idx % reasons.length]
+                });
+            });
+            
+            if (recommendations.length === 0) {
+                for (let i = 0; i < 3; i++) {
+                    const day = Math.floor(Math.random() * 5);
+                    const time = Math.floor(Math.random() * (timeSlots.length - course.duration));
+                    recommendations.push({
+                        day: day,
+                        time: time,
+                        classroom: rooms[i % rooms.length],
+                        score: Math.floor(Math.random() * 20) + 50,
+                        reason: '建议与其他课程协调调整'
+                    });
+                }
+            }
+            
+            return recommendations;
+        }
+
+        function applyRecommendation(idx) {
+            if (!selectedCourse || !currentRecommendations[idx]) return;
+            
+            const rec = currentRecommendations[idx];
+            const idxInCourses = courses.findIndex(c => c.id === selectedCourse.id);
+            if (idxInCourses !== -1) {
+                courses[idxInCourses] = { ...courses[idxInCourses], day: rec.day, time: rec.time, classroom: rec.classroom };
+                detectConflicts();
+                closeModal();
+                showToast('调课成功', `${selectedCourse.name}已调整至新时段`, 'success');
+            }
+        }
+
+        function showToast(title, message, type) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const icons = { info: 'info', success: 'check-circle', warning: 'alert-triangle', error: 'x-circle' };
+            const colors = { info: 'bg-primary', success: 'bg-success', warning: 'bg-warning', error: 'bg-danger' };
+            
+            toast.className = `toast ${colors[type]}/20 border border-${type==='info'?'primary':type==='success'?'success':type==='warning'?'warning':'danger'}/30 rounded-xl p-4 flex items-center space-x-3 min-w-[300px]`;
+            toast.innerHTML = `
+                <i data-lucide="${icons[type]}" class="w-5 h-5 ${type==='info'?'text-primary':type==='success'?'text-success':type==='warning'?'text-warning':'text-danger'}"></i>
+                <div><div class="font-medium text-sm">${title}</div><div class="text-xs text-gray-300">${message}</div></div>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+            setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, 3000);
+        }
+
+        function closeTutorial() {
+            document.getElementById('tutorial').classList.add('hidden');
+            showToast('欢迎使用', '智能调课小助手已就绪', 'success');
+        }
+
+        function prevWeek() { showToast('周次切换', '已切换到上一周', 'info'); }
+        function nextWeek() { showToast('周次切换', '已切换到下一周', 'info'); }
+
+        function showView(view) {
+            document.querySelectorAll('.view-btn').forEach(b => { b.classList.remove('active', 'border-primary/30', 'bg-primary/10', 'text-secondary'); b.classList.add('border-white/20'); });
+            event.target.classList.add('active', 'border-primary/30', 'bg-primary/10', 'text-secondary');
+            event.target.classList.remove('border-white/20');
+            const views = { teacher: '教师', classroom: '教室', student: '学生' };
+            showToast('视图切换', `已切换到按${views[view]}视图`, 'info');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            detectConflicts();
+            renderResources();
+            lucide.createIcons();
+            
+            document.querySelectorAll('.nav-btn').forEach((btn, idx) => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.nav-btn').forEach(b => { b.classList.remove('active', 'border-primary/30', 'bg-primary/10', 'text-secondary'); b.classList.add('border-transparent'); });
+                    btn.classList.add('active', 'border-primary/30', 'bg-primary/10', 'text-secondary');
+                    btn.classList.remove('border-transparent');
+                    const features = ['课表管理', '冲突检测', '一键调课', '数据统计'];
+                    if (idx > 0) showToast('功能切换', `已切换到${features[idx]}模块`, 'info');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

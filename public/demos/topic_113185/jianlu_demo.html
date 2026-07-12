@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>见路 - 智能出行辅助</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #14141f;
+      --bg-card: #1e1e2e;
+      --accent: #00d4aa;
+      --accent-glow: rgba(0, 212, 170, 0.3);
+      --danger: #ff4757;
+      --danger-glow: rgba(255, 71, 87, 0.3);
+      --warning: #ffa502;
+      --warning-glow: rgba(255, 165, 2, 0.3);
+      --safe: #2ed573;
+      --text-primary: #ffffff;
+      --text-secondary: #a0a0b0;
+      --border: #2a2a3a;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 状态栏 */
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 20px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+    }
+
+    /* 标题栏 */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 20px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, var(--accent), #00a8ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-secondary);
+      margin-left: 8px;
+      display: inline-block;
+      transition: all 0.3s;
+    }
+
+    .header .status-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .header .menu-btn {
+      position: absolute;
+      right: 20px;
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    /* 主视觉区 */
+    .main-visual {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/5;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #videoElement, #uploadedVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    #previewCanvas {
+      width: 100%;
+      height: 100%;
+      display: none;
+    }
+
+    #detectionCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-secondary);
+      padding: 40px;
+      text-align: center;
+    }
+
+    .placeholder .icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .placeholder p {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    /* 路径区域指示 */
+    .path-indicator {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 40%;
+      border-top: 2px dashed rgba(0, 212, 170, 0.3);
+      pointer-events: none;
+      display: none;
+    }
+
+    .path-indicator::before {
+      content: "主路径区域";
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      color: rgba(0, 212, 170, 0.5);
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    /* 风险卡片 */
+    .risk-card {
+      margin: 16px;
+      padding: 20px;
+      border-radius: 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      transition: all 0.3s;
+    }
+
+    .risk-card.safe {
+      border-color: var(--safe);
+      box-shadow: 0 0 20px rgba(46, 213, 115, 0.1);
+    }
+
+    .risk-card.warning {
+      border-color: var(--warning);
+      box-shadow: 0 0 20px rgba(255, 165, 2, 0.1);
+    }
+
+    .risk-card.danger {
+      border-color: var(--danger);
+      box-shadow: 0 0 20px rgba(255, 71, 87, 0.15);
+      animation: pulse-danger 2s infinite;
+    }
+
+    @keyframes pulse-danger {
+      0%, 100% { box-shadow: 0 0 20px rgba(255, 71, 87, 0.15); }
+      50% { box-shadow: 0 0 30px rgba(255, 71, 87, 0.3); }
+    }
+
+    .risk-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .risk-level {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .risk-level .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .risk-level.safe { color: var(--safe); }
+    .risk-level.safe .dot { background: var(--safe); box-shadow: 0 0 8px rgba(46, 213, 115, 0.5); }
+    .risk-level.warning { color: var(--warning); }
+    .risk-level.warning .dot { background: var(--warning); box-shadow: 0 0 8px rgba(255, 165, 2, 0.5); }
+    .risk-level.danger { color: var(--danger); }
+    .risk-level.danger .dot { background: var(--danger); box-shadow: 0 0 8px rgba(255, 71, 87, 0.5); }
+
+    .risk-time {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .risk-objects {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+
+    .risk-advice {
+      font-size: 16px;
+      font-weight: 600;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      line-height: 1.5;
+    }
+
+    /* 控制按钮区 */
+    .controls {
+      padding: 0 16px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 18px 24px;
+      border: none;
+      border-radius: 16px;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-family: inherit;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #00b894);
+      color: #000;
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 6px 24px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, var(--danger), #ff6348);
+      color: #fff;
+      box-shadow: 0 4px 20px var(--danger-glow);
+    }
+
+    .btn-danger:hover {
+      box-shadow: 0 6px 24px var(--danger-glow);
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* 语音开关 */
+    .voice-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .toggle-switch {
+      width: 48px;
+      height: 28px;
+      background: var(--border);
+      border-radius: 14px;
+      position: relative;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .toggle-switch.active {
+      background: var(--accent);
+    }
+
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      background: #fff;
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .toggle-switch.active::after {
+      transform: translateX(20px);
+    }
+
+    /* 加载遮罩 */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 15, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: opacity 0.5s;
+    }
+
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-spinner {
+      width: 56px;
+      height: 56px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      margin-top: 20px;
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    /* 求助弹窗 */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 20px;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--bg-card);
+      border-radius: 20px;
+      padding: 32px;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+
+    .modal-icon {
+      font-size: 56px;
+      margin-bottom: 16px;
+    }
+
+    .modal h2 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .modal p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .modal .btn {
+      margin-bottom: 12px;
+    }
+
+    /* 模型标签 */
+    .model-info {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      backdrop-filter: blur(4px);
+    }
+
+    /* FPS计数器 */
+    .fps-counter {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--accent);
+      font-family: monospace;
+      backdrop-filter: blur(4px);
+    }
+
+    /* 隐藏文件输入 */
+    input[type="file"] {
+      display: none;
+    }
+
+    /* 检测框标签 */
+    .detection-label {
+      position: absolute;
+      background: var(--danger);
+      color: #fff;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      pointer-events: none;
+      font-weight: 600;
+    }
+
+    /* 底部安全区 */
+    .safe-area {
+      height: env(safe-area-inset-bottom, 0);
+      min-height: 8px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 加载遮罩 -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">正在加载AI模型...</div>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="status-bar">
+    <span id="clock">12:00</span>
+    <span>见路</span>
+    <span id="modelStatus">模型加载中</span>
+  </div>
+
+  <!-- 标题栏 -->
+  <div class="header">
+    <h1>见路</h1>
+    <span class="status-dot" id="statusDot"></span>
+    <button class="menu-btn" onclick="showAbout()" aria-label="关于">&#9776;</button>
+  </div>
+
+  <!-- 主视觉区 -->
+  <div class="main-visual" id="mainVisual">
+    <div class="placeholder" id="placeholder">
+      <div class="icon">&#128247;</div>
+      <p>请选择识别方式<br>摄像头实时识别 或 上传视频</p>
+    </div>
+    <video id="videoElement" autoplay playsinline muted></video>
+    <video id="uploadedVideo" controls loop playsinline></video>
+    <canvas id="detectionCanvas"></canvas>
+    <div class="path-indicator" id="pathIndicator"></div>
+    <div class="model-info" id="modelInfo" style="display:none">COCO-SSD 目标检测</div>
+    <div class="fps-counter" id="fpsCounter" style="display:none">-- FPS</div>
+  </div>
+
+  <!-- 风险卡片 -->
+  <div class="risk-card" id="riskCard">
+    <div class="risk-header">
+      <div class="risk-level" id="riskLevel">
+        <span class="dot"></span>
+        <span>等待识别</span>
+      </div>
+      <span class="risk-time" id="riskTime">--:--:--</span>
+    </div>
+    <div class="risk-objects" id="riskObjects">尚未开始识别</div>
+    <div class="risk-advice" id="riskAdvice">请选择识别方式开始体验</div>
+  </div>
+
+  <!-- 语音开关 -->
+  <div class="voice-toggle">
+    <span>&#128266; 语音播报</span>
+    <div class="toggle-switch active" id="voiceToggle" onclick="toggleVoice()"></div>
+  </div>
+
+  <!-- 控制按钮 -->
+  <div class="controls">
+    <button class="btn btn-primary" id="cameraBtn" onclick="startCamera()">
+      <span>&#128248;</span> 连接摄像头自动识别
+    </button>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="document.getElementById('videoInput').click()">
+        <span>&#127909;</span> 上传视频
+      </button>
+      <button class="btn btn-secondary" onclick="document.getElementById('imageInput').click()">
+        <span>&#128444;</span> 上传图片
+      </button>
+    </div>
+    <button class="btn btn-danger" onclick="showHelpModal()">
+      <span>&#128680;</span> 一键求助
+    </button>
+  </div>
+
+  <div class="safe-area"></div>
+
+  <!-- 隐藏的文件输入 -->
+  <input type="file" id="videoInput" accept="video/*" onchange="handleVideoUpload(event)">
+  <input type="file" id="imageInput" accept="image/*" onchange="handleImageUpload(event)">
+
+  <!-- 求助弹窗 -->
+  <div class="modal-overlay" id="helpModal">
+    <div class="modal">
+      <div class="modal-icon">&#128680;</div>
+      <h2>发起求助</h2>
+      <p>将发送您的位置信息并联系紧急联系人</p>
+      <button class="btn btn-danger" onclick="confirmHelp()">确认求助</button>
+      <button class="btn btn-secondary" onclick="closeHelpModal()">取消</button>
+    </div>
+  </div>
+
+  <!-- 关于弹窗 -->
+  <div class="modal-overlay" id="aboutModal">
+    <div class="modal" style="text-align:left">
+      <h2 style="text-align:center;margin-bottom:16px">关于 见路</h2>
+      <p style="font-size:14px;line-height:1.8;color:var(--text-secondary)">
+        <strong style="color:var(--text-primary)">见路</strong> 是一款基于AI视觉的智能出行辅助工具，专为视障人士和老年人设计。<br><br>
+        <strong>核心功能：</strong><br>
+        &#9989; 实时障碍物检测<br>
+        &#9989; 风险等级评估<br>
+        &#9989; 语音播报提醒<br>
+        &#9989; 一键紧急求助<br><br>
+        <strong>技术方案：</strong><br>
+        基于 TensorFlow.js COCO-SSD 目标检测模型，在浏览器端本地运行，无需上传数据到服务器，保护用户隐私。
+      </p>
+      <button class="btn btn-secondary" onclick="closeAboutModal()" style="margin-top:16px">关闭</button>
+    </div>
+  </div>
+
+  <script>
+    // ========== 全局状态 ==========
+    let model = null;
+    let isDetecting = false;
+    let detectionMode = 'none'; // 'camera', 'video', 'image'
+    let voiceEnabled = true;
+    let lastSpeakTime = 0;
+    let lastSpeakText = '';
+    let animationId = null;
+    let stream = null;
+
+    // 障碍物相关类别（COCO-SSD）
+    const OBSTACLE_CLASSES = [
+      'person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck',
+      'bench', 'fire hydrant', 'stop sign', 'parking meter',
+      'backpack', 'umbrella', 'handbag', 'suitcase', 'tie',
+      'frisbee', 'skis', 'snowboard', 'sports ball', 'kite',
+      'baseball bat', 'skateboard', 'surfboard', 'tennis racket',
+      'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl',
+      'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot',
+      'hot dog', 'pizza', 'donut', 'cake',
+      'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet',
+      'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone',
+      'microwave', 'oven', 'toaster', 'sink', 'refrigerator',
+      'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+    ];
+
+    const HIGH_RISK_CLASSES = ['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'];
+    const MEDIUM_RISK_CLASSES = ['bench', 'chair', 'fire hydrant', 'stop sign', 'suitcase', 'backpack'];
+
+    // ========== 初始化 ==========
+    async function init() {
+      updateClock();
+      setInterval(updateClock, 1000);
+
+      try {
+        model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('modelStatus').textContent = '模型就绪';
+        document.getElementById('modelStatus').style.color = 'var(--accent)';
+        speak('见路已准备就绪，请选择识别方式');
+      } catch (e) {
+        document.getElementById('loadingText').textContent = '模型加载失败，请刷新页面重试';
+        console.error(e);
+      }
+    }
+
+    // ========== 时钟 ==========
+    function updateClock() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById('clock').textContent = `${h}:${m}`;
+    }
+
+    // ========== 语音播报 ==========
+    function speak(text, force = false) {
+      if (!voiceEnabled && !force) return;
+      if (!window.speechSynthesis) return;
+
+      const now = Date.now();
+      if (!force && text === lastSpeakText && (now - lastSpeakTime) < 5000) return;
+
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'zh-CN';
+      utter.rate = 1.1;
+      utter.pitch = 1;
+      window.speechSynthesis.speak(utter);
+
+      lastSpeakText = text;
+      lastSpeakTime = now;
+    }
+
+    function toggleVoice() {
+      voiceEnabled = !voiceEnabled;
+      document.getElementById('voiceToggle').classList.toggle('active', voiceEnabled);
+      if (voiceEnabled) speak('语音播报已开启');
+    }
+
+    // ========== 摄像头 ==========
+    async function startCamera() {
+      stopDetection();
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+
+        const video = document.getElementById('videoElement');
+        video.srcObject = stream;
+        video.style.display = 'block';
+        document.getElementById('placeholder').style.display = 'none';
+        document.getElementById('uploadedVideo').style.display = 'none';
+        document.getElementById('pathIndicator').style.display = 'block';
+        document.getElementById('modelInfo').style.display = 'block';
+        document.getElementById('fpsCounter').style.display = 'block';
+        document.getElementById('statusDot').classList.add('active');
+        document.getElementById('cameraBtn').innerHTML = '<span>&#9632;</span> 停止识别';
+        document.getElementById('cameraBtn').onclick = stopDetection;
+
+        detectionMode = 'camera';
+        isDetecting = true;
+
+        video.onloadedmetadata = () => {
+          video.play();
+          detectLoop(video);
+        };
+
+        speak('摄像头已连接，开始实时识别');
+      } catch (e) {
+        alert('无法访问摄像头，请确保已授权并处于安全环境（localhost 或 HTTPS）');
+        console.error(e);
+      }
+    }
+
+    // ========== 视频上传 ==========
+    function handleVideoUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      stopDetection();
+      const url = URL.createObjectURL(file);
+      const video = document.getElementById('uploadedVideo');
+      video.src = url;
+      video.style.display = 'block';
+      document.getElementById('videoElement').style.display = 'none';
+      document.getElementById('placeholder').style.display = 'none';
+      document.getElementById('pathIndicator').style.display = 'block';
+      document.getElementById('modelInfo').style.display = 'block';
+      document.getElementById('fpsCounter').style.display = 'block';
+      document.getElementById('statusDot').classList.add('active');
+
+      detectionMode = 'video';
+      isDetecting = true;
+
+      video.onloadedmetadata = () => {
+        video.play();
+        detectLoop(video);
+      };
+
+      speak('视频已加载，开始自动识别');
+    }
+
+    // ========== 图片上传 ==========
+    async function handleImageUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      stopDetection();
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = url;
+
+      img.onload = async () => {
+        const visual = document.getElementById('mainVisual');
+        const canvas = document.createElement('canvas');
+        canvas.id = 'previewCanvas';
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+
+        // 替换之前的canvas
+        const oldCanvas = document.getElementById('previewCanvas');
+        if (oldCanvas) oldCanvas.remove();
+        visual.insertBefore(canvas, document.getElementById('detectionCanvas'));
+
+        const ctx = canvas.getContext('2d');
+        const rect = visual.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        // 绘制图片适配
+        const scale = Math.min(rect.width / img.width, rect.height / img.height);
+        const x = (rect.width - img.width * scale) / 2;
+        const y = (rect.height - img.height * scale) / 2;
+        ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+        document.getElementById('placeholder').style.display = 'none';
+        document.getElementById('videoElement').style.display = 'none';
+        document.getElementById('uploadedVideo').style.display = 'none';
+        document.getElementById('pathIndicator').style.display = 'block';
+        document.getElementById('modelInfo').style.display = 'block';
+        document.getElementById('statusDot').classList.add('active');
+
+        // 检测
+        if (model) {
+          const predictions = await model.detect(img);
+          drawDetections(predictions, canvas.width, canvas.height, x, y, img.width * scale, img.height * scale);
+          updateRiskCard(predictions, img.width, img.height);
+
+          // 语音播报识别结果
+          const obstacles = predictions.filter(p =>
+            OBSTACLE_CLASSES.includes(p.class) && p.score > 0.4
+          );
+          if (obstacles.length > 0) {
+            const names = obstacles.map(p => {
+              const label = p.class === 'person' ? '行人' :
+                p.class === 'car' ? '车辆' :
+                p.class === 'truck' ? '卡车' :
+                p.class === 'bus' ? '公交车' :
+                p.class === 'motorcycle' ? '摩托车' :
+                p.class === 'bicycle' ? '自行车' :
+                p.class === 'chair' ? '椅子' :
+                p.class === 'bench' ? '长椅' :
+                p.class === 'fire hydrant' ? '消防栓' :
+                p.class === 'stop sign' ? '停止标志' :
+                p.class === 'backpack' ? '背包' :
+                p.class === 'suitcase' ? '行李箱' :
+                p.class === 'potted plant' ? '盆栽' :
+                p.class === 'bottle' ? '瓶子' :
+                p.class === 'cup' ? '杯子' :
+                p.class === 'tv' ? '电视机' :
+                p.class === 'laptop' ? '笔记本电脑' :
+                p.class === 'cell phone' ? '手机' :
+                p.class === 'book' ? '书' :
+                p.class === 'umbrella' ? '雨伞' : p.class;
+              return label;
+            });
+            const uniqueNames = [...new Set(names)];
+            const riskText = document.getElementById('riskLevel').textContent.trim();
+            const advice = document.getElementById('riskAdvice').textContent;
+            speak(`图片识别结果：${riskText}，检测到${uniqueNames.join('、')}。${advice}`);
+          } else {
+            speak('图片识别完成，未检测到障碍物，前方道路安全');
+          }
+        } else {
+          speak('图片识别完成');
+        }
+      };
+    }
+
+    // ========== 检测循环 ==========
+    let lastFpsTime = 0;
+    let frameCount = 0;
+
+    async function detectLoop(video) {
+      if (!isDetecting) return;
+
+      const canvas = document.getElementById('detectionCanvas');
+      const visual = document.getElementById('mainVisual');
+      const rect = visual.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      // FPS计算
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        document.getElementById('fpsCounter').textContent = `${frameCount} FPS`;
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+
+      if (model && video.readyState >= 2) {
+        try {
+          const predictions = await model.detect(video);
+          const videoRect = video.getBoundingClientRect();
+          const scaleX = canvas.width / video.videoWidth;
+          const scaleY = canvas.height / video.videoHeight;
+          const offsetX = (canvas.width - video.videoWidth * Math.min(scaleX, scaleY)) / 2;
+          const offsetY = (canvas.height - video.videoHeight * Math.min(scaleX, scaleY)) / 2;
+          const scale = Math.min(scaleX, scaleY);
+
+          drawDetections(predictions, canvas.width, canvas.height, offsetX, offsetY, video.videoWidth * scale, video.videoHeight * scale);
+          updateRiskCard(predictions, video.videoWidth, video.videoHeight);
+        } catch (e) {
+          console.error('Detection error:', e);
+        }
+      }
+
+      animationId = requestAnimationFrame(() => detectLoop(video));
+    }
+
+    // ========== 绘制检测框 ==========
+    function drawDetections(predictions, canvasW, canvasH, offsetX, offsetY, drawW, drawH) {
+      const canvas = document.getElementById('detectionCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvasW, canvasH);
+
+      predictions.forEach(p => {
+        const [x, y, w, h] = p.bbox;
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+
+        // 映射到canvas坐标
+        const scale = drawW / canvasW; // 这个参数需要重新理解
+        // 实际上predictions的bbox是基于原始图像尺寸的
+        // 我们需要把原始图像坐标映射到canvas显示坐标
+
+        const mappedX = offsetX + (x / (offsetX * 2 + drawW) * canvasW) * (drawW / canvasW);
+        const mappedY = offsetY + (y / (offsetY * 2 + drawH) * canvasH) * (drawH / canvasH);
+        const mappedW = w * (drawW / (offsetX * 2 + drawW) * canvasW / canvasW);
+        const mappedH = h * (drawH / (offsetY * 2 + drawH) * canvasH / canvasH);
+
+        // 简化：假设视频/图片填满了整个canvas（object-fit: cover时近似）
+        const sx = canvasW / (offsetX * 2 + drawW);
+        const sy = canvasH / (offsetY * 2 + drawH);
+        const finalX = offsetX + x * sx;
+        const finalY = offsetY + y * sy;
+        const finalW = w * sx;
+        const finalH = h * sy;
+
+        // 风险颜色
+        let color = '#00d4aa';
+        let isObstacle = OBSTACLE_CLASSES.includes(p.class);
+        if (isObstacle) {
+          if (HIGH_RISK_CLASSES.includes(p.class)) color = '#ff4757';
+          else if (MEDIUM_RISK_CLASSES.includes(p.class)) color = '#ffa502';
+          else color = '#ffa502';
+        }
+
+        // 框
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(finalX, finalY, finalW, finalH);
+
+        // 标签背景
+        const label = `${p.class} ${(p.score * 100).toFixed(0)}%`;
+        ctx.font = 'bold 12px sans-serif';
+        const textW = ctx.measureText(label).width;
+        ctx.fillStyle = color;
+        ctx.fillRect(finalX, finalY - 18, textW + 8, 18);
+
+        // 标签文字
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, finalX + 4, finalY - 4);
+      });
+    }
+
+    // ========== 更新风险卡片 ==========
+    function updateRiskCard(predictions, imgWidth, imgHeight) {
+      const obstacles = predictions.filter(p =>
+        OBSTACLE_CLASSES.includes(p.class) && p.score > 0.4
+      );
+
+      let risk = 'safe';
+      let advice = '前方道路畅通，可以安全通行';
+      let objectsText = '未检测到障碍物';
+
+      if (obstacles.length > 0) {
+        // 分析每个障碍物的风险
+        let maxRisk = 0; // 0=safe, 1=warning, 2=danger
+        const objectNames = [];
+
+        obstacles.forEach(p => {
+          const [x, y, w, h] = p.bbox;
+          const cx = x + w / 2;
+          const cy = y + h / 2;
+          const normCy = cy / imgHeight; // 归一化Y坐标
+          const areaRatio = (w * h) / (imgWidth * imgHeight); // 面积占比
+
+          let objRisk = 0;
+          if (HIGH_RISK_CLASSES.includes(p.class)) objRisk = 1;
+          if (MEDIUM_RISK_CLASSES.includes(p.class)) objRisk = 0.5;
+
+          // 位置风险：越靠下（越近）风险越高
+          if (normCy > 0.7) objRisk += 1.5;
+          else if (normCy > 0.5) objRisk += 0.8;
+          else if (normCy > 0.3) objRisk += 0.3;
+
+          // 距离风险（面积越大越近）
+          if (areaRatio > 0.15) objRisk += 1;
+          else if (areaRatio > 0.05) objRisk += 0.5;
+
+          if (objRisk > maxRisk) maxRisk = objRisk;
+          objectNames.push(`${p.class}(${(p.score*100).toFixed(0)}%)`);
+        });
+
+        objectsText = `检测到: ${objectNames.join('、')}`;
+
+        if (maxRisk >= 2) {
+          risk = 'danger';
+          const obs = obstacles[0].class === 'person' ? '行人' :
+                      obstacles[0].class === 'car' ? '车辆' :
+                      obstacles[0].class === 'truck' ? '卡车' :
+                      obstacles[0].class === 'bus' ? '公交车' :
+                      obstacles[0].class === 'motorcycle' ? '摩托车' :
+                      obstacles[0].class === 'bicycle' ? '自行车' : '障碍物';
+          advice = `注意！前方有${obs}，请立即停下或绕行，确保安全后再通行`;
+        } else if (maxRisk >= 1) {
+          risk = 'warning';
+          advice = '前方发现障碍物，请减速慢行，注意避让';
+        } else {
+          risk = 'safe';
+          advice = '前方有物体但不影响通行，保持警惕即可';
+        }
+      }
+
+      // 更新UI
+      const card = document.getElementById('riskCard');
+      card.className = 'risk-card ' + risk;
+
+      const levelEl = document.getElementById('riskLevel');
+      levelEl.className = 'risk-level ' + risk;
+      levelEl.innerHTML = risk === 'safe'
+        ? '<span class="dot"></span><span>安全</span>'
+        : risk === 'warning'
+        ? '<span class="dot"></span><span>注意</span>'
+        : '<span class="dot"></span><span>危险</span>';
+
+      document.getElementById('riskObjects').textContent = objectsText;
+      document.getElementById('riskAdvice').textContent = advice;
+      document.getElementById('riskTime').textContent = new Date().toLocaleTimeString();
+
+      // 语音播报（防抖）
+      if (risk !== 'safe') {
+        speak(advice);
+      } else if (Math.random() < 0.02) { // 偶尔播报安全状态
+        speak('前方道路畅通');
+      }
+    }
+
+    // ========== 停止识别 ==========
+    function stopDetection() {
+      isDetecting = false;
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+
+      document.getElementById('videoElement').style.display = 'none';
+      document.getElementById('uploadedVideo').style.display = 'none';
+      document.getElementById('videoElement').srcObject = null;
+      document.getElementById('uploadedVideo').src = '';
+      document.getElementById('placeholder').style.display = 'flex';
+      document.getElementById('pathIndicator').style.display = 'none';
+      document.getElementById('modelInfo').style.display = 'none';
+      document.getElementById('fpsCounter').style.display = 'none';
+      document.getElementById('statusDot').classList.remove('active');
+      document.getElementById('cameraBtn').innerHTML = '<span>&#128248;</span> 连接摄像头自动识别';
+      document.getElementById('cameraBtn').onclick = startCamera;
+
+      const canvas = document.getElementById('detectionCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const previewCanvas = document.getElementById('previewCanvas');
+      if (previewCanvas) previewCanvas.remove();
+
+      detectionMode = 'none';
+    }
+
+    // ========== 求助 ==========
+    function showHelpModal() {
+      document.getElementById('helpModal').classList.add('active');
+      speak('正在发起求助', true);
+    }
+
+    function closeHelpModal() {
+      document.getElementById('helpModal').classList.remove('active');
+    }
+
+    function confirmHelp() {
+      speak('求助信息已发送，请保持冷静，帮助正在路上', true);
+      alert('求助已发送！\n\n位置：正在获取...\n联系人：紧急联系人\n状态：已通知');
+      closeHelpModal();
+    }
+
+    // ========== 关于 ==========
+    function showAbout() {
+      document.getElementById('aboutModal').classList.add('active');
+    }
+
+    function closeAboutModal() {
+      document.getElementById('aboutModal').classList.remove('active');
+    }
+
+    // 点击遮罩关闭弹窗
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.remove('active');
+      });
+    });
+
+    // 启动
+    init();
+  </script>
+</body>
+</html>
