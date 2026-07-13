@@ -1,0 +1,1 @@
+import{s}from"./request-Cp3RuJTv.js";const t=t=>s.post("/auth/login",t),a=t=>s.post("/auth/register",t),o=t=>s.put("/users/me",t),r=t=>s.post("/auth/change-password",t);export{r as c,t as l,a as r,o as u};

@@ -1,0 +1,1 @@
+import e from"axios";const r=e.create({baseURL:"/api/v1",timeout:15e3});r.interceptors.request.use(e=>{const r=localStorage.getItem("token");return r&&(e.headers.Authorization=`Bearer ${r}`),e},e=>Promise.reject(e)),r.interceptors.response.use(e=>{const r=e.data;return 200!==r.code?Promise.reject(new Error(r.message||"Error")):r},e=>Promise.reject(e));export{r as s};

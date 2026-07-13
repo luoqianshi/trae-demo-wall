@@ -1,0 +1,1963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MallInsight（逛商场） - 发现值得逛的商场</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            background: #000; color: #f5f5f7;
+            line-height: 1.5; -webkit-font-smoothing: antialiased;
+            height: 100vh; overflow: hidden;
+        }
+
+        /* ===== 导航 ===== */
+        .apple-nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+            display: grid; grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            padding: 8px 20px; background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255,255,255,0.06);
+            min-height: 56px;
+        }
+        .nav-left { display: flex; align-items: center; gap: 16px; justify-self: start; }
+        .nav-center {
+            display: flex; align-items: center; justify-content: center;
+            justify-self: center;
+        }
+        .logo { font-size: 16px; font-weight: 700; color: #f5f5f7; letter-spacing: -0.02em; white-space: nowrap; }
+        .logo span { color: #667eea; }
+
+        /* 城市选择移到筛选面板内，不再单独展示 */
+
+        .nav-right { display: flex; align-items: center; gap: 12px; position: relative; justify-self: end; }
+
+        /* ===== 模式切换（今日推荐 / 社区） ===== */
+        .mode-toggle {
+            display: flex; align-items: center; gap: 0;
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; padding: 2px; height: 30px;
+        }
+        .mode-btn {
+            padding: 3px 10px; border-radius: 8px; border: none;
+            background: transparent; color: rgba(255,255,255,0.4);
+            font-size: 12px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .mode-btn:hover { color: rgba(255,255,255,0.7); }
+        .mode-btn.active {
+            background: rgba(102,126,234,0.25);
+            color: #667eea; font-weight: 600;
+        }
+
+        /* ===== 视角切换控件（纯药丸样式） ===== */
+        .perspective-toggle {
+            display: flex; align-items: center; gap: 8px;
+            background: transparent; border: none;
+            padding: 0; height: 36px;
+        }
+        .perspective-btn {
+            padding: 6px 16px; border-radius: 18px; border: none;
+            background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.45);
+            font-size: 13px; font-weight: 700; cursor: pointer;
+            transition: all 0.25s ease; white-space: nowrap;
+        }
+        .perspective-btn:hover { color: rgba(255,255,255,0.8); }
+
+        .perspective-btn.active { color: #fff; font-weight: 700; }
+
+        .perspective-btn[data-p="public"].active { background: #3b82f6; }
+        .perspective-btn[data-p="designer"].active { background: #8b5cf6; }
+        .perspective-btn[data-p="operator"].active { background: #10b981; }
+
+        /* ===== 社区帖子流（横向排列，类似今日推荐） ===== */
+        .community-feed-wrap {
+            position: relative;
+            width: 100%; height: 100%;
+        }
+        .community-feed {
+            display: flex; flex-direction: row; gap: 2px;
+            overflow-x: auto; overflow-y: hidden;
+            height: 100%;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        .community-feed::-webkit-scrollbar { display: none; }
+        .community-post {
+            flex: 0 0 calc(100% / 3);
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            background: #111;
+            scroll-snap-align: start;
+        }
+        .community-nav-btn {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            width: 44px; height: 44px; border-radius: 50%;
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: #fff; font-size: 16px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10; opacity: 0; transition: opacity 0.3s;
+            pointer-events: auto;
+        }
+        .community-feed-wrap:hover .community-nav-btn { opacity: 1; }
+        .community-nav-btn:hover { background: rgba(0,0,0,0.7); }
+        .community-nav-btn.prev { left: 16px; }
+        .community-nav-btn.next { right: 16px; }
+        .community-post:hover .community-post-bg { transform: scale(1.03); }
+        .community-post-bg {
+            width: 100%; height: 100%; display: block;
+            object-fit: cover; transition: transform 0.5s ease;
+        }
+        .community-post-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            padding: 50px 24px 20px;
+            background: linear-gradient(transparent 0%, rgba(0,0,0,0.35) 25%, rgba(0,0,0,0.7) 55%, rgba(0,0,0,0.92) 85%);
+            pointer-events: none;
+        }
+        .community-post-user {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 8px;
+        }
+        .community-post-avatar-wrap {
+            position: relative;
+            width: 28px; height: 28px;
+        }
+        .community-post-avatar {
+            width: 28px; height: 28px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.3);
+            display: block;
+        }
+        .community-post-role {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 11px; font-weight: 600; color: #fff;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.25);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .community-post-username {
+            font-size: 13px; font-weight: 600; color: #fff;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+        }
+        .community-post-comment {
+            font-size: 15px; color: #fff; line-height: 1.45;
+            margin-bottom: 10px;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .community-post-meta {
+            display: flex; gap: 6px; margin-bottom: 10px;
+        }
+        .community-post-tag {
+            padding: 2px 8px; border-radius: 8px;
+            background: rgba(255,255,255,0.15); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-size: 11px; color: rgba(255,255,255,0.85);
+        }
+        .community-post-actions {
+            display: flex; gap: 12px; align-items: center;
+        }
+        .community-post-action {
+            font-size: 12px; color: rgba(255,255,255,0.8);
+            display: flex; align-items: center; gap: 4px;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+        }
+        .community-post-action i { font-size: 11px; }
+        .community-post-rating {
+            margin-left: auto;
+            display: flex; gap: 10px; align-items: center;
+        }
+        .community-post-rating span {
+            font-size: 14px; font-weight: 700;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+        }
+
+        /* ===== 统一搜索+筛选组件 ===== */
+        .search-bar {
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px; padding: 0 4px 0 14px; height: 36px;
+            min-width: 280px; transition: all 0.3s; cursor: text;
+        }
+        .search-bar:focus-within,
+        .search-bar.open { border-color: rgba(102,126,234,0.5); background: rgba(255,255,255,0.12); }
+
+        .search-bar input {
+            flex: 1; background: none; border: none; color: #f5f5f7;
+            font-size: 13px; outline: none; min-width: 0;
+        }
+        .search-bar input::placeholder { color: #86868b; }
+
+        .search-bar-btn {
+            background: none; border: none; color: #86868b; cursor: pointer;
+            font-size: 13px; padding: 4px 8px; border-radius: 6px; transition: all 0.15s;
+            display: flex; align-items: center; gap: 4px; white-space: nowrap;
+        }
+        .search-bar-btn:hover { color: #f5f5f7; background: rgba(255,255,255,0.06); }
+        .search-bar-btn.search-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff; font-weight: 600; padding: 4px 14px; border-radius: 8px;
+            font-size: 12px;
+        }
+        .search-bar-btn.search-btn:hover { transform: scale(1.03); box-shadow: 0 2px 10px rgba(102,126,234,0.4); }
+
+        .search-bar-divider {
+            width: 1px; height: 20px; background: rgba(255,255,255,0.1);
+        }
+
+        /* ===== 筛选下拉面板 ===== */
+        .search-panel {
+            display: none; position: absolute; top: calc(100% + 6px); right: 0;
+            width: 520px; max-width: 94vw;
+            background: rgba(22,22,24,0.98); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+            padding: 20px; z-index: 10000;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .search-panel.visible { display: block; }
+
+        .search-panel-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+        }
+        .search-panel-item {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .search-panel-item.full { grid-column: 1 / -1; }
+
+        .search-panel-label {
+            font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.3);
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+        .search-panel-select {
+            padding: 8px 10px; border-radius: 8px;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+            font-size: 13px; color: #f5f5f7; outline: none; cursor: pointer;
+            appearance: auto; -webkit-appearance: auto;
+        }
+        .search-panel-select:hover { background: rgba(255,255,255,0.12); }
+        .search-panel-select:focus { background: rgba(255,255,255,0.15); border-color: rgba(102,126,234,0.5); }
+        .search-panel-select option { background: #1c1c1e; color: #f5f5f7; }
+
+        .search-panel-close {
+            display: none; /* 桌面端隐藏 */
+            position: absolute; top: 16px; right: 16px;
+            width: 36px; height: 36px; border-radius: 50%;
+            background: rgba(255,255,255,0.1); border: none;
+            color: #fff; font-size: 16px; cursor: pointer;
+            align-items: center; justify-content: center;
+            z-index: 10;
+        }
+        .search-panel-close:hover { background: rgba(255,255,255,0.2); }
+        .search-panel-title {
+            display: none; /* 桌面端隐藏 */
+            font-size: 18px; font-weight: 700; color: #f5f5f7;
+            margin-bottom: 20px; text-align: center;
+        }
+
+        .search-panel-footer {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 16px; padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .search-panel-count { font-size: 12px; color: rgba(255,255,255,0.3); }
+        .search-panel-actions { display: flex; gap: 8px; }
+        .search-panel-btn {
+            padding: 6px 14px; border-radius: 8px; font-size: 12px; cursor: pointer;
+            transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.08); color: #86868b;
+        }
+        .search-panel-btn:hover { background: rgba(255,255,255,0.12); color: #f5f5f7; }
+        .search-panel-btn.primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none; color: #fff; font-weight: 600;
+        }
+        .search-panel-btn.primary:hover { transform: scale(1.03); box-shadow: 0 2px 12px rgba(102,126,234,0.4); }
+
+        /* ===== 实时搜索下拉结果 ===== */
+        .search-suggestions {
+            display: none; position: absolute; top: calc(100% + 6px); right: 0;
+            width: 520px; max-width: 94vw; max-height: 60vh; overflow-y: auto;
+            background: rgba(22,22,24,0.98); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+            z-index: 10000; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .search-suggestions.visible { display: block; }
+        .search-suggestion-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            transition: background 0.15s;
+        }
+        .search-suggestion-item:last-child { border-bottom: none; }
+        .search-suggestion-item:hover { background: rgba(102,126,234,0.1); }
+        .search-suggestion-pic {
+            width: 64px; height: 48px; border-radius: 8px; overflow: hidden; flex-shrink: 0;
+        }
+        .search-suggestion-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .search-suggestion-body { flex: 1; min-width: 0; }
+        .search-suggestion-name { font-size: 15px; font-weight: 600; color: #f5f5f7; }
+        .search-suggestion-meta { font-size: 12px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+        .search-suggestion-ratings { display: flex; gap: 12px; flex-shrink: 0; }
+        .search-suggestion-ratings span { font-size: 13px; font-weight: 600; }
+        .ss-public { color: #60a5fa; }
+        .ss-designer { color: #a78bfa; }
+        .ss-operator { color: #34d399; }
+        .search-suggestion-empty {
+            padding: 40px 20px; text-align: center; color: rgba(255,255,255,0.3); font-size: 14px;
+        }
+
+        .view-toggle {
+            display: flex; align-items: center; gap: 2px;
+            background: rgba(255,255,255,0.06); border-radius: 8px; padding: 2px;
+        }
+        .view-btn {
+            padding: 6px 14px; border-radius: 6px;
+            background: transparent; border: none;
+            color: rgba(255,255,255,0.4); font-size: 13px; cursor: pointer;
+            transition: all 0.2s; display: flex; align-items: center; gap: 5px;
+        }
+        .view-btn.active { background: rgba(102,126,234,0.25); color: #667eea; }
+        .view-btn:hover:not(.active) { color: #f5f5f7; }
+
+        /* ===== 主容器 ===== */
+        .main-wrap {
+            margin-top: 57px;
+            height: calc(100vh - 57px);
+            display: flex;
+            position: relative;
+        }
+
+        /* ===== 今日推荐视图（默认） ===== */
+        .daily-view {
+            flex: 1; display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+
+        .daily-section {
+            flex: 1; display: flex; gap: 2px;
+            min-height: 0;
+            position: relative;
+            overflow-x: auto; overflow-y: hidden;
+            scroll-behavior: smooth;
+            scroll-snap-type: x mandatory;
+        }
+        .daily-section::-webkit-scrollbar { display: none; }
+        .daily-nav-btn {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            z-index: 100; width: 40px; height: 56px; border-radius: 8px;
+            background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+            color: #fff; font-size: 18px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity 0.3s; backdrop-filter: blur(8px);
+        }
+        .daily-section:hover .daily-nav-btn { opacity: 1; }
+        .daily-nav-btn:hover { background: rgba(0,0,0,0.7); }
+        .daily-nav-btn.prev { left: 12px; }
+        .daily-nav-btn.next { right: 12px; }
+
+        .daily-card {
+            flex: 0 0 calc(33.333% - 2px); width: calc(33.333% - 2px);
+            position: relative; cursor: pointer;
+            overflow: hidden; border-radius: 0;
+            background: #111;
+            scroll-snap-align: start;
+        }
+        .daily-card:hover { z-index: 10; }
+        .daily-card:hover .daily-card-bg { transform: scale(1.05); }
+        .daily-card:active .daily-card-bg { transform: scale(1.08); }
+
+        .daily-card-bg {
+            width: 100%; height: 100%; display: block;
+            object-fit: cover; transition: transform 0.5s ease;
+        }
+        .daily-card:hover .daily-card-bg { transform: scale(1.03); }
+
+        .daily-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            padding: 60px 40px 40px;
+            background: linear-gradient(transparent 0%, rgba(0,0,0,0.35) 25%, rgba(0,0,0,0.7) 55%, rgba(0,0,0,0.92) 85%);
+            pointer-events: none;
+        }
+
+        .daily-section-header {
+            position: absolute; top: 24px; left: 0; right: 0;
+            display: flex; align-items: center; justify-content: center;
+            pointer-events: none; z-index: 5;
+        }
+        .daily-section-title {
+            font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.5);
+            letter-spacing: 4px; text-transform: uppercase;
+        }
+
+        .daily-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 16px; border-radius: 20px;
+            background: rgba(102,126,234,0.35); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-size: 13px; font-weight: 600; color: #fff;
+            margin-bottom: 14px; letter-spacing: 0.8px;
+        }
+        .daily-badge i { font-size: 12px; }
+
+        /* 内容优先层级：内容标题最醒目，商场名退居辅助 */
+        .daily-sub {
+            font-size: 22px; font-weight: 700; color: #fff;
+            line-height: 1.3; margin-bottom: 8px;
+            text-shadow: 0 2px 12px rgba(0,0,0,0.5);
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .daily-name {
+            font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.7);
+            margin-bottom: 14px; letter-spacing: 0;
+        }
+
+        /* 发帖人信息：贡献者头像+名字+认证勾+身份标签 */
+        .daily-card-author {
+            display: flex; align-items: center; gap: 6px;
+            margin-bottom: 14px; font-size: 12px;
+        }
+        .daily-card-author-avatar {
+            width: 22px; height: 22px; border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .daily-card-author-name {
+            color: rgba(255,255,255,0.75); font-weight: 500;
+        }
+        .daily-card-author-title {
+            padding: 1px 7px; border-radius: 8px; font-size: 10px; font-weight: 600;
+            background: rgba(59,130,246,0.15); color: #60a5fa;
+            border: 1px solid rgba(59,130,246,0.25);
+        }
+        .daily-card-author-title.designer {
+            background: rgba(167,139,250,0.15); color: #a78bfa; border-color: rgba(167,139,250,0.25);
+        }
+        .daily-card-author-title.operator {
+            background: rgba(52,211,153,0.15); color: #34d399; border-color: rgba(52,211,153,0.25);
+        }
+
+        .daily-ratings {
+            display: flex; gap: 28px; align-items: center;
+        }
+        .daily-rating-item {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .daily-rating-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+        }
+        .daily-rating-dot.public { background: #60a5fa; box-shadow: 0 0 12px rgba(96,165,250,0.5); }
+        .daily-rating-dot.designer { background: #a78bfa; box-shadow: 0 0 12px rgba(167,139,250,0.5); }
+        .daily-rating-dot.operator { background: #34d399; box-shadow: 0 0 12px rgba(52,211,153,0.5); }
+        .daily-rating-label { font-size: 12px; color: rgba(255,255,255,0.45); }
+        .daily-rating-score {
+            font-size: 22px; font-weight: 700;
+        }
+        .daily-rating-score.public { color: #60a5fa; }
+        .daily-rating-score.designer { color: #a78bfa; }
+        .daily-rating-score.operator { color: #34d399; }
+        .daily-rating-max { font-size: 13px; color: rgba(255,255,255,0.2); font-weight: 400; display:none; }
+
+        /* ===== 地图视图（隐藏状态） ===== */
+        .map-view {
+            flex: 1; display: none; position: relative;
+        }
+        .map-view.visible { display: flex; flex-direction: column; }
+        #leaflet-map { width:100%; height:100%; }
+        .leaflet-tile-pane { filter: brightness(0.7) contrast(1.1) saturate(0.4); }
+
+        .custom-marker-icon { background:none !important; border:none !important; }
+        .custom-marker {
+            display:flex; flex-direction:column; align-items:center; cursor:pointer; transition:transform 0.2s;
+        }
+        .custom-marker:hover { transform:scale(1.1); z-index:999 !important; }
+        .marker-label {
+            padding:5px 12px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: 2px solid rgba(255,255,255,0.9);
+            border-radius: 8px; color:#fff; font-size:13px; font-weight:600;
+            white-space:nowrap; box-shadow:0 2px 10px rgba(0,0,0,0.4);
+            text-shadow:0 1px 2px rgba(0,0,0,0.3);
+        }
+        .custom-marker.highlighted .marker-label {
+            background: linear-gradient(135deg, #a78bfa, #7c3aed);
+            box-shadow: 0 0 20px rgba(102,126,234,0.8);
+            transform: scale(1.1);
+        }
+        .marker-pointer {
+            width:0; height:0;
+            border-left:6px solid transparent; border-right:6px solid transparent;
+            border-top:8px solid #764ba2; margin-top:-2px;
+        }
+        .leaflet-popup-content-wrapper { background:rgba(29,29,31,0.95); backdrop-filter:blur(20px); color:#f5f5f7; border-radius:10px; border:1px solid rgba(255,255,255,0.1); }
+        .leaflet-popup-tip { background:rgba(29,29,31,0.95); }
+        .leaflet-popup-content { margin:12px 16px; font-size:13px; }
+        .popup-title { font-weight:600; font-size:15px; margin-bottom:4px; }
+        .popup-sub { color:rgba(255,255,255,0.5); font-size:12px; }
+
+        /* ===== 右侧详情面板 ===== */
+        .right-panel {
+            width: 400px; max-width: 400px;
+            background: rgba(29,29,31,0.95); backdrop-filter: blur(20px);
+            border-left: 1px solid rgba(255,255,255,0.1);
+            display: flex; flex-direction: column; transition: width 0.3s; z-index: 1000;
+        }
+        .right-panel.collapsed { width:0; overflow:hidden; border-left:none; }
+
+        .right-panel-header {
+            padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.08);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .panel-title { font-size: 14px; font-weight: 600; color: #f5f5f7; }
+        .panel-actions { display: flex; align-items: center; gap: 8px; }
+        .panel-close { background:none; border:none; color:#86868b; cursor:pointer; font-size:16px; padding:4px; }
+        .panel-close:hover { color:#f5f5f7; }
+
+        .detail-panel { padding: 20px; flex:1; overflow-y: auto; }
+        .detail-panel::-webkit-scrollbar { width:4px; }
+        .detail-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:2px; }
+
+        .detail-placeholder {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100%; color: #86868b; text-align: center; padding: 40px 20px;
+        }
+        .detail-placeholder i { font-size: 40px; color: #667eea; margin-bottom: 14px; }
+        .detail-placeholder h3 { font-size: 15px; font-weight: 600; color: #f5f5f7; margin-bottom: 6px; }
+        .detail-placeholder p { font-size: 13px; color: #86868b; }
+
+        .detail-title { font-size:26px; font-weight:600; margin-bottom:4px; color:#f5f5f7; }
+        .detail-meta { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+        .detail-tag {
+            display:inline-block; padding:4px 12px;
+            background:rgba(102,126,234,0.15); border:1px solid rgba(102,126,234,0.3);
+            border-radius:12px; font-size:12px; color:#667eea; font-weight:500;
+        }
+
+        /* 详情页顶部精选帖子（当前视角） */
+        .detail-featured-post {
+            background: rgba(255,255,255,0.06); border-radius: 14px;
+            padding: 16px; margin-bottom: 18px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .detail-featured-post-header {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+        }
+        .detail-featured-post-avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .detail-featured-post-user {
+            font-size: 14px; font-weight: 600; color: #fff;
+        }
+        .detail-featured-post-title-tag {
+            padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 600;
+        }
+        .detail-featured-post-title-tag.public { background: rgba(59,130,246,0.15); color: #60a5fa; }
+        .detail-featured-post-title-tag.designer { background: rgba(167,139,250,0.15); color: #a78bfa; }
+        .detail-featured-post-title-tag.operator { background: rgba(52,211,153,0.15); color: #34d399; }
+        .detail-featured-post-title {
+            font-size: 17px; font-weight: 700; color: #fff; line-height: 1.4; margin-bottom: 8px;
+        }
+        .detail-featured-post-excerpt {
+            font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.6; margin-bottom: 12px;
+        }
+        .detail-featured-post-stats {
+            display: flex; gap: 20px; font-size: 13px; color: rgba(255,255,255,0.5);
+        }
+        .detail-featured-post-stats span { display: flex; align-items: center; gap: 4px; }
+
+        .detail-rating-box {
+            padding:16px; background:rgba(255,255,255,0.03); border-radius:12px;
+            border:1px solid rgba(255,255,255,0.08); margin-bottom:18px;
+        }
+        .detail-rating-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; }
+        .detail-rating-label { font-size:13px; color:rgba(255,255,255,0.7); }
+        .detail-stars { display:flex; gap:2px; }
+        .detail-star { font-size:18px; color:rgba(255,255,255,0.15); }
+        .detail-star.filled { color:#667eea; }
+
+        .detail-tabs { display:flex; gap:8px; margin-bottom:16px; }
+        .detail-tab {
+            flex:1; padding:8px 16px; background:rgba(255,255,255,0.05);
+            border:1px solid rgba(255,255,255,0.1); border-radius:8px;
+            color:rgba(255,255,255,0.5); font-size:13px; cursor:pointer; transition:all 0.2s; text-align:center;
+        }
+        .detail-tab:hover { background:rgba(255,255,255,0.1); color:#f5f5f7; }
+        .detail-tab.active { background:#006EFF; border-color:#006EFF; color:#fff; }
+
+        .detail-photo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; }
+        .detail-photo-card {
+            aspect-ratio:4/3; border-radius:8px; overflow:hidden;
+            border:1px solid rgba(255,255,255,0.06);
+            position:relative; transition:transform 0.2s;
+        }
+        .detail-photo-card:hover { transform:translateY(-2px); }
+        .detail-photo-card img { width:100%; height:100%; object-fit:cover; display:block; min-height:0; }
+        .detail-photo-text {
+            position:absolute; bottom:0; left:0; right:0;
+            padding:8px 12px; font-size:12px; color:#fff;
+            background: linear-gradient(transparent, rgba(0,0,0,0.7));
+            pointer-events:none;
+        }
+
+        .detail-info-box {
+            padding:16px; background:rgba(255,255,255,0.03); border-radius:12px;
+            border:1px solid rgba(255,255,255,0.08); margin-bottom:18px;
+        }
+        .detail-info-box h4 { font-size:14px; font-weight:600; margin-bottom:12px; color:#f5f5f7; }
+        .detail-info-row { display:flex; align-items:baseline; padding:4px 0; }
+        .detail-info-label { color:rgba(255,255,255,0.4); font-size:12px; min-width:70px; }
+        .detail-info-value { color:rgba(255,255,255,0.85); font-size:13px; }
+        .detail-desc { color:rgba(255,255,255,0.6); font-size:13px; line-height:1.7; white-space:pre-line; }
+
+        .detail-rate-box {
+            padding:16px; background:rgba(255,255,255,0.03); border-radius:12px;
+            border:1px solid rgba(255,255,255,0.08); margin-bottom:18px;
+        }
+        .detail-rate-title { font-size:14px; font-weight:600; margin-bottom:10px; color:#f5f5f7; }
+        .detail-rate-sub { font-size:12px; color:rgba(255,255,255,0.4); margin-bottom:12px; }
+        .detail-rate-role {
+            display:inline-flex; align-items:center; gap:4px;
+            padding:2px 8px; border-radius:6px;
+            background:rgba(96,165,250,0.15); color:#60a5fa; font-size:12px; font-weight:600;
+        }
+        .detail-rate-stars { display:flex; gap:6px; margin-bottom:12px; }
+        .rate-star {
+            font-size:24px; color:rgba(255,255,255,0.15); cursor:pointer; transition:color 0.15s;
+        }
+        .rate-star:hover, .rate-star.active { color:#667eea; }
+        .detail-rate-btn {
+            padding:8px 20px; border-radius:8px; border:none;
+            background:linear-gradient(135deg, #667eea, #764ba2);
+            color:#fff; font-size:13px; font-weight:600; cursor:pointer;
+            transition:all 0.2s;
+        }
+        .detail-rate-btn:hover { transform:scale(1.03); box-shadow:0 2px 12px rgba(102,126,234,0.4); }
+        .detail-rate-hint { font-size:12px; color:#34d399; margin-top:8px; min-height:16px; }
+
+        .map-toggle-btn {
+            display: none; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            padding: 12px 28px; background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none; border-radius: 30px; color: #fff; font-size: 15px; font-weight: 600;
+            cursor: pointer; z-index: 9999; box-shadow: 0 4px 24px rgba(102,126,234,0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .map-toggle-btn:hover { transform: translateX(-50%) scale(1.05); box-shadow: 0 6px 32px rgba(102,126,234,0.5); }
+
+        /* ===== 响应式 ===== */
+
+        /* === iPad (768px - 1024px) === */
+        @media (max-width: 1024px) {
+            .apple-nav { padding: 8px 16px; }
+            .nav-left { gap: 12px; }
+            .logo { font-size: 15px; }
+            .search-bar { min-width: 200px; }
+            .right-panel { width: 340px !important; }
+        }
+
+        /* === 手机端 (< 768px) === */
+        @media (max-width: 768px) {
+            /* --- 导航栏 --- */
+            .apple-nav {
+                display: flex; flex-wrap: wrap;
+                padding: 8px 12px; gap: 8px;
+                min-height: auto;
+            }
+            .nav-left { width: 100%; justify-content: space-between; }
+            .nav-center {
+                width: 100%; order: 3;
+                overflow-x: auto; -webkit-overflow-scrolling: touch;
+                justify-content: flex-start; padding-bottom: 4px;
+            }
+            .nav-center::-webkit-scrollbar { display: none; }
+            .perspective-toggle { flex-shrink: 0; }
+            .perspective-btn { padding: 5px 12px; font-size: 12px; white-space: nowrap; }
+
+            .nav-right {
+                width: 100%; order: 2;
+                justify-content: stretch;
+            }
+            .search-bar {
+                width: 100%; min-width: 0;
+                border-radius: 20px; padding: 6px 12px;
+            }
+            .search-bar input { font-size: 14px; }
+            .search-bar-btn { padding: 6px 10px; font-size: 13px; }
+            .search-bar-divider { display: none; }
+            .search-panel {
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                width: 100% !important; max-width: 100% !important;
+                border-radius: 0; z-index: 100000;
+                padding: 60px 20px 20px;
+            }
+            .search-panel-close { display: flex; }
+            .search-panel-title { display: block; }
+            .search-suggestions {
+                position: fixed; top: 110px; left: 12px; right: 12px;
+                width: auto; max-width: none;
+                max-height: 50vh;
+            }
+
+            .search-panel-grid { grid-template-columns: 1fr 1fr; }
+
+            /* --- 主内容区 --- */
+            .main-wrap {
+                margin-top: 0; height: 100vh; padding-top: 110px;
+                box-sizing: border-box; overflow: hidden;
+            }
+            .main-content { flex-direction: column; }
+
+            /* --- 今日推荐/社区 垂直滚动 --- */
+            .daily-view { overflow: hidden; display: flex; flex-direction: column; }
+            .daily-section { flex-direction: column; overflow-y: auto; }
+            .daily-card {
+                flex: 0 0 32vh; min-height: 28vh;
+                border-radius: 0; border-bottom: 2px solid rgba(255,255,255,0.06);
+            }
+            .daily-card:hover { flex: 0 0 32vh; }
+            .daily-name { font-size: 22px; }
+            .daily-overlay { padding: 50px 20px 24px; }
+            .daily-ratings { gap: 12px; }
+            .daily-rating-score { font-size: 18px; }
+            .daily-section-header { top: 16px; position: static; padding: 16px 20px 8px; }
+            .daily-section-title { font-size: 12px; letter-spacing: 3px; }
+
+            /* --- 社区模式垂直单列 --- */
+            .community-feed {
+                flex-direction: column; overflow-y: auto; overflow-x: hidden;
+                gap: 2px; scroll-snap-type: y mandatory;
+                height: 100%;
+            }
+            .community-post {
+                flex: 0 0 65vh; min-height: 55vh; width: 100%;
+                scroll-snap-align: start;
+            }
+            .community-feed-wrap { flex: 1; min-height: 0; position: relative; }
+            .community-nav-btn { display: none; } /* 手机端不需要左右箭头 */
+            .daily-nav-btn { display: none; } /* 手机端不需要左右箭头 */
+            .community-post-overlay { padding: 50px 20px 20px; }
+            .community-post-comment { font-size: 16px; max-width: 100%; }
+            .community-post-username { font-size: 14px; }
+            .community-post-role { font-size: 10px; padding: 2px 6px; }
+
+            /* --- 右侧详情面板 → 底部Sheet --- */
+            .right-panel {
+                position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+                width: 100% !important; max-width: 100% !important;
+                height: 85vh; border-radius: 20px 20px 0 0;
+                border-left: none; border-top: 1px solid rgba(255,255,255,0.1);
+                transform: translateY(100%);
+                transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+                z-index: 9999; overflow-y: auto;
+            }
+            .right-panel:not(.collapsed) { transform: translateY(0); }
+            .right-panel.collapsed { transform: translateY(100%); pointer-events: none; }
+
+            /* 底部Sheet遮罩 */
+            .sheet-backdrop {
+                display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.5); z-index: 9998;
+            }
+            .sheet-backdrop.active { display: block; }
+            .right-panel-content { padding: 20px; }
+            .detail-title { font-size: 22px; }
+            .detail-photo-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+
+            /* 底部Sheet拖拽条 */
+            .right-panel::before {
+                content: ''; display: block;
+                width: 36px; height: 5px; border-radius: 3px;
+                background: rgba(255,255,255,0.3);
+                margin: 10px auto 0;
+            }
+
+            .detail-placeholder { display: none; }
+
+            /* --- 按钮最小点击区域 --- */
+            .perspective-btn, .mode-btn, .search-bar-btn {
+                min-height: 40px; min-width: 40px;
+            }
+        }
+    /* === 桌面端移动模拟（URL加 ?mobile） === */
+        body.sim-mobile {
+            max-width: 375px; margin: 0 auto;
+            height: 100vh; overflow: hidden;
+            border-radius: 24px;
+            box-shadow: 0 0 0 3px #333, 0 0 60px rgba(0,0,0,0.5);
+        }
+        body.sim-mobile .main-content { flex-direction: column; }
+        body.sim-mobile .main-wrap { margin-top: 0; height: 100vh; padding-top: 110px; box-sizing: border-box; overflow: hidden; }
+        body.sim-mobile .daily-view { overflow: hidden; display: flex; flex-direction: column; }
+        body.sim-mobile .apple-nav { flex-wrap: wrap; padding: 8px 12px; gap: 8px; min-height: auto; }
+        body.sim-mobile .nav-left { width: 100%; justify-content: space-between; }
+        body.sim-mobile .nav-center { width: 100%; order: 3; overflow-x: auto; justify-content: flex-start; padding-bottom: 4px; }
+        body.sim-mobile .nav-center::-webkit-scrollbar { display: none; }
+        body.sim-mobile .nav-right { width: 100%; order: 2; justify-content: stretch; }
+        body.sim-mobile .search-bar { width: 100%; min-width: 0; border-radius: 20px; padding: 6px 12px; }
+        body.sim-mobile .search-bar-divider { display: none; }
+        body.sim-mobile .search-panel { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100% !important; max-width: 100% !important; border-radius: 0; z-index: 100000; padding: 60px 20px 20px; }
+        body.sim-mobile .search-panel-close { display: flex; }
+        body.sim-mobile .search-panel-title { display: block; }
+        body.sim-mobile .daily-section { flex-direction: column; overflow-y: auto; }
+        body.sim-mobile .daily-card { flex: 0 0 32vh; min-height: 28vh; border-radius: 0; border-bottom: 2px solid rgba(255,255,255,0.06); }
+        body.sim-mobile .daily-card:hover { flex: 0 0 32vh; }
+        body.sim-mobile .daily-name { font-size: 22px; }
+        body.sim-mobile .daily-overlay { padding: 50px 20px 24px; }
+        body.sim-mobile .daily-ratings { gap: 12px; }
+        body.sim-mobile .daily-rating-score { font-size: 18px; }
+        body.sim-mobile .daily-section-header { position: static; padding: 16px 20px 8px; }
+        body.sim-mobile .daily-section-title { font-size: 12px; letter-spacing: 3px; }
+        body.sim-mobile .community-feed { flex-direction: column; overflow-y: auto; overflow-x: hidden; gap: 2px; scroll-snap-type: y mandatory; height: 100%; }
+        body.sim-mobile .community-feed-wrap { flex: 1; min-height: 0; position: relative; }
+        body.sim-mobile .community-post { flex: 0 0 65vh; min-height: 55vh; width: 100%; scroll-snap-align: start; }
+        body.sim-mobile .community-nav-btn { display: none; }
+        body.sim-mobile .community-post-overlay { padding: 50px 20px 20px; }
+        body.sim-mobile .community-post-comment { font-size: 16px; max-width: 100%; }
+        body.sim-mobile .right-panel {
+            position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+            width: 100% !important; max-width: 100% !important;
+            height: 85vh; border-radius: 20px 20px 0 0;
+            border-left: none; border-top: 1px solid rgba(255,255,255,0.1);
+            transform: translateY(100%);
+            transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+            z-index: 9999; overflow-y: auto;
+        }
+        body.sim-mobile .right-panel:not(.collapsed) { transform: translateY(0); }
+        body.sim-mobile .right-panel.collapsed { transform: translateY(100%); pointer-events: none; }
+        body.sim-mobile .right-panel::before {
+            content: ''; display: block;
+            width: 36px; height: 5px; border-radius: 3px;
+            background: rgba(255,255,255,0.3);
+            margin: 10px auto 0;
+        }
+        body.sim-mobile .right-panel-content { padding: 20px; }
+        body.sim-mobile .detail-title { font-size: 22px; }
+        body.sim-mobile .detail-photo-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+        body.sim-mobile .detail-placeholder { display: none; }
+        body.sim-mobile .sheet-backdrop { display: block; }
+        body.sim-mobile .sheet-backdrop.active { display: block; }
+        body.sim-mobile .perspective-btn, body.sim-mobile .mode-btn, body.sim-mobile .search-bar-btn { min-height: 40px; min-width: 40px; }
+    </style>
+</head>
+<body>
+    <!-- 导航 -->
+    <nav class="apple-nav">
+        <div class="nav-left">
+            <div class="logo">Mall<span>Insight</span></div>
+            <div class="mode-toggle" id="modeToggle">
+                <button class="mode-btn active" data-mode="daily">今日推荐</button>
+                <button class="mode-btn" data-mode="community">社区</button>
+            </div>
+        </div>
+        <div class="nav-center">
+            <div class="perspective-toggle" id="perspectiveToggle">
+                <button class="perspective-btn active" data-p="public">逛玩</button>
+                <button class="perspective-btn" data-p="designer">设计</button>
+                <button class="perspective-btn" data-p="operator">运营</button>
+            </div>
+        </div>
+        <div class="nav-right">
+                <div class="search-bar" id="searchBar">
+                    <input type="text" id="searchInput" placeholder="搜索商场..." />
+                    <button class="search-bar-btn" id="searchFilterBtn" title="筛选条件">
+                        <i class="fas fa-filter"></i>
+                    </button>
+                    <span class="search-bar-divider"></span>
+                    <button class="search-bar-btn search-btn" id="searchGoBtn">
+                        <i class="fas fa-search"></i> 搜索
+                    </button>
+                </div>
+                <div class="search-panel" id="searchPanel">
+                    <button class="search-panel-close" id="searchPanelClose"><i class="fas fa-times"></i></button>
+                    <h3 class="search-panel-title">筛选条件</h3>
+                    <div class="search-panel-grid">
+                        <div class="search-panel-item">
+                            <div class="search-panel-label">城市</div>
+                            <select id="filterCity" class="search-panel-select">
+                                <option value="">全部城市</option>
+                            </select>
+                        </div>
+                        <div class="search-panel-item">
+                            <div class="search-panel-label">类型</div>
+                            <select id="filterType" class="search-panel-select">
+                                <option value="">全部类型</option>
+                                <option value="高端">高端</option>
+                                <option value="中端">中端</option>
+                                <option value="特色街区">特色街区</option>
+                                <option value="艺术">艺术</option>
+                                <option value="社区">社区</option>
+                                <option value="综合型">综合型</option>
+                                <option value="奥莱">奥莱</option>
+                            </select>
+                        </div>
+                        <div class="search-panel-item">
+                            <div class="search-panel-label">品牌</div>
+                            <select id="filterBrand" class="search-panel-select">
+                                <option value="">全部品牌</option>
+                            </select>
+                        </div>
+                        <div class="search-panel-item">
+                            <div class="search-panel-label">最低平均评分</div>
+                            <select id="filterRating" class="search-panel-select">
+                                <option value="0">无最低要求</option>
+                                <option value="4">★ 4.0+</option>
+                                <option value="3">★ 3.0+</option>
+                                <option value="2">★ 2.0+</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="search-panel-footer">
+                        <span class="search-panel-count" id="filterCount"></span>
+                        <div class="search-panel-actions">
+                            <button class="search-panel-btn" id="filterReset">重置</button>
+                            <button class="search-panel-btn primary" id="filterApply">应用筛选</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="search-suggestions" id="searchSuggestions"></div>
+            <div class="view-toggle">
+                <button class="view-btn active" id="viewCard"><i class="fas fa-th"></i> 浏览</button>
+                <button class="view-btn" id="viewMap"><i class="fas fa-map-marked-alt"></i> 地图</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="main-wrap">
+        <!-- 今日推荐视图（默认） -->
+        <div class="daily-view" id="dailyView">
+            <div class="daily-section" id="dailySection"></div>
+        </div>
+
+        <!-- 地图视图 -->
+        <div class="map-view" id="mapView">
+            <div id="leaflet-map"></div>
+        </div>
+
+        <!-- 底部Sheet遮罩（手机端） -->
+        <div class="sheet-backdrop" id="sheetBackdrop" onclick="closePanelMobile()"></div>
+
+        <!-- 右侧详情面板（默认收起） -->
+        <div class="right-panel collapsed" id="rightPanel">
+            <div class="right-panel-header">
+                <span class="panel-title">商场详情</span>
+                <div class="panel-actions">
+                    <button class="panel-close" id="panelClose"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div id="detailPanel" class="detail-panel">
+                <div class="detail-placeholder">
+                    <i class="fas fa-store-alt"></i>
+                    <h3>选择一个商场</h3>
+                    <p>点击卡片查看详细信息</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 地图切换按钮（手机端） -->
+    <button class="map-toggle-btn" id="mobileMapToggle" style="display:none;">
+        <i class="fas fa-map-marked-alt"></i> 查看地图分布
+    </button>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="malls_data.js"></script>
+    <script>
+        // ===== 桌面端移动模拟（URL加 ?mobile） =====
+        if (window.location.search.includes('mobile')) {
+            document.body.classList.add('sim-mobile');
+        }
+
+        // ===== 状态 =====
+        let currentCity = '';
+        let selectedMallId = null;
+        let currentView = 'daily';
+        let perspective = 'public'; // public | designer | operator
+        let focusMallId = null; // 点击搜索结果后聚焦的商场ID
+        let viewMode = 'daily'; // 'daily' | 'community'
+        let map, markerLayer;
+
+        // ===== Mock 社区帖子数据 =====
+        const MOCK_USERS = [
+            { name: '小李探店', role: 'public' },
+            { name: '逛吃逛吃', role: 'public' },
+            { name: '商场猎人', role: 'designer' },
+            { name: '周末去哪儿', role: 'public' },
+            { name: '城市漫步者', role: 'operator' },
+            { name: '探店达人', role: 'designer' },
+            { name: '逛街指南', role: 'public' },
+            { name: '消费观察员', role: 'operator' }
+        ];
+        const ROLE_CONFIG = {
+            public:   { icon: 'fa-users',       color: '#60a5fa', label: '逛玩' },
+            designer: { icon: 'fa-palette',     color: '#a78bfa', label: '设计' },
+            operator: { icon: 'fa-briefcase',   color: '#34d399', label: '运营' }
+        };
+        const MOCK_COMMENTS = [
+            '周末来逛，人超多，推荐晚上来，灯光效果很棒！',
+            '设计感很强，拍照出片，适合带朋友来打卡。',
+            '品牌很全，适合逛街，餐饮选择也很多。',
+            '空间规划不错，动线合理，逛起来不累。',
+            '外立面很有特色，夜景尤其好看，值得专门来。',
+            '内部装饰细节做得很好，每个角落都有惊喜。',
+            '交通方便，地铁直达，周边配套也很完善。',
+            '适合家庭出游，有儿童区，老人也能轻松逛。'
+        ];
+        const MOCK_TITLES = [
+            '周末逛商场，分享一下真实感受',
+            '打卡新开商场，说说体验',
+            '遛娃逛街两不误，这家商场不错',
+            '设计视角：聊聊这家商场的空间设计',
+            '实地探访，这家商场值得去吗？',
+            '周末探店：商场里的隐藏好店',
+            '逛了一圈，说说优缺点',
+            '带家人逛商场，体验分享'
+        ];
+        let communityPosts = []; // 生成后填充
+
+        function generateCommunityPosts() {
+            const posts = [];
+            // 只为有精选帖子的商场生成社区帖子
+            const featuredMallIds = [...new Set(FEATURED_POSTS.map(p=>p.mallId))];
+            const featuredMalls = MALLS_DATA.filter(m => featuredMallIds.includes(m.id));
+            const shuffled = [...featuredMalls].sort(() => Math.random() - 0.5);
+            shuffled.forEach((m, idx) => {
+                const u = MOCK_USERS[idx % MOCK_USERS.length];
+                const comment = MOCK_COMMENTS[idx % MOCK_COMMENTS.length];
+                const title = MOCK_TITLES[idx % MOCK_TITLES.length];
+                const likes = Math.floor(Math.random() * 500) + 20;
+                const comments = Math.floor(Math.random() * 100) + 5;
+                posts.push({
+                    mallId: m.id,
+                    user: u.name,
+                    role: u.role,
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.name}`,
+                    title,
+                    comment,
+                    likes,
+                    comments,
+                    tags: [m.city, m.type, m.brand || ''],
+                    image: getMallImage(m.id)
+                });
+            });
+            // 合入精选帖子（带官方身份），置于最前
+            FEATURED_POSTS.forEach(fp => {
+                posts.unshift({
+                    mallId: fp.mallId, user: fp.user, role: fp.role,
+                    userTitle: fp.userTitle, verified: fp.verified, featured: true,
+                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${fp.user}`,
+                    title: fp.title, comment: fp.excerpt,
+                    likes: fp.likes, comments: fp.comments,
+                    tags: [],
+                    image: getCardImage(fp.mallId, fp.role, getMallImage(fp.mallId))
+                });
+            });
+            return posts;
+        }
+
+        // ===== 今日推荐大图 =====
+        const DAILY_IMG_BY_RANK = [null, null, null];
+
+        // ===== 图片映射（覆盖所有49个空间的专属外立面图片） =====
+        // 有真实图片的优先使用，未在此列出的使用 getMallImage() 渐变占位
+        const IMAGE_MAP = {};
+
+        // ===== 内部空间图按 type 分配 =====
+        const INTERIOR_MAP = {};
+
+        // ===== 渐变颜色映射（按 type） =====
+        const GRADIENT_COLORS = {
+            '高端': ['667eea','764ba2'],
+            '中端': ['3b82f6','1d4ed8'],
+            '特色街区': ['14b8a6','0d9488'],
+            '艺术': ['ec4899','be185d'],
+            '社区': ['f97316','ea580c'],
+            '综合型': ['6366f1','4338ca'],
+            '奥莱': ['f59e0b','d97706']
+        };
+
+        // ===== getMallImage: 返回真实图片路径或CSS渐变占位 SVG data URL =====
+        function getMallImage(id, type) {
+            const m = MALLS_DATA.find(x => x.id === id);
+            if (!m) return '';
+            type = type || 'exterior';
+
+            // 1) 有专属图片映射则优先使用
+            const map = IMAGE_MAP[id];
+            if (map && map[type]) return map[type];
+
+            // 2) 中庭 / 内部空间：按 type 分配
+            if (type === 'atrium' || type === 'interior') {
+                return INTERIOR_MAP[m.type] || 'images/interior_corridor.jpg';
+            }
+
+            // 3) 外立面：生成渐变占位 SVG data URL
+            const c = GRADIENT_COLORS[m.type] || ['667eea','764ba2'];
+            return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23${c[0]}'/%3E%3Cstop offset='100%25' style='stop-color:%23${c[1]}'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='400' height='300' fill='url(%23g)'/%3E%3C/svg%3E`;
+        }
+
+        // ===== 视角场景图：同一商场不同视角展示不同场景 =====
+        const PERSPECTIVE_IMAGES = {
+            20: { // 成都太古里
+                public: 'images/chengdu-taiguli/public.jpeg',
+                designer: 'images/chengdu-taiguli/designer.jpg',
+                operator: 'images/chengdu-taiguli/operator.jpg'
+            },
+            4: { // 北京SKP
+                public: 'images/beijing-skp/public.jpg',
+                designer: 'images/beijing-skp/designer.jpg',
+                operator: 'images/beijing-skp/operator.jpg'
+            },
+            9: { // 上海新天地
+                public: 'images/shanghai-xintiandi/public.jpg',
+                designer: 'images/shanghai-xintiandi/designer.jpg',
+                operator: 'images/shanghai-xintiandi/operator.jpg'
+            },
+            16: { // 深圳万象天地
+                public: 'images/shenzhen-wanxiangtiandi/public.jpg',
+                designer: 'images/shenzhen-wanxiangtiandi/designer.jpg',
+                operator: 'images/shenzhen-wanxiangtiandi/operator.jpg'
+            },
+            3: { // 北京三里屯太古里
+                public: 'images/beijing-sanlitun/public.jpg',
+                designer: 'images/beijing-sanlitun/designer.jpg',
+                operator: 'images/beijing-sanlitun/operator.jpg'
+            },
+            8: { // 上海前滩太古里
+                public: 'images/shanghai-qiantan/public.jpg',
+                designer: 'images/shanghai-qiantan/designer.jpg',
+                operator: 'images/shanghai-qiantan/operator.jpg'
+            }
+        };
+
+        function getCardImage(id, perspective, fallback) {
+            const p = PERSPECTIVE_IMAGES[id];
+            if (p && p[perspective]) return p[perspective];
+            return fallback;
+        }
+
+        // ===== 三视角动态信息（精选帖子未覆盖商场的兜底信息） =====
+        const MALL_UPDATES = {
+            20: { public: '李现在蓉助力启幕adidas Sportswear CLIMACOOL清风茶馆', designer: '裸筑更新设计·里巷二期空间升级', operator: '快闪经济带动里巷客流·运营复盘' },
+            9:  { public: 'AW2026上海时装周｜去繁就简的高级审美', designer: 'introlemons新天地旗舰店 · AIM恺慕建筑设计', operator: '时装周+快闪双IP联动的客流效应' },
+            16: { public: 'Salomon萨洛蒙SS级全国旗舰店来了', designer: 'Bananain蕉内概念店 · Some Thoughts空间设计', operator: '首店策略构建品牌壁垒' },
+            3:  { public: '打卡三里屯KURASU咖啡', designer: '蒂芙尼北京旗舰店立面改造 · MVRDV', operator: '摩登派对十周年·潮人体验官招募' },
+            44: { public: '夏季折扣季全场低至3折 · 免费接驳车', designer: '意式小镇二期扩建开放', operator: '华北最大奥莱客流稳定增长' },
+            1:  { public: '度假街区主题市集本周末 · 新品牌入驻', designer: '度假街区空间改造案例', operator: '日均客流12万人次稳定' },
+            48: { public: '负一层美食城全新升级 · 人气第一', designer: '空间动线问题仍待改善', operator: '日均18万人次西北第一' },
+            4:  { public: '北京麦卡伦体验空间 · 与张若昀一同开启非凡体验', designer: 'GENTLE MONSTER于北京SKP-S揭幕品牌旗舰店', operator: '周年庆会员复盘·VIP私享品鉴会' },
+            8:  { public: '前滩太古里 × POP MART 的星星人装置', designer: 'POPSOCKETS快闪店 · 弹性工作室', operator: 'LUX OPEN周年盛典·VIP体验周拉新' },
+            35: { public: '云章公所历史建筑开放参观 · 新店多', designer: '历史建筑与现代商业融合案例', operator: '华润新一代产品线首店聚集' },
+            26: { public: '茑屋书店周末有读书会 · 园区好逛', designer: '隈研吾设计作品实地参访', operator: '文化艺术定位客流转化待提升' },
+            6:  { public: '奢侈品牌齐全一站式购齐 · 陆家嘴', designer: '陆家嘴高端商业空间标杆', operator: 'ifc系租金坪效上海前三' },
+            11: { public: '阳台花园开放休息 · 下午茶好去处', designer: '太古汇中庭空间设计经典', operator: '太古系华南旗舰项目稳定' },
+            15: { public: '一期二期品牌全面升级 · 新店开业', designer: '奢侈品立面改造完成', operator: '华润系华南标杆坪效最高' },
+            21: { public: '熊猫雕塑热门打卡点 · 顶层观景台', designer: '隈研吾设计的熊猫雕塑案例', operator: '九龙仓系西南旗舰业绩领先' },
+            25: { public: '西湖边最强打卡商圈 · 夜景出片', designer: '湖滨商业带连续街区设计', operator: '银泰系客流最高项目' },
+            34: { public: '德基美术馆有新展览 · 顶层观景', designer: '美术馆空间设计值得研究', operator: '南京销售额第一商场' },
+            46: { public: 'SKP-S西安版全新开业 · 奢侈品齐全', designer: 'SKP-S空间设计延续北京版', operator: '西北奢侈品销售第一' },
+            38: { public: '武商梦时代已开业连通 · 超大好逛', designer: '超大规模商业动线设计挑战', operator: '武商系华中旗舰业绩领先' }
+        };
+
+        // ===== 精选帖子：带官方贡献者身份，关联商场和视角（19商场 × 3视角 = 57条） =====
+        const FEATURED_POSTS = [
+            // 成都太古里
+            { mallId:20, role:'public', user:'成都探店小王', userTitle:'探店达人', verified:true,
+              title:'李现来太古里了！adidas清风茶馆现场直击', excerpt:'今天路过太古里，发现adidas搞了个清风茶馆，李现本人来了！现场人山人海，互动区拍照超好看', likes:2340, comments:87 },
+            { mallId:20, role:'designer', user:'裸筑更新', userTitle:'设计事务所', verified:true,
+              title:'里巷二期空间升级：我们做了什么', excerpt:'去年我们完成了太古里里巷二期的空间改造，这次重点解决的是街区与店铺的过渡空间问题', likes:1567, comments:42 },
+            { mallId:20, role:'operator', user:'成都太古里', userTitle:'官方运营', verified:true,
+              title:'快闪经济如何带动里巷客流——本月运营复盘', excerpt:'宝丽来、adidas两场快闪落地里巷，带动周末客流增长35%，快闪已成为里巷核心引流手段。下月开放体验官名额，优先邀请高活跃会员参与品牌共创', likes:892, comments:31 },
+            // 上海新天地
+            { mallId:9, role:'public', user:'魔都逛吃指南', userTitle:'探店达人', verified:true,
+              title:'AW2026上海时装周｜去繁就简的高级审美', excerpt:'新天地时装周回归，去繁就简的高级审美，秀场氛围感拉满，拍照超出片', likes:1876, comments:65 },
+            { mallId:9, role:'designer', user:'AIM恺慕建筑设计', userTitle:'设计事务所', verified:true,
+              title:'introlemons新天地旗舰店，上海', excerpt:'我们为introlemons打造的新天地旗舰店，在历史街区中植入当代零售空间体验', likes:1102, comments:38 },
+            { mallId:9, role:'operator', user:'上海新天地', userTitle:'官方运营', verified:true,
+              title:'时装周+快闪双IP联动，对北里客流的拉动效应', excerpt:'时装周期间叠加乐事快闪，北里周末客流提升42%。双IP联动的节奏把控是关键，秀场预留了会员观秀席，将活动流量转化为会员资产', likes:534, comments:12 },
+            // 深圳万象天地
+            { mallId:16, role:'public', user:'深圳探店达人', userTitle:'探店达人', verified:true,
+              title:'Salomon萨洛蒙SS级全国旗舰店来了！深圳万象天地', excerpt:'Salomon萨洛蒙SS级全国旗舰店落地万象天地，户外运动品牌线下热度持续', likes:2103, comments:78 },
+            { mallId:16, role:'designer', user:'Some Thoughts空间设计', userTitle:'设计事务所', verified:true,
+              title:'Bananain蕉内深圳万象天地概念店', excerpt:'我们为蕉内打造的万象天地概念店，探索内衣品牌在商业空间中的表达方式', likes:1340, comments:45 },
+            { mallId:16, role:'operator', user:'华润万象生活', userTitle:'官方运营', verified:true,
+              title:'首店策略如何构建万象天地的品牌壁垒', excerpt:'Gentle Monster全球最大店+Salomon SS级旗舰店，首店占比38%形成差异化护城河。首店流量需配合内容体验延长停留，奇遇书局和MXTR街区市集是配套抓手', likes:678, comments:24 },
+            // 北京三里屯太古里
+            { mallId:3, role:'public', user:'北京逛街地图', userTitle:'探店达人', verified:true,
+              title:'打卡三里屯KURASU咖啡', excerpt:'三里屯新开的KURASU咖啡，京都来的手冲品牌，排队40分钟也值得', likes:1956, comments:71 },
+            { mallId:3, role:'designer', user:'MVRDV', userTitle:'设计事务所', verified:true,
+              title:'蒂芙尼北京旗舰店立面改造', excerpt:'MVRDV操刀的蒂芙尼三里屯旗舰店立面改造，在原有建筑上重新定义奢侈品牌的空间表达', likes:987, comments:33 },
+            { mallId:3, role:'operator', user:'三里屯太古里', userTitle:'官方运营', verified:true,
+              title:'摩登派对十周年：一场活动如何拉动全场客流', excerpt:'第十届摩登派对联动北区品牌独栋旗舰店，活动期间全场客流增长50%。秀场前排预留潮人体验官席位，将活动势能转化为内容传播', likes:612, comments:19 },
+            // 北京SKP
+            { mallId:4, role:'public', user:'北京奢侈品代购', userTitle:'探店达人', verified:true,
+              title:'北京麦卡伦体验空间，与张若昀一同开启非凡体验', excerpt:'SKP麦卡伦体验空间开放，张若昀本人来了现场，品鉴威士忌的同时感受高端生活方式', likes:2045, comments:74 },
+            { mallId:4, role:'designer', user:'Sybarite Architects', userTitle:'设计事务所', verified:true,
+              title:'GENTLE MONSTER于全新高端百货旗舰北京SKP-S揭幕其品牌旗舰店', excerpt:'GENTLE MONSTER在SKP-S揭幕品牌旗舰店，空间设计延续SKP-S的数字艺术语言', likes:1234, comments:41 },
+            { mallId:4, role:'operator', user:'北京SKP', userTitle:'官方运营', verified:true,
+              title:'周年庆运营复盘：会员体系如何撑起全国销售额第一', excerpt:'周年庆期间会员消费占比72%，VIP私享品鉴会带动高净值客群复购，单日销售破亿。会员深度运营是SKP持续领先的核心引擎', likes:876, comments:29 },
+            // 上海前滩太古里
+            { mallId:8, role:'public', user:'上海逛街小达人', userTitle:'探店达人', verified:true,
+              title:'前滩太古里 × POP MART 的星星人装置', excerpt:'前滩太古里和POP MART联名的星星人装置上线了，超好拍，限时打卡', likes:1567, comments:48 },
+            { mallId:8, role:'designer', user:'弹性工作室', userTitle:'设计事务所', verified:true,
+              title:'POPSOCKETS快闪店，上海', excerpt:'我们为POPSOCKETS设计的前滩太古里快闪店，用弹性结构探索临时商业空间的可能', likes:1023, comments:36 },
+            { mallId:8, role:'operator', user:'前滩太古里', userTitle:'官方运营', verified:true,
+              title:'LUX OPEN周年盛典复盘：VIP体验周如何拉新会员', excerpt:'LUX OPEN串联VIP派对、尊享体验周、天空秀场时装周，活动期间新增会员同比增长60%。体验式活动是前滩太古里会员增长的核心抓手', likes:567, comments:17 }
+        ];
+
+        // 从精选帖子中获取副信息
+        function getFeaturedPost(mallId, role) {
+            return FEATURED_POSTS.find(p => p.mallId === mallId && p.role === role);
+        }
+
+        // 三视角副信息：优先从精选帖子标题生成
+        function getSubInfo(m, p) {
+            const post = getFeaturedPost(m.id, p);
+            if (post) return post.title;
+            const upd = MALL_UPDATES[m.id];
+            if (upd) {
+                if (p === 'designer') return upd.designer;
+                if (p === 'operator') return upd.operator;
+                return upd.public;
+            }
+            if (p === 'designer') return `${m.type} · ${m.area}万㎡ · ${m.openedYear}年开业`;
+            if (p === 'operator') {
+                const t = m.trend === 'up' ? '人气上升' : m.trend === 'down' ? '人气下降' : '趋势平稳';
+                return `${m.brand || '独立运营'}运营 · 日均${m.dailyVisitors}万人次 · ${t}`;
+            }
+            return (m.tags || []).map(t => '#' + t).join(' ');
+        }
+
+        // 获取精选帖子的贡献者信息
+        function getFeaturedAuthor(m, p) {
+            const post = getFeaturedPost(m.id, p);
+            if (post) return { name: post.user, title: post.userTitle, verified: post.verified };
+            return null;
+        }
+
+        // ===== 筛选辅助函数 =====
+        function getFilterCity() { return document.getElementById('filterCity').value; }
+        function getFilterType() { return document.getElementById('filterType').value; }
+        function getFilterBrand() { return document.getElementById('filterBrand').value; }
+        function getFilterRating() { return parseFloat(document.getElementById('filterRating').value); }
+
+        function updateFilterCount() {
+            const count = getMalls().length;
+            document.getElementById('filterCount').textContent = `${count} 个结果`;
+        }
+
+        // ===== 初始化筛选面板 =====
+        function initFilterPanel() {
+            // 城市下拉
+            const cities = [...new Set(MALLS_DATA.map(m => m.city))];
+            const citySelect = document.getElementById('filterCity');
+            citySelect.innerHTML = '<option value="">全部城市</option>' + cities.map(c => `<option value="${c}">${c}</option>`).join('');
+
+            // 品牌下拉
+            const allBrands = [...new Set(MALLS_DATA.map(m => m.brand).filter(Boolean))].sort();
+            const brandSelect = document.getElementById('filterBrand');
+            brandSelect.innerHTML = '<option value="">全部品牌</option>' + allBrands.map(b => `<option value="${b}">${b}</option>`).join('');
+
+            // 生成社区帖子mock数据
+            communityPosts = generateCommunityPosts();
+
+            updateFilterCount();
+        }
+
+        function doSearch() {
+            const panel = document.getElementById('searchPanel');
+            panel.classList.remove('visible');
+            document.getElementById('searchBar').classList.remove('open');
+            document.getElementById('searchSuggestions').classList.remove('visible');
+            renderAll();
+            updateFilterCount();
+        }
+
+        function resetFilters() {
+            document.getElementById('filterCity').value = '';
+            document.getElementById('filterType').value = '';
+            document.getElementById('filterBrand').value = '';
+            document.getElementById('filterRating').value = '0';
+            document.getElementById('searchInput').value = '';
+            renderAll();
+            updateFilterCount();
+        }
+
+        // ===== 获取筛选数据 =====
+        function getMalls() {
+            const q = document.getElementById('searchInput').value.toLowerCase().trim();
+            const filterCity = getFilterCity();
+            const filterType = getFilterType();
+            const filterBrand = getFilterBrand();
+            const filterRating = getFilterRating();
+            return MALLS_DATA.filter(m => {
+                if (filterCity && m.city !== filterCity) return false;
+                if (filterType && m.type !== filterType) return false;
+                if (filterBrand && m.brand !== filterBrand) return false;
+                if (filterRating) {
+                    const avg = (m.publicRating + m.designerRating + m.operatorRating) / 3;
+                    if (avg < filterRating) return false;
+                }
+                if (q && !m.name.toLowerCase().includes(q) && !m.city.toLowerCase().includes(q) && !m.short.toLowerCase().includes(q) && !m.brand.toLowerCase().includes(q) && !m.district.toLowerCase().includes(q)) return false;
+                return true;
+            });
+        }
+
+
+        // ===== 动态计算今日推荐（按当前视角排序） =====
+        function getDaily() {
+            const featuredMallIds = [...new Set(FEATURED_POSTS.map(p=>p.mallId))];
+            const all = getMalls().filter(m => featuredMallIds.includes(m.id));
+            let getScore;
+            if (perspective === 'designer') {
+                getScore = m => m.designerRating * 5 + (m.publicRating + m.designerRating + m.operatorRating);
+            } else if (perspective === 'operator') {
+                getScore = m => m.operatorRating * 5 + (m.publicRating + m.designerRating + m.operatorRating);
+            } else { // public
+                getScore = m => m.publicRating * 5 + (m.publicRating + m.designerRating + m.operatorRating);
+            }
+            return [...all].sort((a, b) => getScore(b) - getScore(a)).slice(0, 6);
+        }
+
+        function getPerspectiveLabel() {
+            return '为你推荐';
+        }
+
+        // ===== 渲染星级 =====
+        function stars(r) { let h=''; for(let i=1;i<=5;i++) h+=`<span class="star ${i<=r?'filled':''}">★</span>`; return h; }
+
+        // ===== 渲染今日推荐 =====
+        function renderAll() {
+            const sec = document.getElementById('dailySection');
+
+            // 社区模式：垂直滚动的帖子流
+            if (viewMode === 'community') {
+                let posts = communityPosts.filter(p => p.role === perspective);
+                const q = document.getElementById('searchInput').value.toLowerCase().trim();
+                if (q) {
+                    posts = posts.filter(p => {
+                        const m = MALLS_DATA.find(x => x.id === p.mallId);
+                        return m && (m.name.toLowerCase().includes(q) || m.city.toLowerCase().includes(q));
+                    });
+                }
+                if (posts.length === 0) {
+                    sec.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:rgba(255,255,255,0.3);font-size:15px;gap:8px;"><i class="fas fa-store-slash" style="font-size:32px;color:rgba(255,255,255,0.1);"></i>暂无帖子</div>';
+                } else {
+                    sec.innerHTML = `
+                        <div class="community-feed-wrap">
+                            <div class="community-feed" id="communityFeed">
+                                ${posts.map(p => {
+                                const m = MALLS_DATA.find(x => x.id === p.mallId);
+                                const verifiedBadge = p.verified ? '<i class="fas fa-check-circle" style="color:#3b82f6;font-size:12px;margin-left:2px;" title="认证贡献者"></i>' : '';
+                                const titleLabel = p.userTitle ? `<span class="community-post-tag" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3);font-size:10px;">${p.userTitle}</span>` : '';
+                                return `
+                                <div class="community-post" onclick="selectMall(${p.mallId})">
+                                    <img class="community-post-bg" src="${p.image}" alt="${m ? m.short : ''}" loading="lazy"/>
+                                    <div class="community-post-overlay">
+                                        <div class="community-post-user">
+                                            <img src="${p.avatar}" class="community-post-avatar" alt="${p.user}"/>
+                                            <span class="community-post-username">${p.user}${verifiedBadge}</span>
+                                            ${titleLabel}
+                                            <span class="community-post-role" style="background:${ROLE_CONFIG[p.role].color}"><i class="fas ${ROLE_CONFIG[p.role].icon}"></i> ${ROLE_CONFIG[p.role].label}</span>
+                                        </div>
+                                        <div class="community-post-comment">${p.title || p.comment}</div>
+                                        ${p.title ? `<div class="community-post-comment" style="font-size:13px;color:rgba(255,255,255,0.6);font-weight:400;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${p.comment}</div>` : ''}
+                                        <div class="community-post-meta">
+                                            <span class="community-post-tag">${m ? m.city : ''}</span>
+                                            <span class="community-post-tag">${m ? m.type : ''}</span>
+                                        </div>
+                                        <div class="community-post-actions">
+                                            <span class="community-post-action"><i class="fas fa-heart"></i> ${p.likes}</span>
+                                            <span class="community-post-action"><i class="fas fa-comment"></i> ${p.comments}</span>
+                                            <div class="community-post-rating">
+                                                <span style="color:#60a5fa">${m ? m.publicRating : '-'}</span>
+                                                <span style="color:rgba(255,255,255,0.3)">/</span>
+                                                <span style="color:#a78bfa">${m ? m.designerRating : '-'}</span>
+                                                <span style="color:rgba(255,255,255,0.3)">/</span>
+                                                <span style="color:#34d399">${m ? m.operatorRating : '-'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                `;
+                            }).join('')}
+                            </div>
+                            <button class="community-nav-btn prev" id="communityPrev" title="上一组"><i class="fas fa-chevron-left"></i></button>
+                            <button class="community-nav-btn next" id="communityNext" title="下一组"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            // 聚焦模式：只显示选中的单个商场
+            if (focusMallId) {
+                const m = MALLS_DATA.find(x => x.id === focusMallId);
+                if (m) {
+                    const img = getCardImage(m.id, perspective, getMallImage(m.id));
+                    const post = getFeaturedPost(m.id, perspective);
+                    let authorHtml = '';
+                    if (post) {
+                        const titleClass = post.role === 'designer' ? 'designer' : post.role === 'operator' ? 'operator' : '';
+                        authorHtml = `
+                            <div class="daily-card-author">
+                                <img class="daily-card-author-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user}" alt="${post.user}"/>
+                                <span class="daily-card-author-name">${post.user}</span>
+                                <i class="fas fa-check-circle" style="color:#3b82f6;font-size:11px;"></i>
+                                <span class="daily-card-author-title ${titleClass}">${post.userTitle}</span>
+                            </div>`;
+                    }
+                    sec.innerHTML = `
+                        <div class="daily-section-header"><span class="daily-section-title">${m.name}</span></div>
+                        <div class="daily-card" onclick="clearFocus()" style="cursor:default;">
+                            <img class="daily-card-bg" src="${img}" alt="${m.name}" loading="lazy"/>
+                            <div class="daily-overlay">
+                                <div class="daily-badge"><i class="fas fa-map-marker-alt"></i> ${m.city} · ${m.district}</div>
+                                <div class="daily-sub">${getSubInfo(m, perspective)}</div>
+                                <div class="daily-name">${m.name} · ${m.type} · ${m.brand || '独立运营'}</div>
+                                ${authorHtml}
+                                <div class="daily-ratings">
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot public"></span>
+                                        <span class="daily-rating-label">逛玩</span>
+                                        <span class="daily-rating-score public">${m.publicRating}.0</span>
+                                    </div>
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot designer"></span>
+                                        <span class="daily-rating-label">设计</span>
+                                        <span class="daily-rating-score designer">${m.designerRating}.0</span>
+                                    </div>
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot operator"></span>
+                                        <span class="daily-rating-label">运营</span>
+                                        <span class="daily-rating-score operator">${m.operatorRating}.0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+            }
+
+            const dailyMalls = getDaily();
+            const allResults = getMalls();
+            const isFiltered = document.getElementById('searchInput').value.trim() !== '' ||
+                               getFilterCity() || getFilterType() || getFilterBrand() || getFilterRating() > 0;
+
+            if (dailyMalls.length === 0) {
+                sec.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:rgba(255,255,255,0.3);font-size:15px;gap:8px;"><i class="fas fa-store-slash" style="font-size:32px;color:rgba(255,255,255,0.1);"></i>暂无匹配的商场</div>';
+            } else {
+                const title = isFiltered ? `搜索结果（${allResults.length}个）` : getPerspectiveLabel();
+                sec.innerHTML = `
+                    <div class="daily-section-header"><span class="daily-section-title">${title}</span></div>
+                    <button class="daily-nav-btn prev" onclick="scrollDaily(-1)"><i class="fas fa-chevron-left"></i></button>
+                    <button class="daily-nav-btn next" onclick="scrollDaily(1)"><i class="fas fa-chevron-right"></i></button>
+                    ${dailyMalls.map((m, i) => {
+                        const topImg = getCardImage(m.id, perspective, DAILY_IMG_BY_RANK[i] || getMallImage(m.id));
+                        const post = getFeaturedPost(m.id, perspective);
+                        let authorHtml = '';
+                        if (post) {
+                            const titleClass = post.role === 'designer' ? 'designer' : post.role === 'operator' ? 'operator' : '';
+                            authorHtml = `
+                                <div class="daily-card-author">
+                                    <img class="daily-card-author-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user}" alt="${post.user}"/>
+                                    <span class="daily-card-author-name">${post.user}</span>
+                                    <i class="fas fa-check-circle" style="color:#3b82f6;font-size:11px;"></i>
+                                    <span class="daily-card-author-title ${titleClass}">${post.userTitle}</span>
+                                </div>`;
+                        }
+                        return `
+                        <div class="daily-card" onclick="selectMall(${m.id})">
+                            <img class="daily-card-bg" src="${topImg}" alt="${m.name}" loading="lazy"/>
+                            <div class="daily-overlay">
+                                <div class="daily-sub">${getSubInfo(m, perspective)}</div>
+                                <div class="daily-name">${m.name} · <i class="fas fa-map-marker-alt"></i> ${m.city} ${m.district}</div>
+                                ${authorHtml}
+                                <div class="daily-ratings">
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot public"></span>
+                                        <span class="daily-rating-label">逛玩</span>
+                                        <span class="daily-rating-score public">${m.publicRating}.0</span>
+                                    </div>
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot designer"></span>
+                                        <span class="daily-rating-label">设计</span>
+                                        <span class="daily-rating-score designer">${m.designerRating}.0</span>
+                                    </div>
+                                    <div class="daily-rating-item">
+                                        <span class="daily-rating-dot operator"></span>
+                                        <span class="daily-rating-label">运营</span>
+                                        <span class="daily-rating-score operator">${m.operatorRating}.0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;}).join('')}
+                `;
+            }
+        }
+
+        function clearFocus() {
+            focusMallId = null;
+            renderAll();
+        }
+
+        function scrollDaily(dir) {
+            const sec = document.getElementById('dailySection');
+            if (!sec) return;
+            // 一次翻3张卡片（一页）
+            const pageWidth = sec.clientWidth;
+            sec.scrollBy({ left: dir * pageWidth, behavior: 'smooth' });
+        }
+
+        // ===== 手机端关闭底部Sheet =====
+        function closePanelMobile() {
+            document.getElementById('rightPanel').classList.add('collapsed');
+            document.getElementById('sheetBackdrop').classList.remove('active');
+        }
+
+        // ===== 渲染实时搜索建议 =====
+        function renderSearchSuggestions() {
+            const q = document.getElementById('searchInput').value.toLowerCase().trim();
+            const container = document.getElementById('searchSuggestions');
+            const filterCity = getFilterCity();
+            const filterType = getFilterType();
+            const filterBrand = getFilterBrand();
+            const filterRating = getFilterRating();
+
+            if (!q && !filterCity && !filterType && !filterBrand && !filterRating) {
+                container.classList.remove('visible');
+                container.innerHTML = '';
+                return;
+            }
+
+            const results = getMalls();
+
+            if (results.length === 0) {
+                container.innerHTML = '<div class="search-suggestion-empty">未找到匹配的商场</div>';
+                container.classList.add('visible');
+                return;
+            }
+
+            container.innerHTML = results.map(m => {
+                return `
+                <div class="search-suggestion-item" onclick="selectSuggestion(${m.id})">
+                    <div class="search-suggestion-pic">
+                        <img src="${getMallImage(m.id)}" alt="${m.short}" loading="lazy" />
+                    </div>
+                    <div class="search-suggestion-body">
+                        <div class="search-suggestion-name">${m.name}</div>
+                        <div class="search-suggestion-meta">${m.city} · ${m.district} · ${m.type}</div>
+                    </div>
+                    <div class="search-suggestion-ratings">
+                        <span class="ss-public">${m.publicRating}</span>
+                        <span style="color:rgba(255,255,255,0.15);font-size:10px;">/</span>
+                        <span class="ss-designer">${m.designerRating}</span>
+                        <span style="color:rgba(255,255,255,0.15);font-size:10px;">/</span>
+                        <span class="ss-operator">${m.operatorRating}</span>
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            container.classList.add('visible');
+        }
+
+        function selectSuggestion(id) {
+            focusMallId = id;
+            selectMall(id);
+            document.getElementById('searchSuggestions').classList.remove('visible');
+            document.getElementById('searchSuggestions').innerHTML = '';
+            document.getElementById('searchInput').value = '';
+            renderAll();
+            updateFilterCount();
+        }
+
+        // ===== 选择商场 =====
+        function selectMall(id) {
+            selectedMallId = id;
+            renderAll();
+
+            document.getElementById('rightPanel').classList.remove('collapsed');
+
+            // 手机端：显示底部Sheet遮罩
+            if (window.innerWidth <= 768) {
+                document.getElementById('sheetBackdrop').classList.add('active');
+            }
+
+            const m = MALLS_DATA.find(x => x.id === id);
+            if (!m) return;
+
+            // 当前视角的精选帖子（详情页顶部展示）
+            const featuredPost = getFeaturedPost(id, perspective);
+            let featuredHtml = '';
+            if (featuredPost) {
+                featuredHtml = `
+                <div class="detail-featured-post">
+                    <div class="detail-featured-post-header">
+                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=${featuredPost.user}" class="detail-featured-post-avatar" alt="${featuredPost.user}"/>
+                        <span class="detail-featured-post-user">${featuredPost.user}</span>
+                        <i class="fas fa-check-circle" style="color:#3b82f6;font-size:12px;"></i>
+                        <span class="detail-featured-post-title-tag ${featuredPost.role}">${featuredPost.userTitle}</span>
+                    </div>
+                    <div class="detail-featured-post-title">${featuredPost.title}</div>
+                    <div class="detail-featured-post-excerpt">${featuredPost.excerpt}</div>
+                    <div class="detail-featured-post-stats">
+                        <span><i class="far fa-heart"></i> ${featuredPost.likes}</span>
+                        <span><i class="far fa-comment"></i> ${featuredPost.comments}</span>
+                    </div>
+                </div>`;
+            }
+
+            const dp = document.getElementById('detailPanel');
+            dp.innerHTML = `
+                ${featuredHtml}
+                <div class="detail-title">${m.name}</div>
+                <div class="detail-meta">
+                    <span class="detail-tag">${m.city}</span>
+                    <span class="detail-tag">${m.district}</span>
+                    <span class="detail-tag">${m.type}</span>
+                    <span class="detail-tag">${m.brand}</span>
+                </div>
+
+                <div class="detail-rating-box">
+                    <div class="detail-rating-row">
+                        <span class="detail-rating-label">逛玩评分</span>
+                        <div>
+                            <div class="detail-stars">${stars(m.publicRating)}</div>
+                            <span style="font-size:13px;color:#60a5fa;font-weight:600;">${m.publicRating}.0</span>
+                        </div>
+                    </div>
+                    <div class="detail-rating-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:10px;">
+                        <span class="detail-rating-label">设计评分</span>
+                        <div>
+                            <div class="detail-stars">${stars(m.designerRating)}</div>
+                            <span style="font-size:13px;color:#a78bfa;font-weight:600;">${m.designerRating}.0</span>
+                        </div>
+                    </div>
+                    <div class="detail-rating-row" style="border-top:1px solid rgba(255,255,255,0.06);margin-top:6px;padding-top:10px;">
+                        <span class="detail-rating-label">运营评分</span>
+                        <div>
+                            <div class="detail-stars">${stars(m.operatorRating)}</div>
+                            <span style="font-size:13px;color:#34d399;font-weight:600;">${m.operatorRating}.0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-rate-box">
+                    <h4 class="detail-rate-title"><i class="fas fa-pen" style="margin-right:6px;"></i>我要评分</h4>
+                    <p class="detail-rate-sub">您当前身份：<span class="detail-rate-role"><i class="fas ${ROLE_CONFIG['public'].icon}"></i> 逛玩</span></p>
+                    <div class="detail-rate-stars" id="rateStars">
+                        ${[1,2,3,4,5].map(i => `<span class="rate-star" data-val="${i}">★</span>`).join('')}
+                    </div>
+                    <button class="detail-rate-btn" onclick="submitRating(${m.id})">提交评分</button>
+                    <p class="detail-rate-hint" id="rateHint"></p>
+                </div>
+
+                <div class="detail-tabs">
+                    <button class="detail-tab active" onclick="switchDetailTab('photos',this)">照片</button>
+                    <button class="detail-tab" onclick="switchDetailTab('info',this)">信息</button>
+                </div>
+
+                <div id="detailPhotos">
+                    <div class="detail-photo-grid">
+                        ${['exterior','atrium','interior'].map(t => {
+                            const labels = { exterior:'外立面', atrium:'中庭', interior:'内部空间' };
+                            return `
+                            <div class="detail-photo-card">
+                                <img src="${getMallImage(m.id, t)}" alt="${m.short} · ${labels[t]}" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;" />
+                                <div class="detail-photo-text">${m.short} · ${labels[t]}</div>
+                            </div>
+                        `;}).join('')}
+                    </div>
+                </div>
+                <div id="detailInfo" style="display:none">
+                    <div class="detail-info-box">
+                        <h4>基本信息</h4>
+                        ${[['名称',m.name],['城市',m.city],['区域',m.district],['类型',m.type],['品牌',m.brand]].map(([l,v]) => `
+                            <div class="detail-info-row">
+                                <span class="detail-info-label">${l}</span>
+                                <span class="detail-info-value">${v}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="detail-info-box">
+                        <h4>项目简介</h4>
+                        <div class="detail-desc">${m.description}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function switchDetailTab(tab, btn) {
+            document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('detailPhotos').style.display = tab === 'photos' ? 'block' : 'none';
+            document.getElementById('detailInfo').style.display = tab === 'info' ? 'block' : 'none';
+        }
+
+        // ===== 评分交互 =====
+        let currentRating = 0;
+        function submitRating(mallId) {
+            if (currentRating === 0) {
+                const hint = document.getElementById('rateHint');
+                if (hint) { hint.textContent = '请先选择星级评分'; hint.style.color = '#ef4444'; }
+                return;
+            }
+            const hint = document.getElementById('rateHint');
+            if (hint) { hint.textContent = '评分已记录，感谢您的参与！'; hint.style.color = '#34d399'; }
+            currentRating = 0;
+            document.querySelectorAll('.rate-star').forEach(s => s.classList.remove('active'));
+        }
+
+        // ===== 切换视图 =====
+        function setView(view) {
+            currentView = view;
+            document.getElementById('dailyView').style.display = view === 'daily' ? 'flex' : 'none';
+            document.getElementById('mapView').className = view === 'map' ? 'map-view visible' : 'map-view';
+            document.getElementById('viewCard').classList.toggle('active', view === 'daily');
+            document.getElementById('viewMap').classList.toggle('active', view === 'map');
+
+            if (view === 'map' && !map) {
+                initMap();
+            }
+            if (view === 'map' && map) {
+                setTimeout(() => map.invalidateSize(), 100);
+                renderMapMarkers();
+            }
+        }
+
+        // ===== 地图 =====
+        function initMap() {
+            map = L.map('leaflet-map', { center: [32, 117], zoom: 6, zoomControl: true, attributionControl: false });
+            L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains:'1234', maxZoom:18 }).addTo(map);
+            markerLayer = L.layerGroup().addTo(map);
+            renderMapMarkers();
+            const bounds = L.latLngBounds(MALLS_DATA.map(m => [m.lat, m.lng]));
+            map.fitBounds(bounds, { padding: [40, 40] });
+        }
+
+        function renderMapMarkers() {
+            if (!markerLayer) return;
+            markerLayer.clearLayers();
+            getMalls().forEach(m => {
+                const icon = L.divIcon({ className:'custom-marker-icon', html:`<div class="custom-marker"><div class="marker-label">${m.short}</div><div class="marker-pointer"></div></div>`, iconSize:[140,44], iconAnchor:[70,44] });
+                L.marker([m.lat, m.lng], {icon}).addTo(markerLayer).bindPopup(`<div class="popup-title">${m.name}</div><div class="popup-sub">${m.city} ${m.district} · ${m.type}</div>`).on('click', ()=>{
+                    selectMall(m.id);
+                    setView('daily');
+                });
+            });
+        }
+
+        // ===== 事件绑定 =====
+        document.addEventListener('DOMContentLoaded', () => {
+            initFilterPanel();
+            renderAll();
+
+            const searchBar = document.getElementById('searchBar');
+            const searchPanel = document.getElementById('searchPanel');
+            const searchInput = document.getElementById('searchInput');
+
+            // 搜索按钮 → 执行搜索
+            document.getElementById('searchGoBtn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                doSearch();
+            });
+
+            // 回车键 → 执行搜索
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    document.getElementById('searchSuggestions').classList.remove('visible');
+                    doSearch();
+                }
+            });
+
+            // 输入即出实时建议
+            searchInput.addEventListener('input', () => {
+                renderSearchSuggestions();
+            });
+
+            // 聚焦时如果有内容也显示建议
+            searchInput.addEventListener('focus', () => {
+                const q = searchInput.value.trim();
+                const fc = getFilterCity() || getFilterType() || getFilterBrand() || (getFilterRating() > 0);
+                if (q || fc) renderSearchSuggestions();
+            });
+
+            // 筛选按钮 → 切换面板
+            document.getElementById('searchFilterBtn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = searchPanel.classList.contains('visible');
+                if (isOpen) {
+                    searchPanel.classList.remove('visible');
+                    searchBar.classList.remove('open');
+                } else {
+                    searchPanel.classList.add('visible');
+                    searchBar.classList.add('open');
+                    updateFilterCount();
+                }
+            });
+
+            // 点击搜索框 → 打开面板
+            searchBar.addEventListener('click', (e) => {
+                if (!searchPanel.classList.contains('visible')) {
+                    searchPanel.classList.add('visible');
+                    searchBar.classList.add('open');
+                    updateFilterCount();
+                }
+            });
+
+            // 点击外部关闭面板
+            document.addEventListener('click', (e) => {
+                if (!searchBar.contains(e.target) && !searchPanel.contains(e.target)) {
+                    searchPanel.classList.remove('visible');
+                    searchBar.classList.remove('open');
+                }
+                if (!document.getElementById('searchSuggestions').contains(e.target) && e.target !== searchInput) {
+                    document.getElementById('searchSuggestions').classList.remove('visible');
+                }
+            });
+
+            // 应用筛选
+            document.getElementById('filterApply').addEventListener('click', (e) => {
+                e.stopPropagation();
+                doSearch();
+            });
+
+            // 重置筛选
+            document.getElementById('filterReset').addEventListener('click', (e) => {
+                e.stopPropagation();
+                resetFilters();
+            });
+
+            document.getElementById('viewCard').addEventListener('click', () => setView('daily'));
+            document.getElementById('viewMap').addEventListener('click', () => setView('map'));
+
+            document.getElementById('panelClose').addEventListener('click', () => {
+                document.getElementById('rightPanel').classList.toggle('collapsed');
+                // 手机端：关闭遮罩
+                if (window.innerWidth <= 768) {
+                    document.getElementById('sheetBackdrop').classList.remove('active');
+                }
+            });
+
+            // 模式切换（今日推荐 / 社区）
+            document.querySelectorAll('#modeToggle .mode-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const mode = btn.dataset.mode;
+                    viewMode = mode;
+                    document.querySelectorAll('#modeToggle .mode-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    renderAll();
+                });
+            });
+
+            // 视角切换
+            document.querySelectorAll('#perspectiveToggle .perspective-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const p = btn.dataset.p;
+                    perspective = p;
+                    focusMallId = null;
+                    document.querySelectorAll('#perspectiveToggle .perspective-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    renderAll();
+                });
+            });
+
+            // 社区帖子左右导航（事件委托，因为按钮动态生成）
+            document.addEventListener('click', (e) => {
+                const feed = document.getElementById('communityFeed');
+                if (!feed) return;
+                const btn = e.target.closest('#communityPrev') || e.target.closest('#communityNext');
+                if (!btn) return;
+                const scrollAmount = feed.clientWidth;
+                if (btn.id === 'communityPrev') {
+                    feed.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+                } else {
+                    feed.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+                }
+            });
+
+            // 社区帖子滚轮水平滚动（桌面端横向feed）
+            document.addEventListener('wheel', (e) => {
+                const feed = document.getElementById('communityFeed');
+                if (!feed) return;
+                const rect = feed.getBoundingClientRect();
+                if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+                // 手机端：社区feed是垂直滚动，不需要转换
+                if (window.innerWidth <= 768) return;
+                // 桌面端：垂直滚动转换为水平滚动
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                    e.preventDefault();
+                    feed.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+
+            // 搜索面板关闭按钮
+            document.getElementById('searchPanelClose').addEventListener('click', () => {
+                const panel = document.getElementById('searchPanel');
+                if (panel) panel.style.display = 'none';
+            });
+
+            // 桌面端滚动增强：鼠标滚轮无法滚动 overflow:auto 的 flex 容器时，手动转接
+            (function enableWheelScroll() {
+                const dailySection = document.getElementById('dailySection');
+                if (!dailySection) return;
+
+                const isScrollable = (el) => el.scrollHeight > el.clientHeight;
+
+                dailySection.addEventListener('wheel', (e) => {
+                    if (!isScrollable(dailySection)) return;
+                    const maxScroll = dailySection.scrollHeight - dailySection.clientHeight;
+                    const atTop = dailySection.scrollTop <= 0;
+                    const atBottom = dailySection.scrollTop >= maxScroll;
+                    const scrollingDown = e.deltaY > 0;
+                    const scrollingUp = e.deltaY < 0;
+
+                    if ((scrollingDown && !atBottom) || (scrollingUp && !atTop)) {
+                        e.preventDefault();
+                        dailySection.scrollTop += e.deltaY;
+                    }
+                }, { passive: false });
+
+                // 社区模式滚轮支持
+                const communityObserver = new MutationObserver(() => {
+                    const feed = document.getElementById('communityFeed');
+                    if (feed && !feed.dataset.wheelBound) {
+                        feed.dataset.wheelBound = '1';
+                        feed.addEventListener('wheel', (e) => {
+                            if (window.innerWidth > 768) return;
+                            if (feed.scrollHeight <= feed.clientHeight) return;
+                            e.preventDefault();
+                            feed.scrollTop += e.deltaY;
+                        }, { passive: false });
+                    }
+                });
+                communityObserver.observe(dailySection, { childList: true, subtree: true });
+            })();
+
+            // 详情面板评分星星点击（事件委托）
+            document.addEventListener('click', (e) => {
+                const star = e.target.closest('.rate-star');
+                if (!star) return;
+                const val = parseInt(star.dataset.val);
+                currentRating = val;
+                document.querySelectorAll('.rate-star').forEach(s => {
+                    const sVal = parseInt(s.dataset.val);
+                    s.classList.toggle('active', sVal <= val);
+                });
+                const hint = document.getElementById('rateHint');
+                if (hint) { hint.textContent = ''; }
+            });
+        });
+    </script>
+</body>
+</html>

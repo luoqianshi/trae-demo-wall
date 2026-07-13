@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>刷题 · Shuati</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=3" />
+  <script src="vendor/pdf.min.js?v=2"></script>
+  <script src="vendor/mammoth.browser.min.js?v=2"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">题</span>
+      <span class="brand-name">刷题</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-icon" id="themeToggleBtn" title="切换暗色模式" aria-label="切换暗色模式">🌙</button>
+      <nav class="topnav" aria-label="主导航">
+        <button class="nav-btn active" data-view="upload" aria-label="导入题库">导入题库</button>
+        <button class="nav-btn" data-view="quiz" aria-label="开始刷题">开始刷题</button>
+        <button class="nav-btn" data-view="wrongbook" aria-label="错题本">错题本 <span class="badge" id="wbBadge" hidden>0</span></button>
+        <button class="nav-btn" data-view="result" aria-label="成绩统计">成绩统计</button>
+      </nav>
+      <span class="conn-dot offline" id="topProgressConn" aria-label="连接状态">●</span>
+      <span class="topbar-stat" id="topProgressStat" aria-live="polite"></span>
+    </div>
+    <div class="topbar-progress" aria-hidden="true"><div class="topbar-progress-fill" id="topProgressFill"></div></div>
+  </header>
+
+  <main class="container">
+
+    <!-- 视图：上传 -->
+    <section class="view active" id="view-upload">
+      <div class="hero">
+        <h1>把 PDF / Word 变成你的题库</h1>
+        <p class="subtitle">上传文件，自动识别题号与选项，直接开刷。</p>
+      </div>
+
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-inner">
+          <div class="dropzone-icon">↑</div>
+          <div class="dropzone-title">拖拽文件到这里</div>
+          <div class="dropzone-sub">或者 <label class="linklike" for="fileInput">点击选择文件</label></div>
+          <div class="dropzone-hint">支持 .pdf / .docx · 解析在本地完成，文件不上传服务器</div>
+          <input type="file" id="fileInput" accept=".pdf,.docx" hidden />
+        </div>
+      </div>
+
+      <div class="parse-status" id="parseStatus" hidden></div>
+
+      <div class="actions-row" id="actionsRow" hidden>
+        <div class="actions-head">
+          <div class="actions-info" id="actionsInfo"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn small ghost" id="manualEntryBtn">＋ 手动录题</button>
+            <button class="btn small ghost danger" id="clearBankBtn">清空全部题库</button>
+          </div>
+        </div>
+        <div class="group-cards" id="groupCards"></div>
+        <div class="actions-foot">
+          <div class="seg-toggle" role="tablist" aria-label="刷题顺序">
+            <button class="seg-btn active" data-order="sequential" id="orderSeqBtn">顺序</button>
+            <button class="seg-btn" data-order="shuffle" id="orderShuffleBtn">乱序</button>
+            <button class="seg-btn" data-order="exam" id="orderExamBtn">📝 模拟考试</button>
+          </div>
+          <!-- 考试配置（默认隐藏） -->
+          <div class="exam-config" id="examConfig" style="display:none">
+            <label>抽题数 <input type="number" id="examCount" value="20" min="1" max="500" style="width:64px" /></label>
+            <label>限时(分钟，0=不限) <input type="number" id="examTimeLimit" value="0" min="0" max="480" style="width:56px" /></label>
+          </div>
+          <button class="btn primary" id="goQuizBtn">开始刷题 →</button>
+        </div>
+      </div>
+
+      <!-- 题库浏览器 -->
+      <div class="preview-card" id="previewCard" hidden>
+        <div class="preview-head">
+          <span>题目预览</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" class="bank-search" id="bankSearch" placeholder="搜索题目..." />
+            <span class="preview-count" id="previewCount"></span>
+          </div>
+        </div>
+        <ol class="preview-list" id="previewList"></ol>
+        <div class="preview-foot">
+          <button class="btn small ghost" id="viewRawBtn">查看原始文本（调试用）</button>
+          <button class="btn small ghost" id="exportBankBtn">📄 导出题库</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 视图：刷题 -->
+    <section class="view" id="view-quiz">
+      <div class="quiz-head">
+        <div class="quiz-progress">
+          <span id="quizIndex">0</span><span class="dim">/</span><span id="quizTotal">0</span>
+        </div>
+        <div class="quiz-progress-wrap">
+          <div class="quiz-bar"><div class="quiz-bar-fill" id="quizBarFill"></div></div>
+          <span class="quiz-progress-percent" id="quizPct">0%</span>
+        </div>
+        <span class="quiz-timer" id="quizTimer" title="答题用时">⏱ 00:00</span>
+        <select class="group-select" id="groupSelect" title="切换分组"></select>
+        <button class="btn small ghost" id="quitQuizBtn" style="margin-left:auto">交卷</button>
+        <button class="btn small ghost" id="toggleGridBtn" title="题目列表">☰ 题目</button>
+      </div>
+
+      <div class="quiz-layout">
+        <div class="quiz-main">
+          <div class="quiz-card" id="quizCard">
+            <div class="quiz-type" id="quizType">单选题</div>
+            <div class="quiz-stem" id="quizStem"></div>
+            <div class="quiz-options" id="quizOptions"></div>
+            <div class="quiz-foot">
+              <button class="btn ghost" id="prevQBtn">上一题</button>
+              <div style="display:flex;align-items:center;gap:16px">
+                <button class="btn-icon-star" id="starToggleBtn" title="收藏本题">☆</button>
+                <button class="btn-icon-star" id="editQBtn" title="编辑本题">✎</button>
+                <label class="auto-next-toggle" title="选择后自动跳转下一题（仅单选题）">
+                  <input type="checkbox" id="autoNextToggle" /><span>自动下一题</span>
+                </label>
+              </div>
+              <button class="btn primary" id="nextQBtn">下一题</button>
+            </div>
+            <div class="keyboard-hints">
+              <span><kbd>1-4</kbd> 选择</span>
+              <span><kbd>← →</kbd> 导航</span>
+              <span><kbd>Enter</kbd> 下一题</span>
+              <span><kbd>Ctrl+Z</kbd> 撤销</span>
+              <span><kbd>S</kbd> 收藏</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="quiz-side" id="quizSide">
+          <div class="side-head">
+            <span>题目列表</span>
+            <button class="side-close" id="sideCloseBtn">×</button>
+          </div>
+          <div class="side-stats">
+            <span class="stat stat-done"><b id="statDone">0</b>已答</span>
+            <span class="stat stat-todo"><b id="statTodo">0</b>未答</span>
+            <span class="stat stat-star"><b id="statStar">0</b>收藏</span>
+          </div>
+          <div class="side-grid" id="sideGrid"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 视图：结果 + 统计 -->
+    <section class="view" id="view-result">
+      <div class="result-hero">
+        <div class="score-ring">
+          <svg viewBox="0 0 120 120" width="200" height="200">
+            <circle cx="60" cy="60" r="52" class="ring-bg"></circle>
+            <circle cx="60" cy="60" r="52" class="ring-fg" id="ringFg"></circle>
+          </svg>
+          <div class="score-text">
+            <span class="score-num" id="scoreNum">0</span>
+            <span class="score-of">/ <span id="scoreOf">0</span></span>
+          </div>
+        </div>
+        <div class="score-percent" id="scorePercent">0%</div>
+        <h2 id="resultTitle">已完成本次练习</h2>
+        <p class="result-sub" id="resultSub">点击下方题号查看每题详情。</p>
+        <div class="result-actions">
+          <button class="btn ghost" id="backHomeBtn">返回首页</button>
+          <button class="btn primary" id="redoWrongBtn">重做错题</button>
+          <button class="btn ghost" id="exportResultBtn">📄 导出本次成绩</button>
+        </div>
+      </div>
+
+      <div class="result-legend">
+        <span class="lg lg-right">已答对</span><span class="lg lg-wrong">做错</span>
+        <span class="lg lg-todo">未作答</span><span class="lg lg-current">当前</span>
+        <span class="lg lg-star">★ 收藏</span>
+      </div>
+
+      <div class="result-grid" id="resultGrid"></div>
+      <div class="result-detail" id="resultDetail" hidden></div>
+
+      <!-- 历史成绩 -->
+      <div class="history-section" id="historySection">
+        <h3 class="history-title">📋 历史成绩</h3>
+        <div class="history-list" id="historyList"></div>
+      </div>
+
+      <!-- 统计分析 -->
+      <div class="stats-section" id="statsSection">
+        <h3 class="stats-title">📊 统计分析</h3>
+        <div class="stats-cards" id="statsCards"></div>
+      </div>
+    </section>
+
+    <!-- 视图：错题本 -->
+    <section class="view" id="view-wrongbook">
+      <div class="hero">
+        <h1>错题本</h1>
+        <p class="subtitle">做错的题自动收录到这里，方便反复练习。</p>
+      </div>
+
+      <!-- 统计卡片 -->
+      <div class="wb-stats-grid" id="wbStatsGrid"></div>
+
+      <!-- 工具栏 -->
+      <div class="wb-toolbar">
+        <div class="wb-info" id="wbInfo">暂无错题</div>
+        <div class="wb-actions">
+          <select class="wb-filter" id="wbFilter" title="按分组筛选">
+            <option value="all">全部分组</option>
+          </select>
+          <button class="btn small ghost" id="wbSelectAllBtn">全选</button>
+          <button class="btn small ghost danger" id="wbBatchRemoveBtn" disabled>批量移除</button>
+          <button class="btn ghost" id="wbExportBtn">📄 导出</button>
+          <button class="btn ghost danger" id="wbClearBtn">清空</button>
+          <button class="btn primary" id="wbPracticeBtn">重做全部错题</button>
+        </div>
+      </div>
+
+      <!-- 错题列表 -->
+      <div class="wb-list" id="wbList"></div>
+    </section>
+
+  </main>
+
+  <!-- 原始文本弹窗 -->
+  <div class="modal" id="rawModal" hidden>
+    <div class="modal-mask" id="rawModalMask"></div>
+    <div class="modal-card">
+      <div class="modal-head"><span>原始文本（PDF/Word 提取后）</span><button class="modal-close" id="rawModalClose">×</button></div>
+      <pre class="modal-body" id="rawModalBody"></pre>
+    </div>
+  </div>
+
+  <!-- 交卷确认弹窗 -->
+  <div class="modal" id="submitModal" hidden>
+    <div class="modal-mask" id="submitModalMask"></div>
+    <div class="modal-card modal-card-small">
+      <div class="modal-head"><span>交卷确认</span><button class="modal-close" id="submitModalClose">×</button></div>
+      <div class="modal-content" id="submitModalBody"></div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="submitCancelBtn">继续作答</button>
+        <button class="btn primary" id="submitConfirmBtn">确认交卷</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 题目编辑 / 手动录入弹窗 -->
+  <div class="modal" id="editQModal" hidden>
+    <div class="modal-mask" id="editQModalMask"></div>
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head"><span id="editQModalTitle">编辑题目</span><button class="modal-close" id="editQModalClose">×</button></div>
+      <div class="modal-body-form" id="editQModalBody"></div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="editQCancelBtn">取消</button>
+        <button class="btn danger" id="editQDeleteBtn" style="margin-right:auto">删除本题</button>
+        <button class="btn primary" id="editQSaveBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出预览弹窗 -->
+  <div class="modal" id="exportModal" hidden>
+    <div class="modal-mask" id="exportModalMask"></div>
+    <div class="modal-card">
+      <div class="modal-head"><span>导出预览</span><button class="modal-close" id="exportModalClose">×</button></div>
+      <div class="modal-body-export" id="exportModalBody"></div>
+      <div class="modal-foot">
+        <button class="btn ghost" id="exportCopyBtn">📋 复制内容</button>
+        <button class="btn primary" id="exportPrintBtn">🖨 打印</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 保存指示器 -->
+  <div class="save-indicator" id="saveIndicator" title="正在保存...">●</div>
+
+  <script src="js/api.js?v=7"></script>
+  <script src="js/parser.js?v=6"></script>
+  <script src="js/app.js?v=8"></script>
+</body>
+</html>

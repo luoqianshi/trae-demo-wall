@@ -1,0 +1,1 @@
+import{s}from"./request-Cp3RuJTv.js";const e=e=>s.get("/interviews",{params:e}),t=e=>s.get(`/interviews/${e}`),i=e=>s.post("/interviews",e),a=(e,t)=>s.post(`/interviews/${e}/messages`,t),r=e=>s.post(`/interviews/${e}/complete`),o=e=>s.delete(`/interviews/${e}`),m=e=>s.post(`/interviews/${e}/summary`);export{i as a,t as b,r as c,o as d,m as e,a as f,e as g};

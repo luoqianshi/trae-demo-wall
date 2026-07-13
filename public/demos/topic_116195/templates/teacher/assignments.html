@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}作业管理{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- 页面标题 -->
+    <div class="mb-8 flex items-center justify-between">
+        <div>
+            <h1 class="text-3xl font-bold" style="color: var(--text-primary); letter-spacing: -0.02em;">作业管理</h1>
+            <p class="mt-2" style="color: var(--text-secondary);">创建和分配编程作业</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <a href="/teacher/assignments/create" class="btn btn-primary">
+                <svg class="w-5 h-5 mr-2 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                创建作业
+            </a>
+            <a href="/teacher/dashboard" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors">
+                返回仪表板
+            </a>
+        </div>
+    </div>
+
+    <!-- 筛选器 -->
+    <div class="card p-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color: var(--text-secondary);">班级筛选</label>
+                <select id="filter-class" class="input w-full">
+                    <!-- 班级选项将通过JavaScript动态加载 -->
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color: var(--text-secondary);">发布状态</label>
+                <select id="filter-published" class="input w-full">
+                    <option value="true">已发布</option>
+                    <option value="false">未发布</option>
+                </select>
+            </div>
+            <div class="flex items-end">
+                <button id="btn-apply-filter" class="btn btn-secondary w-full">应用筛选</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 作业列表 -->
+    <div class="card">
+        <div class="p-4" style="border-bottom: 1px solid var(--border-primary);">
+            <h3 class="text-lg font-semibold" style="color: var(--text-primary);">作业列表</h3>
+        </div>
+
+        <!-- 加载状态 -->
+        <div id="loading-container" class="p-8 text-center">
+            <div class="spinner mx-auto mb-4"></div>
+            <p style="color: var(--text-secondary);">加载中...</p>
+        </div>
+
+        <!-- 空状态 -->
+        <div id="empty-container" class="hidden p-8 text-center">
+            <svg class="w-16 h-16 mx-auto mb-4" style="color: var(--text-tertiary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+            </svg>
+            <p style="color: var(--text-secondary);">暂无作业</p>
+            <a href="/teacher/problems/create" class="btn btn-primary mt-4">
+                创建第一个作业
+            </a>
+        </div>
+
+        <!-- 列表内容 -->
+        <div id="assignments-list"></div>
+
+        <!-- 分页 -->
+        <div id="pagination-container" class="p-4 flex items-center justify-between" style="border-top: 1px solid var(--border-primary);">
+            <div class="text-sm" style="color: var(--text-secondary);">
+                共 <span id="total-count">0</span> 条记录
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="btn-prev-page" class="btn btn-secondary" style="padding: 0.5rem 1rem;">上一页</button>
+                <span class="text-sm" style="color: var(--text-secondary);">
+                    第 <span id="current-page">1</span> / <span id="total-pages">1</span> 页
+                </span>
+                <button id="btn-next-page" class="btn btn-secondary" style="padding: 0.5rem 1rem;">下一页</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let currentPage = 1;
+    let totalPages = 1;
+    let currentFilters = {};
+    let allClasses = [];
+
+    // 加载班级列表
+    async function loadClasses() {
+        try {
+            const response = await apiRequest('/teacher/api/classes');
+            if (response.ok && response.data) {
+                allClasses = response.data.classes || [];
+                const filterClass = document.getElementById('filter-class');
+                allClasses.forEach(cls => {
+                    filterClass.innerHTML += `<option value="${cls.id}">${cls.name}</option>`;
+                });
+                if (allClasses.length > 0) {
+                    currentFilters.class_id = allClasses[0].id;
+                    filterClass.value = allClasses[0].id;
+                    loadAssignments();
+                }
+            }
+        } catch (error) {
+            console.error('加载班级列表失败:', error);
+        }
+    }
+
+    // 加载作业列表
+    async function loadAssignments(page = 1) {
+        const loadingContainer = document.getElementById('loading-container');
+        const emptyContainer = document.getElementById('empty-container');
+        const listContainer = document.getElementById('assignments-list');
+
+        loadingContainer.classList.remove('hidden');
+        emptyContainer.classList.add('hidden');
+        listContainer.innerHTML = '';
+
+        try {
+            const params = new URLSearchParams({
+                page: page,
+                page_size: 10,
+                ...currentFilters
+            });
+
+            const response = await apiRequest(`/teacher/api/assignments?${params}`);
+
+            if (response.ok && response.data) {
+                const assignments = response.data.assignments || [];
+                const total = response.data.total || 0;
+                totalPages = response.data.total_pages || 1;
+
+                currentPage = page;
+                document.getElementById('current-page').textContent = currentPage;
+                document.getElementById('total-pages').textContent = totalPages;
+                document.getElementById('total-count').textContent = total;
+
+                document.getElementById('btn-prev-page').disabled = currentPage === 1;
+                document.getElementById('btn-next-page').disabled = currentPage >= totalPages;
+
+                if (assignments.length === 0) {
+                    emptyContainer.classList.remove('hidden');
+                } else {
+                    renderAssignments(assignments);
+                }
+            }
+        } catch (error) {
+            console.error('加载作业列表失败:', error);
+            alert('加载失败: ' + error.message);
+        } finally {
+            loadingContainer.classList.add('hidden');
+        }
+    }
+
+    // 渲染作业列表
+    function renderAssignments(assignments) {
+        const container = document.getElementById('assignments-list');
+
+        assignments.forEach(assignment => {
+            const item = document.createElement('div');
+            item.className = 'p-4 hover:bg-gray-50 transition-colors';
+            item.style.borderBottom = '1px solid var(--border-primary)';
+
+            const statusBadge = assignment.is_published
+                ? '<span class="px-2 py-1 rounded-full text-xs font-medium" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">已发布</span>'
+                : '<span class="px-2 py-1 rounded-full text-xs font-medium" style="background: rgba(156, 163, 175, 0.15); color: #6b7280;">未发布</span>';
+
+            const deadlineBadge = assignment.is_overdue
+                ? '<span class="px-2 py-1 rounded-full text-xs font-medium" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">已截止</span>'
+                : assignment.deadline
+                ? `<span class="text-sm" style="color: var(--text-tertiary);">截止: ${formatTime(assignment.deadline)}</span>`
+                : '';
+
+            item.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-3 mb-2">
+                            <h4 class="font-semibold text-lg" style="color: var(--text-primary);">${assignment.title}</h4>
+                            ${statusBadge}
+                            ${deadlineBadge}
+                        </div>
+                        <div class="flex items-center gap-4 text-sm mb-2" style="color: var(--text-secondary);">
+                            <span>班级: ${assignment.class_names || '未指定'}</span>
+                            <span>测试用例: ${assignment.test_case_count || 0}</span>
+                            <span>创建时间: ${formatTime(assignment.created_at)}</span>
+                        </div>
+                        ${assignment.description ? `<p class="text-sm" style="color: var(--text-tertiary);">${assignment.description}</p>` : ''}
+                    </div>
+                    <div class="flex items-center gap-2 ml-4">
+                        <button onclick="editAssignment(${assignment.id})" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+                            编辑
+                        </button>
+                        <button onclick="deleteAssignment(${assignment.id}, '${assignment.title}')" class="btn" style="padding: 0.5rem 1rem; font-size: 0.875rem; background: #ef4444; color: white;">
+                            删除
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(item);
+        });
+    }
+
+    // 编辑作业 - 跳转到创建页面
+    function editAssignment(id) {
+        window.location.href = `/teacher/assignments/create?edit=${id}`;
+    }
+
+    // 删除作业
+    async function deleteAssignment(id, title) {
+        if (!confirm(`确定要删除作业"${title}"吗？`)) {
+            return;
+        }
+
+        try {
+            const response = await apiRequest(`/teacher/api/assignments/${id}/delete`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                alert('作业已删除');
+                loadAssignments(currentPage);
+            } else {
+                alert(response.message || '删除失败');
+            }
+        } catch (error) {
+            console.error('删除作业失败:', error);
+            alert('删除失败: ' + error.message);
+        }
+    }
+
+    // 应用筛选
+    function applyFilters() {
+        const classId = document.getElementById('filter-class').value;
+        const isPublished = document.getElementById('filter-published').value;
+
+        currentFilters = {};
+        if (classId) currentFilters.class_id = classId;
+        if (isPublished) currentFilters.is_published = isPublished;
+
+        loadAssignments(1);
+    }
+
+    // 格式化时间
+    function formatTime(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadClasses();
+        document.getElementById('btn-apply-filter').addEventListener('click', applyFilters);
+        document.getElementById('btn-prev-page').addEventListener('click', () => {
+            if (currentPage > 1) loadAssignments(currentPage - 1);
+        });
+        document.getElementById('btn-next-page').addEventListener('click', () => {
+            if (currentPage < totalPages) loadAssignments(currentPage + 1);
+        });
+    });
+</script>
+{% endblock %}

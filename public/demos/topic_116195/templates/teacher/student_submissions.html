@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}{{ student.username }}的提交历史{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <!-- 页面标题 -->
+    <div class="mb-8 flex items-center justify-between">
+        <div>
+            <h1 class="text-3xl font-bold" style="color: var(--text-primary); letter-spacing: -0.02em;">{{ student.username }}的提交历史</h1>
+            <p class="mt-2" style="color: var(--text-secondary);">查看该学生的所有代码提交记录</p>
+        </div>
+        <a href="/teacher/students" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors">
+            返回学生管理
+        </a>
+    </div>
+
+    <!-- 统计概览 -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="card p-4">
+            <div class="text-sm mb-1" style="color: var(--text-tertiary);">总提交数</div>
+            <div class="text-2xl font-bold" style="color: var(--text-primary);" id="stat-total">0</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-sm mb-1" style="color: var(--text-tertiary);">通过数</div>
+            <div class="text-2xl font-bold" style="color: var(--success);" id="stat-success">0</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-sm mb-1" style="color: var(--text-tertiary);">失败数</div>
+            <div class="text-2xl font-bold" style="color: var(--danger);" id="stat-fail">0</div>
+        </div>
+        <div class="card p-4">
+            <div class="text-sm mb-1" style="color: var(--text-tertiary);">通过率</div>
+            <div class="text-2xl font-bold" style="color: var(--primary);" id="stat-rate">0%</div>
+        </div>
+    </div>
+
+    <!-- 提交列表 -->
+    <div class="card">
+        <div class="p-4" style="border-bottom: 1px solid var(--border-primary);">
+            <h3 class="text-lg font-semibold" style="color: var(--text-primary);">提交记录</h3>
+        </div>
+
+        <!-- 加载状态 -->
+        <div id="loading-container" class="p-8 text-center">
+            <div class="spinner mx-auto mb-4"></div>
+            <p style="color: var(--text-secondary);">加载中...</p>
+        </div>
+
+        <!-- 空状态 -->
+        <div id="empty-container" class="hidden p-8 text-center">
+            <svg class="w-16 h-16 mx-auto mb-4" style="color: var(--text-tertiary);" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            <p style="color: var(--text-secondary);">暂无提交记录</p>
+        </div>
+
+        <!-- 列表内容 -->
+        <div id="submissions-list"></div>
+
+        <!-- 分页 -->
+        <div id="pagination-container" class="p-4 flex items-center justify-between" style="border-top: 1px solid var(--border-primary);">
+            <div class="text-sm" style="color: var(--text-secondary);">
+                共 <span id="total-count">0</span> 条记录
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="btn-prev-page" class="btn btn-secondary" style="padding: 0.5rem 1rem;">上一页</button>
+                <span class="text-sm" style="color: var(--text-secondary);">
+                    第 <span id="current-page">1</span> / <span id="total-pages">1</span> 页
+                </span>
+                <button id="btn-next-page" class="btn btn-secondary" style="padding: 0.5rem 1rem;">下一页</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .difficulty-easy {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .difficulty-medium {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .difficulty-hard {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const studentId = {{ student.id }};
+    let currentPage = 1;
+    let totalPages = 1;
+
+    // 加载提交历史
+    async function loadSubmissions(page = 1) {
+        const loadingContainer = document.getElementById('loading-container');
+        const emptyContainer = document.getElementById('empty-container');
+        const listContainer = document.getElementById('submissions-list');
+
+        loadingContainer.classList.remove('hidden');
+        emptyContainer.classList.add('hidden');
+        listContainer.innerHTML = '';
+
+        try {
+            const params = new URLSearchParams({
+                page: page,
+                page_size: 10,
+                student_id: studentId
+            });
+
+            const response = await apiRequest(`/teacher/api/submissions?${params}`);
+
+            if (response.ok && response.data) {
+                const submissions = response.data.submissions || [];
+                const total = response.data.total || 0;
+                totalPages = response.data.total_pages || 1;
+
+                // 更新统计
+                const successCount = submissions.filter(s => s.run_status === 'success').length;
+                const failCount = submissions.filter(s => s.run_status !== 'success').length;
+                updateStatistics({
+                    total: total,
+                    success: successCount,
+                    fail: failCount
+                });
+
+                // 更新分页信息
+                currentPage = page;
+                document.getElementById('current-page').textContent = currentPage;
+                document.getElementById('total-pages').textContent = totalPages;
+                document.getElementById('total-count').textContent = total;
+
+                // 更新按钮状态
+                document.getElementById('btn-prev-page').disabled = currentPage === 1;
+                document.getElementById('btn-next-page').disabled = currentPage >= totalPages;
+
+                if (submissions.length === 0) {
+                    emptyContainer.classList.remove('hidden');
+                } else {
+                    renderSubmissions(submissions);
+                }
+            }
+        } catch (error) {
+            console.error('加载提交历史失败:', error);
+            showToast('加载失败: ' + error.message, 'error');
+        } finally {
+            loadingContainer.classList.add('hidden');
+        }
+    }
+
+    // 渲染提交列表
+    function renderSubmissions(submissions) {
+        const container = document.getElementById('submissions-list');
+
+        submissions.forEach(submission => {
+            const item = document.createElement('div');
+            item.className = 'p-4 transition-colors';
+            item.style.borderBottom = '1px solid var(--border-primary)';
+            item.style.cursor = 'default';
+
+            const statusColors = {
+                'success': 'difficulty-easy',
+                'fail': 'difficulty-medium',
+                'error': 'difficulty-hard'
+            };
+
+            const statusText = {
+                'success': '运行成功',
+                'fail': '测试失败',
+                'error': '运行错误'
+            };
+
+            item.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-3 mb-2">
+                            <h4 class="font-semibold" style="color: var(--text-primary);">${submission.problem_title}</h4>
+                            <span class="px-2 py-1 rounded-full text-xs font-medium ${statusColors[submission.run_status]}">
+                                ${statusText[submission.run_status]}
+                            </span>
+                            <span class="text-sm" style="color: var(--text-secondary);">得分: ${submission.score}分</span>
+                        </div>
+                        <div class="flex items-center gap-4 text-sm" style="color: var(--text-tertiary);">
+                            <span>${formatTime(submission.created_at)}</span>
+                            ${submission.error_type ? `<span>错误: ${submission.error_type}</span>` : ''}
+                            ${submission.has_diagnosis ? '<span style="color: var(--secondary);">• 已诊断</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <a href="/teacher/submissions/${submission.id}/review"
+                           class="btn btn-primary"
+                           style="padding: 0.5rem 1rem; font-size: 0.875rem;">
+                            审阅反馈
+                        </a>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(item);
+        });
+    }
+
+    // 更新统计信息
+    function updateStatistics(stats) {
+        if (stats) {
+            document.getElementById('stat-total').textContent = stats.total || 0;
+            document.getElementById('stat-success').textContent = stats.success || 0;
+            document.getElementById('stat-fail').textContent = stats.fail || 0;
+            document.getElementById('stat-rate').textContent =
+                stats.total > 0 ? Math.round((stats.success / stats.total) * 100) + '%' : '0%';
+        }
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSubmissions(1);
+
+        // 绑定分页事件
+        document.getElementById('btn-prev-page').addEventListener('click', () => {
+            if (currentPage > 1) loadSubmissions(currentPage - 1);
+        });
+        document.getElementById('btn-next-page').addEventListener('click', () => {
+            if (currentPage < totalPages) loadSubmissions(currentPage + 1);
+        });
+    });
+</script>
+{% endblock %}

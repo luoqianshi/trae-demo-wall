@@ -1,0 +1,1 @@
+import{r as a}from"./_plugin-vue_export-helper._9dfcAK3.js";const r=r=>a({url:"/auth/login",method:"POST",data:r}),t=r=>a({url:"/users",method:"GET",data:r}),e=(r,t)=>a({url:`/users/${r}`,method:"PUT",data:t});export{t as g,r as l,e as u};

@@ -1,0 +1,1 @@
+import{z as o,J as t}from"./index-Bx1H5A2Y.js";const a=a=>new Promise((e,r)=>{const s=o("token"),c={...a.header,Authorization:s?`Bearer ${s}`:""};t({url:`/api/v1${a.url}`,method:a.method||"GET",data:a.data,header:c,success:o=>{const t=o.data;200===t.code?e(t):r(t)},fail:o=>{r(o)}})}),e=(o,t)=>{const a=o.__vccOpts||o;for(const[e,r]of t)a[e]=r;return a};export{e as _,a as r};

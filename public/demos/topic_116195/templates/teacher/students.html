@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}学生管理 - 教师端{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- 页面标题 -->
+    <div class="mb-8 flex items-center justify-between">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900">学生管理</h1>
+            <p class="text-gray-600 mt-2">查看学生学习情况和提交记录</p>
+        </div>
+        <a href="/teacher/dashboard" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors">
+            返回仪表板
+        </a>
+    </div>
+
+    <!-- 筛选和搜索 -->
+    <div class="bg-white rounded-lg shadow-sm p-6 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- 班级筛选 -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">班级</label>
+                <select id="filter-class" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    <!-- 班级选项将通过JavaScript动态加载 -->
+                </select>
+            </div>
+
+            <!-- 作业筛选 -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">作业</label>
+                <select id="filter-assignment" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    <option value="">全部作业</option>
+                </select>
+            </div>
+
+            <!-- 搜索 -->
+            <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">搜索学生</label>
+                <div class="flex items-center space-x-2">
+                    <input type="text" id="search-input" placeholder="搜索学生用户名..."
+                        class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                    <button id="btn-search" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                        搜索
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 学生列表 -->
+    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学生ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">用户名</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交次数</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">平均得分</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最后活跃</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                </tr>
+            </thead>
+            <tbody id="students-tbody" class="bg-white divide-y divide-gray-200">
+                <tr>
+                    <td colspan="6" class="px-6 py-4 text-center text-gray-500">加载中...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 分页 -->
+    <div id="pagination" class="mt-6 flex justify-center">
+        <!-- 分页按钮将通过JavaScript动态生成 -->
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let currentPage = 1;
+    let currentSearch = '';
+    let currentFilters = {
+        class_id: '',
+        assignment_id: ''
+    };
+
+    // 加载班级列表
+    async function loadClasses() {
+        try {
+            const response = await apiRequest('/teacher/api/classes');
+            if (response.ok && response.data) {
+                const select = document.getElementById('filter-class');
+                const classes = response.data.classes || [];
+                classes.forEach(cls => {
+                    const option = document.createElement('option');
+                    option.value = cls.id;
+                    option.textContent = cls.name;
+                    select.appendChild(option);
+                });
+
+                // 默认选择第一个班级
+                if (classes.length > 0) {
+                    currentFilters.class_id = classes[0].id;
+                    select.value = classes[0].id;
+                    loadStudents();
+                }
+            }
+        } catch (error) {
+            console.error('加载班级列表失败:', error);
+        }
+    }
+
+    // 加载作业列表
+    async function loadAssignments() {
+        try {
+            const response = await apiRequest('/teacher/api/assignments?page_size=100');
+            if (response.ok && response.data) {
+                const select = document.getElementById('filter-assignment');
+                response.data.assignments.forEach(assignment => {
+                    const option = document.createElement('option');
+                    option.value = assignment.id;
+                    option.textContent = assignment.title;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('加载作业列表失败:', error);
+        }
+    }
+
+    // 加载学生列表
+    async function loadStudents() {
+        try {
+            let url = `/teacher/api/stats/students?page=${currentPage}&page_size=20`;
+            if (currentSearch) url += `&search=${encodeURIComponent(currentSearch)}`;
+            if (currentFilters.class_id) url += `&class_id=${currentFilters.class_id}`;
+            if (currentFilters.assignment_id) url += `&assignment_id=${currentFilters.assignment_id}`;
+
+            const response = await apiRequest(url);
+            if (response.ok) {
+                const data = response.data;
+                renderStudents(data.students || []);
+                if (data.total) {
+                    renderPagination(data.total, data.page || currentPage, data.page_size || 20);
+                }
+            }
+        } catch (error) {
+            console.error('加载学生列表失败:', error);
+            document.getElementById('students-tbody').innerHTML =
+                '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">加载失败</td></tr>';
+        }
+    }
+
+    // 渲染学生列表
+    function renderStudents(students) {
+        const tbody = document.getElementById('students-tbody');
+
+        if (students.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">暂无学生数据</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = students.map(student => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${student.id || student.student_id}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${student.username || student.student_name}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${student.submission_count || 0}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${(student.avg_score || 0).toFixed(1)}分</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${student.last_active ? formatTime(student.last_active) : '未知'}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                    <a href="/teacher/students/${student.id || student.student_id}/submissions"
+                       class="btn btn-secondary"
+                       style="padding: 0.375rem 0.75rem; font-size: 0.875rem;">
+                        查看提交
+                    </a>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // 渲染分页
+    function renderPagination(total, page, pageSize) {
+        const totalPages = Math.ceil(total / pageSize);
+        const pagination = document.getElementById('pagination');
+
+        if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+        }
+
+        let html = '<div class="flex space-x-2">';
+
+        // 上一页
+        if (page > 1) {
+            html += `<button onclick="changePage(${page - 1})" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">上一页</button>`;
+        }
+
+        // 页码
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === page) {
+                html += `<button class="px-4 py-2 bg-blue-600 text-white rounded-lg">${i}</button>`;
+            } else if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                html += `<button onclick="changePage(${i})" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">${i}</button>`;
+            } else if (i === page - 3 || i === page + 3) {
+                html += `<span class="px-4 py-2">...</span>`;
+            }
+        }
+
+        // 下一页
+        if (page < totalPages) {
+            html += `<button onclick="changePage(${page + 1})" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">下一页</button>`;
+        }
+
+        html += '</div>';
+        pagination.innerHTML = html;
+    }
+
+    // 切换页码
+    function changePage(page) {
+        currentPage = page;
+        loadStudents();
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        // 加载初始数据
+        loadClasses(); // 会自动加载第一个班级的学生数据
+        loadAssignments();
+
+        // 绑定搜索事件
+        document.getElementById('btn-search').addEventListener('click', () => {
+            currentSearch = document.getElementById('search-input').value;
+            currentPage = 1;
+            loadStudents();
+        });
+
+        document.getElementById('search-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                currentSearch = e.target.value;
+                currentPage = 1;
+                loadStudents();
+            }
+        });
+
+        // 绑定筛选器事件
+        document.getElementById('filter-class').addEventListener('change', (e) => {
+            currentFilters.class_id = e.target.value;
+            currentPage = 1;
+            loadStudents();
+        });
+
+        document.getElementById('filter-assignment').addEventListener('change', (e) => {
+            currentFilters.assignment_id = e.target.value;
+            currentPage = 1;
+            loadStudents();
+        });
+    });
+
+</script>
+{% endblock %}

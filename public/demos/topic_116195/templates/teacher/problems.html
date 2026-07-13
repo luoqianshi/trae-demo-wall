@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}题目管理 - 教师端{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- 页面标题 -->
+    <div class="mb-8 flex items-center justify-between">
+        <div>
+            <h1 class="text-3xl font-bold" style="color: var(--text-primary); letter-spacing: -0.02em;">题目管理</h1>
+            <p class="mt-2" style="color: var(--text-secondary);">查看和管理所有题目</p>
+        </div>
+        <a href="/teacher/dashboard" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors">
+            返回仪表板
+        </a>
+    </div>
+
+    <!-- 筛选和搜索 -->
+    <div class="card p-6 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color: var(--text-secondary);">班级筛选</label>
+                <select id="class-filter" class="input w-full">
+                    <!-- 动态加载班级列表 -->
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color: var(--text-secondary);">难度筛选</label>
+                <select id="difficulty-filter" class="input w-full">
+                    <option value="">全部难度</option>
+                    <option value="easy">简单</option>
+                    <option value="medium">中等</option>
+                    <option value="hard">困难</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color: var(--text-secondary);">搜索题目</label>
+                <input type="text" id="search-input" placeholder="输入题目标题或关键词..." class="input w-full">
+            </div>
+            <div class="flex items-end">
+                <button id="btn-search" class="btn btn-primary w-full">
+                    搜索
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 题目列表 -->
+    <div class="card overflow-hidden">
+        <table class="min-w-full">
+            <thead style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary);">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">题目ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">题目标题</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">难度</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">测试用例</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">所属班级</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">创建时间</th>
+                </tr>
+            </thead>
+            <tbody id="problems-tbody" style="background: var(--bg-primary);">
+                <tr>
+                    <td colspan="6" class="px-6 py-4 text-center" style="color: var(--text-tertiary);">加载中...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 分页 -->
+    <div id="pagination" class="mt-6 flex justify-center">
+        <!-- 分页按钮将通过JavaScript动态生成 -->
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let currentPage = 1;
+    let currentDifficulty = '';
+    let currentSearch = '';
+    let currentClassId = '';
+
+    // 加载班级列表
+    async function loadClasses() {
+        try {
+            const response = await apiRequest('/teacher/api/classes');
+            if (response.ok && response.data) {
+                const select = document.getElementById('class-filter');
+                const classes = response.data.classes || [];
+                classes.forEach(cls => {
+                    const option = document.createElement('option');
+                    option.value = cls.id;
+                    option.textContent = cls.name;
+                    select.appendChild(option);
+                });
+
+                // 默认选择第一个班级
+                if (classes.length > 0) {
+                    currentClassId = classes[0].id;
+                    select.value = classes[0].id;
+                }
+            }
+        } catch (error) {
+            console.error('加载班级列表失败:', error);
+        }
+
+        // 无论班级是否加载成功，都加载题目列表
+        loadProblems();
+    }
+
+    // 加载题目列表
+    async function loadProblems() {
+        try {
+            let url = `/teacher/api/problems?page=${currentPage}&page_size=20`;
+            if (currentClassId) url += `&class_id=${currentClassId}`;
+            if (currentDifficulty) url += `&difficulty=${currentDifficulty}`;
+            if (currentSearch) url += `&search=${encodeURIComponent(currentSearch)}`;
+
+            const response = await apiRequest(url);
+            if (response.ok) {
+                const data = response.data;
+                renderProblems(data.problems || []);
+                if (data.total) {
+                    renderPagination(data.total, currentPage, 20);
+                }
+            }
+        } catch (error) {
+            console.error('加载题目失败:', error);
+            document.getElementById('problems-tbody').innerHTML =
+                '<tr><td colspan="6" class="px-6 py-4 text-center" style="color: var(--danger);">加载失败</td></tr>';
+        }
+    }
+
+    // 渲染题目列表
+    function renderProblems(problems) {
+        const tbody = document.getElementById('problems-tbody');
+
+        if (problems.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center" style="color: var(--text-tertiary);">暂无题目</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = problems.map(problem => `
+            <tr class="hover:bg-gray-50" style="border-bottom: 1px solid var(--border-primary);">
+                <td class="px-6 py-4 whitespace-nowrap text-sm" style="color: var(--text-primary);">${problem.id}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium" style="color: var(--primary);">
+                    <a href="/problems/${problem.id}/solve" class="hover:underline">${problem.title}</a>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                        ${problem.difficulty === 'easy' ? 'difficulty-easy' :
+                          problem.difficulty === 'medium' ? 'difficulty-medium' :
+                          'difficulty-hard'}">
+                        ${problem.difficulty_display}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm" style="color: var(--text-primary);">${problem.test_cases_count || 0}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm" style="color: var(--text-secondary);">
+                    ${problem.class_names && problem.class_names.length > 0 ? problem.class_names.join(', ') : '公共题目'}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm" style="color: var(--text-tertiary);">${formatTime(problem.created_at)}</td>
+            </tr>
+        `).join('');
+    }
+
+    // 渲染分页
+    function renderPagination(total, page, pageSize) {
+        const totalPages = Math.ceil(total / pageSize);
+        const pagination = document.getElementById('pagination');
+
+        if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+        }
+
+        let html = '<div class="flex space-x-2">';
+
+        // 上一页
+        if (page > 1) {
+            html += `<button onclick="changePage(${page - 1})" class="btn btn-secondary" style="padding: 0.5rem 1rem;">上一页</button>`;
+        }
+
+        // 页码
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === page) {
+                html += `<button class="btn btn-primary" style="padding: 0.5rem 1rem;">${i}</button>`;
+            } else if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                html += `<button onclick="changePage(${i})" class="btn btn-secondary" style="padding: 0.5rem 1rem;">${i}</button>`;
+            } else if (i === page - 3 || i === page + 3) {
+                html += `<span class="px-4 py-2" style="color: var(--text-tertiary);">...</span>`;
+            }
+        }
+
+        // 下一页
+        if (page < totalPages) {
+            html += `<button onclick="changePage(${page + 1})" class="btn btn-secondary" style="padding: 0.5rem 1rem;">下一页</button>`;
+        }
+
+        html += '</div>';
+        pagination.innerHTML = html;
+    }
+
+    // 切换页码
+    function changePage(page) {
+        currentPage = page;
+        loadProblems();
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        loadClasses(); // 会自动加载第一个班级的题目数据
+
+        // 绑定筛选和搜索事件
+        document.getElementById('class-filter').addEventListener('change', (e) => {
+            currentClassId = e.target.value;
+            currentPage = 1;
+            loadProblems();
+        });
+
+        document.getElementById('difficulty-filter').addEventListener('change', (e) => {
+            currentDifficulty = e.target.value;
+            currentPage = 1;
+            loadProblems();
+        });
+
+        document.getElementById('btn-search').addEventListener('click', () => {
+            currentSearch = document.getElementById('search-input').value;
+            currentPage = 1;
+            loadProblems();
+        });
+
+        document.getElementById('search-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                currentSearch = e.target.value;
+                currentPage = 1;
+                loadProblems();
+            }
+        });
+    });
+</script>
+{% endblock %}

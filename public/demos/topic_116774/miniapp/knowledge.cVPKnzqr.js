@@ -1,0 +1,1 @@
+import{r as e}from"./_plugin-vue_export-helper.CEWlauKL.js";const a=a=>e({url:"/knowledge",method:"GET",data:a}),o=a=>e({url:`/knowledge/${a}`,method:"GET"}),d=(a,o)=>e({url:`/knowledge/${a}/verify`,method:"PUT",data:o}),r=(a,o)=>e({url:`/knowledge/${a}/feedback`,method:"POST",data:o});export{o as a,r as f,a as g,d as v};

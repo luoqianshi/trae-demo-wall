@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head><title>Audio Test</title></head>
+<body>
+<h2>Web Audio API 测试</h2>
+<button onclick="testGunshot()">测试枪声</button>
+<button onclick="testFootstep()">测试脚步声</button>
+<button onclick="testSimple()">测试简单音</button>
+<p id="log"></p>
+<script>
+const log = document.getElementById('log');
+function addLog(msg) { log.innerHTML += msg + '<br>'; }
+
+let audioCtx = null;
+let soundMasterGain = null;
+let soundMasterCtx = null;
+
+function initAudio() {
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      addLog('AudioContext 创建成功, state=' + audioCtx.state);
+    } catch (e) {
+      addLog('AudioContext 创建失败: ' + e.message);
+      return false;
+    }
+  }
+  if (soundMasterCtx !== audioCtx) {
+    soundMasterGain = null;
+  }
+  return true;
+}
+
+function getMasterGain() {
+  if (!soundMasterGain || soundMasterCtx !== audioCtx) {
+    soundMasterGain = audioCtx.createGain();
+    soundMasterGain.gain.value = 0.25;
+    soundMasterGain.connect(audioCtx.destination);
+    soundMasterCtx = audioCtx;
+    addLog('masterGain 创建并连接');
+  }
+  return soundMasterGain;
+}
+
+function createPinkNoiseBuffer(duration) {
+  const size = Math.max(1, Math.ceil(audioCtx.sampleRate * duration));
+  const buf = audioCtx.createBuffer(1, size, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+  for (let i=0;i<size;i++) {
+    const white = Math.random()*2-1;
+    b0=0.99886*b0+white*0.0555179;
+    b1=0.99332*b1+white*0.0750759;
+    b2=0.96900*b2+white*0.1538520;
+    b3=0.86650*b3+white*0.3104856;
+    b4=0.55000*b4+white*0.5329522;
+    b5=-0.7616*b5-white*0.0168980;
+    d[i]=(b0+b1+b2+b3+b4+b5+b6+white*0.5362)*0.11;
+    b6=white*0.115926;
+  }
+  return buf;
+}
+
+function testSimple() {
+  if (!initAudio()) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = 440;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+  osc.connect(g);
+  g.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.5);
+  addLog('简单音播放 (440Hz sine, 直连destination)');
+}
+
+function testGunshot() {
+  if (!initAudio()) return;
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  
+  try {
+    const now = audioCtx.currentTime;
+    const masterGain = getMasterGain();
+    addLog('masterGain.gain.value = ' + masterGain.gain.value);
+    
+    const peakFreq = 600, bodyFreq = 500, decay = 0.12, volume = 0.45;
+    
+    // 1. transient
+    const transient = audioCtx.createOscillator();
+    transient.type = 'sine';
+    transient.frequency.setValueAtTime(Math.max(20, peakFreq * 0.8), now);
+    transient.frequency.exponentialRampToValueAtTime(Math.max(20, peakFreq * 0.5), now + 0.003);
+    const transientGain = audioCtx.createGain();
+    transientGain.gain.setValueAtTime(volume * 0.3, now);
+    transientGain.gain.exponentialRampToValueAtTime(0.001, now + 0.005);
+    transient.connect(transientGain);
+    transientGain.connect(masterGain);
+    transient.start(now);
+    transient.stop(now + 0.008);
+    addLog('transient: freq=' + (peakFreq*0.8) + ', vol=' + (volume*0.3));
+    
+    // 2. body
+    const bodySrc = audioCtx.createBufferSource();
+    bodySrc.buffer = createPinkNoiseBuffer(decay);
+    const bodyFilter = audioCtx.createBiquadFilter();
+    bodyFilter.type = 'lowpass';
+    bodyFilter.frequency.setValueAtTime(Math.max(20, bodyFreq * 0.6), now);
+    bodyFilter.frequency.exponentialRampToValueAtTime(Math.max(20, bodyFreq * 0.2), now + decay);
+    const bodyGain = audioCtx.createGain();
+    bodyGain.gain.setValueAtTime(0.001, now);
+    bodyGain.gain.linearRampToValueAtTime(volume * 0.8, now + 0.003);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, now + decay);
+    bodySrc.connect(bodyFilter);
+    bodyFilter.connect(bodyGain);
+    bodyGain.connect(masterGain);
+    bodySrc.start(now);
+    bodySrc.stop(now + decay);
+    addLog('body: filter=' + (bodyFreq*0.6) + 'Hz, decay=' + decay);
+    
+    // 3. rumble
+    const rumble = audioCtx.createOscillator();
+    rumble.type = 'sine';
+    rumble.frequency.setValueAtTime(80, now);
+    rumble.frequency.exponentialRampToValueAtTime(40, now + decay * 0.5);
+    const rumbleGain = audioCtx.createGain();
+    rumbleGain.gain.setValueAtTime(volume * 0.35, now);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + decay * 0.5);
+    rumble.connect(rumbleGain);
+    rumbleGain.connect(masterGain);
+    rumble.start(now);
+    rumble.stop(now + decay * 0.5);
+    addLog('rumble: 80->40Hz');
+    
+    addLog('枪声播放完成 (通过masterGain)');
+  } catch(e) {
+    addLog('ERROR: ' + e.message);
+  }
+}
+
+function testFootstep() {
+  if (!initAudio()) return;
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  
+  try {
+    const now = audioCtx.currentTime;
+    const masterGain = getMasterGain();
+    const volume = 0.35;
+    
+    // impact
+    const impactSrc = audioCtx.createBufferSource();
+    impactSrc.buffer = createPinkNoiseBuffer(0.02);
+    const impactFilter = audioCtx.createBiquadFilter();
+    impactFilter.type = 'bandpass';
+    impactFilter.frequency.setValueAtTime(300, now);
+    impactFilter.Q.setValueAtTime(1.2, now);
+    const impactGain = audioCtx.createGain();
+    impactGain.gain.setValueAtTime(volume * 0.5, now);
+    impactGain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+    impactSrc.connect(impactFilter);
+    impactFilter.connect(impactGain);
+    impactGain.connect(masterGain);
+    impactSrc.start(now);
+    impactSrc.stop(now + 0.02);
+    
+    // thud
+    const thud = audioCtx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(80, now);
+    thud.frequency.exponentialRampToValueAtTime(40, now + 0.06);
+    const thudGain = audioCtx.createGain();
+    thudGain.gain.setValueAtTime(volume * 0.5, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    thud.connect(thudGain);
+    thudGain.connect(masterGain);
+    thud.start(now);
+    thud.stop(now + 0.08);
+    
+    addLog('脚步声播放完成');
+  } catch(e) {
+    addLog('ERROR: ' + e.message);
+  }
+}
+</script>
+</body>
+</html>

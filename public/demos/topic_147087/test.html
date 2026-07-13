@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>P5 验证 — TimeAxis + ConnectionLayer</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/nodes.css">
+<link rel="stylesheet" href="styles/columns.css">
+<link rel="stylesheet" href="styles/canvas.css">
+<link rel="stylesheet" href="styles/connections.css">
+<style>
+  :root {
+    --text-primary: #E8E6E1;
+    --text-secondary: #8A8880;
+    --text-muted: #565453;
+    --bg-card: #222124;
+    --bg-canvas: #171615;
+    --border-light: rgba(232,230,225,0.12);
+    --border-subtle: rgba(232,230,225,0.08);
+    --weight-strong: 600;
+    --ease-out: cubic-bezier(0.16,1,0.3,1);
+  }
+  body { font-family: 'SF Mono', Consolas, monospace; font-size:13px; padding:24px; background:#1e1e1e; color:#d4d4d4; margin:0; display:flex; flex-direction:column; height:100vh; box-sizing:border-box; }
+  .pass { color: #6a9955; }
+  .fail { color: #f44747; }
+  .test { margin: 4px 0; font-size:12px; }
+  .section { color: #569cd6; margin: 16px 0 6px; font-weight: bold; font-size: 13px; }
+  #results { flex-shrink: 0; max-height: 220px; overflow-y: auto; }
+  #stage { flex: 1; margin-top: 16px; border-radius: 12px; overflow: hidden; }
+  h2 { color:#dcdcaa; margin:0 0 4px; font-size:15px; }
+  .info-bar { display:flex; gap:12px; color:var(--text-muted); font-size:11px; margin-top:4px; }
+</style>
+</head>
+<body>
+<h2>P5 TimeAxis + ConnectionLayer 验证</h2>
+<div id="results"></div>
+<div id="stage"></div>
+<div class="info-bar">
+  <span>滚动 浏览</span>
+  <span>点击节点 展开分支</span>
+  <span>hover连线 预览关系 · 点击连线 进入焦点模式</span>
+  <span id="zoom-readout">缩放: 100%</span>
+</div>
+
+<script src="core/EventEmitter.js?v=8"></script>
+<script src="core/DataStore.js?v=91"></script>
+<script src="core/RelationIndex.js?v=91"></script>
+<script src="theme/ThemeAdapter.js?v=8"></script>
+<script src="theme/themeConfig.js?v=8"></script>
+<script src="components/nodes/EventNodeCard.js?v=74"></script>
+<script src="components/nodes/NodeDetail.js?v=75"></script>
+<script src="components/timelines/TimelineColumn.js?v=75"></script>
+<script src="components/canvas/NarrativeCanvas.js?v=80"></script>
+<script src="components/canvas/ConnectionLayer.js?v=84"></script>
+<script src="components/canvas/TimeAxis.js?v=74"></script>
+<script src="components/canvas/FocusMode.js?v=82"></script>
+
+<script>
+(function () {
+  var R = document.getElementById('results');
+  var pc = 0, fc = 0;
+  function T(d, c) { var e = document.createElement('div'); e.className = 'test'; e.innerHTML = c ? ('<span class="pass">PASS</span> ' + d) : ('<span class="fail">FAIL</span> ' + d); if (c) pc++; else fc++; R.appendChild(e); }
+  function S(t) { var e = document.createElement('div'); e.className = 'section'; e.textContent = t; R.appendChild(e); }
+
+  var store = window.TT.DataStore.getInstance();
+
+  S('--- 加载测试数据 ---');
+
+  store.loadNodes({
+    // === 主时间线 ===
+    'ft-founding':     { id:'ft-founding', title:'星辰科技成立', summary:'在北京中关村创立，三位联合创始人共同出资200万元。', content:'2020年3月15日，李明、王悦、张凯三位联合创始人正式注册成立北京星辰科技有限公司。初始注册资本200万元人民币。', startTime:'2020-03-15', importance:'breakthrough', confidence:'high', tags:['里程碑'] },
+    'ft-seed-round':   { id:'ft-seed-round', title:'完成种子轮融资', summary:'蓝池资本500万美元种子轮，估值3000万美元。', startTime:'2020-08-20', importance:'important', confidence:'high', tags:['融资'] },
+    'ft-v1-launch':    { id:'ft-v1-launch', title:'星图 V1.0 发布', summary:'推出文生图基础功能，10种艺术风格。', startTime:'2021-02-10', importance:'breakthrough', confidence:'high', tags:['产品发布','v1.0'] },
+    'ft-series-a':     { id:'ft-series-a', title:'完成A轮融资', summary:'3000万美元，红杉资本领投，估值2亿美元。', startTime:'2021-06-15', importance:'important', confidence:'high', tags:['融资'] },
+    'ft-v2-launch':    { id:'ft-v2-launch', title:'星图 V2.0 发布', summary:'拓展短视频生成，StarGAN引擎使生成速度提升十倍。', startTime:'2022-03-20', importance:'breakthrough', confidence:'medium', tags:['产品发布','v2.0'] },
+    'ft-global-expand':{ id:'ft-global-expand', title:'海外市场拓展', summary:'设立新加坡总部，发布英文版本，正式进军东南亚。', startTime:'2022-08-01', importance:'important', confidence:'medium', tags:['战略'] },
+    'ft-regulation':   { id:'ft-regulation', title:'AI内容生成新规出台', summary:'网信办要求所有AI生成内容必须添加水印标识。', startTime:'2023-02-01', importance:'important', confidence:'high', tags:['政策'] },
+    'ft-series-b':     { id:'ft-series-b', title:'完成B轮融资', summary:'1.2亿美元，估值突破10亿，正式跻身独角兽。', startTime:'2023-09-20', importance:'breakthrough', confidence:'high', tags:['融资'] },
+    'ft-v3-launch':    { id:'ft-v3-launch', title:'星图 V3.0 发布', summary:'多模态大模型驱动，日活突破100万，企业版上线。', startTime:'2024-01-15', importance:'breakthrough', confidence:'high', tags:['产品发布','v3.0'] },
+    // === 技术架构演进 ===
+    'ft-microservices':{ id:'ft-microservices', title:'微服务架构选型', summary:'完成核心系统微服务化改造，支撑后续快速迭代。', startTime:'2020-06-10', importance:'important', tags:['技术'] },
+    'ft-stargan-proto':{ id:'ft-stargan-proto', title:'StarGAN原型验证', summary:'自研生成引擎原型跑通，生成速度达行业3倍。', startTime:'2021-01-20', importance:'important', tags:['技术'] },
+    'ft-multimodal-research':{ id:'ft-multimodal-research', title:'多模态模型预研', summary:'启动文图音跨模态统一表征研究。', startTime:'2022-01-15', importance:'important', tags:['技术'] },
+    'ft-xinghe-train': { id:'ft-xinghe-train', title:'星河大模型训练启动', summary:'千卡集群就位，训练参数规模达百亿。', startTime:'2023-03-01', importance:'breakthrough', tags:['技术'] },
+    'ft-inference-refactor':{ id:'ft-inference-refactor', title:'推理引擎重构', summary:'自研推理框架上线，推理成本降低60%。', startTime:'2023-12-10', importance:'important', tags:['技术'] },
+    // === 市场竞争 ===
+    'ft-competitor-a': { id:'ft-competitor-a', title:'竞品A进入市场', summary:'海外巨头推出同类产品，国内市场格局生变。', startTime:'2020-10-01', importance:'important', tags:['市场'] },
+    'ft-price-war':    { id:'ft-price-war', title:'行业价格战', summary:'多家厂商免费策略冲击，商业化承压。', startTime:'2021-08-15', importance:'important', tags:['市场'] },
+    'ft-ma-event':     { id:'ft-ma-event', title:'头部并购案', summary:'行业第二第三宣布合并，市场份额集中。', startTime:'2022-06-30', importance:'important', tags:['市场'] },
+    'ft-market-regulation':{ id:'ft-market-regulation', title:'市场监管收紧', summary:'反垄断调查波及内容平台，广告收入下滑。', startTime:'2023-07-20', importance:'important', tags:['市场'] },
+    'ft-market-final': { id:'ft-market-final', title:'市场格局定型', summary:'前三家占据85%市场份额，尾部出清。', startTime:'2024-02-28', importance:'breakthrough', tags:['市场'] },
+    // === 合规应对 ===
+    'ft-audit':        { id:'ft-audit', title:'内部合规审计', summary:'启动全平台内容合规审计流程。', startTime:'2023-03-05', importance:'minor', tags:['合规'] },
+    'ft-policy-update':{ id:'ft-policy-update', title:'内容政策更新', summary:'更新用户协议，明确AI生成内容标识要求。', startTime:'2023-04-12', importance:'minor', tags:['合规'] },
+    'ft-watermark':    { id:'ft-watermark', title:'自研水印系统上线', summary:'「星迹」系统上线，2个月内完成开发并通过审核。', startTime:'2023-05-10', importance:'important', tags:['合规'] },
+    'ft-training':     { id:'ft-training', title:'员工合规培训', summary:'全员合规培训，覆盖AI内容审核标准。', startTime:'2023-06-20', importance:'minor', tags:['合规'] },
+    'ft-external-audit':{ id:'ft-external-audit', title:'第三方合规评估', summary:'邀请外部机构进行合规评估，通过率95%。', startTime:'2023-08-05', importance:'minor', tags:['合规'] },
+    // === 核心团队 ===
+    'ft-team-grow':    { id:'ft-team-grow', title:'团队扩张至200人', summary:'研发团队占比70%，设立硅谷研发中心。', startTime:'2021-09-01', importance:'important', tags:['团队'] },
+    'ft-culture':      { id:'ft-culture', title:'企业文化升级', summary:'发布「让创造力自由」使命宣言。', startTime:'2022-05-15', importance:'minor', tags:['团队'] },
+    'ft-hiring':       { id:'ft-hiring', title:'校招启动', summary:'启动首届校园招聘，覆盖15所高校。', startTime:'2022-10-10', importance:'minor', tags:['团队'] },
+    'ft-stock':        { id:'ft-stock', title:'期权激励计划', summary:'向核心员工发放期权，覆盖率达80%。', startTime:'2023-01-20', importance:'important', tags:['团队'] },
+    // === 用户增长 ===
+    'ft-10k-users':    { id:'ft-10k-users', title:'用户破万', summary:'上线8个月，注册用户突破1万。', startTime:'2020-12-01', importance:'important', tags:['增长'] },
+    'ft-100k-users':   { id:'ft-100k-users', title:'用户破十万', summary:'口碑传播效应显现，月新增超3万。', startTime:'2021-05-01', importance:'breakthrough', tags:['增长'] },
+    'ft-1m-users':     { id:'ft-1m-users', title:'用户破百万', summary:'V2.0带动爆发，日活首次破百万。', startTime:'2022-12-01', importance:'breakthrough', tags:['增长'] },
+    'ft-10m-users':    { id:'ft-10m-users', title:'用户破千万', summary:'V3.0全球化推动，海外用户占比40%。', startTime:'2024-03-01', importance:'breakthrough', tags:['增长'] }
+  });
+
+  store.loadRelations([
+    { fromNodeId:'ft-founding', toNodeId:'ft-microservices', targetTimelineId:'tl-demo-tech', label:'技术基因' },
+    { fromNodeId:'ft-founding', toNodeId:'ft-inference-refactor', targetTimelineId:'tl-demo-tech', label:'架构演进' },
+    { fromNodeId:'ft-founding', toNodeId:'ft-seed-round', targetTimelineId:'tl-demo-main', label:'催生' },
+    { fromNodeId:'ft-seed-round', toNodeId:'ft-10k-users', targetTimelineId:'tl-demo-growth', label:'驱动' },
+    { fromNodeId:'ft-seed-round', toNodeId:'ft-v1-launch', targetTimelineId:'tl-demo-main', label:'依赖' },
+    { fromNodeId:'ft-v1-launch', toNodeId:'ft-stargan-proto', targetTimelineId:'tl-demo-tech', label:'引擎' },
+    { fromNodeId:'ft-v1-launch', toNodeId:'ft-series-a', targetTimelineId:'tl-demo-main', label:'助推' },
+    { fromNodeId:'ft-series-a', toNodeId:'ft-team-grow', targetTimelineId:'tl-demo-team', label:'催生' },
+    { fromNodeId:'ft-series-a', toNodeId:'ft-100k-users', targetTimelineId:'tl-demo-growth', label:'助力' },
+    { fromNodeId:'ft-series-a', toNodeId:'ft-v2-launch', targetTimelineId:'tl-demo-main', label:'依赖' },
+    { fromNodeId:'ft-v2-launch', toNodeId:'ft-multimodal-research', targetTimelineId:'tl-demo-tech', label:'奠基' },
+    { fromNodeId:'ft-v2-launch', toNodeId:'ft-global-expand', targetTimelineId:'tl-demo-main', label:'衍生' },
+    { fromNodeId:'ft-global-expand', toNodeId:'ft-hiring', targetTimelineId:'tl-demo-team', label:'影响' },
+    { fromNodeId:'ft-regulation', toNodeId:'ft-watermark', targetTimelineId:'tl-demo-side', label:'影响' },
+    { fromNodeId:'ft-global-expand', toNodeId:'ft-series-b', targetTimelineId:'tl-demo-main', label:'助推' },
+    { fromNodeId:'ft-series-b', toNodeId:'ft-watermark', targetTimelineId:'tl-demo-side', label:'协同' },
+    { fromNodeId:'ft-series-b', toNodeId:'ft-market-regulation', targetTimelineId:'tl-demo-market', label:'呼应' },
+    { fromNodeId:'ft-series-b', toNodeId:'ft-v3-launch', targetTimelineId:'tl-demo-main', label:'依赖' },
+    { fromNodeId:'ft-v3-launch', toNodeId:'ft-10m-users', targetTimelineId:'tl-demo-growth', label:'引爆' },
+    { fromNodeId:'ft-v3-launch', toNodeId:'ft-market-final', targetTimelineId:'tl-demo-market', label:'定局' },
+    { fromNodeId:'ft-microservices', toNodeId:'ft-stargan-proto', targetTimelineId:'tl-demo-tech', label:'铺垫' },
+    { fromNodeId:'ft-stargan-proto', toNodeId:'ft-multimodal-research', targetTimelineId:'tl-demo-tech', label:'演进' },
+    { fromNodeId:'ft-multimodal-research', toNodeId:'ft-xinghe-train', targetTimelineId:'tl-demo-tech', label:'转化' },
+    { fromNodeId:'ft-xinghe-train', toNodeId:'ft-inference-refactor', targetTimelineId:'tl-demo-tech', label:'落地' },
+    { fromNodeId:'ft-inference-refactor', toNodeId:'ft-v3-launch', targetTimelineId:'tl-demo-main', label:'赋能' },
+    { fromNodeId:'ft-competitor-a', toNodeId:'ft-price-war', targetTimelineId:'tl-demo-market', label:'引发' },
+    { fromNodeId:'ft-price-war', toNodeId:'ft-ma-event', targetTimelineId:'tl-demo-market', label:'催化' },
+    { fromNodeId:'ft-ma-event', toNodeId:'ft-market-regulation', targetTimelineId:'tl-demo-market', label:'连锁' },
+    { fromNodeId:'ft-market-regulation', toNodeId:'ft-market-final', targetTimelineId:'tl-demo-market', label:'终局' },
+    { fromNodeId:'ft-10k-users', toNodeId:'ft-100k-users', targetTimelineId:'tl-demo-growth', label:'积累' },
+    { fromNodeId:'ft-100k-users', toNodeId:'ft-1m-users', targetTimelineId:'tl-demo-growth', label:'跃升' },
+    { fromNodeId:'ft-1m-users', toNodeId:'ft-10m-users', targetTimelineId:'tl-demo-growth', label:'爆发' }
+  ]);
+
+  store.loadTimelines({
+    'tl-demo-main': {
+      id: 'tl-demo-main', title: '星辰创业全历程',
+      nodes: [
+        { time:'2020-03-15', nodeId:'ft-founding', importance:'breakthrough' },
+        { time:'2020-08-20', nodeId:'ft-seed-round', importance:'important' },
+        { time:'2021-02-10', nodeId:'ft-v1-launch', importance:'breakthrough' },
+        { time:'2021-06-15', nodeId:'ft-series-a', importance:'important' },
+        { time:'2022-03-20', nodeId:'ft-v2-launch', importance:'breakthrough' },
+        { time:'2022-08-01', nodeId:'ft-global-expand', importance:'important' },
+        { time:'2023-02-01', nodeId:'ft-regulation', importance:'important' },
+        { time:'2023-09-20', nodeId:'ft-series-b', importance:'breakthrough' },
+        { time:'2024-01-15', nodeId:'ft-v3-launch', importance:'breakthrough' }
+      ]
+    },
+    'tl-demo-tech': {
+      id: 'tl-demo-tech', title: '技术架构演进',
+      nodes: [
+        { time:'2020-06-10', nodeId:'ft-microservices', importance:'important' },
+        { time:'2021-01-20', nodeId:'ft-stargan-proto', importance:'important' },
+        { time:'2022-01-15', nodeId:'ft-multimodal-research', importance:'important' },
+        { time:'2023-03-01', nodeId:'ft-xinghe-train', importance:'breakthrough' },
+        { time:'2023-12-10', nodeId:'ft-inference-refactor', importance:'important' }
+      ]
+    },
+    'tl-demo-market': {
+      id: 'tl-demo-market', title: '市场竞争格局',
+      nodes: [
+        { time:'2020-10-01', nodeId:'ft-competitor-a', importance:'important' },
+        { time:'2021-08-15', nodeId:'ft-price-war', importance:'important' },
+        { time:'2022-06-30', nodeId:'ft-ma-event', importance:'important' },
+        { time:'2023-07-20', nodeId:'ft-market-regulation', importance:'important' },
+        { time:'2024-02-28', nodeId:'ft-market-final', importance:'breakthrough' }
+      ]
+    },
+    'tl-demo-team': {
+      id: 'tl-demo-team', title: '核心团队成长',
+      nodes: [
+        { time:'2021-09-01', nodeId:'ft-team-grow', importance:'important' },
+        { time:'2022-05-15', nodeId:'ft-culture', importance:'minor' },
+        { time:'2022-10-10', nodeId:'ft-hiring', importance:'minor' },
+        { time:'2023-01-20', nodeId:'ft-stock', importance:'important' }
+      ]
+    },
+    'tl-demo-side': {
+      id: 'tl-demo-side', title: '合规与应对',
+      nodes: [
+        { time:'2023-03-05', nodeId:'ft-audit', importance:'minor' },
+        { time:'2023-04-12', nodeId:'ft-policy-update', importance:'minor' },
+        { time:'2023-05-10', nodeId:'ft-watermark', importance:'important' },
+        { time:'2023-06-20', nodeId:'ft-training', importance:'minor' },
+        { time:'2023-08-05', nodeId:'ft-external-audit', importance:'minor' }
+      ]
+    },
+    'tl-demo-growth': {
+      id: 'tl-demo-growth', title: '用户增长轨迹',
+      nodes: [
+        { time:'2020-12-01', nodeId:'ft-10k-users', importance:'important' },
+        { time:'2021-05-01', nodeId:'ft-100k-users', importance:'breakthrough' },
+        { time:'2022-12-01', nodeId:'ft-1m-users', importance:'breakthrough' },
+        { time:'2024-03-01', nodeId:'ft-10m-users', importance:'breakthrough' }
+      ]
+    }
+  });
+
+  T('DataStore 加载 32 个节点', store._nodes.size === 32);
+  T('tl-demo-main 有 9 个节点', store.getTimeline('tl-demo-main').nodes.length === 9);
+  T('tl-demo-tech 有 5 个节点', store.getTimeline('tl-demo-tech').nodes.length === 5);
+  T('tl-demo-market 有 5 个节点', store.getTimeline('tl-demo-market').nodes.length === 5);
+  T('tl-demo-team 有 4 个节点', store.getTimeline('tl-demo-team').nodes.length === 4);
+  T('tl-demo-side 有 5 个节点', store.getTimeline('tl-demo-side').nodes.length === 5);
+  T('tl-demo-growth 有 4 个节点', store.getTimeline('tl-demo-growth').nodes.length === 4);
+
+  S('--- NarrativeCanvas 基础 ---');
+
+  var stage = document.getElementById('stage');
+  var canvas = window.TT.NarrativeCanvas.create(stage);
+
+  T('NarrativeCanvas 实例可创建', canvas instanceof window.TT.NarrativeCanvas);
+  T('getElement 返回 DOM', canvas.getElement() instanceof HTMLElement);
+
+  S('--- 添加时间线列 ---');
+
+  canvas.addColumn('tl-demo-main', 'main');
+
+  var stageEl = canvas.getElement().querySelector('[data-role="canvas-stage"]');
+  var colEls = stageEl.querySelectorAll('[data-role="timeline-column"]');
+  T('默认只渲染 1 列', colEls.length === 1);
+
+  S('--- ConnectionLayer ---');
+
+  var clEl = stageEl.querySelector('[data-role="connection-layer"]');
+  T('ConnectionLayer SVG 存在', !!clEl);
+  T('SVG 在 stage 内', clEl && clEl.parentNode === stageEl);
+  T('SVG 含 arrow marker', clEl && clEl.querySelector('marker') !== null);
+
+  S('--- TimeAxis ---');
+
+  var taEl = stageEl.querySelector('[data-role="time-axis"]');
+  T('TimeAxis 存在', !!taEl);
+  T('TimeAxis 在 stage 内', taEl && taEl.parentNode === stageEl);
+  T('TimeAxis 是第一个子元素', taEl && stageEl.firstChild === taEl);
+
+  var zr = document.getElementById('zoom-readout');
+  canvas.on('zoom:changed', function (ev) { zr.textContent = '缩放: ' + Math.round(ev.zoom * 100) + '%'; });
+
+  S('--- node:selected 事件转发 + 分支展开 ---');
+
+  var selected = null;
+  var nodeDetail = window.TT.NodeDetail.create();
+
+  // 点击卡片其他区域 → 弹出详情面板
+  canvas.on('node:selected', function (d) {
+    selected = d;
+
+    var nodeData = store.getNode(d.nodeId);
+    if (nodeData) {
+      // 获取关联详情列表
+      var rels = store.getRelationsOf(d.nodeId);
+      var relations = [];
+      rels.forEach(function (r) {
+        var targetNode = store.getNode(r.toNodeId);
+        relations.push({
+          label: r.label || '关联',
+          targetNodeId: r.toNodeId,
+          targetTitle: targetNode ? targetNode.title : r.toNodeId,
+          direction: r.direction || 'out'
+        });
+      });
+
+      var cardData = {
+        id: nodeData.id,
+        title: nodeData.title,
+        summary: nodeData.summary,
+        content: nodeData.content,
+        startTime: nodeData.startTime,
+        importance: nodeData.importance,
+        confidence: nodeData.confidence,
+        tags: nodeData.tags ? (Array.isArray(nodeData.tags) ? nodeData.tags : Object.keys(nodeData.tags)) : [],
+        relationCount: relations.length,
+        relations: relations,
+        sources: nodeData.sources || [],
+        comments: nodeData.comments || []
+      };
+      nodeDetail.open(cardData, d.nodeEl);
+    }
+  });
+
+  // 点击关联圆点 → 展开分支事件线
+  canvas.on('node:relation-click', function (d) {
+    var tl = store.getTimeline(d.timelineId);
+    if (!tl) return;
+    var entry = null;
+    for (var i = 0; i < tl.nodes.length; i++) {
+      if (tl.nodes[i].nodeId === d.nodeId) { entry = tl.nodes[i]; break; }
+    }
+    if (!entry || !entry.relations) return;
+
+    var branchTlIds = {};
+    for (var j = 0; j < entry.relations.length; j++) {
+      var r = entry.relations[j];
+      if (r.direction !== 'out' && r.direction !== '→') continue;
+      var targetTlId = r.targetTimelineId || d.timelineId;
+      if (targetTlId !== d.timelineId && !canvas.getColumn(targetTlId)) {
+        branchTlIds[targetTlId] = true;
+      }
+    }
+    Object.keys(branchTlIds).forEach(function (branchId) {
+      canvas.addColumn(branchId, 'extra');
+    });
+  });
+
+  // 初始只渲染主列，不自动展开分支
+  // 手动点击节点验证分支展开：
+  //   - ft-regulation → 引出 tl-demo-side（合规与应对，5 节点）
+  //   - ft-series-a   → 引出 tl-demo-team（团队成长，4 节点）
+  //   - ft-global-expand → 引出 tl-demo-team
+  T('初始只渲染主列（等待手动点击展开分支）', stageEl.querySelectorAll('[data-role="timeline-column"]').length === 1);
+
+  S('--- 缩放功能 ---');
+
+  T('默认 zoom = 1', canvas.getZoom() === 1);
+
+  canvas.zoomIn();
+  T('zoomIn() 缩放增大', canvas.getZoom() > 1);
+
+  canvas.zoomOut();
+  T('zoomOut() 恢复', canvas.getZoom() <= 1);
+
+  canvas.setZoom(0.1);
+  T('setZoom 下限钳制在 0.5', canvas.getZoom() === 0.5);
+
+  canvas.setZoom(3);
+  T('setZoom 上限钳制在 1.5', canvas.getZoom() === 1.5);
+
+  canvas.setZoom(1);
+  zr.textContent = '缩放: 100%';
+
+  S('--- zoomToFit ---');
+
+  canvas.zoomToFit();
+  T('zoomToFit 后 zoom ≤ 1', canvas.getZoom() <= 1);
+  canvas.setZoom(1);
+  zr.textContent = '缩放: 100%';
+
+  S('--- destroy 验证 ---');
+
+  var testCanvas = window.TT.NarrativeCanvas.create(document.createElement('div'));
+  testCanvas.destroy();
+  T('destroy 后 getElement 返回 null', testCanvas.getElement() === null);
+
+  S('结果: ' + pc + ' 通过, ' + fc + ' 失败');
+  S('手动验证：点击 ft-regulation / ft-series-a / ft-global-expand 展开分支');
+})();
+</script>
+</body>
+</html>

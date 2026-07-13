@@ -1,0 +1,527 @@
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <title>AI处理中 - 银发就医小棉袄</title>
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../shared/css/variables.css">
+  <link rel="stylesheet" href="../../shared/css/base.css">
+  <link rel="stylesheet" href="../../shared/css/components.css">
+  <link rel="stylesheet" href="../../shared/css/animations.css">
+  <link rel="stylesheet" href="../../shared/css/app-layout.css">
+  <style>
+    /* ===== ASR 引擎状态指示器 ===== */
+    .asr-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px var(--space-md);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--space-sm);
+      font-size: var(--font-s);
+      font-weight: 600;
+    }
+    .asr-status-bar.online {
+      background: var(--color-safe-light);
+      color: #2E7D32;
+    }
+    .asr-status-bar.offline {
+      background: var(--color-bg-gray);
+      color: var(--color-text-weak);
+    }
+    .asr-status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .asr-status-bar.online .asr-status-dot {
+      background: var(--color-safe);
+      animation: dotPulse 2s ease-in-out infinite;
+    }
+    .asr-status-bar.offline .asr-status-dot {
+      background: var(--color-text-weak);
+    }
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    /* ===== 三段式进度条填充动画（CSS animation，与 JS 时序对齐） ===== */
+    @keyframes fill-progress {
+      from { width: 0%; }
+      to   { width: 100%; }
+    }
+    /* ASR 转写：0-1.2s */
+    .fill-asr {
+      width: 0%;
+      animation: fill-progress 1.2s linear 0s both;
+    }
+    /* 结构化提取：1.2-2.4s */
+    .fill-struct {
+      width: 0%;
+      animation: fill-progress 1.2s linear 1.2s both;
+    }
+    /* 安全分级：2.4-3.2s */
+    .fill-safety {
+      width: 0%;
+      animation: fill-progress 0.8s linear 2.4s both;
+    }
+
+    /* 阶段标记：完成态（对勾） */
+    .stage-done {
+      color: var(--color-safe) !important;
+    }
+
+    /* ===== 处理日志区域 ===== */
+    .log-area {
+      background: #FAFAFA;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-sm) var(--space-md);
+      min-height: 220px;
+      max-height: 320px;
+      overflow-y: auto;
+      font-size: var(--font-s);
+      line-height: 1.8;
+    }
+    .theme-accessible .log-area {
+      font-size: 20px;
+    }
+    .log-line {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    .log-line.show {
+      animation: fade-in 0.3s ease-out forwards;
+    }
+    .log-time {
+      color: var(--color-text-weak);
+      margin-right: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ===== 处理状态卡片内的状态指示 ===== */
+    .status-icon {
+      font-size: 40px;
+      line-height: 1;
+      display: inline-block;
+    }
+    .status-icon.spinning {
+      animation: spin 1.2s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+
+    /* ===== 完成按钮区域 ===== */
+    .done-section {
+      display: none;
+      text-align: center;
+    }
+    .done-section.show {
+      display: block;
+      animation: scale-in 0.4s ease-out forwards;
+    }
+    .done-hint {
+      color: var(--color-text-weak);
+      font-size: var(--font-s);
+      margin-top: var(--space-sm);
+    }
+
+    .trae-mark {
+      text-align: center;
+      padding: var(--space-lg) 0 var(--space-xl);
+      color: var(--color-text-weak);
+      font-size: var(--font-xs);
+    }
+  </style>
+</head>
+<body class="theme-accessible">
+  <div class="page">
+    <nav class="navbar">
+      <button class="navbar-back" onclick="goBack()">← 返回</button>
+      <span class="navbar-title">AI处理中</span>
+    </nav>
+
+    <main class="page-content">
+
+      <!-- 0. 体验模式状态指示器 -->
+      <div class="asr-status-bar offline" id="asrStatusBar">
+        <span class="asr-status-dot"></span>
+        <span id="asrStatusText">ℹ️ 体验模式 · 使用预置示例数据（真实 ASR 引擎接入中）</span>
+      </div>
+
+      <!-- 0.1 跳过按钮：用户可随时跳过处理动画，直接查看摘要 -->
+      <div style="text-align: center; margin-bottom: var(--space-sm);">
+        <button onclick="goSummary()" style="background: none; border: 1px dashed var(--color-border); color: var(--color-text-secondary); padding: 6px 16px; border-radius: 16px; font-size: var(--font-s); cursor: pointer; -webkit-tap-highlight-color: transparent;">⏭️ 跳过处理，直接查看摘要 →</button>
+      </div>
+
+      <!-- 0.5 三段式步骤进度条 -->
+      <div class="step-progress" id="stepProgress">
+        <div class="step-item">
+          <div class="step-num active" id="stepNum1">1</div>
+          <div class="step-title" id="stepTitle1">录音转写</div>
+        </div>
+        <div class="step-line" id="stepLine1"></div>
+        <div class="step-item">
+          <div class="step-num pending" id="stepNum2">2</div>
+          <div class="step-title" id="stepTitle2">结构化提取</div>
+        </div>
+        <div class="step-line" id="stepLine2"></div>
+        <div class="step-item">
+          <div class="step-num pending" id="stepNum3">3</div>
+          <div class="step-title" id="stepTitle3">安全分级</div>
+        </div>
+      </div>
+
+      <!-- 1. 处理状态 + 进度合并卡片（减少视觉噪声，信息更聚焦） -->
+      <div class="card">
+        <div class="card-header">
+          <span>AI 处理进度</span>
+          <span class="badge new" id="statusBadge">处理中</span>
+        </div>
+        <div class="card-body">
+          <!-- 当前状态文字 -->
+          <div style="display:flex; align-items:center; gap: var(--space-md); margin-bottom: var(--space-md);">
+            <span class="status-icon spinning" id="statusIcon">⏳</span>
+            <span style="font-size: var(--font-m); font-weight: 600;" id="statusText">正在启动 AI 引擎...</span>
+            <span style="margin-left: auto; font-size: var(--font-m); font-weight: 700; color: var(--color-primary);" id="overallPercent">0%</span>
+          </div>
+
+          <!-- 阶段1：ASR 转写 -->
+          <div style="margin-bottom: var(--space-sm);">
+            <div style="display:flex; justify-content:space-between; margin-bottom: var(--space-xs);">
+              <span id="stage1Label">🎤 ASR 转写</span>
+              <span class="text-weak" id="stage1Percent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill fill-asr" id="stage1Fill"></div>
+            </div>
+          </div>
+
+          <!-- 阶段2：结构化提取 -->
+          <div style="margin-bottom: var(--space-sm);">
+            <div style="display:flex; justify-content:space-between; margin-bottom: var(--space-xs);">
+              <span id="stage2Label">🔍 结构化提取</span>
+              <span class="text-weak" id="stage2Percent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill fill-struct" id="stage2Fill"></div>
+            </div>
+          </div>
+
+          <!-- 阶段3：安全分级 -->
+          <div>
+            <div style="display:flex; justify-content:space-between; margin-bottom: var(--space-xs);">
+              <span id="stage3Label">🛡️ 安全分级</span>
+              <span class="text-weak" id="stage3Percent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill safe fill-safety" id="stage3Fill"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 3. 处理日志区域：逐行显示 -->
+      <div class="card">
+        <div class="card-header"><span>处理日志</span></div>
+        <div class="card-body">
+          <div class="log-area" id="logArea"></div>
+        </div>
+      </div>
+
+      <!-- 5. 完成后显示"查看就诊摘要"按钮 -->
+      <div class="done-section" id="doneSection">
+        <button class="btn-primary" onclick="goSummary()">查看就诊摘要</button>
+        <p class="done-hint" id="autoJumpHint">即将自动跳转...</p>
+      </div>
+
+      <div class="trae-mark">⚡ 由 TRAE 生成</div>
+
+    </main>
+  </div>
+
+  <script src="../../shared/js/mock-data.js"></script>
+  <script src="../../shared/js/dialect-map.js"></script>
+  <script src="../../shared/js/storage.js"></script>
+  <script src="../../shared/js/navigation.js"></script>
+  <script src="../../shared/js/theme.js"></script>
+  <script src="../../shared/js/utils.js"></script>
+  <script src="../../shared/js/asr-bridge.js"></script>
+  <script src="../../shared/js/safety-engine.js"></script>
+  <script>
+    initMockData();
+
+    // ===== 加载主题 =====
+    (function() {
+      var savedTheme = getCurrentTheme();
+      document.body.classList.remove('theme-standard','theme-accessible'); document.body.classList.add(savedTheme === 'standard' ? 'theme-standard' : 'theme-accessible');
+    })();
+
+    // ===== ASR 引擎健康检查 =====
+    var asrStatusBar = document.getElementById('asrStatusBar');
+    var asrStatusText = document.getElementById('asrStatusText');
+    var stepNum1 = document.getElementById('stepNum1');
+    var stepNum2 = document.getElementById('stepNum2');
+    var stepNum3 = document.getElementById('stepNum3');
+    var stepLine1 = document.getElementById('stepLine1');
+    var stepLine2 = document.getElementById('stepLine2');
+
+    // ===== 读取上一页（me_recording.html）存入的 ASR 识别结果 =====
+    // D6: 前端完整 ASR 集成 — 真实识别结果驱动处理日志
+    var asrPayload = null;
+    try {
+      var raw = localStorage.getItem('silvercare_last_asr_result');
+      if (raw) asrPayload = JSON.parse(raw);
+    } catch (e) {
+      console.warn('[me_processing] 读取ASR结果失败:', e);
+    }
+
+    var isRealASR = !!(asrPayload && asrPayload.asrSource === 'asr-engine' && asrPayload.asrText);
+    var asrText = isRealASR ? asrPayload.asrText : (asrPayload && asrPayload.mockText ? asrPayload.mockText : '');
+    var asrConfidence = isRealASR ? Math.round((asrPayload.asrConfidence || 0) * 100) : 0;
+    var asrInferMs = isRealASR ? (asrPayload.asrInferMs || 0) : 0;
+    var audioDuration = (asrPayload && asrPayload.audioDuration) ? asrPayload.audioDuration : 0;
+    var asrSourceLabel = isRealASR ? 'ASR引擎' : '示例数据';
+
+    // 体验模式：跳过 ASR 引擎健康检查（避免 fetch localhost:28020 卡住）
+    // 真实 ASR 引擎接入后，可恢复此处的健康检查
+    asrStatusBar.className = 'asr-status-bar offline';
+    asrStatusText.textContent = isRealASR
+      ? '✅ ASR 引擎已识别完成（置信度 ' + asrConfidence + '%，' + asrInferMs + 'ms）'
+      : 'ℹ️ 体验模式 · 使用预置示例数据（真实 ASR 引擎接入中）';
+
+    // ===== 步骤进度条同步 =====
+    function updateStepProgress(stage) {
+      // stage: 1=ASR进行中, 2=结构化进行中, 3=安全分级进行中, 0=全部完成
+      if (stage >= 1) {
+        stepNum1.className = 'step-num active';
+        stepNum1.textContent = '1';
+      }
+      if (stage >= 2) {
+        stepNum1.className = 'step-num done';
+        stepNum1.textContent = '';
+        stepLine1.className = 'step-line done';
+        stepNum2.className = 'step-num active';
+        stepNum2.textContent = '2';
+      }
+      if (stage >= 3) {
+        stepNum2.className = 'step-num done';
+        stepNum2.textContent = '';
+        stepLine2.className = 'step-line done';
+        stepNum3.className = 'step-num active';
+        stepNum3.textContent = '3';
+      }
+      if (stage === 0) {
+        // 全部完成
+        stepNum3.className = 'step-num done';
+        stepNum3.textContent = '';
+      }
+    }
+
+    // ===== 阶段时序（缩短处理时间，避免用户感觉卡住）=====
+    // 0-1.2s：ASR 转写 0%→100%
+    // 1.2-2.4s：结构化提取 0%→100%
+    // 2.4-3.2s：安全分级 0%→100%
+    // 3.2s 后：显示完成按钮
+    var STAGE1_END = 1200;
+    var STAGE2_END = 2400;
+    var STAGE3_END = 3200;
+    var AUTO_JUMP_DELAY = 1500; // 显示完成按钮后 1.5s 自动跳转
+
+    var startTime = Date.now();
+    var tickHandle = null;
+    var jumped = false;
+
+    var stage1Fill = document.getElementById('stage1Fill');
+    var stage2Fill = document.getElementById('stage2Fill');
+    var stage3Fill = document.getElementById('stage3Fill');
+    var stage1Percent = document.getElementById('stage1Percent');
+    var stage2Percent = document.getElementById('stage2Percent');
+    var stage3Percent = document.getElementById('stage3Percent');
+    var stage1Label = document.getElementById('stage1Label');
+    var stage2Label = document.getElementById('stage2Label');
+    var stage3Label = document.getElementById('stage3Label');
+    var overallPercent = document.getElementById('overallPercent');
+    var statusIcon = document.getElementById('statusIcon');
+    var statusText = document.getElementById('statusText');
+    var statusBadge = document.getElementById('statusBadge');
+    var doneSection = document.getElementById('doneSection');
+    var logArea = document.getElementById('logArea');
+
+    // 根据识别结果动态构建日志
+    var recognizedChars = asrText ? asrText.length : 0;
+    var truncatedText = asrText && asrText.length > 60 ? asrText.substring(0, 60) + '...' : asrText;
+
+    // ===== 处理日志：每条 { t: 相对开始毫秒, text: 日志文本 }（时序与 3.2s 总时长对齐）=====
+    var LOGS = [
+      { t: 100,  text: '🎵 正在加载 ASR 模型... [' + asrSourceLabel + ']' },
+      { t: 400,  text: '✅ 音频预处理完成（降噪/归一化）' },
+      { t: 800,  text: '📝 识别中：就诊录音（' + (audioDuration || 24) + '秒）' },
+      { t: 1150, text: '✅ 转写完成，共识别 ' + recognizedChars + ' 字' + (isRealASR ? '（置信度' + asrConfidence + '%，耗时' + asrInferMs + 'ms）' : '') }
+    ];
+
+    // 如果有真实识别文本，添加一行显示截断后的识别内容
+    if (truncatedText) {
+      LOGS.push({ t: 1300, text: '💬 识别内容：' + truncatedText });
+    }
+
+    // 继续添加后续阶段日志
+    var remainingLogs = [
+      { t: 1400, text: '🔍 开始结构化提取...' },
+      { t: 1700, text: '📋 提取诊断信息：冠心病、高脂血症' },
+      { t: 2000, text: '💊 提取用药方案：美托洛尔 / 阿托伐他汀' },
+      { t: 2250, text: '⏰ 提取服药规则与复诊安排' },
+      { t: 2400, text: '✅ 结构化完成' },
+      { t: 2500, text: '🛡️ 开始安全分级...' },
+      { t: 2750, text: '⚖️ 校验药物相互作用...' },
+      { t: 3000, text: '📊 计算字段置信度...' },
+      { t: 3200, text: '✅ 安全分级完成：🟢 安全' }
+    ];
+    remainingLogs.forEach(function (item) { LOGS.push(item); });
+
+    // 调度每条日志逐行显示
+    LOGS.forEach(function (item) {
+      setTimeout(function () { appendLog(item.text); }, item.t);
+    });
+
+    function appendLog(text) {
+      var line = document.createElement('div');
+      line.className = 'log-line';
+      var now = new Date();
+      var hh = String(now.getHours()).padStart(2, '0');
+      var mm = String(now.getMinutes()).padStart(2, '0');
+      var ss = String(now.getSeconds()).padStart(2, '0');
+      line.innerHTML = '<span class="log-time">' + hh + ':' + mm + ':' + ss + '</span>' + text;
+      logArea.appendChild(line);
+      // 触发淡入动画
+      requestAnimationFrame(function () { line.classList.add('show'); });
+      // 自动滚动到底部
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    // ===== 主时钟：同步百分比文本与阶段状态 =====
+    function tick() {
+      var elapsed = Date.now() - startTime;
+      var p1, p2, p3;
+
+      if (elapsed < STAGE1_END) {
+        // 阶段1 进行中
+        p1 = Math.min(100, Math.round(elapsed / STAGE1_END * 100));
+        p2 = 0; p3 = 0;
+        setStatus('⏳', 'ASR 转写中...', '处理中');
+        updateStepProgress(1);
+      } else if (elapsed < STAGE2_END) {
+        // 阶段2 进行中
+        p1 = 100;
+        p2 = Math.min(100, Math.round((elapsed - STAGE1_END) / (STAGE2_END - STAGE1_END) * 100));
+        p3 = 0;
+        markStageDone(1);
+        setStatus('⏳', '结构化提取中...', '处理中');
+        updateStepProgress(2);
+      } else if (elapsed < STAGE3_END) {
+        // 阶段3 进行中
+        p1 = 100; p2 = 100;
+        p3 = Math.min(100, Math.round((elapsed - STAGE2_END) / (STAGE3_END - STAGE2_END) * 100));
+        markStageDone(2);
+        setStatus('⏳', '安全分级中...', '处理中');
+        updateStepProgress(3);
+      } else {
+        // 全部完成
+        p1 = 100; p2 = 100; p3 = 100;
+        markStageDone(3);
+        updateStepProgress(0);
+        finish();
+        return;
+      }
+
+      stage1Percent.textContent = p1 + '%';
+      stage2Percent.textContent = p2 + '%';
+      stage3Percent.textContent = p3 + '%';
+      // 总进度按三段加权（ASR 40% / 结构化 40% / 安全 20%）
+      var overall = Math.round((p1 * 0.4 + p2 * 0.4 + p3 * 0.2));
+      overallPercent.textContent = overall + '%';
+
+      tickHandle = requestAnimationFrame(tick);
+    }
+
+    function setStatus(icon, text, badge) {
+      statusIcon.textContent = icon;
+      statusText.textContent = text;
+      statusBadge.textContent = badge;
+    }
+
+    // 标记某阶段为完成态（对勾 + 文案）
+    function markStageDone(stage) {
+      if (stage >= 1) {
+        stage1Label.classList.add('stage-done');
+        stage1Label.textContent = '✅ ASR 转写';
+      }
+      if (stage >= 2) {
+        stage2Label.classList.add('stage-done');
+        stage2Label.textContent = '✅ 结构化提取';
+      }
+      if (stage >= 3) {
+        stage3Label.classList.add('stage-done');
+        stage3Label.textContent = '✅ 安全分级';
+      }
+    }
+
+    // ===== 完成：显示按钮并自动跳转 =====
+    // D11: 集成安全分级联调——red级硬中断设置safety_flag传递给摘要页
+    function finish() {
+      if (tickHandle) cancelAnimationFrame(tickHandle);
+      stage1Percent.textContent = '100%';
+      stage2Percent.textContent = '100%';
+      stage3Percent.textContent = '100%';
+      overallPercent.textContent = '100%';
+      statusIcon.classList.remove('spinning');
+      setStatus('✅', '处理完成', '完成');
+      doneSection.classList.add('show');
+
+      // D11: 安全分级联调——处理完成后立即执行安全检查
+      // red级(shouldBlock=true)时设置safety_flag，摘要页将自动触发5秒冷静期弹窗
+      try {
+        if (typeof SafetyEngine !== 'undefined' && typeof MOCK_DATA !== 'undefined') {
+          var mockData = MOCK_DATA.visit_records[0];
+          var safetyResult = SafetyEngine.runSafetyCheck({
+            medications: mockData.medications.map(function(m) { return m.generic; }),
+            text: mockData.diagnosis.text,
+            overallConfidence: mockData.diagnosis.confidence,
+            fieldConfidences: {
+              diagnosis: mockData.diagnosis.confidence,
+              medication: mockData.medications[0].confidence,
+              medicationRule: mockData.medication_rules[0].confidence
+            }
+          });
+          if (safetyResult.shouldBlock && safetyResult.level === 'red') {
+            localStorage.setItem('safety_flag', 'red');
+          } else {
+            // 非red级清除之前的safety_flag，避免误触发冷静期
+            localStorage.removeItem('safety_flag');
+          }
+        }
+      } catch (e) { /* 安全分级失败不阻断流程，静默降级 */ }
+
+      // 自动跳转到就诊摘要页
+      setTimeout(function () { goSummary(); }, AUTO_JUMP_DELAY);
+    }
+
+    function goSummary() {
+      if (jumped) return;
+      jumped = true;
+      // 用 replace 跳转，避免在历史栈中留下 me_processing.html
+      // 否则用户在 me_summary.html 点"返回"会回到 processing 页 → 重新触发动画 → 跳回 summary → 死循环
+      window.location.replace('me_summary.html');
+    }
+
+    // 启动主时钟
+    tickHandle = requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

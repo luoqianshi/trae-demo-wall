@@ -1,0 +1,1 @@
+import{r}from"./_plugin-vue_export-helper._9dfcAK3.js";const a=a=>r({url:"/favorites",method:"GET",data:a}),t=a=>r({url:"/favorites",method:"POST",data:a}),e=a=>r({url:`/favorites/${a}`,method:"DELETE"});export{t as a,a as g,e as r};

@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的世界 - 地球</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000;font-family:'Microsoft YaHei',sans-serif}
+#blocker{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:100;display:flex;align-items:center;justify-content:center;flex-direction:column}
+#blocker h1{color:#fff;font-size:48px;margin-bottom:20px;text-shadow:3px 3px 6px #000}
+#blocker p{color:#ccc;font-size:16px;margin:4px 0}
+#blocker .btn{margin-top:30px;padding:15px 50px;font-size:22px;background:#4a8c3f;color:#fff;border:3px solid #2d5a22;cursor:pointer;border-radius:5px;transition:all .2s}
+#blocker .btn:hover{background:#5aa04f;transform:scale(1.05)}
+#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:24px;height:24px;z-index:50;pointer-events:none;display:none}
+#crosshair::before,#crosshair::after{content:'';position:absolute;background:rgba(255,255,255,.8)}
+#crosshair::before{width:2px;height:24px;left:11px;top:0}
+#crosshair::after{width:24px;height:2px;top:11px;left:0}
+#hotbar{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);display:none;z-index:50;background:rgba(0,0,0,.5);border:2px solid #555;border-radius:4px;padding:4px}
+#hotbar .s{display:inline-block;width:48px;height:48px;margin:2px;border:2px solid #333;background:rgba(0,0,0,.4);position:relative;cursor:pointer;vertical-align:top}
+#hotbar .s.a{border-color:#fff;background:rgba(255,255,255,.15)}
+#hotbar .s .k{position:absolute;top:1px;left:3px;color:#aaa;font-size:10px}
+#hotbar .s .n{position:absolute;bottom:1px;left:50%;transform:translateX(-50%);color:#fff;font-size:8px;white-space:nowrap;text-shadow:1px 1px 1px #000}
+#info{position:fixed;top:10px;left:10px;color:#fff;font-size:14px;z-index:50;display:none;text-shadow:1px 1px 2px #000;line-height:1.6}
+#modeInfo{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);font-size:14px;z-index:50;display:none;text-shadow:1px 1px 2px #000;text-align:center;padding:4px 12px;border-radius:4px;background:rgba(0,0,0,.4)}
+#flyInfo{position:fixed;top:10px;right:10px;color:#7af;font-size:16px;z-index:50;display:none;text-shadow:1px 1px 2px #000;font-weight:bold}
+#inv{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);display:none;z-index:200;background:rgba(30,30,30,.95);border:3px solid #666;border-radius:8px;padding:15px;min-width:420px}
+#inv h2{color:#fff;text-align:center;margin-bottom:12px;font-size:20px}
+#inv .g{display:grid;grid-template-columns:repeat(7,52px);gap:4px;justify-content:center}
+#inv .is{width:48px;height:48px;border:2px solid #444;background:rgba(0,0,0,.4);cursor:pointer;position:relative;border-radius:3px}
+#inv .is:hover{border-color:#fff}
+#inv .is .in{position:absolute;bottom:1px;left:50%;transform:translateX(-50%);color:#fff;font-size:7px;white-space:nowrap;text-shadow:1px 1px 1px #000}
+#mapOverlay{position:fixed;top:0;left:0;width:100%;height:100%;display:none;z-index:300;background:rgba(0,0,0,.8);align-items:center;justify-content:center;flex-direction:column}
+#mapOverlay h2{color:#fff;margin-bottom:10px;font-size:22px}
+#mapOverlay p{color:#aaa;margin-bottom:10px;font-size:13px}
+#mapCanvas{border:2px solid #555;cursor:crosshair;border-radius:4px;image-rendering:pixelated}
+#mapCoords{color:#ff0;font-size:14px;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="blocker">
+  <h1>我的世界 - 地球</h1>
+  <p>WASD 移动 | 空格 跳跃 | 双击空格 飞行</p>
+  <p>左键 操作 | F 切换模式 | E 背包 | M 地图</p>
+  <p>探索球体世界，复刻地球景观</p>
+  <button class="btn" id="startBtn">开始游戏</button>
+</div>
+<div id="crosshair"></div>
+<div id="hotbar"></div>
+<div id="info">
+  <div id="fps">FPS: 0</div>
+  <div id="pos"></div>
+  <div id="chunkInfo"></div>
+</div>
+<div id="flyInfo"></div>
+<div id="modeInfo"></div>
+<div id="inv"><h2>背包 (无限)</h2><div class="g" id="invGrid"></div></div>
+<div id="mapOverlay">
+  <h2>世界地图</h2>
+  <p>点击地图传送 | 按M关闭</p>
+  <canvas id="mapCanvas" width="400" height="200"></canvas>
+  <div id="mapCoords"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+'use strict';
+
+// ============ 常量 ============
+const CHUNK_SIZE=12,CHUNK_HEIGHT=48,RENDER_DIST=4;
+const WORLD_SEED=Math.random()*10000|0;
+const EARTH_R=200,MAX_H=32,SEA_LV=10;
+const GRAVITY=20,JUMP_V=8,PLAYER_H=1.7;
+const WALK_SPD=20,SPRINT_SPD=32,FLY_SPD=40,FLY_SPRINT_SPD=80;
+const WORLD_LON=288,WORLD_LAT=144;
+
+const BLOCK={
+  AIR:0,GRASS:1,DIRT:2,STONE:3,SAND:4,WOOD:5,LEAVES:6,WATER:7,
+  SNOW:8,COBBLE:9,PLANK:10,BRICK:11,GLASS:12,BEDROCK:13,TNT:14,
+  IRON:15,RED:16,YELLOW:17,BLUE:18,ICE:19
+};
+
+const COLORS={
+  [BLOCK.GRASS]:{top:0x5d9b3a,side:0x7b5b3a,bot:0x6b4a2a},
+  [BLOCK.DIRT]:{top:0x6b4a2a,side:0x6b4a2a,bot:0x6b4a2a},
+  [BLOCK.STONE]:{top:0x8a8a8a,side:0x7a7a7a,bot:0x6a6a6a},
+  [BLOCK.SAND]:{top:0xd4c484,side:0xc4b474,bot:0xb4a464},
+  [BLOCK.WOOD]:{top:0x9a7a4a,side:0x6a4a2a,bot:0x9a7a4a},
+  [BLOCK.LEAVES]:{top:0x3a8a2a,side:0x2a7a1a,bot:0x2a6a1a},
+  [BLOCK.WATER]:{top:0x3a6aaa,side:0x3a6aaa,bot:0x3a6aaa},
+  [BLOCK.SNOW]:{top:0xf0f0f0,side:0xe0e0e0,bot:0xd0d0d0},
+  [BLOCK.COBBLE]:{top:0x7a7a7a,side:0x6a6a6a,bot:0x5a5a5a},
+  [BLOCK.PLANK]:{top:0xb8945a,side:0xa8844a,bot:0x98743a},
+  [BLOCK.BRICK]:{top:0x9a4a3a,side:0x8a3a2a,bot:0x7a2a1a},
+  [BLOCK.GLASS]:{top:0xaaddff,side:0xaaddff,bot:0xaaddff},
+  [BLOCK.BEDROCK]:{top:0x3a3a3a,side:0x2a2a2a,bot:0x1a1a1a},
+  [BLOCK.TNT]:{top:0xcc2222,side:0xcc3333,bot:0x992222},
+  [BLOCK.IRON]:{top:0xddddcc,side:0xccccbb,bot:0xbbbbaa},
+  [BLOCK.RED]:{top:0xcc2222,side:0xbb1111,bot:0xaa0000},
+  [BLOCK.YELLOW]:{top:0xcccc22,side:0xbbbb11,bot:0xaaaa00},
+  [BLOCK.BLUE]:{top:0x2222cc,side:0x1111bb,bot:0x0000aa},
+  [BLOCK.ICE]:{top:0xaaddff,side:0x99ccff,bot:0x88bbee}
+};
+
+const NAMES={
+  [BLOCK.GRASS]:'草方块',[BLOCK.DIRT]:'泥土',[BLOCK.STONE]:'石头',
+  [BLOCK.SAND]:'沙子',[BLOCK.WOOD]:'木头',[BLOCK.LEAVES]:'树叶',
+  [BLOCK.WATER]:'水',[BLOCK.SNOW]:'雪',[BLOCK.COBBLE]:'圆石',
+  [BLOCK.PLANK]:'木板',[BLOCK.BRICK]:'砖块',[BLOCK.GLASS]:'玻璃',
+  [BLOCK.BEDROCK]:'基岩',[BLOCK.TNT]:'TNT',[BLOCK.IRON]:'铁块',
+  [BLOCK.RED]:'红方块',[BLOCK.YELLOW]:'黄方块',[BLOCK.BLUE]:'蓝方块',[BLOCK.ICE]:'冰'
+};
+
+const ALL_BLOCKS=[BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.SAND,BLOCK.WOOD,BLOCK.LEAVES,BLOCK.COBBLE,BLOCK.PLANK,BLOCK.BRICK,BLOCK.SNOW,BLOCK.GLASS,BLOCK.TNT,BLOCK.IRON,BLOCK.RED,BLOCK.YELLOW,BLOCK.BLUE,BLOCK.ICE];
+const HOTBAR=[BLOCK.GRASS,BLOCK.DIRT,BLOCK.STONE,BLOCK.SAND,BLOCK.WOOD,BLOCK.PLANK,BLOCK.COBBLE,BLOCK.BRICK,BLOCK.TNT];
+const MODES=['破坏','放置','炮弹'];
+const MODE_COL=['#f55','#5f5','#fa5'];
+
+// ============ Simplex噪声 ============
+class SimplexNoise{
+  constructor(seed){
+    this.grad3=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+    this.p=[];let s=seed;
+    const rng=()=>{s=(s*16807+0)%2147483647;return(s-1)/2147483646;};
+    for(let i=0;i<256;i++)this.p[i]=i;
+    for(let i=255;i>0;i--){const j=(rng()*(i+1))|0;[this.p[i],this.p[j]]=[this.p[j],this.p[i]];}
+    this.perm=new Array(512);for(let i=0;i<512;i++)this.perm[i]=this.p[i&255];
+  }
+  dot(g,x,y){return g[0]*x+g[1]*y;}
+  noise2D(x,y){
+    const F2=0.5*(Math.sqrt(3)-1),G2=(3-Math.sqrt(3))/6;
+    const s=(x+y)*F2,i=Math.floor(x+s),j=Math.floor(y+s);
+    const t=(i+j)*G2,X0=i-t,Y0=j-t,x0=x-X0,y0=y-Y0;
+    let i1,j1;if(x0>y0){i1=1;j1=0}else{i1=0;j1=1}
+    const x1=x0-i1+G2,y1=y0-j1+G2,x2=x0-1+2*G2,y2=y0-1+2*G2;
+    const ii=i&255,jj=j&255;
+    const gi0=this.perm[ii+this.perm[jj]]%12,gi1=this.perm[ii+i1+this.perm[jj+j1]]%12,gi2=this.perm[ii+1+this.perm[jj+1]]%12;
+    let n0=0,n1=0,n2=0;
+    let t0=0.5-x0*x0-y0*y0;if(t0>=0){t0*=t0;n0=t0*t0*this.dot(this.grad3[gi0],x0,y0)}
+    let t1=0.5-x1*x1-y1*y1;if(t1>=0){t1*=t1;n1=t1*t1*this.dot(this.grad3[gi1],x1,y1)}
+    let t2=0.5-x2*x2-y2*y2;if(t2>=0){t2*=t2;n2=t2*t2*this.dot(this.grad3[gi2],x2,y2)}
+    return 70*(n0+n1+n2);
+  }
+  octave(x,y,o,p){
+    let t=0,f=1,a=1,m=0;
+    for(let i=0;i<o;i++){t+=this.noise2D(x*f,y*f)*a;m+=a;a*=p;f*=2}
+    return t/m;
+  }
+}
+
+const N1=new SimplexNoise(WORLD_SEED);
+const N2=new SimplexNoise(WORLD_SEED+1);
+const N3=new SimplexNoise(WORLD_SEED+2);
+
+// ============ 坐标转换 ============
+function ll2xyz(lat,lon,h){
+  const phi=(90-lat)*Math.PI/180;
+  const theta=(lon+180)*Math.PI/180;
+  const r=EARTH_R+h;
+  return new THREE.Vector3(
+    -r*Math.sin(phi)*Math.cos(theta),
+    r*Math.cos(phi),
+    r*Math.sin(phi)*Math.sin(theta)
+  );
+}
+
+function xyz2ll(v){
+  const r=v.length();
+  const phi=Math.acos(Math.max(-1,Math.min(1,v.y/r)));
+  const theta=Math.atan2(v.z,v.x);
+  let lat=90-phi*180/Math.PI;
+  let lon=theta*180/Math.PI+180;
+  lat=lat-90;lon=lon-180;
+  return {lat,lon,h:r-EARTH_R};
+}
+
+// ============ 地形生成 ============
+function getHeight(lat,lon){
+  const c1=N1.octave(lon*0.003,lat*0.003,6,0.5);
+  const c2=N1.octave((lon+300)*0.004,(lat+200)*0.004,6,0.5);
+  const c3=N1.octave((lon+500)*0.0035,(lat+400)*0.0035,6,0.5);
+  const c4=N1.octave((lon+700)*0.0045,(lat+100)*0.0045,6,0.5);
+  const c5=N1.octave((lon+100)*0.003,(lat+500)*0.003,6,0.5);
+  const cont=c1*1.2+c2*0.8+c3*1.0+c4*0.6+c5*0.9;
+  const mt=Math.max(0,N2.octave(lon*0.005,lat*0.005,4,0.5));
+  const det=N3.octave(lon*0.02,lat*0.02,3,0.5)*0.3;
+  let h=cont*25+mt*mt*35+det*5+SEA_LV;
+  return Math.max(0,Math.min(MAX_H,Math.floor(h)));
+}
+
+function getBiome(lat,lon){
+  const h=getHeight(lat,lon);
+  if(h<=SEA_LV)return'ocean';
+  const temp=(90-Math.abs(lat))/90;
+  const hum=N2.octave(lon*0.002+500,lat*0.002+500,2,0.5);
+  if(temp<0.15)return'snow';
+  if(temp>0.7&&hum<-0.15)return'desert';
+  if(hum>0.15)return'forest';
+  if(temp>0.6&&h<=SEA_LV+3)return'beach';
+  return'plains';
+}
+
+function hasTree(lat,lon){
+  const h=getHeight(lat,lon);
+  if(h<=SEA_LV+2)return false;
+  const b=getBiome(lat,lon);
+  if(b==='ocean'||b==='desert'||b==='beach'||b==='snow')return false;
+  return N2.noise2D(lon*0.8,lat*0.8)>0.73;
+}
+
+// ============ 区块系统 ============
+const chunks=new Map();
+function ck(cx,cz){return cx+','+cz}
+function wrapLon(lon){return ((lon%WORLD_LON)+WORLD_LON)%WORLD_LON;}
+function idx(lx,ly,lz){return lx*CHUNK_HEIGHT*CHUNK_SIZE+ly*CHUNK_SIZE+lz;}
+
+function getBlock(lon,lat,h){
+  if(h<0||h>=CHUNK_HEIGHT)return BLOCK.AIR;
+  lon=wrapLon(lon);
+  if(lat<-90||lat>=90)return BLOCK.AIR;
+  const wlon=lon+WORLD_LON/2,wlat=lat+WORLD_LAT/2;
+  const cx=Math.floor(wlon/CHUNK_SIZE),cz=Math.floor(wlat/CHUNK_SIZE);
+  const lx=wlon%CHUNK_SIZE,lz=wlat%CHUNK_SIZE;
+  const ch=chunks.get(ck(cx,cz));
+  if(!ch)return BLOCK.AIR;
+  return ch.data[idx(lx,h,lz)];
+}
+
+function setBlock(lon,lat,h,type){
+  if(h<0||h>=CHUNK_HEIGHT)return;
+  lon=wrapLon(lon);
+  if(lat<-90||lat>=90)return;
+  const wlon=lon+WORLD_LON/2,wlat=lat+WORLD_LAT/2;
+  const cx=Math.floor(wlon/CHUNK_SIZE),cz=Math.floor(wlat/CHUNK_SIZE);
+  const lx=wlon%CHUNK_SIZE,lz=wlat%CHUNK_SIZE;
+  let ch=chunks.get(ck(cx,cz));
+  if(!ch)ch=genChunk(cx,cz);
+  ch.data[idx(lx,h,lz)]=type;
+  ch.dirty=true;
+  if(lx===0){const n=chunks.get(ck(cx-1,cz));if(n)n.dirty=true}
+  if(lx===CHUNK_SIZE-1){const n=chunks.get(ck(cx+1,cz));if(n)n.dirty=true}
+  if(lz===0){const n=chunks.get(ck(cx,cz-1));if(n)n.dirty=true}
+  if(lz===CHUNK_SIZE-1){const n=chunks.get(ck(cx,cz+1));if(n)n.dirty=true}
+}
+
+function genChunk(cx,cz){
+  const key=ck(cx,cz);
+  if(chunks.has(key))return chunks.get(key);
+  const data=new Uint8Array(CHUNK_SIZE*CHUNK_HEIGHT*CHUNK_SIZE);
+  const baseLon=cx*CHUNK_SIZE-WORLD_LON/2,baseLat=cz*CHUNK_SIZE-WORLD_LAT/2;
+  for(let lx=0;lx<CHUNK_SIZE;lx++){
+    for(let lz=0;lz<CHUNK_SIZE;lz++){
+      const lon=baseLon+lx,lat=baseLat+lz;
+      const h=Math.min(getHeight(lat,lon),CHUNK_HEIGHT-1);
+      const biome=getBiome(lat,lon);
+      for(let y=0;y<=h;y++){
+        let b;
+        if(y===0)b=BLOCK.BEDROCK;
+        else if(y<h-4)b=BLOCK.STONE;
+        else if(y<h)b=(biome==='desert'||biome==='beach')?BLOCK.SAND:BLOCK.DIRT;
+        else{
+          if(biome==='ocean')b=BLOCK.WATER;
+          else if(biome==='desert')b=BLOCK.SAND;
+          else if(biome==='snow')b=BLOCK.SNOW;
+          else if(biome==='beach')b=BLOCK.SAND;
+          else b=BLOCK.GRASS;
+        }
+        data[idx(lx,y,lz)]=b;
+      }
+      if(hasTree(lat,lon)&&h<CHUNK_HEIGHT-8){
+        const th=4+((Math.abs(N2.noise2D(lon*1.5,lat*1.5)*3))|0);
+        for(let ty=1;ty<=th;ty++){const yy=h+ty;if(yy<CHUNK_HEIGHT)data[idx(lx,yy,lz)]=BLOCK.WOOD;}
+        for(let ly=-2;ly<=1;ly++){
+          const r=ly<0?2:1;
+          for(let dx=-r;dx<=r;dx++)for(let dz=-r;dz<=r;dz++){
+            if(dx===0&&dz===0&&ly<1)continue;
+            const nx=lx+dx,nz=lz+dz,ny=h+th+ly;
+            if(nx>=0&&nx<CHUNK_SIZE&&nz>=0&&nz<CHUNK_SIZE&&ny<CHUNK_HEIGHT)
+              if(data[idx(nx,ny,nz)]===BLOCK.AIR)data[idx(nx,ny,nz)]=BLOCK.LEAVES;
+          }
+        }
+      }
+      if(biome==='snow'&&h>SEA_LV+2&&N3.noise2D(lon*2,lat*2)>0.5){
+        const yy=h+1;
+        if(yy<CHUNK_HEIGHT&&data[idx(lx,yy,lz)]===BLOCK.AIR)data[idx(lx,yy,lz)]=BLOCK.ICE;
+      }
+    }
+  }
+  const ch={cx,cz,data,mesh:null,dirty:true};
+  chunks.set(key,ch);
+  return ch;
+}
+
+// ============ 网格构建 ============
+const matCache={};
+function getMat(block,face){
+  const c=COLORS[block];if(!c)return null;
+  let color=face==='top'?c.top:face==='bot'?c.bot:c.side;
+  const key=color+'_'+block;
+  if(!matCache[key]){
+    const opts={color,flatShading:true};
+    if(block===BLOCK.WATER){opts.transparent=true;opts.opacity=0.6}
+    if(block===BLOCK.GLASS){opts.transparent=true;opts.opacity=0.3}
+    if(block===BLOCK.LEAVES){opts.transparent=true;opts.opacity=0.9}
+    if(block===BLOCK.ICE){opts.transparent=true;opts.opacity=0.8}
+    matCache[key]=new THREE.MeshLambertMaterial(opts);
+  }
+  return matCache[key];
+}
+
+const FACES=[
+  {dlon:1,dlat:0,dy:0,face:'side',corners:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]]},
+  {dlon:-1,dlat:0,dy:0,face:'side',corners:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]]},
+  {dlon:0,dlat:1,dy:0,face:'side',corners:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]]},
+  {dlon:0,dlat:-1,dy:0,face:'side',corners:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]]},
+  {dlon:0,dlat:0,dy:1,face:'top',corners:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]]},
+  {dlon:0,dlat:0,dy:-1,face:'bot',corners:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]]}
+];
+
+function buildChunkMesh(ch){
+  const geos={};
+  const baseLon=ch.cx*CHUNK_SIZE-WORLD_LON/2,baseLat=ch.cz*CHUNK_SIZE-WORLD_LAT/2;
+  for(let lx=0;lx<CHUNK_SIZE;lx++){
+    for(let lz=0;lz<CHUNK_SIZE;lz++){
+      const lon=baseLon+lx,lat=baseLat+lz;
+      for(let y=0;y<CHUNK_HEIGHT;y++){
+        const block=ch.data[idx(lx,y,lz)];
+        if(block===BLOCK.AIR)continue;
+        for(const f of FACES){
+          const nlon=lon+f.dlon,nlat=lat+f.dlat,ny=y+f.dy;
+          const nb=getBlock(nlon,nlat,ny);
+          if(nb!==BLOCK.AIR&&!(block!==BLOCK.WATER&&nb===BLOCK.WATER)&&!(block!==BLOCK.GLASS&&nb===BLOCK.GLASS)&&!(block!==BLOCK.LEAVES&&nb===BLOCK.LEAVES)&&!(block!==BLOCK.ICE&&nb===BLOCK.ICE))continue;
+          const mk=block+'_'+f.face;
+          if(!geos[mk])geos[mk]={p:[],n:[],ind:[],block,face:f.face};
+          const g=geos[mk],vi=g.p.length/3;
+          for(const c of f.corners){
+            const p=ll2xyz(lat+c[2]-0.5,lon+c[0]-0.5,y+c[1]);
+            g.p.push(p.x,p.y,p.z);
+            const norm=ll2xyz(lat,lon,y+c[1]).normalize();
+            g.n.push(norm.x,norm.y,norm.z);
+          }
+          g.ind.push(vi,vi+1,vi+2,vi,vi+2,vi+3);
+        }
+      }
+    }
+  }
+  if(ch.mesh)ch.mesh.forEach(m=>{scene.remove(m);m.geometry.dispose();});
+  ch.mesh=[];
+  for(const k in geos){
+    const g=geos[k];if(g.p.length===0)continue;
+    const bg=new THREE.BufferGeometry();
+    bg.setAttribute('position',new THREE.Float32BufferAttribute(g.p,3));
+    bg.setAttribute('normal',new THREE.Float32BufferAttribute(g.n,3));
+    bg.setIndex(g.ind);
+    const m=new THREE.Mesh(bg,getMat(g.block,g.face));
+    scene.add(m);ch.mesh.push(m);
+  }
+  ch.dirty=false;
+}
+
+// ============ Three.js场景 ============
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x000022);
+scene.fog=new THREE.Fog(0x000022,EARTH_R*0.5,EARTH_R*1.5);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,EARTH_R*3);
+const renderer=new THREE.WebGLRenderer({antialias:false});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0x888899,0.7));
+const dl=new THREE.DirectionalLight(0xffeedd,0.8);
+dl.position.set(EARTH_R*2,EARTH_R*3,EARTH_R*2);scene.add(dl);
+scene.add(new THREE.HemisphereLight(0x87ceeb,0x6b4a2a,0.3));
+const sg=new THREE.BufferGeometry();
+const sa=new Float32Array(2000*3);
+for(let i=0;i<2000*3;i++)sa[i]=(Math.random()-0.5)*EARTH_R*20;
+sg.setAttribute('position',new THREE.BufferAttribute(sa,3));
+scene.add(new THREE.Points(sg,new THREE.PointsMaterial({size:0.5,color:0xffffff})));
+const hGeo=new THREE.BoxGeometry(1.05,1.05,1.05);
+const hMesh=new THREE.Mesh(hGeo,new THREE.MeshBasicMaterial({color:0,wireframe:true,transparent:true,opacity:0.5}));
+hMesh.visible=false;scene.add(hMesh);
+const startLat=30,startLon=120;
+const startH=getHeight(startLat,startLon)+3;
+const sp=ll2xyz(startLat,startLon,startH);
+const player={lon:startLon,lat:startLat,h:startH,vy:0,onGround:false,yaw:0,pitch:0,slot:0,flying:false,mode:0};
+function playerXYZ(){return ll2xyz(player.lat,player.lon,player.h);}
+
+// ============ UI ============
+function drawIcon(ctx,block){
+  const c=COLORS[block];if(!c)return;
+  ctx.fillStyle='#'+c.top.toString(16).padStart(6,'0');
+  ctx.beginPath();ctx.moveTo(16,4);ctx.lineTo(28,10);ctx.lineTo(16,16);ctx.lineTo(4,10);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#'+c.side.toString(16).padStart(6,'0');
+  ctx.beginPath();ctx.moveTo(4,10);ctx.lineTo(16,16);ctx.lineTo(16,28);ctx.lineTo(4,22);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(28,10);ctx.lineTo(16,16);ctx.lineTo(16,28);ctx.lineTo(28,22);ctx.closePath();ctx.fill();
+}
+function buildHotbar(){
+  const hb=document.getElementById('hotbar');hb.innerHTML='';
+  for(let i=0;i<9;i++){
+    const s=document.createElement('div');s.className='s'+(i===player.slot?' a':'');
+    s.innerHTML='<span class="k">'+(i+1)+'</span><span class="n">'+(NAMES[HOTBAR[i]]||'')+'</span>';
+    const c=document.createElement('canvas');c.width=32;c.height=32;
+    drawIcon(c.getContext('2d'),HOTBAR[i]);s.appendChild(c);
+    s.onclick=()=>{player.slot=i;buildHotbar();};hb.appendChild(s);
+  }
+}
+buildHotbar();
+let invOpen=false,mapOpen=false;
+function toggleInv(){
+  invOpen=!invOpen;
+  document.getElementById('inv').style.display=invOpen?'block':'none';
+  if(invOpen){document.exitPointerLock();buildInvUI();}
+  else renderer.domElement.requestPointerLock();
+}
+function buildInvUI(){
+  const g=document.getElementById('invGrid');g.innerHTML='';
+  ALL_BLOCKS.forEach(b=>{
+    const s=document.createElement('div');s.className='is';s.title=NAMES[b]+' (无限)';
+    const c=document.createElement('canvas');c.width=32;c.height=32;
+    drawIcon(c.getContext('2d'),b);s.appendChild(c);
+    const n=document.createElement('span');n.className='in';n.textContent=NAMES[b];s.appendChild(n);
+    s.onclick=()=>{HOTBAR[player.slot]=b;buildHotbar();buildInvUI();};g.appendChild(s);
+  });
+}
+function toggleMap(){
+  mapOpen=!mapOpen;
+  document.getElementById('mapOverlay').style.display=mapOpen?'flex':'none';
+  if(mapOpen){document.exitPointerLock();renderMap();}
+  else renderer.domElement.requestPointerLock();
+}
+function renderMap(){
+  const cv=document.getElementById('mapCanvas'),ctx=cv.getContext('2d'),w=cv.width,h=cv.height;
+  const img=ctx.createImageData(w,h);
+  for(let sx=0;sx<w;sx++){
+    for(let sy=0;sy<h;sy++){
+      const lon=(sx/w)*360-180,lat=90-(sy/h)*180;
+      const ht=getHeight(lat,lon),bm=getBiome(lat,lon),hn=(ht-SEA_LV)/MAX_H;
+      let r,g,b;
+      if(bm==='ocean'){r=20+hn*20;g=40+hn*40;b=80+hn*60}
+      else if(bm==='desert'){r=180+hn*30;g=160+hn*30;b=100+hn*20}
+      else if(bm==='snow'){r=200+hn*40;g=200+hn*40;b=210+hn*30}
+      else if(bm==='forest'){r=40+hn*30;g=100+hn*50;b=30+hn*20}
+      else if(bm==='beach'){r=220+hn*20;g=200+hn*20;b=160+hn*20}
+      else{r=60+hn*40;g=130+hn*40;b=40+hn*20}
+      const i=(sy*w+sx)*4;
+      img.data[i]=Math.max(0,Math.min(255,r|0));
+      img.data[i+1]=Math.max(0,Math.min(255,g|0));
+      img.data[i+2]=Math.max(0,Math.min(255,b|0));
+      img.data[i+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  const px=((player.lon+180)/360)*w,py=((90-player.lat)/180)*h;
+  ctx.fillStyle='#f00';ctx.beginPath();ctx.arc(px,py,3,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+  document.getElementById('mapCoords').textContent='玩家: '+player.lat.toFixed(1)+'°N, '+player.lon.toFixed(1)+'°E | 点击传送';
+}
+
+document.getElementById('mapCanvas').onclick=e=>{
+  if(!mapOpen)return;
+  const r=e.target.getBoundingClientRect();
+  const sx=(e.clientX-r.left)/r.width,sy=(e.clientY-r.top)/r.height;
+  player.lon=sx*360-180;player.lat=90-sy*180;
+  player.h=getHeight(player.lat,player.lon)+3;player.vy=0;
+  renderMap();
+};
+
+// ============ 射线检测 ============
+function raycast(){
+  const dir=new THREE.Vector3(0,0,-1);
+  dir.applyEuler(new THREE.Euler(player.pitch,player.yaw,0,'YXZ'));
+  const pos=playerXYZ();
+  const step=0.1;let prev=null;
+  for(let d=step;d<6;d+=step){
+    const cp=pos.clone().add(dir.clone().multiplyScalar(d));
+    const ll=xyz2ll(cp);
+    const b=getBlock(Math.round(ll.lon),Math.round(ll.lat),Math.round(ll.h));
+    if(b!==BLOCK.AIR&&b!==BLOCK.WATER){
+      const rlon=Math.round(ll.lon),rlat=Math.round(ll.lat),rh=Math.round(ll.h);
+      if(!prev)prev=pos.clone();
+      const pll=xyz2ll(prev);
+      const prlon=Math.round(pll.lon),prlat=Math.round(pll.lat),prh=Math.round(pll.h);
+      return {lon:rlon,lat:rlat,h:rh,block:b,nlon:prlon-rlon,nlat:prlat-rlat,nh:prh-rh};
+    }
+    prev=cp.clone();
+  }
+  return null;
+}
+
+// ============ 碰撞检测 ============
+function solid(lon,lat,h){const b=getBlock(lon,lat,h);return b!==BLOCK.AIR&&b!==BLOCK.WATER;}
+function playerCollides(plon,plat,ph){
+  const w=0.3;
+  for(let dl=-w;dl<=w;dl+=w*2)
+    for(let dp=-w;dp<=w;dp+=w*2)
+      for(let dy=0;dy>=-PLAYER_H;dy-=0.5)
+        if(solid(Math.round(plon+dl),Math.round(plat+dp),Math.round(ph+dy)))return true;
+  return false;
+}
+
+// ============ 爆炸/炮弹 ============
+const particles=[];
+function explode(lon,lat,h,radius){
+  for(let dx=-radius;dx<=radius;dx++)
+    for(let dy=-radius;dy<=radius;dy++)
+      for(let dz=-radius;dz<=radius;dz++){
+        if(dx*dx+dy*dy+dz*dz>radius*radius)continue;
+        const b=getBlock(lon+dx,lat+dz,h+dy);
+        if(b!==BLOCK.AIR&&b!==BLOCK.BEDROCK)setBlock(lon+dx,lat+dz,h+dy,BLOCK.AIR);
+      }
+  const p=ll2xyz(lat,lon,h);
+  const geo=new THREE.SphereGeometry(0.15,4,4);
+  for(let i=0;i<30;i++){
+    const mat=new THREE.MeshBasicMaterial({color:new THREE.Color().setHSL(0.05+Math.random()*0.08,1,0.4+Math.random()*0.3),transparent:true,opacity:1});
+    const m=new THREE.Mesh(geo,mat);m.position.copy(p);
+    const v=new THREE.Vector3((Math.random()-0.5)*2,(Math.random()-0.5)*2,(Math.random()-0.5)*2).normalize().multiplyScalar(radius*2+Math.random()*5);
+    scene.add(m);particles.push({mesh:m,vel:v,life:0.8+Math.random()*0.5,age:0});
+  }
+}
+
+const cannonballs=[];
+function fireCannonball(){
+  const dir=new THREE.Vector3(0,0,-1);
+  dir.applyEuler(new THREE.Euler(player.pitch,player.yaw,0,'YXZ'));
+  const pos=playerXYZ();
+  const geo=new THREE.SphereGeometry(0.25,8,8);
+  const mat=new THREE.MeshLambertMaterial({color:0x222222,emissive:0x331100});
+  const m=new THREE.Mesh(geo,mat);
+  m.position.copy(pos).add(dir.clone().multiplyScalar(1.5));
+  scene.add(m);cannonballs.push({mesh:m,dir:dir.clone(),speed:50,age:0});
+}
+
+// ============ 输入处理 ============
+const keys={};
+let locked=false,lastSpace=0;
+
+document.onkeydown=e=>{
+  if(mapOpen&&e.code!=='KeyM'&&e.code!=='Escape')return;
+  if(invOpen&&e.code!=='KeyE'&&e.code!=='Escape')return;
+  keys[e.code]=true;
+  if(e.code==='Space'){
+    e.preventDefault();
+    const now=performance.now();
+    if(now-lastSpace<300){player.flying=!player.flying;player.vy=0;
+      document.getElementById('flyInfo').textContent=player.flying?'[飞行]':'';
+    }
+    lastSpace=now;
+  }
+  if(e.code>='Digit1'&&e.code<='Digit9'){player.slot=parseInt(e.code.slice(5))-1;buildHotbar();}
+  if(e.code==='KeyE'){e.preventDefault();toggleInv();}
+  if(e.code==='KeyF'){e.preventDefault();player.mode=(player.mode+1)%3;
+    const el=document.getElementById('modeInfo');
+    el.textContent='模式: '+MODES[player.mode]+' | F切换';
+    el.style.color=MODE_COL[player.mode];
+  }
+  if(e.code==='KeyM'){e.preventDefault();toggleMap();}
+  if(e.code==='Escape'){if(mapOpen)toggleMap();else if(invOpen)toggleInv();}
+};
+document.onkeyup=e=>{keys[e.code]=false};
+document.onwheel=e=>{
+  if(!locked||invOpen||mapOpen)return;
+  player.slot=e.deltaY>0?(player.slot+1)%9:(player.slot+8)%9;buildHotbar();
+};
+
+document.getElementById('startBtn').onclick=()=>renderer.domElement.requestPointerLock();
+
+document.addEventListener('pointerlockchange',()=>{
+  locked=document.pointerLockElement===renderer.domElement;
+  document.getElementById('blocker').style.display=locked?'none':'flex';
+  document.getElementById('crosshair').style.display=locked?'block':'none';
+  document.getElementById('hotbar').style.display=locked?'block':'none';
+  document.getElementById('info').style.display=locked?'block':'none';
+  document.getElementById('flyInfo').style.display=locked?'block':'none';
+  document.getElementById('modeInfo').style.display=locked?'block':'none';
+  if(locked){
+    const el=document.getElementById('modeInfo');
+    el.textContent='模式: '+MODES[player.mode]+' | F切换';
+    el.style.color=MODE_COL[player.mode];
+  }
+});
+
+document.onmousemove=e=>{
+  if(!locked||invOpen||mapOpen)return;
+  player.yaw-=e.movementX*0.002;
+  player.pitch-=e.movementY*0.002;
+  player.pitch=Math.max(-Math.PI/2+0.01,Math.min(Math.PI/2-0.01,player.pitch));
+};
+
+document.onmousedown=e=>{
+  if(!locked||invOpen||mapOpen)return;
+  if(e.button===0){
+    if(player.mode===0){
+      const hit=raycast();
+      if(hit&&hit.block!==BLOCK.BEDROCK)setBlock(hit.lon,hit.lat,hit.h,BLOCK.AIR);
+    }else if(player.mode===1){
+      const hit=raycast();
+      if(hit){
+        const plon=hit.lon+hit.nlon,plat=hit.lat+hit.nlat,ph=hit.h+hit.nh;
+        if(ph>=0&&ph<CHUNK_HEIGHT&&getBlock(plon,plat,ph)===BLOCK.AIR)
+          setBlock(plon,plat,ph,HOTBAR[player.slot]);
+      }
+    }else if(player.mode===2)fireCannonball();
+  }
+};
+document.oncontextmenu=e=>e.preventDefault();
+
+// ============ 区块更新 ============
+function updateChunks(){
+  const pcx=Math.floor((player.lon+WORLD_LON/2)/CHUNK_SIZE);
+  const pcz=Math.floor((player.lat+WORLD_LAT/2)/CHUNK_SIZE);
+  for(let dx=-RENDER_DIST;dx<=RENDER_DIST;dx++)
+    for(let dz=-RENDER_DIST;dz<=RENDER_DIST;dz++){
+      if(dx*dx+dz*dz>RENDER_DIST*RENDER_DIST)continue;
+      if(!chunks.has(ck(pcx+dx,pcz+dz)))genChunk(pcx+dx,pcz+dz);
+    }
+  let built=0;
+  for(const[_,ch]of chunks){
+    if(ch.dirty){buildChunkMesh(ch);built++;if(built>=4)break;}
+  }
+  for(const[k,ch]of chunks){
+    if((ch.cx-pcx)*(ch.cx-pcx)+(ch.cz-pcz)*(ch.cz-pcz)>(RENDER_DIST+2)*(RENDER_DIST+2)){
+      if(ch.mesh)ch.mesh.forEach(m=>{scene.remove(m);m.geometry.dispose();});
+      chunks.delete(k);
+    }
+  }
+  document.getElementById('chunkInfo').textContent='区块: '+chunks.size;
+}
+
+// ============ 主循环 ============
+let lastTime=performance.now(),frameCount=0,fpsTime=0,fps=0;
+
+function update(dt){
+  if(!locked||invOpen||mapOpen)return;
+  const cosLat=Math.cos(player.lat*Math.PI/180);
+  let spd=player.flying?(keys['ShiftLeft']?FLY_SPRINT_SPD:FLY_SPD):(keys['ShiftLeft']?SPRINT_SPD:WALK_SPD);
+  const dlon=spd/(EARTH_R*Math.max(cosLat,0.01))*180/Math.PI*dt;
+  const dlat=spd/EARTH_R*180/Math.PI*dt;
+
+  const fwd=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
+  const rgt=new THREE.Vector3(Math.cos(player.yaw),0,-Math.sin(player.yaw));
+
+  let mlon=0,mlat=0;
+  if(keys['KeyW'])mlat+=dlat;
+  if(keys['KeyS'])mlat-=dlat;
+  if(keys['KeyA'])mlon-=dlon;
+  if(keys['KeyD'])mlon+=dlon;
+
+  const mvLen=Math.sqrt(mlon*mlon+mlat*mlat);
+  if(mvLen>0){
+    const a=Math.atan2(mlon,mlat);
+    const fa=Math.atan2(fwd.x,fwd.z);
+    const na=a+fa;
+    mlon=Math.cos(na)*mvLen;mlat=Math.sin(na)*mvLen;
+  }
+
+  const nl=player.lon+mlon,nt=player.lat+mlat;
+
+  if(!player.flying){
+    if(!playerCollides(nl,nt,player.h)){player.lon=nl;player.lat=nt;}
+    player.vy-=GRAVITY*dt;
+    if(keys['Space']&&player.onGround){player.vy=JUMP_V;player.onGround=false;}
+    const fh=player.h+player.vy*dt;
+    if(!playerCollides(player.lon,player.lat,fh)){player.h=fh;player.onGround=false;}
+    else{if(player.vy<0)player.onGround=true;player.vy=0;}
+  }else{
+    player.lon=nl;player.lat=nt;
+    if(keys['Space'])player.h+=spd*dt;
+    if(keys['ShiftLeft'])player.h-=spd*dt;
+    player.vy=0;
+  }
+  if(player.h<1)player.h=1;
+
+  const p=playerXYZ();
+  camera.position.copy(p);
+  camera.position.y-=PLAYER_H*0.3;
+  camera.rotation.order='YXZ';
+  camera.rotation.y=player.yaw;
+  camera.rotation.x=player.pitch;
+
+  const hit=raycast();
+  hMesh.visible=hit!==null;
+  if(hit){
+    const hp=ll2xyz(hit.lat+0.5,hit.lon+0.5,hit.h+0.5);
+    hMesh.position.copy(hp);
+  }
+
+  document.getElementById('pos').textContent=
+    '位置: '+player.lat.toFixed(1)+'°N, '+player.lon.toFixed(1)+'°E, 高: '+Math.floor(player.h);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  const now=performance.now();
+  const dt=Math.min((now-lastTime)/1000,0.1);
+  lastTime=now;
+  frameCount++;fpsTime+=dt;
+  if(fpsTime>=1){fps=frameCount;frameCount=0;fpsTime=0;
+    document.getElementById('fps').textContent='FPS: '+fps;}
+  update(dt);updateChunks();
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];p.age+=dt;
+    if(p.age>=p.life){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();particles.splice(i,1);continue;}
+    p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
+    p.vel.y-=10*dt;
+    p.mesh.material.opacity=1-(p.age/p.life);
+    const s=1-p.age/p.life*0.5;p.mesh.scale.set(s,s,s);
+  }
+  for(let i=cannonballs.length-1;i>=0;i--){
+    const cb=cannonballs[i];cb.age+=dt;
+    const mv=cb.dir.clone().multiplyScalar(cb.speed*dt);
+    cb.mesh.position.add(mv);cb.dir.y-=5*dt;
+    const ll=xyz2ll(cb.mesh.position);
+    const bl=Math.round(ll.lon),bt=Math.round(ll.lat),bh=Math.round(ll.h);
+    const b=getBlock(bl,bt,bh);
+    if(b!==BLOCK.AIR&&b!==BLOCK.WATER){
+      explode(bl,bt,bh,4);
+      scene.remove(cb.mesh);cb.mesh.geometry.dispose();cb.mesh.material.dispose();cannonballs.splice(i,1);
+    }else if(cb.age>5){scene.remove(cb.mesh);cb.mesh.geometry.dispose();cb.mesh.material.dispose();cannonballs.splice(i,1);}
+  }
+  renderer.render(scene,camera);
+}
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+animate();
+})();
+</script>
+</body>
+</html>

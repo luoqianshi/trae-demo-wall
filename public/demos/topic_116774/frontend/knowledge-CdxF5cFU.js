@@ -1,0 +1,1 @@
+import{s as e}from"./request-Cp3RuJTv.js";const a=a=>e.get("/knowledge",{params:a}),s=a=>e.get(`/knowledge/${a}`),g=(a,s)=>e.put(`/knowledge/${a}/verify`,s),t=a=>e.get(`/graph/${a}`),r=()=>e.get("/graph");export{t as a,r as b,s as c,a as g,g as v};
