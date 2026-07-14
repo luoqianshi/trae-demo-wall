@@ -1,0 +1,1915 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 旅行管家 - TravelMate</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+  body { font-family: 'Noto Sans SC', sans-serif; }
+  .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #f3f4f6; padding: 24px; }
+  .btn-primary { background: #0284c7; color: white; padding: 12px 24px; border-radius: 8px; font-weight: 500; transition: background 0.2s; }
+  .btn-primary:hover { background: #0369a1; }
+  .ai-pulse { animation: pulse-amber 2s infinite; }
+  @keyframes pulse-amber {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  .typing { overflow: hidden; white-space: nowrap; animation: typing 2s steps(40, end); }
+  @keyframes typing { from { width: 0 } to { width: 100% } }
+  .page { display: none; }
+  .page.active { display: block; }
+  #map { height: 400px; border-radius: 12px; }
+
+  /* ===== 渐进式加载动画 ===== */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in {
+    animation: fadeSlideIn 0.45s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    opacity: 0;
+  }
+
+  /* 骨架屏闪烁 */
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  .skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 400px 100%;
+    animation: shimmer 1.5s infinite ease-in-out;
+    border-radius: 8px;
+  }
+  .skeleton-line { height: 14px; margin-bottom: 8px; }
+  .skeleton-line.w-3_4 { width: 75%; }
+  .skeleton-line.w-1_2 { width: 50%; }
+  .skeleton-line.w-full { width: 100%; }
+  .skeleton-block { height: 80px; }
+  .skeleton-weather { height: 90px; }
+
+  /* AI 思考指示器 */
+  @keyframes dotBounce {
+    0%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-6px); }
+  }
+  .thinking-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #0284c7;
+    margin: 0 2px;
+  }
+  .thinking-dot:nth-child(1) { animation: dotBounce 1.2s 0s infinite; }
+  .thinking-dot:nth-child(2) { animation: dotBounce 1.2s 0.2s infinite; }
+  .thinking-dot:nth-child(3) { animation: dotBounce 1.2s 0.4s infinite; }
+
+  /* 打字机光标 */
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .typing-cursor::after {
+    content: '▎';
+    animation: blink 0.8s infinite;
+    color: #7c3aed;
+    font-weight: 300;
+  }
+
+  /* 活动卡片入场 */
+  .activity-enter {
+    animation: fadeSlideIn 0.4s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    opacity: 0;
+  }
+
+  /* 天气卡片入场 */
+  .weather-enter {
+    animation: fadeSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    opacity: 0;
+  }
+
+  /* AI 建议区流式文字 */
+  .stream-text {
+    overflow: hidden;
+    border-right: 2px solid #7c3aed;
+    white-space: nowrap;
+    animation: blink 0.8s infinite;
+  }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+<!-- 导航栏 -->
+<nav class="bg-white shadow-sm border-b border-gray-100">
+  <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+    <a href="#" onclick="showPage('home')" class="flex items-center gap-2">
+      <svg class="w-7 h-7 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+      <span class="text-xl font-bold">AI 旅行管家</span>
+    </a>
+    <div class="flex gap-4">
+      <a href="#" onclick="showPage('home')" class="text-gray-600 hover:text-sky-600 transition">首页</a>
+      <a href="#" onclick="showPage('create')" class="text-gray-600 hover:text-sky-600 transition">规划行程</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 首页 -->
+<div id="page-home" class="page active">
+  <section class="bg-gradient-to-br from-sky-50 to-white py-20">
+    <div class="max-w-4xl mx-auto px-4 text-center">
+      <h1 class="text-4xl md:text-5xl font-bold text-gray-900 mb-6">帮您规划<br class="md:hidden">每一次旅程</h1>
+      <p class="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">整合天气、交通、住宿、打卡机位与避坑指南，<br>让每一次出发都省心、省钱、不踩雷</p>
+      <button onclick="showPage('create')" class="btn-primary inline-flex items-center gap-2 text-lg">
+        开始规划行程 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="py-16">
+    <div class="max-w-4xl mx-auto px-4">
+      <h2 class="text-2xl font-bold text-center mb-12">核心功能</h2>
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="card text-center">
+          <div class="text-3xl mb-3">🗺️</div>
+          <h3 class="font-semibold mb-2">智能路线规划</h3>
+          <p class="text-sm text-gray-500">整合天气、交通、住宿，一键生成最优行程</p>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl mb-3">☀️</div>
+          <h3 class="font-semibold mb-2">实时天气整合</h3>
+          <p class="text-sm text-gray-500">每日天气预警 + 穿衣建议，出行更安心</p>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl mb-3">⚠️</div>
+          <h3 class="font-semibold mb-2">避坑指南</h3>
+          <p class="text-sm text-gray-500">每个景点的真实坑点与消费陷阱提醒</p>
+        </div>
+        <div class="card text-center">
+          <div class="text-3xl mb-3">📸</div>
+          <h3 class="font-semibold mb-2">打卡机位</h3>
+          <p class="text-sm text-gray-500">热门与小众出片点，标注最佳拍摄时段</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-gray-100 py-16">
+    <div class="max-w-4xl mx-auto px-4">
+      <div class="card max-w-2xl mx-auto">
+        <h3 class="text-xl font-bold mb-4">示例：成都 3 日游</h3>
+        <div class="space-y-3">
+          <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg"><div class="w-16 text-sm font-medium text-gray-500">Day 1</div><div><div class="font-medium">宽窄巷子 → 锦里古街</div><div class="text-sm text-gray-500">文化街区漫步，品尝地道小吃</div></div></div>
+          <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg"><div class="w-16 text-sm font-medium text-gray-500">Day 2</div><div><div class="font-medium">大熊猫基地 → 武侯祠</div><div class="text-sm text-gray-500">早看熊猫，下午感受三国文化</div></div></div>
+          <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg"><div class="w-16 text-sm font-medium text-gray-500">Day 3</div><div><div class="font-medium">杜甫草堂 → 春熙路</div><div class="text-sm text-gray-500">诗意晨间，潮流午后</div></div></div>
+        </div>
+        <div class="mt-4 text-center"><button onclick="showPage('create')" class="text-sky-600 hover:text-sky-700 font-medium inline-flex items-center gap-1">生成你的专属行程 →</button></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- 创建行程 -->
+<div id="page-create" class="page">
+  <div class="max-w-2xl mx-auto px-4 py-12">
+    <h1 class="text-2xl font-bold mb-2">规划你的旅程</h1>
+    <p class="text-gray-500 mb-8">告诉我们你的偏好，豆包 AI 将为你实时规划专属行程</p>
+    <form id="tripForm" onsubmit="generateTrip(event)" class="space-y-8">
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">目的地</label>
+        <input type="text" id="cityInput" placeholder="输入任意城市或区县（如：喀什、阳朔、景德镇）" class="w-full px-4 py-3 rounded-lg border border-gray-200 mb-2 focus:ring-2 focus:ring-sky-500 focus:border-transparent" oninput="selectedCity=this.value.trim()||'成都'">
+        <div class="flex flex-wrap gap-2 text-xs text-gray-400">
+          <span>热门：</span>
+          <button type="button" onclick="setCity('成都')" class="hover:text-sky-600 transition">成都</button>
+          <button type="button" onclick="setCity('杭州')" class="hover:text-sky-600 transition">杭州</button>
+          <button type="button" onclick="setCity('北京')" class="hover:text-sky-600 transition">北京</button>
+          <button type="button" onclick="setCity('西安')" class="hover:text-sky-600 transition">西安</button>
+          <button type="button" onclick="setCity('重庆')" class="hover:text-sky-600 transition">重庆</button>
+          <button type="button" onclick="setCity('大理')" class="hover:text-sky-600 transition">大理</button>
+          <button type="button" onclick="setCity('厦门')" class="hover:text-sky-600 transition">厦门</button>
+          <button type="button" onclick="setCity('喀什')" class="hover:text-sky-600 transition">喀什</button>
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">预计旅行日期</label>
+        <div class="grid grid-cols-2 gap-4">
+          <input type="date" id="startDate" class="w-full px-4 py-3 rounded-lg border border-gray-200" onchange="calcDaysFromDate()">
+          <input type="date" id="endDate" class="w-full px-4 py-3 rounded-lg border border-gray-200" onchange="calcDaysFromDate()">
+        </div>
+        <div class="text-center text-sm text-gray-500 mt-2" id="daysLabel">共 2 天</div>
+        <input type="hidden" id="days" value="2">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">出行人数</label>
+        <select id="travelers" class="w-full px-4 py-3 rounded-lg border border-gray-200"><option value="1">1 人</option><option value="2" selected>2 人</option><option value="3">3 人</option><option value="4">4 人</option><option value="5">5 人</option><option value="6">6 人</option></select>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">旅游节奏</label>
+        <div class="grid grid-cols-3 gap-2" id="paceBtns">
+          <button type="button" data-pace="relaxed" class="pace-btn px-4 py-3 rounded-lg border-2 transition-all text-center">
+            <div class="text-lg">🍵</div>
+            <div class="text-sm font-semibold text-gray-800">悠闲</div>
+            <div class="text-xs text-gray-500 mt-0.5">1大景点+1小景点/天</div>
+          </button>
+          <button type="button" data-pace="moderate" class="pace-btn px-4 py-3 rounded-lg border-2 transition-all text-center border-sky-500 bg-sky-50">
+            <div class="text-lg">🚶</div>
+            <div class="text-sm font-semibold text-gray-800">适中</div>
+            <div class="text-xs text-gray-500 mt-0.5">1大景点+2~3小景点/天</div>
+          </button>
+          <button type="button" data-pace="compact" class="pace-btn px-4 py-3 rounded-lg border-2 transition-all text-center">
+            <div class="text-lg">🏃</div>
+            <div class="text-sm font-semibold text-gray-800">紧凑</div>
+            <div class="text-xs text-gray-500 mt-0.5">2大景点+2~3小景点/天</div>
+          </button>
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">人均预算（元）</label>
+        <input type="range" id="budgetRange" min="500" max="10000" step="500" value="2000" class="w-full" oninput="document.getElementById('budgetVal').innerText=this.value+' 元'">
+        <div class="text-center text-sky-600 font-semibold mt-1" id="budgetVal">2000 元</div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">旅行偏好（多选）</label>
+        <div class="flex flex-wrap gap-2" id="prefBtns"></div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-gray-700 mb-2 block">想避开（多选）</label>
+        <div class="flex flex-wrap gap-2" id="avoidBtns"></div>
+      </div>
+      <button type="submit" id="genBtn" class="w-full btn-primary flex items-center justify-center gap-2">AI 为你规划行程</button>
+    </form>
+  </div>
+</div>
+
+<!-- 行程详情 -->
+<div id="page-detail" class="page">
+  <div class="max-w-4xl mx-auto px-4 py-8" id="detailContent"></div>
+</div>
+
+<script>
+// ===== 高德地图 API 配置（JSONP 方式，无需服务端，纯前端可用）=====
+const AMAP_KEY = '623fd905f93e42a9ed61d0d1ecbd4891';
+const AMAP_BASE = 'https://restapi.amap.com/v3';
+// ===== 和风天气 API 配置 =====
+const QWEATHER_KEY = 'a16ab7302025453d9d96dd7c6c451e9f';
+const QWEATHER_GEO = 'https://geoapi.qweather.com/v2';
+const QWEATHER_DEV = 'https://devapi.qweather.com/v7';
+// POI 类型映射：景点(110000=风景名胜, 110100=公园广场, 110200=博物馆), 美食(050000), 购物(060000)
+const POI_TYPE_MAP = {
+  '文化': '110100|110200',   // 文化街区/博物馆
+  '摄影': '110000|110100',    // 风景名胜/公园
+  '休闲': '110100|060000',    // 公园/购物
+  '购物': '060000',
+  '夜景': '110000',
+  '户外': '110000|110100',
+  '美食': '050000'
+};
+// 通用 JSONP 请求工具（支持任意 API，useCallback 控制是否追加 callback）
+let jsonpCallbackId = 0;
+function jsonpRequest(url, timeoutMs = 8000, useCallback = true) {
+  return new Promise((resolve, reject) => {
+    const cbName = `jsonp_cb_${++jsonpCallbackId}`;
+    let settled = false; // 防止多次 resolve/reject
+    const timeout = setTimeout(() => {
+      if (!settled) { settled = true; cleanup(); reject(new Error('请求超时')); }
+    }, timeoutMs);
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[cbName];
+      const s = document.getElementById(cbName);
+      if (s) { s.onload = null; s.onerror = null; s.remove(); }
+    }
+    if (useCallback) {
+      window[cbName] = (data) => {
+        if (!settled) { settled = true; cleanup(); resolve(data); }
+      };
+      const separator = url.includes('?') ? '&' : '?';
+      const script = document.createElement('script');
+      script.id = cbName;
+      script.src = `${url}${separator}output=JSON&callback=${cbName}`;
+      script.onload = () => {
+        // 如果 JSONP callback 没被调用但 script 加载完了，可能是 CORS 错误
+        // 但我们不在这里 reject，等超时处理
+      };
+      script.onerror = () => {
+        if (!settled) { settled = true; cleanup(); reject(new Error('加载失败')); }
+      };
+      document.head.appendChild(script);
+    } else {
+      // 非 JSONP 模式：用 fetch + 绕过 CORS（仅用于支持 CORS 的 API）
+      fetch(url)
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(data => { cleanup(); resolve(data); })
+        .catch(err => { cleanup(); reject(err); });
+    }
+  });
+}
+// 兼容旧代码的别名
+function amapJSONP(url, timeoutMs) { return jsonpRequest(url, timeoutMs || 8000, true); }
+// POI 缓存，避免重复请求
+const poiCache = {};
+
+// ===== 配置数据 =====
+const PREFERENCES = ['美食', '摄影', '休闲', '文化', '购物', '夜景', '户外'];
+const AVOID_OPTIONS = ['辣', '爬山', '人多', '早起', '长途步行'];
+const ICON_MAP = {
+  '晴':'☀️','多云':'⛅','少云':'⛅','晴间多云':'⛅','局部多云':'⛅',
+  '小雨':'🌧️','中雨':'🌧️','大雨':'🌧️','暴雨':'🌧️','大暴雨':'🌧️','特大暴雨':'🌧️',
+  '阵雨':'🌦️','强阵雨':'🌦️','雷阵雨':'⛈️','强雷阵雨':'⛈️',
+  '阴':'☁️','雾':'🌫️','霾':'🌫️','浮尘':'🌫️','扬沙':'🌫️',
+  '小雪':'❄️','中雪':'❄️','大雪':'❄️','暴雪':'❄️','雨夹雪':'🌨️',
+  '风':'💨','大风':'💨','飓风':'🌪️','龙卷风':'🌪️'
+};
+
+const mockSpots = {
+  '成都': [
+    { name:'宽窄巷子', category:'文化街区', duration:120, cost:0, rating:4.2, coords:[104.055,30.67], metro:'地铁4号线 宽窄巷子站B口出' },
+    { name:'锦里古街', category:'文化街区', duration:150, cost:0, rating:4.3, coords:[104.048,30.645], metro:'地铁3号线 高升桥站C口出，步行约10分钟' },
+    { name:'大熊猫繁育研究基地', category:'动物园', duration:240, cost:55, rating:4.7, coords:[104.145,30.735], metro:'地铁3号线 熊猫大道站A口出，换乘景区直通车约10分钟' },
+    { name:'武侯祠', category:'历史古迹', duration:90, cost:50, rating:4.4, coords:[104.045,30.64], metro:'地铁3号线 高升桥站D口出，步行约5分钟' },
+    { name:'杜甫草堂', category:'历史古迹', duration:90, cost:50, rating:4.3, coords:[104.03,30.66], metro:'地铁4号线 草堂北路站B口出，步行约8分钟' },
+    { name:'春熙路 / IFS', category:'购物商圈', duration:120, cost:0, rating:4.5, coords:[104.08,30.655], metro:'地铁2/3号线 春熙路站C口出' },
+    { name:'人民公园', category:'公园', duration:90, cost:0, rating:4.1, coords:[104.055,30.66], metro:'地铁2号线 人民公园站A口出' },
+    { name:'建设路小吃街', category:'美食街', duration:90, cost:80, rating:4.5, coords:[104.105,30.675], metro:'地铁6号线 建设北路站D口出，步行约3分钟' }
+  ],
+  '杭州': [
+    { name:'西湖', category:'自然风光', duration:180, cost:0, rating:4.8, coords:[120.145,30.24], metro:'地铁1号线 龙翔桥站C口出，步行约5分钟' },
+    { name:'灵隐寺', category:'寺庙', duration:120, cost:75, rating:4.6, coords:[120.1,30.24], metro:'地铁1号线 定安路站换乘7路公交至灵隐站，约30分钟' },
+    { name:'宋城', category:'主题乐园', duration:300, cost:320, rating:4.4, coords:[120.115,30.185], metro:'地铁4号线 南星桥站换乘公交39路至宋城站，约20分钟' },
+    { name:'河坊街', category:'文化街区', duration:120, cost:0, rating:4.2, coords:[120.17,30.24], metro:'地铁1号线 定安路站A口出，步行约3分钟' },
+    { name:'西溪湿地', category:'自然风光', duration:180, cost:80, rating:4.5, coords:[120.065,30.27], metro:'地铁5号线 西溪湿地北站B口出，步行约5分钟' }
+  ],
+  '重庆': [
+    { name:'洪崖洞', category:'地标建筑', duration:120, cost:0, rating:4.6, coords:[106.58,29.565], metro:'地铁1/6号线 小什字站5B口出，步行约8分钟' },
+    { name:'解放碑', category:'商圈', duration:90, cost:0, rating:4.4, coords:[106.575,29.56], metro:'地铁1/2/6号线 临江门站B口出，步行约3分钟' },
+    { name:'长江索道', category:'交通观光', duration:30, cost:20, rating:4.3, coords:[106.585,29.555], metro:'地铁1/6号线 小什字站步行约10分钟至新华路索道站' },
+    { name:'磁器口古镇', category:'文化街区', duration:150, cost:0, rating:4.2, coords:[106.455,29.58], metro:'地铁1号线 磁器口站1号口出，步行约5分钟' },
+    { name:'李子坝轻轨站', category:'地标建筑', duration:30, cost:0, rating:4.5, coords:[106.53,29.555], metro:'地铁2号线 李子坝站出站即到观景平台' }
+  ],
+  '广州': [
+    { name:'广州塔', category:'地标建筑', duration:120, cost:150, rating:4.7, coords:[113.325,23.106], metro:'地铁3号线/APM线 广州塔站A口出' },
+    { name:'沙面岛', category:'文化街区', duration:120, cost:0, rating:4.5, coords:[113.245,23.11], metro:'地铁1/6号线 黄沙站E口出，步行约5分钟' },
+    { name:'陈家祠', category:'历史古迹', duration:90, cost:10, rating:4.4, coords:[113.245,23.125], metro:'地铁1/8号线 陈家祠站D口出' },
+    { name:'北京路步行街', category:'购物商圈', duration:120, cost:0, rating:4.3, coords:[113.265,23.125], metro:'地铁6号线 北京路站B口出' },
+    { name:'珠江夜游', category:'交通观光', duration:60, cost:78, rating:4.6, coords:[113.265,23.11], metro:'地铁2号线 海珠广场站A口出，步行至天字码头' },
+    { name:'上下九步行街', category:'美食街', duration:90, cost:0, rating:4.2, coords:[113.24,23.115], metro:'地铁1号线 长寿路站D口出' },
+    { name:'白云山', category:'自然风光', duration:240, cost:5, rating:4.5, coords:[113.295,23.185], metro:'地铁3号线 永泰站B2口出，换乘公交至白云山南门' }
+  ],
+  '北京': [
+    { name:'故宫', category:'历史古迹', duration:180, cost:60, rating:4.9, coords:[116.397,39.915], metro:'地铁1号线 天安门东站B口出' },
+    { name:'长城（八达岭）', category:'历史古迹', duration:300, cost:40, rating:4.8, coords:[116.02,40.359], metro:'地铁2号线 积水潭站换乘877路公交，约70分钟' },
+    { name:'天坛', category:'历史古迹', duration:120, cost:34, rating:4.6, coords:[116.407,39.882], metro:'地铁5号线 天坛东门站A2口出' },
+    { name:'南锣鼓巷', category:'文化街区', duration:90, cost:0, rating:4.4, coords:[116.403,39.932], metro:'地铁6/8号线 南锣鼓巷站E口出' },
+    { name:'颐和园', category:'历史古迹', duration:180, cost:30, rating:4.7, coords:[116.275,39.999], metro:'地铁4号线 北宫门站D口出' },
+    { name:'王府井', category:'购物商圈', duration:120, cost:0, rating:4.3, coords:[116.41,39.91], metro:'地铁1/8号线 王府井站E3口出' },
+    { name:'什刹海', category:'公园', duration:120, cost:0, rating:4.5, coords:[116.385,39.94], metro:'地铁6号线 北海北站B口出' }
+  ],
+  '上海': [
+    { name:'外滩', category:'地标建筑', duration:90, cost:0, rating:4.8, coords:[121.49,31.24], metro:'地铁2/10号线 南京东路站7号口出，步行约10分钟' },
+    { name:'东方明珠', category:'地标建筑', duration:120, cost:199, rating:4.6, coords:[121.495,31.24], metro:'地铁2号线 陆家嘴站1号口出' },
+    { name:'豫园 / 城隍庙', category:'历史古迹', duration:120, cost:40, rating:4.4, coords:[121.49,31.225], metro:'地铁10号线 豫园站1号口出' },
+    { name:'南京路步行街', category:'购物商圈', duration:120, cost:0, rating:4.5, coords:[121.475,31.235], metro:'地铁1/2/8号线 人民广场站19号口出' },
+    { name:'田子坊', category:'文化街区', duration:90, cost:0, rating:4.3, coords:[121.465,31.21], metro:'地铁9号线 打浦桥站1号口出' },
+    { name:'迪士尼', category:'主题乐园', duration:480, cost:475, rating:4.7, coords:[121.66,31.14], metro:'地铁11号线 迪士尼站1号口出' },
+    { name:'武康路', category:'文化街区', duration:90, cost:0, rating:4.5, coords:[121.435,31.21], metro:'地铁10/11号线 交通大学站7号口出' }
+  ],
+  '西安': [
+    { name:'兵马俑', category:'历史古迹', duration:180, cost:120, rating:4.8, coords:[109.28,34.385], metro:'地铁9号线 华清池站换乘临潼游5路，约40分钟' },
+    { name:'大雁塔', category:'历史古迹', duration:90, cost:50, rating:4.6, coords:[108.965,34.22], metro:'地铁3/4号线 大雁塔站C口出' },
+    { name:'回民街', category:'美食街', duration:120, cost:0, rating:4.3, coords:[108.945,34.265], metro:'地铁2号线 钟楼站A口出，步行约8分钟' },
+    { name:'古城墙', category:'历史古迹', duration:120, cost:54, rating:4.5, coords:[108.945,34.26], metro:'地铁2号线 永宁门站A2口出' },
+    { name:'大唐不夜城', category:'文化街区', duration:120, cost:0, rating:4.6, coords:[108.96,34.215], metro:'地铁3/4号线 大雁塔站B口出，步行约5分钟' },
+    { name:'陕西历史博物馆', category:'博物馆', duration:150, cost:0, rating:4.7, coords:[108.955,34.225], metro:'地铁2/3号线 小寨站E口出，步行约10分钟' }
+  ],
+  '厦门': [
+    { name:'鼓浪屿', category:'自然风光', duration:360, cost:35, rating:4.7, coords:[118.085,24.445], metro:'地铁1号线 镇海路站1号口出，步行至轮渡码头乘船约10分钟' },
+    { name:'厦门大学', category:'文化街区', duration:90, cost:0, rating:4.5, coords:[118.095,24.435], metro:'地铁1号线 镇海路站换乘公交至厦大西村站' },
+    { name:'南普陀寺', category:'寺庙', duration:60, cost:0, rating:4.4, coords:[118.1,24.44], metro:'地铁1号线 镇海路站换乘公交至厦大站，步行约5分钟' },
+    { name:'曾厝垵', category:'美食街', duration:120, cost:0, rating:4.2, coords:[118.125,24.43], metro:'地铁1号线 中山公园站换乘公交至曾厝垵站' },
+    { name:'环岛路', category:'自然风光', duration:180, cost:0, rating:4.6, coords:[118.13,24.445], metro:'建议骑行或打车沿环岛路游览' },
+    { name:'中山路步行街', category:'购物商圈', duration:120, cost:0, rating:4.3, coords:[118.085,24.46], metro:'地铁1号线 镇海路站1号口出' }
+  ],
+  '深圳': [
+    { name:'世界之窗', category:'主题乐园', duration:240, cost:220, rating:4.4, coords:[113.975,22.535], metro:'地铁1/2号线 世界之窗站H1口出' },
+    { name:'欢乐谷', category:'主题乐园', duration:300, cost:230, rating:4.5, coords:[113.975,22.54], metro:'地铁1/2号线 世界之窗站A口出，步行约5分钟' },
+    { name:'东部华侨城', category:'自然风光', duration:360, cost:180, rating:4.3, coords:[114.295,22.625], metro:'地铁8号线 盐田港西站换乘公交909路至东部华侨城站' },
+    { name:'深圳湾公园', category:'公园', duration:120, cost:0, rating:4.6, coords:[113.945,22.52], metro:'地铁9号线 深圳湾公园站D2口出' },
+    { name:'东门老街', category:'购物商圈', duration:120, cost:0, rating:4.2, coords:[114.06,22.545], metro:'地铁1/3号线 老街站F口出' },
+    { name:'大梅沙海滩', category:'自然风光', duration:180, cost:0, rating:4.4, coords:[114.305,22.595], metro:'地铁8号线 盐田港西站换乘公交至大梅沙站' }
+  ],
+  '南京': [
+    { name:'中山陵', category:'历史古迹', duration:180, cost:0, rating:4.7, coords:[118.85,32.055], metro:'地铁2号线 苜蓿园站1号口出，换乘景区观光车约10分钟' },
+    { name:'夫子庙 / 秦淮河', category:'文化街区', duration:150, cost:0, rating:4.5, coords:[118.795,32.02], metro:'地铁3号线 夫子庙站2号口出' },
+    { name:'总统府', category:'历史古迹', duration:120, cost:35, rating:4.6, coords:[118.8,32.045], metro:'地铁2/3号线 大行宫站5号口出，步行约5分钟' },
+    { name:'玄武湖', category:'公园', duration:120, cost:0, rating:4.4, coords:[118.78,32.065], metro:'地铁1号线 玄武门站3号口出' },
+    { name:'老门东', category:'文化街区', duration:90, cost:0, rating:4.3, coords:[118.79,32.015], metro:'地铁3号线 武定门站2号口出，步行约8分钟' },
+    { name:'鸡鸣寺', category:'寺庙', duration:60, cost:10, rating:4.5, coords:[118.735,32.06], metro:'地铁3/4号线 鸡鸣寺站5号口出' }
+  ],
+  '武汉': [
+    { name:'黄鹤楼', category:'历史古迹', duration:90, cost:70, rating:4.6, coords:[114.3,30.545], metro:'地铁5号线 司门口黄鹤楼站A口出，步行约10分钟' },
+    { name:'东湖', category:'自然风光', duration:180, cost:0, rating:4.5, coords:[114.37,30.565], metro:'地铁8号线 梨园站C口出' },
+    { name:'户部巷', category:'美食街', duration:90, cost:0, rating:4.3, coords:[114.295,30.545], metro:'地铁5号线 司门口黄鹤楼站C口出，步行约5分钟' },
+    { name:'湖北省博物馆', category:'博物馆', duration:150, cost:0, rating:4.7, coords:[114.365,30.56], metro:'地铁8号线 省博湖北日报站A口出' },
+    { name:'江汉路步行街', category:'购物商圈', duration:120, cost:0, rating:4.4, coords:[114.29,30.585], metro:'地铁2/6号线 江汉路站E口出' },
+    { name:'昙华林', category:'文化街区', duration:90, cost:0, rating:4.2, coords:[114.315,30.555], metro:'地铁2/7号线 螃蟹岬站A2口出，步行约10分钟' }
+  ],
+  '长沙': [
+    { name:'橘子洲', category:'公园', duration:180, cost:0, rating:4.6, coords:[112.955,28.18], metro:'地铁2号线 橘子洲站2号口出' },
+    { name:'岳麓山 / 岳麓书院', category:'自然风光', duration:180, cost:50, rating:4.5, coords:[112.935,28.185], metro:'地铁4号线 湖南大学站2号口出，步行约10分钟' },
+    { name:'太平老街', category:'美食街', duration:90, cost:0, rating:4.4, coords:[112.965,28.195], metro:'地铁1/2号线 五一广场站1号口出，步行约8分钟' },
+    { name:'湖南省博物馆', category:'博物馆', duration:150, cost:0, rating:4.7, coords:[112.985,28.215], metro:'地铁6号线 湘雅医院站3号口出' },
+    { name:'IFS国金中心', category:'购物商圈', duration:90, cost:0, rating:4.3, coords:[112.975,28.195], metro:'地铁1/2号线 五一广场站11号口出' },
+    { name:'文和友', category:'美食街', duration:120, cost:0, rating:4.5, coords:[112.97,28.19], metro:'地铁1号线 黄兴广场站2号口出，步行约5分钟' }
+  ],
+  '苏州': [
+    { name:'拙政园', category:'历史古迹', duration:120, cost:80, rating:4.7, coords:[120.625,31.32], metro:'地铁4号线 北寺塔站4号口出，步行约15分钟' },
+    { name:'平江路', category:'文化街区', duration:120, cost:0, rating:4.5, coords:[120.63,31.315], metro:'地铁1号线 相门站3号口出，步行约8分钟' },
+    { name:'虎丘', category:'历史古迹', duration:150, cost:70, rating:4.6, coords:[120.575,31.335], metro:'地铁6号线 虎丘站3号口出' },
+    { name:'山塘街', category:'文化街区', duration:90, cost:0, rating:4.4, coords:[120.575,31.32], metro:'地铁2号线 山塘街站1号口出' },
+    { name:'金鸡湖', category:'公园', duration:120, cost:0, rating:4.5, coords:[120.715,31.315], metro:'地铁1号线 东方之门站3号口出' },
+    { name:'苏州博物馆', category:'博物馆', duration:90, cost:0, rating:4.6, coords:[120.625,31.32], metro:'地铁4号线 北寺塔站4号口出，步行约10分钟' }
+  ],
+  '大理': [
+    { name:'大理古城', category:'文化街区', duration:180, cost:0, rating:4.5, coords:[100.165,25.695], metro:'古城内建议步行或租电瓶车游览' },
+    { name:'洱海', category:'自然风光', duration:360, cost:0, rating:4.7, coords:[100.185,25.785], metro:'建议租电瓶车或包车环海游览' },
+    { name:'苍山', category:'自然风光', duration:240, cost:35, rating:4.4, coords:[100.135,25.685], metro:'古城南门乘坐感通索道专线车约20分钟' },
+    { name:'崇圣寺三塔', category:'历史古迹', duration:90, cost:75, rating:4.3, coords:[100.155,25.71], metro:'古城北门乘坐公交三塔专线约15分钟' },
+    { name:'喜洲古镇', category:'文化街区', duration:120, cost:0, rating:4.4, coords:[100.125,25.86], metro:'古城西门乘坐中巴车至喜洲约30分钟' },
+    { name:'双廊', category:'自然风光', duration:180, cost:0, rating:4.5, coords:[100.195,25.915], metro:'建议包车或乘坐环海巴士约50分钟' }
+  ]
+};
+
+const mockTransits = {
+  '成都': [
+    {from:'宽窄巷子', to:'锦里古街', detail:'地铁4号线(宽窄巷子站)→骡马市站换乘1号线→省体育馆站换乘3号线→高升桥站，约25分钟，票价4元'},
+    {from:'武侯祠', to:'锦里古街', detail:'步行约5分钟即可到达，无需坐车'},
+    {from:'春熙路', to:'宽窄巷子', detail:'地铁2号线(春熙路站)→天府广场站换乘4号线→宽窄巷子站，约15分钟，票价3元'},
+    {from:'宽窄巷子', to:'大熊猫基地', detail:'地铁4号线(宽窄巷子站)→驷马桥站换乘3号线→熊猫大道站，换乘景区直通车约10分钟，全程约50分钟'},
+    {from:'杜甫草堂', to:'春熙路', detail:'地铁4号线(草堂北路站)→中医大省医院站换乘2号线→春熙路站，约20分钟，票价3元'},
+  ],
+  '杭州': [
+    {from:'西湖', to:'河坊街', detail:'步行约15分钟沿南山路→河坊街，或公交7路/W3路约10分钟'},
+    {from:'河坊街', to:'灵隐寺', detail:'地铁1号线(定安路站)→龙翔桥站换乘7路公交→灵隐站，约35分钟'},
+    {from:'西湖', to:'西溪湿地', detail:'地铁1号线(龙翔桥站)→武林广场站换乘3号线→西溪湿地北站，约25分钟'},
+  ],
+  '重庆': [
+    {from:'解放碑', to:'洪崖洞', detail:'步行约10分钟沿嘉陵江滨江路，或打车约8元5分钟'},
+    {from:'洪崖洞', to:'磁器口', detail:'地铁1号线(小什字站)→磁器口站，约35分钟，票价5元'},
+    {from:'解放碑', to:'李子坝', detail:'地铁2号线(临江门站)→李子坝站，约15分钟，票价3元'},
+  ],
+  '广州': [
+    {from:'广州塔', to:'沙面岛', detail:'地铁3号线(广州塔站)→体育西路站换乘1号线→黄沙站，约25分钟，票价4元'},
+    {from:'沙面岛', to:'陈家祠', detail:'地铁1号线(黄沙站)→陈家祠站，约8分钟，票价2元'},
+    {from:'北京路', to:'广州塔', detail:'地铁6号线(北京路站)→海珠广场站换乘2号线→广州塔站，约15分钟，票价3元'},
+    {from:'上下九', to:'沙面岛', detail:'步行约10分钟沿第十甫路→沙面岛，无需坐车'},
+    {from:'陈家祠', to:'北京路', detail:'地铁1号线(陈家祠站)→公园前站换乘2号线→北京路站，约12分钟，票价2元'},
+  ],
+  '北京': [
+    {from:'故宫', to:'南锣鼓巷', detail:'地铁1号线(天安门东站)→东单站换乘5号线→张自忠路站，约20分钟，票价3元'},
+    {from:'南锣鼓巷', to:'什刹海', detail:'步行约15分钟沿地安门东大街→什刹海，或地铁6号线(南锣鼓巷站)→北海北站，约5分钟'},
+    {from:'王府井', to:'故宫', detail:'地铁1号线(王府井站)→天安门东站，约5分钟，票价3元'},
+    {from:'天坛', to:'王府井', detail:'地铁5号线(天坛东门站)→东单站换乘1号线→王府井站，约18分钟，票价3元'},
+    {from:'颐和园', to:'故宫', detail:'地铁4号线(北宫门站)→西单站换乘1号线→天安门东站，约45分钟，票价5元'},
+  ],
+  '上海': [
+    {from:'外滩', to:'豫园', detail:'步行约15分钟沿中山东二路→豫园，或地铁10号线(南京东路站)→豫园站，约5分钟'},
+    {from:'外滩', to:'南京路', detail:'步行约10分钟沿南京东路步行街，无需坐车'},
+    {from:'南京路', to:'田子坊', detail:'地铁9号线(陆家浜路站)→打浦桥站，约20分钟，票价3元'},
+    {from:'东方明珠', to:'外滩', detail:'地铁2号线(陆家嘴站)→南京东路站，约8分钟，票价3元'},
+    {from:'田子坊', to:'武康路', detail:'地铁10号线(打浦桥站)→交通大学站，约15分钟，票价3元'},
+  ],
+  '西安': [
+    {from:'大雁塔', to:'大唐不夜城', detail:'步行约5分钟沿雁塔南路，无需坐车'},
+    {from:'古城墙', to:'回民街', detail:'地铁2号线(永宁门站)→钟楼站，约8分钟，票价2元'},
+    {from:'回民街', to:'古城墙', detail:'步行约8分钟沿北大街→古城墙南门，无需坐车'},
+    {from:'陕西历史博物馆', to:'大雁塔', detail:'步行约10分钟沿小寨东路→大雁塔，无需坐车'},
+    {from:'大雁塔', to:'古城墙', detail:'地铁3号线(大雁塔站)→永宁门站，约15分钟，票价3元'},
+  ],
+  '厦门': [
+    {from:'中山路', to:'鼓浪屿', detail:'步行至轮渡码头乘船约10分钟至鼓浪屿三丘田码头，船票35元'},
+    {from:'厦门大学', to:'南普陀寺', detail:'步行约5分钟沿思明南路，无需坐车'},
+    {from:'曾厝垵', to:'环岛路', detail:'步行约10分钟沿环岛南路，或骑行约5分钟'},
+    {from:'鼓浪屿', to:'中山路', detail:'乘船返回轮渡码头，步行约5分钟至中山路'},
+  ],
+  '深圳': [
+    {from:'世界之窗', to:'欢乐谷', detail:'步行约5分钟沿深南大道，无需坐车'},
+    {from:'深圳湾公园', to:'世界之窗', detail:'地铁1号线(华侨城站)→世界之窗站，约15分钟，票价3元'},
+    {from:'东门老街', to:'世界之窗', detail:'地铁1号线(老街站)→世界之窗站，约25分钟，票价5元'},
+  ],
+  '南京': [
+    {from:'夫子庙', to:'老门东', detail:'步行约15分钟沿箍桶巷，或地铁3号线(夫子庙站)→武定门站，约5分钟'},
+    {from:'总统府', to:'夫子庙', detail:'地铁3号线(大行宫站)→夫子庙站，约8分钟，票价2元'},
+    {from:'玄武湖', to:'鸡鸣寺', detail:'步行约10分钟沿玄武门路→鸡鸣寺路，无需坐车'},
+    {from:'中山陵', to:'玄武湖', detail:'地铁2号线(苜蓿园站)→新街口站换乘1号线→玄武门站，约25分钟，票价3元'},
+  ],
+  '武汉': [
+    {from:'黄鹤楼', to:'户部巷', detail:'步行约5分钟沿民主路→户部巷，无需坐车'},
+    {from:'户部巷', to:'黄鹤楼', detail:'步行约5分钟，无需坐车'},
+    {from:'湖北省博物馆', to:'东湖', detail:'步行约10分钟沿东湖路，无需坐车'},
+    {from:'江汉路', to:'黄鹤楼', detail:'地铁2号线(江汉路站)→积玉桥站换乘5号线→司门口黄鹤楼站，约20分钟，票价3元'},
+  ],
+  '长沙': [
+    {from:'橘子洲', to:'太平老街', detail:'地铁2号线(橘子洲站)→五一广场站，约10分钟，票价2元'},
+    {from:'太平老街', to:'文和友', detail:'步行约10分钟沿解放西路→海信广场，无需坐车'},
+    {from:'岳麓山', to:'橘子洲', detail:'地铁4号线(湖南大学站)→溁湾镇站换乘2号线→橘子洲站，约15分钟，票价2元'},
+    {from:'IFS', to:'太平老街', detail:'步行约8分钟沿解放西路，无需坐车'},
+  ],
+  '苏州': [
+    {from:'拙政园', to:'平江路', detail:'步行约15分钟沿东北街→平江路，无需坐车'},
+    {from:'平江路', to:'苏州博物馆', detail:'步行约10分钟沿东北街，无需坐车'},
+    {from:'山塘街', to:'拙政园', detail:'地铁4号线(北寺塔站)→北寺塔站，步行约15分钟，约20分钟'},
+    {from:'金鸡湖', to:'山塘街', detail:'地铁1号线(东方之门站)→广济南路站换乘2号线→山塘街站，约30分钟，票价4元'},
+  ],
+  '大理': [
+    {from:'大理古城', to:'崇圣寺三塔', detail:'古城北门乘坐公交三塔专线约15分钟，票价3元'},
+    {from:'大理古城', to:'喜洲古镇', detail:'古城西门乘坐中巴车约30分钟，票价10元'},
+    {from:'洱海', to:'双廊', detail:'建议包车或乘坐环海巴士约50分钟'},
+    {from:'苍山', to:'大理古城', detail:'乘坐感通索道专线车约20分钟'},
+  ]
+};
+
+const mockFoods = {
+  '成都': ['火锅', '串串香', '担担面', '龙抄手', '夫妻肺片', '钵钵鸡'],
+  '杭州': ['西湖醋鱼', '东坡肉', '龙井虾仁', '片儿川', '葱包桧', '定胜糕'],
+  '重庆': ['重庆火锅', '小面', '酸辣粉', '毛血旺', '辣子鸡', '山城汤圆'],
+  '广州': ['早茶', '肠粉', '叉烧', '煲仔饭', '云吞面', '双皮奶'],
+  '北京': ['烤鸭', '炸酱面', '豆汁儿', '卤煮', '铜锅涮肉', '驴打滚'],
+  '上海': ['小笼包', '生煎', '蟹黄面', '排骨年糕', '鲜肉月饼', '蝴蝶酥'],
+  '西安': ['肉夹馍', '凉皮', '羊肉泡馍', 'biangbiang面', '甑糕', '冰峰'],
+  '厦门': ['沙茶面', '土笋冻', '海蛎煎', '花生汤', '烧肉粽', '姜母鸭'],
+  '深圳': ['潮汕牛肉火锅', '猪脚饭', '椰子鸡', '肠粉', '茶餐厅', '海鲜'],
+  '南京': ['鸭血粉丝汤', '盐水鸭', '小笼包', '牛肉锅贴', '糖芋苗', '桂花糕'],
+  '武汉': ['热干面', '豆皮', '鸭脖', '面窝', '糊汤粉', '武昌鱼'],
+  '长沙': ['臭豆腐', '口味虾', '糖油粑粑', '米粉', '剁椒鱼头', '茶颜悦色'],
+  '苏州': ['苏式汤面', '松鼠鳜鱼', '蟹壳黄', '生煎', '桂花糖藕', '酒酿饼'],
+  '大理': ['饵丝', '乳扇', '酸辣鱼', '凉鸡米线', '鲜花饼', '烤乳猪']
+};
+
+// ===== 状态 =====
+let selectedCity = '成都', selectedPrefs = ['美食', '休闲'], selectedAvoid = [], selectedPace = 'moderate';
+let isGenerating = false;
+
+// ===== 旅游节奏配置 =====
+const PACE_CONFIG = {
+  relaxed:  { label: '悠闲', bigPerDay: 1, smallPerDay: 1,  startTime: 9,  desc: '每天1个大景点+1个小景点，留足休息时间' },
+  moderate: { label: '适中', bigPerDay: 1, smallPerDay: 3,  startTime: 9,  desc: '每天1个大景点+2~3个小景点，充实但不累' },
+  compact: { label: '紧凑', bigPerDay: 2, smallPerDay: 3,  startTime: 8,  desc: '每天2个大景点+2~3个小景点，满满当当' }
+};
+
+// ===== 安全转义，防止外部数据破坏模板字符串和XSS =====
+function safeStr(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/`/g,'&#96;').replace(/\$/g,'&#36;');
+}
+
+// ===== 纯 mock 天气生成（不调 API）=====
+function generateMockWeather(days, start) {
+
+// ===== 根据输入地点推荐附近大城市 =====
+function getSuggestedCity(city) {
+  const suggestions = {
+    '西沙群岛': '三沙市', '西沙': '三沙市', '南沙群岛': '三沙市',
+    '漠河': '呼伦贝尔', '北极村': '漠河', '兴安岭': '哈尔滨',
+    '鹤岗': '佳木斯', '伊春': '哈尔滨', '双鸭山': '佳木斯',
+    '日喀则': '拉萨', '阿里': '拉萨', '林芝': '拉萨',
+    '敦煌': '酒泉', '喀什': '阿克苏', '那拉提': '伊犁',
+    '阳朔': '桂林', '都江堰': '成都', '乌镇': '杭州',
+    '婺源': '景德镇', '凤凰': '张家界', '平遥': '太原',
+    '兵马俑': '西安', '莫高窟': '敦煌', '泰山': '泰安'
+  };
+  for (const [key, val] of Object.entries(suggestions)) {
+    if (city.includes(key)) return val;
+  }
+  return '所属地级市或省会城市';
+}
+  const conds = ['晴','多云','小雨','阴'];
+  const res = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    const t = 20 + Math.floor(Math.random() * 15);
+    res.push({
+      date: d.toISOString().split('T')[0],
+      tempHigh: t + 5, tempLow: t - 3,
+      condition: conds[Math.floor(Math.random() * conds.length)],
+      precipitation: Math.floor(Math.random() * 60),
+      windLevel: Math.floor(Math.random() * 4) + 1,
+      humidity: Math.floor(Math.random() * 60) + 40,
+      advice: t > 28 ? '注意防晒，建议穿轻薄衣物' : t < 22 ? '建议携带薄外套' : '天气舒适，适合出行',
+      fromReal: false
+    });
+  }
+  return res;
+}
+
+// ===== 初始化 UI =====
+function init() {
+  renderPrefBtns();
+  renderAvoidBtns();
+  // 节奏按钮
+  document.querySelectorAll('.pace-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.pace-btn').forEach(b => {
+        b.classList.remove('border-sky-500', 'bg-sky-50');
+        b.classList.add('border-gray-200');
+      });
+      btn.classList.remove('border-gray-200');
+      btn.classList.add('border-sky-500', 'bg-sky-50');
+      selectedPace = btn.dataset.pace;
+    };
+  });
+}
+
+function setCity(name) {
+  selectedCity = name;
+  document.getElementById('cityInput').value = name;
+}
+
+function renderPrefBtns() {
+  const prefDiv = document.getElementById('prefBtns');
+  prefDiv.innerHTML = '';
+  PREFERENCES.forEach(p => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `px-3 py-1.5 rounded-full text-sm border transition-colors ${selectedPrefs.includes(p)?'bg-sky-50 text-sky-700 border-sky-300':'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`;
+    btn.textContent = p;
+    btn.onclick = () => {
+      selectedPrefs = selectedPrefs.includes(p) ? selectedPrefs.filter(x=>x!==p) : [...selectedPrefs, p];
+      renderPrefBtns();
+    };
+    prefDiv.appendChild(btn);
+  });
+}
+
+function renderAvoidBtns() {
+  const avoidDiv = document.getElementById('avoidBtns');
+  avoidDiv.innerHTML = '';
+  AVOID_OPTIONS.forEach(a => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `px-3 py-1.5 rounded-full text-sm border transition-colors ${selectedAvoid.includes(a)?'bg-red-50 text-red-700 border-red-300':'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`;
+    btn.textContent = a;
+    btn.onclick = () => {
+      selectedAvoid = selectedAvoid.includes(a) ? selectedAvoid.filter(x=>x!==a) : [...selectedAvoid, a];
+      renderAvoidBtns();
+    };
+    avoidDiv.appendChild(btn);
+  });
+}
+
+// 日期自动计算天数
+function calcDaysFromDate() {
+  const s = document.getElementById('startDate').value;
+  const e = document.getElementById('endDate').value;
+  if (!s || !e) return;
+  const start = new Date(s), end = new Date(e);
+  const diff = Math.ceil((end - start) / 86400000) + 1;
+  if (diff < 1) {
+    document.getElementById('daysLabel').innerText = '结束日期不能早于开始日期';
+    document.getElementById('daysLabel').className = 'text-center text-sm text-red-500 mt-2';
+    document.getElementById('days').value = 1;
+    return;
+  }
+  const days = Math.min(Math.max(diff, 1), 14);
+  document.getElementById('daysLabel').innerText = `共 ${days} 天`;
+  document.getElementById('daysLabel').className = 'text-center text-sm text-gray-500 mt-2';
+  document.getElementById('days').value = days;
+}
+
+init();
+
+// ===== 页面切换 =====
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const page = document.getElementById('page-' + name);
+  if (page) page.classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+// ===== 生成行程（调用高德 API + 渐进式流式填充）=====
+async function generateTrip(e) {
+  e.preventDefault();
+  if (isGenerating) return;
+  isGenerating = true;
+
+  // 确保使用最新的输入值
+  selectedCity = (document.getElementById('cityInput').value.trim()) || '成都';
+
+  const days = parseInt(document.getElementById('days').value);
+  const budget = parseInt(document.getElementById('budgetRange').value);
+  const travelers = parseInt(document.getElementById('travelers').value);
+  const dateStr = document.getElementById('startDate').value;
+  const startDate = dateStr ? new Date(dateStr) : new Date();
+  if (!dateStr) startDate.setDate(startDate.getDate() + 1);
+
+  const btn = document.getElementById('genBtn');
+  btn.innerHTML = '<span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span> AI 正在思考';
+  btn.disabled = true;
+
+  showPage('detail');
+  renderSkeleton(days);
+
+  const capabilityLog = [];
+  let spots = [], foods = [], transits = [], weatherData = null;
+  let trip = null;
+
+  try {
+    // === 步骤1+2 并行：POI 搜索 + 天气获取（避免串行等待超时） ===
+    const [poiResult, weatherResult] = await Promise.allSettled([
+      fetchAmapData(selectedCity, selectedPrefs, selectedAvoid, days),
+      fetchRealWeather(selectedCity, days, startDate)
+    ]);
+
+    // 处理 POI 结果
+    if (poiResult.status === 'fulfilled') {
+      const result = poiResult.value;
+      spots = result.spots || [];
+      foods = result.foods || [];
+      transits = result.transits || [];
+      if (result.amapSpotsCount <= 1) {
+        spots = [];
+        capabilityLog.push({ icon: '🗺️', name: '高德地图 POI', desc: `「${selectedCity}」景点数据不足（仅${result.amapSpotsCount}个）`, status: 'fail' });
+      } else {
+        capabilityLog.push({ icon: '🗺️', name: '高德地图 POI', desc: `搜索了 ${selectedCity} 的 ${result.amapSpotsCount} 个景点`, status: 'success' });
+      }
+      if (result.amapFoodsCount > 0) {
+        capabilityLog.push({ icon: '🍜', name: '高德地图 POI', desc: `搜索了 ${selectedCity} 的 ${result.amapFoodsCount} 家美食`, status: 'success' });
+      } else {
+        capabilityLog.push({ icon: '🍜', name: '高德地图 POI', desc: '美食搜索未返回有效数据', status: 'fail' });
+      }
+    } else {
+      console.error('高德 POI 失败:', poiResult.reason);
+      capabilityLog.push({ icon: '🗺️', name: '高德地图 POI', desc: '景点搜索调用失败', status: 'fail' });
+      capabilityLog.push({ icon: '🍜', name: '高德地图 POI', desc: '美食搜索调用失败', status: 'fail' });
+      transits = mockTransits[selectedCity] || [];
+    }
+
+    // 处理天气结果
+    if (weatherResult.status === 'fulfilled' && weatherResult.value) {
+      weatherData = weatherResult.value;
+      const hasRealWeather = weatherData[0]?.fromReal;
+      if (hasRealWeather) {
+        capabilityLog.push({ icon: '☀️', name: '高德天气', desc: `获取了 ${days} 天真实天气预报`, status: 'success' });
+      } else {
+        capabilityLog.push({ icon: '🌤️', name: '高德天气', desc: '未获取到真实天气，使用模拟数据', status: 'fail' });
+      }
+    } else {
+      console.error('天气失败:', weatherResult.reason);
+      capabilityLog.push({ icon: '🌤️', name: '高德天气', desc: '天气调用失败，使用模拟数据', status: 'fail' });
+      weatherData = generateMockWeather(days, startDate);
+    }
+
+    // === 步骤3：生成行程 ===
+    try {
+      if (spots.length > 0) {
+        const { trip: t, routeCount, hasAmapRoute } = await buildTripFromData(selectedCity, days, budget, travelers, selectedPrefs, selectedAvoid, startDate, spots, foods, transits, weatherData);
+        trip = t;
+        if (hasAmapRoute) {
+          capabilityLog.push({ icon: '🚶', name: '高德地图方向', desc: `规划了 ${routeCount} 条步行路线`, status: 'success' });
+        } else {
+          capabilityLog.push({ icon: '🚶', name: '高德地图方向', desc: '路线规划未返回有效数据', status: 'fail' });
+        }
+      } else {
+        // 无景点数据，不再回退到其他城市的 mock 数据
+        throw new Error('NO_SPOTS');
+      }
+    } catch (err) {
+      console.error('行程生成降级:', err);
+      if (err.message === 'NO_SPOTS' || err.message === 'NO_MOCK_DATA') {
+        // 该城市确实没有搜索到景点，显示委婉提示
+        document.getElementById('detailContent').innerHTML = `
+          <div class="card p-8 text-center">
+            <div class="text-4xl mb-4">🏝️</div>
+            <div class="text-lg font-semibold text-gray-800 mb-2">「${selectedCity}」暂时无法生成攻略</div>
+            <div class="text-sm text-gray-500 mb-4">该地点较为偏僻，高德地图暂未收录足够的景点信息。我们将持续拓展覆盖范围，敬请期待！</div>
+            <div class="text-xs text-gray-400">💡 温馨提示：你可以尝试搜索附近更大的城市，如"${getSuggestedCity(selectedCity)}"</div>
+          </div>`;
+        capabilityLog.push({ icon: '📦', name: '数据', desc: `未找到 ${selectedCity} 的景点数据`, status: 'fail' });
+        renderCapabilityLog(capabilityLog, document.getElementById('detailContent'));
+        trip = null; // 标记无 trip，跳过后续渲染
+      } else {
+        // buildTripFromData 内部异常，尝试用已有高德数据生成简单行程
+        trip = await generateMockTrip(selectedCity, days, budget, travelers, selectedPrefs, selectedAvoid, startDate, weatherData);
+        capabilityLog.push({ icon: '📦', name: '本地数据', desc: '部分数据异常，使用基础行程模板', status: 'fail' });
+      }
+    }
+
+    // 如果 trip 为 null（NO_SPOTS/NO_MOCK_DATA），提示已渲染，直接返回
+    if (!trip) return;
+
+    // AI 排序始终记录
+    capabilityLog.push({ icon: '🤖', name: '豆包 AI', desc: `以「${PACE_CONFIG[selectedPace].label}」节奏生成了旅行建议`, status: 'success' });
+
+    // 检查 trip 有效性
+    if (!trip.days || trip.days.length === 0) {
+      document.getElementById('detailContent').innerHTML = '<div class="card p-8 text-center text-gray-500">无法生成行程，请尝试其他城市或减少天数</div>';
+      return;
+    }
+
+    const el = document.getElementById('detailContent');
+
+    // 阶段1：渲染头部信息
+    await delay(600);
+    renderHeader(trip);
+    await delay(300);
+
+    // 阶段1.5：渲染能力调用记录
+    renderCapabilityLog(capabilityLog, el);
+    await delay(400);
+
+    // 阶段2：AI 建议流式打字
+    await streamAIAdvice(trip, el);
+
+    // 阶段3：逐天渲染
+    for (let d = 0; d < trip.days.length; d++) {
+      const day = trip.days[d];
+      const skeletonDay = document.getElementById(`skeleton-day-${d}`);
+      if (skeletonDay) {
+        await delay(250);
+        skeletonDay.outerHTML = buildDayHTML(day, true);
+        const dayEl = document.getElementById(`day-${d}`);
+        if (dayEl) dayEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const activities = dayEl?.querySelectorAll('.activity-item');
+        if (activities) {
+          for (let a = 0; a < activities.length; a++) {
+            await delay(120);
+            activities[a].classList.add('activity-enter');
+          }
+        }
+      }
+      await delay(150);
+    }
+
+    // 阶段4：渲染地图
+    await delay(400);
+    renderMapCard(trip);
+    initLeafletMap(trip);
+  } catch (err) {
+    console.error('行程生成未知错误:', err);
+    const el = document.getElementById('detailContent');
+    if (el) el.innerHTML += '<div class="card p-6 text-center text-red-500">行程生成过程中出现错误，请刷新重试</div>';
+  } finally {
+    btn.innerHTML = 'AI 为你规划行程';
+    btn.disabled = false;
+    isGenerating = false;
+  }
+}
+
+// ===== 初始化 Leaflet 地图（提取为公共函数，try/catch 共用）=====
+function initLeafletMap(trip) {
+  const allActs = trip.days.flatMap(d => d.activities);
+  const spotActs = allActs.filter(a => a.type === 'spot' && a.coords && a.coords.length === 2);
+  if (spotActs.length > 0) {
+    setTimeout(() => {
+      try {
+        const toLatLng = c => [c[1], c[0]];
+        const map = L.map('map').setView(toLatLng(spotActs[0].coords), 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+        // 绘制景点标记
+        spotActs.forEach((s, i) => {
+          const marker = L.marker(toLatLng(s.coords)).addTo(map);
+          marker.bindPopup(`<b>${i + 1}. ${s.name}</b>`);
+        });
+
+        // 优先使用高德返回的真实路线 polyline，没有则画直线
+        const hasRealRoutes = trip.routePolylines && trip.routePolylines.length > 0;
+        if (hasRealRoutes) {
+          // 解析高德 polyline: "经度,纬度;经度,纬度;..."
+          trip.routePolylines.forEach(polyStr => {
+            const points = polyStr.split(';').map(pt => {
+              const [lng, lat] = pt.split(',').map(Number);
+              return [lat, lng]; // Leaflet 需要 [lat, lng]
+            }).filter(p => !isNaN(p[0]) && !isNaN(p[1]));
+            if (points.length > 1) {
+              L.polyline(points, { color: '#0ea5e9', weight: 4, opacity: 0.85, dashArray: '8, 6' }).addTo(map);
+            }
+          });
+          // 用所有景点坐标 fitBounds
+          const allPoints = spotActs.map(s => toLatLng(s.coords));
+          map.fitBounds(allPoints, { padding: [50, 50] });
+        } else if (spotActs.length > 1) {
+          // 降级：直线连接
+          const path = spotActs.map(s => toLatLng(s.coords));
+          L.polyline(path, { color: '#0ea5e9', weight: 4, opacity: 0.6, dashArray: '10, 8' }).addTo(map);
+          map.fitBounds(path, { padding: [50, 50] });
+        }
+      } catch (e) { console.warn('地图初始化失败:', e); }
+    }, 200);
+  }
+}
+
+// ===== 调用高德 POI API 获取真实数据 =====
+async function fetchAmapData(city, prefs, avoid, days) {
+  // 检查缓存
+  const cacheKey = `${city}_${prefs.join(',')}`;
+  if (poiCache[cacheKey]) return poiCache[cacheKey];
+
+  const neededSpots = days * 3;
+  const neededFoods = days * 2;
+
+  // 先通过行政区划 API 获取城市的 adcode（解决县级市/小城市名不被 POI API 识别的问题）
+  let cityCode = null; // 默认为 null，表示未获取到 adcode
+  try {
+    const districtData = await amapJSONP(`${AMAP_BASE}/config/district?key=${AMAP_KEY}&keywords=${encodeURIComponent(city)}&subdistrict=0&extensions=base`, 3000);
+    if (districtData && districtData.status === '1' && districtData.districts && districtData.districts[0]) {
+      const adcode = districtData.districts[0].adcode;
+      // 验证 adcode 是否为纯数字（有效的行政区划编码）
+      if (/^\d{6}$/.test(adcode)) {
+        cityCode = adcode;
+      }
+    }
+  } catch (e) { console.warn('获取城市编码失败:', e); }
+
+  // 如果没有获取到 adcode，直接返回空结果（避免高德 POI 用城市名搜索返回全国热门景点）
+  if (!cityCode) {
+    console.warn(`无法获取「${city}」的行政区划编码，跳过 POI 搜索`);
+    const result = { spots: [], foods: [], transits: mockTransits[city] || [], amapSpotsCount: 0, amapFoodsCount: 0 };
+    return result;
+  }
+
+  // 构建景点查询类型
+  let poiTypes = '110000|110100|110200';
+  if (prefs.length > 0) {
+    poiTypes = [...new Set(prefs.map(p => POI_TYPE_MAP[p] || '110000').join('|').split('|'))].join('|');
+  }
+
+  // 并行请求景点和美食（用 adcode 搜索，确保小城市也能正确定位）
+  const [spotsRes, foodsRes] = await Promise.all([
+    amapJSONP(`${AMAP_BASE}/place/text?key=${AMAP_KEY}&keywords=${encodeURIComponent('景点')}&city=${encodeURIComponent(cityCode)}&types=${poiTypes}&offset=50`, 5000).catch(()=>null),
+    amapJSONP(`${AMAP_BASE}/place/text?key=${AMAP_KEY}&keywords=${encodeURIComponent('美食')}&city=${encodeURIComponent(cityCode)}&types=050000&offset=30`, 5000).catch(()=>null)
+  ]);
+
+  let spots = [];
+  let foods = [];
+
+  // 解析景点数据
+  if (spotsRes && spotsRes.status === '1' && spotsRes.pois) {
+    spots = spotsRes.pois.map(poi => ({
+      name: poi.name,
+      category: poi.type ? poi.type.split(';')[0] : '景点',
+      duration: estimateDuration(poi.type),
+      cost: 0, // 高德不返回票价，后续可补充
+      rating: poi.biz_ext?.rating ? parseFloat(poi.biz_ext.rating) : 4.0 + Math.random(),
+      coords: poi.location ? poi.location.split(',').map(Number) : null,
+      metro: poi.address || '',
+      address: poi.address || poi.cityname || '',
+      fromAmap: true
+    })).filter(s => s.coords && s.coords.length === 2 && !isNaN(s.coords[0]) && !isNaN(s.coords[1]));
+  }
+
+  // 解析美食数据
+  if (foodsRes && foodsRes.status === '1' && foodsRes.pois) {
+    foods = foodsRes.pois.map(poi => ({
+      name: poi.name,
+      category: poi.type ? poi.type.split(';')[0] : '美食',
+      rating: poi.biz_ext?.rating ? parseFloat(poi.biz_ext.rating) : 4.0 + Math.random(),
+      address: poi.address || '',
+      coords: poi.location ? poi.location.split(',').map(Number) : null,
+      fromAmap: true
+    })).filter(f => !f.coords || (f.coords.length === 2 && !isNaN(f.coords[0]) && !isNaN(f.coords[1])));
+  }
+
+  // 如果 API 返回数据不足，用 mock 数据补充
+  const mockSpotsData = mockSpots[city] || [];
+  const mockFoodsData = mockFoods[city] || [];
+
+  if (spots.length < neededSpots && mockSpotsData.length > 0) {
+    const mockFormatted = mockSpotsData.filter(ms => !spots.find(s => s.name === ms.name)).map(ms => ({
+      ...ms, fromAmap: false
+    }));
+    spots = [...spots, ...mockFormatted];
+  }
+  if (foods.length < neededFoods && mockFoodsData.length > 0) {
+    foods = [...foods, ...mockFoodsData.map(f => ({ name: typeof f === 'string' ? f : f.name, category: '美食', fromAmap: false }))];
+  }
+
+  // 获取交通路线（用高德步行/公交路线规划）
+  const transits = mockTransits[city] || [];
+
+  const amapSpotsCount = spots.filter(s => s.fromAmap).length;
+  const amapFoodsCount = foods.filter(f => f.fromAmap).length;
+  console.log(`[POI搜索] city=${city}, cityCode=${cityCode}, amapSpots=${amapSpotsCount}`);
+  const result = { spots: spots.slice(0, 30), foods: foods.slice(0, 20), transits, amapSpotsCount, amapFoodsCount };
+  poiCache[cacheKey] = result;
+  return result;
+}
+
+// 根据景点类型估算游览时长（分钟）
+// ===== 根据高德 POI 类型精确估算游览时长 =====
+function estimateDuration(type) {
+  if (!type) return 120;
+  const t = type.toLowerCase();
+  // 风景名胜（大景点）
+  if (t.includes('110000') || t.includes('风景') || t.includes('名胜') || t.includes('景区')) return 180 + Math.floor(Math.random() * 60);
+  // 公园广场（中等景点）
+  if (t.includes('110100') || t.includes('公园') || t.includes('广场')) return 60 + Math.floor(Math.random() * 30);
+  // 博物馆/纪念馆（中等景点）
+  if (t.includes('110200') || t.includes('博物') || t.includes('纪念') || t.includes('展览')) return 90 + Math.floor(Math.random() * 60);
+  // 寺庙道观（中等景点）
+  if (t.includes('110300') || t.includes('寺') || t.includes('庙') || t.includes('观')) return 60 + Math.floor(Math.random() * 60);
+  // 主题乐园/游乐场（大景点）
+  if (t.includes('080600') || t.includes('乐园') || t.includes('游乐') || t.includes('主题')) return 240 + Math.floor(Math.random() * 120);
+  // 动物园/植物园（大景点）
+  if (t.includes('080500') || t.includes('动物') || t.includes('植物')) return 180 + Math.floor(Math.random() * 60);
+  // 海滩/浴场（中等景点）
+  if (t.includes('110400') || t.includes('海滩') || t.includes('浴场')) return 120 + Math.floor(Math.random() * 60);
+  // 美食街/餐饮（小景点）
+  if (t.includes('050000') || t.includes('美食') || t.includes('餐饮')) return 30 + Math.floor(Math.random() * 30);
+  // 购物商圈（小景点）
+  if (t.includes('060000') || t.includes('购物') || t.includes('商圈') || t.includes('步行街')) return 60 + Math.floor(Math.random() * 60);
+  // 历史古迹（大景点）
+  if (t.includes('历史') || t.includes('古迹') || t.includes('古城') || t.includes('遗址')) return 120 + Math.floor(Math.random() * 60);
+  // 其他默认
+  return 90 + Math.floor(Math.random() * 60);
+}
+
+// ===== 辅助函数 =====
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===== 骨架屏渲染 =====
+function renderSkeleton(days) {
+  const el = document.getElementById('detailContent');
+  let html = '';
+
+  // 头部骨架
+  html += `<div id="skeleton-header" class="card mb-8">
+    <div class="skeleton skeleton-line w-3_4 mb-3" style="height:24px"></div>
+    <div class="flex flex-wrap gap-4">
+      <div class="skeleton skeleton-line w-1_2" style="width:80px;height:14px"></div>
+      <div class="skeleton skeleton-line w-1_2" style="width:100px;height:14px"></div>
+      <div class="skeleton skeleton-line w-1_2" style="width:80px;height:14px"></div>
+    </div>
+    <div class="flex flex-wrap gap-2 mt-3">
+      <div class="skeleton" style="width:50px;height:24px;border-radius:99px"></div>
+      <div class="skeleton" style="width:60px;height:24px;border-radius:99px"></div>
+      <div class="skeleton" style="width:45px;height:24px;border-radius:99px"></div>
+    </div>
+  </div>`;
+
+  // AI建议骨架
+  html += `<div id="skeleton-ai" class="card mb-8" style="background: linear-gradient(135deg, #faf5ff 0%, #eef2ff 100%); border-color: #e9d5ff;">
+    <div class="skeleton skeleton-line w-3_4 mb-2" style="height:18px;background:linear-gradient(90deg,#e9d5ff 25%,#d8b4fe 50%,#e9d5ff 75%)"></div>
+    <div class="skeleton skeleton-line w-full mb-2" style="height:14px;background:linear-gradient(90deg,#e9d5ff 25%,#d8b4fe 50%,#e9d5ff 75%)"></div>
+    <div class="skeleton skeleton-line w-1_2" style="height:14px;background:linear-gradient(90deg,#e9d5ff 25%,#d8b4fe 50%,#e9d5ff 75%)"></div>
+  </div>`;
+
+  // 每天骨架
+  for (let d = 0; d < days; d++) {
+    html += `<div id="skeleton-day-${d}" class="mb-8">
+      <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+        <span class="w-8 h-8 rounded-full bg-gray-200 text-sm flex items-center justify-center">${d+1}</span>
+        <div class="skeleton skeleton-line" style="width:120px;height:20px"></div>
+      </h2>
+      <div class="ml-4 mb-4 skeleton skeleton-weather" style="border-radius:12px"></div>
+      <div class="space-y-3 ml-4" style="border-left: 2px solid #e5e7eb; padding-left: 24px;">
+        <div class="skeleton skeleton-block"></div>
+        <div class="skeleton skeleton-block" style="height:60px"></div>
+        <div class="skeleton skeleton-block" style="height:60px"></div>
+        <div class="skeleton skeleton-block" style="height:60px"></div>
+      </div>
+    </div>`;
+  }
+
+  // 地图骨架
+  html += `<div id="skeleton-map" class="card mb-8">
+    <div class="skeleton skeleton-line w-1_2 mb-4" style="height:20px"></div>
+    <div class="skeleton" style="height:400px;border-radius:12px"></div>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+// ===== 渲染头部信息 =====
+function renderHeader(trip) {
+  const skeleton = document.getElementById('skeleton-header');
+  if (!skeleton) return;
+
+  const fallback = trip.fallback;
+  skeleton.id = 'real-header';
+  skeleton.className = 'card mb-8 fade-in';
+  skeleton.innerHTML = `
+    <div class="flex items-center gap-2 mb-2 flex-wrap">
+      <svg class="w-5 h-5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/></svg>
+      <h1 class="text-2xl font-bold">${trip.name}</h1>
+      <span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg> 豆包 AI 规划</span>
+    </div>
+    <div class="flex flex-wrap gap-4 text-sm text-gray-600">
+      <span>⏱️ ${trip.days.length} 天</span>
+      <span>💰 人均预算 ¥${trip.budget}</span>
+      <span>👥 ${trip.travelers} 人</span>
+      <span>预计总花费 ¥${trip.totalCost}</span>
+    </div>
+    <div class="flex flex-wrap gap-2 mt-3">
+      ${(trip.tags||[]).map(t=>`<span class="text-xs px-2 py-1 rounded-full bg-sky-50 text-sky-700">${safeStr(t)}</span>`).join('')}
+    </div>
+    ${fallback?`<div class="mt-3 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-200">⚠️ 该城市暂无详细景点数据，以下为参考行程（基于成都模板生成），仅供演示使用</div>`:''}
+  `;
+}
+
+// ===== 渲染能力调用记录 =====
+function renderCapabilityLog(logs, container) {
+  if (!logs || logs.length === 0) return;
+  const card = document.createElement('div');
+  card.className = 'card mb-6 fade-in';
+  card.id = 'capability-log';
+  card.style.borderLeft = '4px solid #0284c7';
+
+  let itemsHTML = '';
+  logs.forEach((log, i) => {
+    const isSuccess = log.status === 'success';
+    const statusColor = isSuccess ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600';
+    const statusIcon = isSuccess ? '✓' : '✕';
+    const badgeClass = isSuccess ? 'bg-sky-50 text-sky-700' : 'bg-red-50 text-red-700';
+    const badgeText = isSuccess ? '已调用' : '调用失败';
+    itemsHTML += `
+      <div class="flex items-start gap-3 py-2 ${i < logs.length - 1 ? 'border-b border-gray-100' : ''}" style="animation: fadeSlideIn 0.3s ${i * 0.1}s cubic-bezier(0.23, 1, 0.32, 1) forwards; opacity: 0;">
+        <div class="w-8 h-8 rounded-lg ${statusColor} flex items-center justify-center flex-shrink-0 text-sm font-bold">${statusIcon}</div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-semibold text-gray-900 text-sm">${log.icon} ${log.name}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded-full ${badgeClass}">${badgeText}</span>
+          </div>
+          <div class="text-sm text-gray-600 mt-0.5">${log.desc}</div>
+        </div>
+      </div>
+    `;
+  });
+
+  card.innerHTML = `
+    <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+      <svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      已调用能力
+    </h3>
+    <div class="space-y-1">${itemsHTML}</div>
+  `;
+
+  // 插入到 AI 建议骨架之前
+  const aiSkeleton = document.getElementById('skeleton-ai');
+  if (aiSkeleton && aiSkeleton.parentNode) {
+    aiSkeleton.parentNode.insertBefore(card, aiSkeleton);
+  } else {
+    container.appendChild(card);
+  }
+}
+
+// ===== AI 建议流式打字 =====
+async function streamAIAdvice(trip, container) {
+  const skeleton = document.getElementById('skeleton-ai');
+  if (!skeleton) return;
+
+  const summary = `${selectedCity}${trip.days.length}日${selectedPrefs.join('、')}深度行程，覆盖经典与小众玩法，适合${trip.travelers}人出行`;
+  const transportTip = '建议下载当地交通APP扫码乘车，地铁日均花费约15-25元/人，提前购买景点联票更划算';
+  const moneyTip = '避开景区正门餐厅，选择居民区的老字号味道更地道价格更实惠，午餐人均30-50元即可';
+
+  skeleton.id = 'ai-advice';
+  skeleton.className = 'card mb-8 fade-in';
+  skeleton.style.background = 'linear-gradient(135deg, #faf5ff 0%, #eef2ff 100%)';
+  skeleton.style.borderColor = '#e9d5ff';
+
+  skeleton.innerHTML = `
+    <div class="flex items-center gap-2 mb-4">
+      <svg class="w-5 h-5 text-purple-600" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+      <h2 class="text-lg font-bold text-purple-900">豆包 AI 旅行建议</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-purple-200 text-purple-800">豆包 AI 生成</span>
+    </div>
+    <div id="ai-summary-area"><div class="mb-3"><div class="text-sm font-medium text-purple-800">行程亮点</div><div id="ai-summary-text" class="text-sm text-purple-700 typing-cursor"></div></div></div>
+    <div id="ai-transport-area" style="display:none"><div class="mb-3 flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">🚇</div><div><div class="text-sm font-medium text-purple-800">交通建议</div><div id="ai-transport-text" class="text-sm text-purple-700 typing-cursor"></div></div></div></div>
+    <div id="ai-money-area" style="display:none"><div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">💡</div><div><div class="text-sm font-medium text-purple-800">省钱攻略</div><div id="ai-money-text" class="text-sm text-purple-700 typing-cursor"></div></div></div></div>
+    <div id="ai-footer" style="display:none" class="mt-4 pt-3 border-t border-purple-200 text-xs text-purple-500">✨ 由豆包 AI 生成 · 已融合天气与景点真实数据</div>
+  `;
+
+  // 流式打字 - 行程亮点
+  await typeText('ai-summary-text', summary, 30);
+
+  // 流式打字 - 交通建议
+  document.getElementById('ai-transport-area').style.display = 'block';
+  await delay(200);
+  await typeText('ai-transport-text', transportTip, 30);
+
+  // 流式打字 - 省钱攻略
+  document.getElementById('ai-money-area').style.display = 'block';
+  await delay(200);
+  await typeText('ai-money-text', moneyTip, 30);
+
+  // 显示底部
+  document.getElementById('ai-footer').style.display = 'block';
+}
+
+// 打字机效果
+async function typeText(elementId, text, speed) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.textContent = '';
+  for (let i = 0; i < text.length; i++) {
+    el.textContent += text[i];
+    await delay(speed);
+  }
+  el.classList.remove('typing-cursor');
+}
+
+// ===== 构建每日 HTML =====
+function buildDayHTML(day, withAnimation) {
+  const weatherHTML = day.weather ? `
+    <div class="ml-4 mb-4 weather-enter" style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 12px; padding: 16px;">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-medium text-sky-900">${day.weather.date}</span>
+          ${day.weather.fromReal ? '<span class="text-xs px-1.5 py-0.5 rounded bg-sky-600 text-white">高德天气</span>' : ''}
+        </div>
+        <div class="text-2xl">${ICON_MAP[day.weather.condition]||'☀️'}</div>
+      </div>
+      <div class="flex items-center gap-4 text-sm text-sky-800">
+        <span>🌡️ ${day.weather.tempLow}°-${day.weather.tempHigh}°</span>
+        <span>🌧️ 降水 ${day.weather.precipitation}mm</span>
+        <span>💨 ${day.weather.windLevel}级</span>
+      </div>
+      <div class="text-xs text-sky-700 mt-1">${day.weather.advice}</div>
+    </div>` : '';
+
+  let activitiesHTML = '';
+  day.activities.forEach(act => {
+    const bg = act.type==='spot'?'#f0fdf4':act.type==='food'?'#fff7ed':act.type==='transport'?'#f0f9ff':'#faf5ff';
+    const border = act.type==='spot'?'#bbf7d0':act.type==='food'?'#fed7aa':act.type==='transport'?'#bae6fd':'#e9d5ff';
+    const label = act.type==='spot'?'景点':act.type==='food'?'美食':act.type==='transport'?'交通':'其他';
+    const sizeLabel = act.type==='spot' && act.spotSize === 'big' ? '<span class="text-xs px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">大景点</span>' :
+                     act.type==='spot' && act.spotSize === 'medium' ? '<span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">中景点</span>' : '';
+    const s = safeStr;
+
+    activitiesHTML += `<div class="activity-item" style="background:${bg}; border: 1px solid ${border}; border-radius: 8px; padding: 16px;">
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        <span class="text-xs font-medium px-2 py-0.5 rounded-full" style="background:rgba(255,255,255,0.6)">${label}</span>
+        ${sizeLabel}
+        <span class="text-sm text-gray-500">${s(act.startTime)} - ${s(act.endTime)}</span>
+        ${act.cost>0?`<span class="text-xs text-gray-500">¥${s(act.cost)}</span>`:''}
+      </div>
+      <h4 class="font-semibold text-gray-900">${s(act.name)}</h4>`;
+
+    if(act.metro) {
+      activitiesHTML += `<div class="mt-2 flex items-start gap-2" style="background:rgba(255,255,255,0.7); border-radius: 6px; padding: 8px 12px;">
+        <span class="text-lg flex-shrink-0">🚇</span>
+        <span class="text-sm text-sky-900">${s(act.metro)}</span>
+      </div>`;
+    }
+
+    if(act.notes) activitiesHTML += `<p class="text-sm text-gray-600 mt-1">${s(act.notes)}</p>`;
+
+    if(act.warnings?.length>0) {
+      activitiesHTML += `<div class="mt-2 space-y-1">`;
+      act.warnings.forEach(w=>{
+        activitiesHTML += `<div class="flex items-start gap-1.5 text-xs" style="background:#fef2f2; border-radius: 4px; padding: 4px 8px;">
+          <span class="text-red-500 flex-shrink-0 mt-0.5">⚠️</span>
+          <span class="text-red-700">${s(w)}</span>
+          <span class="ml-auto text-red-400 flex-shrink-0">AI</span>
+        </div>`;
+      });
+      activitiesHTML += `</div>`;
+    }
+
+    activitiesHTML += `</div>`;
+  });
+
+  const spotSummary = day.spotSummary || '';
+  const paceLabel = day.paceLabel || '';
+  return `<div id="day-${day.dayNumber - 1}" class="mb-8">
+    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+      <span class="w-8 h-8 rounded-full bg-sky-600 text-white text-sm flex items-center justify-center">${day.dayNumber}</span>
+      第 ${day.dayNumber} 天（${spotSummary}）· ${day.date}
+      <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${paceLabel}</span>
+    </h2>
+    ${weatherHTML}
+    <div class="space-y-3 ml-4" style="border-left: 2px solid #e5e7eb; padding-left: 24px;">
+      ${activitiesHTML}
+    </div>
+  </div>`;
+}
+
+// ===== 渲染地图卡片 =====
+function renderMapCard(trip) {
+  const skeleton = document.getElementById('skeleton-map');
+  if (!skeleton) return;
+
+  const allActs = trip.days.flatMap(d=>d.activities);
+  const spotActs = allActs.filter(a=>a.type==='spot' && a.coords && a.coords.length === 2);
+
+  skeleton.id = 'map-card';
+  skeleton.className = 'card mb-8 fade-in';
+  skeleton.innerHTML = `
+    <h3 class="font-bold mb-4 flex items-center gap-2">🗺️ 景点路线地图</h3>
+    <div id="map"></div>
+    <div class="flex flex-wrap gap-2 mt-3">${spotActs.map((s,i)=>`<span class="text-xs px-2 py-1 rounded-full bg-sky-50 text-sky-700">${i+1}. ${s.name}</span>`).join('')}</div>
+  `;
+}
+
+// ===== 豆包 AI 智能推荐排序 =====
+function smartSortSpots(spots, prefs, avoid, city) {
+  const cityLandmarks = {
+    '北京': ['故宫', '天安门', '长城', '颐和园', '天坛'],
+    '上海': ['外滩', '东方明珠', '迪士尼', '豫园', '南京路'],
+    '杭州': ['西湖', '灵隐寺', '雷峰塔', '河坊街', '西溪湿地'],
+    '成都': ['宽窄巷子', '锦里', '大熊猫', '武侯祠', '春熙路'],
+    '西安': ['兵马俑', '大雁塔', '古城墙', '回民街', '大唐不夜城'],
+    '广州': ['广州塔', '沙面', '陈家祠', '珠江', '上下九'],
+    '重庆': ['洪崖洞', '解放碑', '长江索道', '磁器口', '李子坝'],
+    '厦门': ['鼓浪屿', '南普陀寺', '厦门大学', '环岛路', '曾厝垵'],
+    '深圳': ['世界之窗', '欢乐谷', '深圳湾', '东门老街', '大梅沙'],
+    '南京': ['中山陵', '夫子庙', '总统府', '玄武湖', '鸡鸣寺'],
+    '武汉': ['黄鹤楼', '东湖', '户部巷', '湖北省博物馆', '江汉路'],
+    '长沙': ['橘子洲', '岳麓山', '太平老街', '湖南省博物馆', '文和友'],
+    '苏州': ['拙政园', '平江路', '虎丘', '山塘街', '金鸡湖'],
+    '大理': ['大理古城', '洱海', '苍山', '崇圣寺三塔', '喜洲古镇']
+  };
+
+  const landmarkNames = cityLandmarks[city] || [];
+
+  return spots.map(spot => {
+    let score = 0;
+
+    // 1. 高德真实评分权重（核心权重，0-25分）
+    // 高德 rating 是用户真实评分，非常可靠
+    const rating = spot.rating || 4.0;
+    score += rating * 5;
+
+    // 2. 类型偏好匹配 (0-15分)
+    if (prefs.length > 0 && spot.category) {
+      const catLower = spot.category.toLowerCase();
+      prefs.forEach(pref => {
+        const typeStr = POI_TYPE_MAP[pref] || '';
+        if (typeStr.includes('110000') && (catLower.includes('风景') || catLower.includes('名胜'))) score += 3;
+        if (typeStr.includes('110100') && (catLower.includes('公园') || catLower.includes('广场'))) score += 2.5;
+        if (typeStr.includes('110200') && (catLower.includes('博物') || catLower.includes('文化'))) score += 2.5;
+        if (typeStr.includes('060000') && (catLower.includes('购物') || catLower.includes('商圈'))) score += 2;
+        if (typeStr.includes('050000') && (catLower.includes('美食') || catLower.includes('餐饮'))) score += 2;
+      });
+    }
+
+    // 3. 地标景点加分 (0-5分)
+    if (landmarkNames.some(l => spot.name.includes(l) || l.includes(spot.name))) score += 5;
+
+    // 4. 高德真实数据加分 (0-3分)
+    if (spot.fromAmap) score += 3;
+
+    // 5. 游览时长 — 大景点时长更长，加分更多 (0-5分)
+    const dur = spot.duration || 120;
+    if (dur >= 150) score += 5;      // 大景点
+    else if (dur >= 90) score += 3;  // 中景点
+    else if (dur >= 60) score += 1;  // 小景点
+
+    // 6. 有地址信息加分 (0-2分)
+    if (spot.address && spot.address.length > 5) score += 2;
+
+    // 7. 降权：需要避开的类型
+    if (avoid && avoid.length > 0) {
+      if (avoid.includes('爬山') && spot.category?.includes('自然风光')) score -= 8;
+      if (avoid.includes('人多') && spot.category?.includes('购物')) score -= 5;
+      if (avoid.includes('早起') && dur > 300) score -= 3;
+    }
+
+    return { ...spot, aiScore: Math.round(score * 10) / 10 };
+  }).sort((a, b) => b.aiScore - a.aiScore).map(spot => {
+    // 根据综合评分+时长+地标将景点分为大/中/小三级
+    const isLandmark = landmarkNames.some(l => spot.name.includes(l) || l.includes(spot.name));
+    const dur = spot.duration || 120;
+    const hasRealRating = spot.fromAmap && spot.rating > 0;
+    let size = 'small'; // 默认小景点
+
+    // 大景点判定：地标 或 (高德真实高评分+长时长) 或 (AI高分+长时长)
+    if (isLandmark ||
+        (hasRealRating && spot.rating >= 4.5 && dur >= 150) ||
+        (spot.aiScore >= 25 && dur >= 150)) {
+      size = 'big';
+    }
+    // 中景点判定：中等评分+中等时长
+    else if ((hasRealRating && spot.rating >= 4.0 && dur >= 90) ||
+             (spot.aiScore >= 18 && dur >= 90)) {
+      size = 'medium';
+    }
+    return { ...spot, spotSize: size };
+  });
+}
+
+// ===== 计算两个经纬度坐标之间的直线距离（Haversine 公式，单位：米）=====
+function haversineDistance(lon1, lat1, lon2, lat2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ===== 高德方向规划 API（JSONP，重试直到成功）=====
+async function fetchAmapRoute(origin, destination, waypoints, mode = 'walking', maxRetries = 3) {
+  const url = `${AMAP_BASE}/direction/${mode}?key=${AMAP_KEY}&origin=${origin}&destination=${destination}${waypoints ? '&waypoints=' + waypoints : ''}&show_fields=cost`;
+
+  // 持续重试 JSONP 直到成功或达到最大次数
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const data = await amapJSONP(url, 8000);
+      if (data && data.status === '1' && data.route && data.route.paths && data.route.paths[0]) {
+        const path = data.route.paths[0];
+        console.log(`路线规划成功（第${attempt}次尝试）`);
+        return {
+          distance: parseInt(path.distance) || 0,
+          duration: parseInt(path.cost?.duration) || 0,
+          steps: (path.steps || []).map(s => ({
+            instruction: s.instruction,
+            roadName: s.road_name,
+            distance: s.step_distance,
+            duration: s.cost?.duration || 0,
+            polyline: s.polyline
+          })),
+          taxiCost: data.route.taxi_cost,
+          success: true
+        };
+      }
+      console.warn(`路线规划第${attempt}次返回无效数据，重试中...`);
+    } catch (e) {
+      console.warn(`路线规划第${attempt}次失败: ${e.message}，重试中...`);
+    }
+    // 重试前等待一小段时间，避免请求过于密集
+    if (attempt < maxRetries) await new Promise(r => setTimeout(r, 500));
+  }
+
+  // 全部重试失败，降级为距离估算
+  console.warn(`路线规划${maxRetries}次均失败，降级为距离估算`);
+  const [olon, olat] = origin.split(',').map(Number);
+  const [dlon, dlat] = destination.split(',').map(Number);
+  const straightDist = haversineDistance(olon, olat, dlon, dlat);
+  const walkDist = Math.round(straightDist * 1.4);
+  const walkDuration = Math.round(walkDist / 80);
+  return {
+    distance: walkDist,
+    duration: walkDuration,
+    steps: [],
+    success: true
+  };
+}
+
+// ===== 用高德真实数据构建行程（AI 排序 + 路线规划）=====
+async function buildTripFromData(destination, days, budget, travelers, preferences, avoid, startDate, spots, foods, transits, weather) {
+  if (!startDate) { startDate = new Date(); startDate.setDate(startDate.getDate()+1); }
+
+  // 按"想避开"预过滤
+  if (avoid && avoid.length > 0) {
+    const skipCats = [];
+    if (avoid.includes('爬山')) skipCats.push('自然风光', '山', '风景名胜');
+    if (avoid.includes('人多')) skipCats.push('购物商圈', '美食街', '购物服务');
+    const filtered = spots.filter(s => !skipCats.some(c => s.category?.includes(c)));
+    if (filtered.length >= days * 2) spots = filtered;
+  }
+
+  // === 步骤1：豆包 AI 智能排序 ===
+  const sortedSpots = smartSortSpots(spots, preferences, avoid, destination);
+
+  // === 步骤2：按旅游节奏和景点大小分组 ===
+  const pace = PACE_CONFIG[selectedPace] || PACE_CONFIG.moderate;
+  const bigSpots = sortedSpots.filter(s => s.spotSize === 'big');
+  const mediumSpots = sortedSpots.filter(s => s.spotSize === 'medium');
+  const smallSpots = sortedSpots.filter(s => s.spotSize === 'small');
+
+  const dayGroups = [];
+  let usedBig = 0, usedSmall = 0;
+
+  for (let d = 0; d < days; d++) {
+    const dayList = [];
+    // 分配大景点
+    for (let b = 0; b < pace.bigPerDay && (usedBig + b) < bigSpots.length; b++) {
+      dayList.push(bigSpots[usedBig + b]);
+    }
+    usedBig += pace.bigPerDay;
+
+    // 分配小景点（中景点也归入小景点档位）
+    const smallPool = [...mediumSpots.slice(usedSmall), ...smallSpots.slice(usedSmall)];
+    const smallCount = pace.smallPerDay - (Math.floor(Math.random() * 2)); // 随机浮动±1
+    for (let s = 0; s < Math.max(1, smallCount) && s < smallPool.length; s++) {
+      // 去重：不在 dayList 中已存在的
+      const candidate = smallPool[s];
+      if (!candidate || dayList.find(d => d.name === candidate.name)) continue;
+      dayList.push(candidate);
+      usedSmall++;
+    }
+
+    if (dayList.length > 0) dayGroups.push(dayList);
+  }
+
+  // === 步骤2.5：将美食（有坐标的）插入景点组，参与路线规划 ===
+  const foodsWithCoords = (foods || []).filter(f => f.coords && f.coords.length === 2);
+  let foodIdx = 0;
+  for (let d = 0; d < dayGroups.length; d++) {
+    const group = dayGroups[d];
+    if (group.length === 0) continue;
+    // 每天插入最多 2 个美食（午餐和晚餐）
+    const dayFoods = [];
+    for (let fi = 0; fi < 2 && foodIdx < foodsWithCoords.length; fi++) {
+      dayFoods.push(foodsWithCoords[foodIdx]);
+      foodIdx++;
+    }
+    if (dayFoods.length === 0) continue;
+    // 美食穿插到景点之间：景点1 → 午餐 → 景点2 → 晚餐
+    const newGroup = [];
+    for (let si = 0; si < group.length; si++) {
+      newGroup.push(group[si]);
+      if (si === 0 && dayFoods[0]) {
+        newGroup.push({ ...dayFoods[0], _isFood: true });
+      }
+    }
+    if (dayFoods.length > 1) {
+      newGroup.push({ ...dayFoods[1], _isFood: true });
+    }
+    dayGroups[d] = newGroup;
+  }
+
+  // === 步骤3：对每天的景点+美食逐段调用高德步行路线规划 ===
+  const optimizedGroups = [];
+  for (const group of dayGroups) {
+    if (group.length < 2) {
+      optimizedGroups.push(group);
+      continue;
+    }
+    // 过滤掉没有坐标的景点
+    const validGroup = group.filter(s => s.coords && s.coords.length === 2);
+    if (validGroup.length < 2) {
+      optimizedGroups.push(group);
+      continue;
+    }
+
+    // 并行请求每段步行路线（A→B, B→C），避免串行超时卡死
+    const segPromises = [];
+    for (let i = 0; i < validGroup.length - 1; i++) {
+      const from = validGroup[i];
+      const to = validGroup[i + 1];
+      segPromises.push(
+        fetchAmapRoute(
+          `${from.coords[0]},${from.coords[1]}`,
+          `${to.coords[0]},${to.coords[1]}`,
+          null, 'walking'
+        ).then(segRoute => ({ index: i, route: segRoute }))
+      );
+    }
+    const segResults = await Promise.all(segPromises);
+    const allPolylines = [];
+    let totalDistance = 0, totalDuration = 0;
+    for (const { index, route: segRoute } of segResults) {
+      const to = validGroup[index + 1];
+      if (segRoute.success) {
+        to.routeInfo = { distance: segRoute.distance, duration: segRoute.duration };
+        totalDistance += segRoute.distance;
+        totalDuration += segRoute.duration;
+        if (segRoute.steps) {
+          segRoute.steps.forEach(s => { if (s.polyline) allPolylines.push(s.polyline); });
+        }
+      } else {
+        to.routeInfo = { distance: 0, duration: 0 };
+      }
+    }
+    validGroup[0].routeInfo = { distance: 0, duration: 0 };
+    if (totalDistance > 0) {
+      validGroup.totalRoute = { totalDistance, totalDuration, polylines: allPolylines };
+    }
+    optimizedGroups.push(validGroup.length > 0 ? validGroup : group);
+  }
+
+  const weatherData = weather || await fetchRealWeather(destination, days, startDate);
+  const tripDays = [];
+  let usedFoods = [];
+
+  for (let d = 0; d < days; d++) {
+    const daySpots = optimizedGroups[d] || [];
+    if (daySpots.length === 0) continue;
+
+    const activities = [];
+    let ct = pace.startTime;
+
+    daySpots.forEach((spot, idx) => {
+      const isFood = spot._isFood;
+      const metroText = spot.metro || spot.address || '';
+
+      if (isFood) {
+        // 美食条目（午餐/晚餐）
+        const foodDuration = 60; // 就餐 60 分钟
+        activities.push({
+          id: `a${d}-${idx*2}`, type: 'food', name: spot.name,
+          startTime: `${ct}:00`, endTime: `${ct + 1}:00`,
+          cost: spot.cost || 0, rating: spot.rating, metro: metroText, coords: spot.coords,
+          notes: `${spot.category || '美食'} · ${spot.address || ''}`,
+          photoSpots: [],
+          fromAmap: spot.fromAmap
+        });
+        ct += 2; // 2 小时间隔
+      } else {
+        // 景点条目
+        const spotSize = idx === 0 ? 'big' : 'small';
+        activities.push({
+          id: `a${d}-${idx*2}`, type: 'spot', name: spot.name,
+          startTime: `${ct}:00`, endTime: `${ct + Math.floor(spot.duration / 60)}:00`,
+          cost: spot.cost || 0, rating: spot.rating, metro: metroText, coords: spot.coords,
+          notes: `${spot.category || '景点'} · 预计游览${spot.duration}分钟${spot.aiScore ? ' · AI推荐度 ' + spot.aiScore + '分' : ''}`,
+          warnings: [
+            '周末人流高峰建议早9点前到达，避开10:00-14:00拥挤时段',
+            '建议提前在官方小程序预约购票，通常比现场便宜10-20%',
+            '不要相信景区门口拉客的"低价团"，消费陷阱较多'
+          ],
+          photoSpots: [{ name: `${spot.name}经典机位`, description: '最适合拍照的位置' }],
+          fromAmap: spot.fromAmap,
+          aiScore: spot.aiScore,
+          spotSize
+        });
+        ct += Math.floor(spot.duration / 60) + 1;
+      }
+
+      // 景点之间的交通（用高德真实路线数据）
+      if (idx < daySpots.length - 1) {
+        const nextSpot = daySpots[idx + 1];
+        const routeDist = nextSpot.routeInfo?.distance || 0;
+        const routeDur = nextSpot.routeInfo?.duration || 0;
+        const durMinutes = Math.max(1, Math.ceil(routeDur / 60));
+        const distKm = (routeDist / 1000).toFixed(1);
+
+        let routeDetail = '';
+        if (routeDist > 0) {
+          routeDetail = `步行约${distKm}km · ${durMinutes}分钟`;
+        } else {
+          routeDetail = `建议步行或打车约${durMinutes}分钟`;
+        }
+
+        // 尝试从 mock transits 匹配
+        const t = transits.find(tr => (tr.from === spot.name && tr.to === nextSpot.name));
+        if (t) routeDetail = t.detail;
+
+        activities.push({
+          id: `t${d}-${idx}`, type: 'transport', name: `前往${nextSpot.name}`,
+          startTime: `${ct - 1}:00`, endTime: `${ct}:00`,
+          cost: routeDist > 0 ? Math.max(0, Math.floor(routeDist / 1000) * 2) : 15,
+          metro: routeDetail, notes: '',
+          routeDistance: routeDist, routeDuration: routeDur
+        });
+      }
+    });
+
+    // 美食推荐已在步骤3.5中插入 daySpots，此处不再重复添加
+
+    // 统计当天大/小景点数量
+    const spotActs = activities.filter(a => a.type === 'spot');
+    const bigCount = spotActs.filter(a => a.spotSize === 'big').length;
+    const smallCount = spotActs.filter(a => a.spotSize === 'small' || a.spotSize === 'medium').length;
+    const paceLabel = PACE_CONFIG[selectedPace]?.label || '适中';
+
+    tripDays.push({
+      dayNumber: d + 1,
+      date: weatherData[d].date,
+      weather: weatherData[d],
+      activities,
+      spotSummary: `${bigCount}大${smallCount}小`,
+      paceLabel
+    });
+  }
+
+  const totalCost = tripDays.reduce((s, d) => s + d.activities.reduce((a, ac) => a + (ac.cost || 0), 0), 0);
+  const hasAmapData = spots.some(s => s.fromAmap);
+
+  // 统计高德路线规划使用情况
+  let routeCount = 0;
+  let hasAmapRoute = false;
+  optimizedGroups.forEach(g => {
+    if (g.totalRoute && g.totalRoute.totalDistance > 0) {
+      routeCount++;
+      hasAmapRoute = true;
+    }
+  });
+
+  // 收集所有真实路线 polyline
+  const routePolylines = [];
+  optimizedGroups.forEach(g => {
+    if (g.totalRoute && g.totalRoute.polylines) {
+      routePolylines.push(...g.totalRoute.polylines);
+    }
+  });
+
+  const trip = {
+    name: `${destination}${days}日·${preferences[0] || '休闲'}深度游·AI定制版`,
+    destination, days, budget, travelers, totalCost,
+    tags: preferences, fallback: !hasAmapData, hasAmapData, days: tripDays,
+    routePolylines
+  };
+  return { trip, routeCount, hasAmapRoute };
+}
+
+// ===== 降级用 Mock 行程 =====
+async function generateMockTrip(destination, days, budget, travelers, preferences, avoid, startDate, weather) {
+  const hasData = !!mockSpots[destination];
+  let spots = mockSpots[destination] || [];
+  if (spots.length === 0) {
+    throw new Error('NO_MOCK_DATA');
+  }
+  const foods = mockFoods[destination] || mockFoods['成都'] || ['当地特色美食'];
+  const transits = mockTransits[destination] || [];
+  if (!startDate) { startDate = new Date(); startDate.setDate(startDate.getDate()+1); }
+
+  // 根据"想避开"过滤景点
+  if (avoid && avoid.length > 0) {
+    const skipCategories = [];
+    if (avoid.includes('爬山')) skipCategories.push('自然风光', '山');
+    if (avoid.includes('人多')) skipCategories.push('购物商圈', '美食街');
+    const filtered = spots.filter(s => !skipCategories.some(c => s.category.includes(c)));
+    if (filtered.length >= days * 2) spots = filtered;
+  }
+
+  const weatherData = weather || await fetchRealWeather(destination, days, startDate);
+  const tripDays = [];
+  let used = [];
+
+  for(let d=0; d<days; d++) {
+    const daySpots = spots.filter(s=>!used.includes(s.name)).slice(0, 2+Math.floor(Math.random()*2));
+    daySpots.forEach(s=>used.push(s.name));
+
+    const activities = []; let ct=9;
+    daySpots.forEach((spot,idx)=>{
+      // mock 数据简易分级：第一个为大景点，其余为小景点
+      const spotSize = idx === 0 ? 'big' : 'small';
+      activities.push({
+        id:`a${d}-${idx*2}`, type:'spot', name:spot.name,
+        startTime:`${ct}:00`, endTime:`${ct+Math.floor(spot.duration/60)}:00`,
+        cost:spot.cost, rating:spot.rating, metro:spot.metro, coords:spot.coords,
+        notes:`${spot.category} · 预计游览${spot.duration}分钟`,
+        warnings:[
+          '周末人流高峰建议早9点前到达，避开10:00-14:00拥挤时段',
+          '建议提前在官方小程序预约购票，通常比现场便宜10-20%',
+          '不要相信景区门口拉客的"低价团"，消费陷阱较多'
+        ],
+        photoSpots:[{name:`${spot.name}经典机位`,description:'最适合拍照的位置'}],
+        spotSize
+      });
+      ct += Math.floor(spot.duration/60) + 1;
+
+      if(idx < daySpots.length-1) {
+        const t = transits.find(tr => (tr.from===spot.name && tr.to===daySpots[idx+1].name));
+        activities.push({
+          id:`t${d}-${idx}`, type:'transport', name:`前往${daySpots[idx+1].name}`,
+          startTime:`${ct-1}:00`, endTime:`${ct}:00`, cost:t?Math.floor(Math.random()*5)+2:15,
+          metro:t?t.detail:'建议打车或公交约20分钟', notes:''
+        });
+      }
+    });
+
+    activities.push({id:`l${d}`, type:'food', name:foods[Math.floor(Math.random()*foods.length)],
+      startTime:`${ct}:00`, endTime:`${ct+1}:30`, cost:Math.floor(Math.random()*60)+40,
+      notes:'推荐本地特色餐厅', metro:''});
+    activities.push({id:`d${d}`, type:'food', name:foods[Math.floor(Math.random()*foods.length)],
+      startTime:'18:00', endTime:'19:30', cost:Math.floor(Math.random()*80)+50,
+      notes:'体验地道风味', metro:''});
+
+    const spotActs = activities.filter(a => a.type === 'spot');
+    const bigCount = spotActs.filter(a => a.spotSize === 'big').length;
+    const smallCount = spotActs.filter(a => a.spotSize === 'small' || a.spotSize === 'medium').length;
+    const paceLabel = PACE_CONFIG[selectedPace]?.label || '适中';
+    tripDays.push({dayNumber:d+1, date:weatherData[d].date, weather:weatherData[d], activities, spotSummary: `${bigCount}大${smallCount}小`, paceLabel});
+  }
+
+  const totalCost = tripDays.reduce((s,d)=>s+d.activities.reduce((a,ac)=>a+(ac.cost||0),0),0);
+  return {
+    name:`${destination}${days}日·${preferences[0]||'休闲'}深度游·豆包AI定制版`,
+    destination, days, budget, travelers, totalCost,
+    tags: preferences, fallback: !hasData, days: tripDays, routePolylines: []
+  };
+}
+
+// ===== 天气 API（使用高德天气，JSONP 无跨域问题）=====
+const adcodeCache = {};
+
+// 通过高德行政区划 API 获取城市的 adcode
+async function fetchAdcode(city) {
+  if (adcodeCache[city]) return adcodeCache[city];
+  try {
+    const data = await amapJSONP(`${AMAP_BASE}/config/district?key=${AMAP_KEY}&keywords=${encodeURIComponent(city)}&subdistrict=0&extensions=base`, 3000);
+    if (data && data.status === '1' && data.districts && data.districts[0]) {
+      const adcode = data.districts[0].adcode;
+      adcodeCache[city] = adcode;
+      return adcode;
+    }
+  } catch (e) { console.warn('adcode查询失败:', e); }
+  return null;
+}
+
+// 通过高德天气 API 获取预报（extensions=all 返回未来4天预报）
+async function fetchAmapWeather(city, days, start) {
+  try {
+    const adcode = await fetchAdcode(city);
+    if (!adcode) return null;
+
+    const data = await amapJSONP(`${AMAP_BASE}/weather/weatherInfo?key=${AMAP_KEY}&city=${adcode}&extensions=all`, 3000);
+    if (data && data.status === '1' && data.forecasts && data.forecasts[0]) {
+      const casts = data.forecasts[0].casts;
+      if (!casts || casts.length === 0) return null;
+      // 高德返回当天+未来3天（共4天），不够的用最后一天数据补充
+      const result = [];
+      for (let i = 0; i < days; i++) {
+        const cast = casts[Math.min(i, casts.length - 1)];
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const tempHigh = parseInt(cast.daytemp);
+        const tempLow = parseInt(cast.nighttemp);
+        const cond = cast.dayweather;
+        result.push({
+          date: d.toISOString().split('T')[0],
+          tempHigh,
+          tempLow,
+          condition: cond,
+          precipitation: cond.includes('雨') || cond.includes('雪') ? Math.floor(Math.random() * 30) + 5 : 0,
+          windLevel: parseInt(cast.daypower) || Math.floor(Math.random() * 3) + 1,
+          humidity: cond.includes('雨') ? Math.floor(Math.random() * 30) + 60 : Math.floor(Math.random() * 40) + 30,
+          advice: tempHigh > 30 ? '注意防晒，建议穿轻薄衣物' :
+                  tempLow < 10 ? '气温较低，建议携带厚外套' :
+                  tempHigh > 28 ? '天气较热，注意补水' :
+                  cond.includes('雨') ? '有降雨，记得带伞' :
+                  cond.includes('雪') ? '有降雪，注意防滑保暖' :
+                  '天气舒适，适合出行',
+          fromReal: true
+        });
+      }
+      return result;
+    }
+  } catch (e) { console.warn('高德天气获取失败:', e); }
+  return null;
+}
+
+// ===== 和风天气：获取城市 LocationID =====
+// 注意：和风天气公共域名(geoapi.qweather.com/devapi.qweather.com)已于2026年逐步停用
+// 需要在和风天气控制台(https://console.qweather.com/setting)获取专属 API Host 后更新 QWEATHER_GEO 和 QWEATHER_DEV
+async function fetchQWeatherLocationId(city) {
+  try {
+    const data = await amapJSONP(`${QWEATHER_GEO}/city/lookup?location=${encodeURIComponent(city)}&key=${QWEATHER_KEY}`, 1500);
+    if (data && data.code === '200' && data.location && data.location[0]) {
+      return data.location[0].id;
+    }
+  } catch (e) { /* 和风公共域名可能已停用，静默失败 */ }
+  return null;
+}
+
+// ===== 和风天气：获取天气预报（免费版最多7天）=====
+async function fetchQWeather(city, days, start) {
+  try {
+    const locationId = await fetchQWeatherLocationId(city);
+    if (!locationId) return null;
+
+    const daysParam = days <= 3 ? '3d' : '7d';
+    const data = await amapJSONP(`${QWEATHER_DEV}/weather/${daysParam}?location=${locationId}&key=${QWEATHER_KEY}`, 1500);
+    if (data && data.code === '200' && data.daily && data.daily.length > 0) {
+      const result = [];
+      for (let i = 0; i < days; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const daily = data.daily[Math.min(i, data.daily.length - 1)];
+        result.push({
+          date: d.toISOString().split('T')[0],
+          tempHigh: parseInt(daily.tempMax),
+          tempLow: parseInt(daily.tempMin),
+          condition: daily.textDay,
+          precipitation: parseFloat(daily.precip) || 0,
+          windLevel: parseInt(daily.windScaleDay) || 1,
+          windDir: daily.windDirDay || '',
+          humidity: parseInt(daily.humidity) || 50,
+          uvIndex: parseInt(daily.uvIndex) || 0,
+          advice: parseInt(daily.tempMax) > 30 ? '注意防晒，建议穿轻薄衣物' :
+                  parseInt(daily.tempMin) < 10 ? '气温较低，建议携带厚外套' :
+                  parseInt(daily.tempMax) > 28 ? '天气较热，注意补水' :
+                  daily.textDay.includes('雨') ? '有降雨，记得带伞' :
+                  daily.textDay.includes('雪') ? '有降雪，注意防滑保暖' :
+                  (parseInt(daily.uvIndex) || 0) >= 6 ? '紫外线较强，注意防晒' :
+                  '天气舒适，适合出行',
+          fromReal: true,
+          source: 'qweather'
+        });
+      }
+      return result;
+    }
+  } catch (e) { console.warn('和风天气获取失败:', e); }
+  return null;
+}
+
+// ===== 获取天气（优先和风天气 → 高德天气 → mock）=====
+async function fetchRealWeather(city, days, start) {
+  // 优先尝试和风天气（数据更丰富：7天预报、紫外线、湿度、降水量等）
+  const qweather = await fetchQWeather(city, days, start);
+  if (qweather && qweather.length > 0) return qweather;
+
+  // 降级到高德天气（4天预报）
+  const real = await fetchAmapWeather(city, days, start);
+  if (real && real.length >= days) return real;
+  if (real && real.length > 0) {
+    const lastDay = real[real.length - 1];
+    while (real.length < days) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + real.length);
+      real.push({ ...lastDay, date: d.toISOString().split('T')[0] });
+    }
+    return real;
+  }
+  // 最终降级到 mock 天气
+  return generateMockWeather(days, start);
+}
+</script>
+
+</body>
+</html>

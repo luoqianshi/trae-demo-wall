@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <title>就诊录音 - 银发就医小棉袄</title>
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../shared/css/variables.css">
+  <link rel="stylesheet" href="../../shared/css/base.css">
+  <link rel="stylesheet" href="../../shared/css/components.css">
+  <link rel="stylesheet" href="../../shared/css/animations.css">
+  <link rel="stylesheet" href="../../shared/css/toast.css">
+  <style>
+    /* ===== 录音引导说明 ===== */
+    .record-guide {
+      text-align: center;
+      padding: var(--space-lg) var(--space-md) var(--space-sm);
+    }
+    .record-guide-title {
+      font-size: var(--font-xl);
+      font-weight: 700;
+      color: var(--color-text, #1f2937);
+      margin: 0 0 var(--space-sm);
+      line-height: 1.4;
+    }
+    .record-guide-example {
+      font-size: var(--font-s);
+      color: var(--color-text-weak, #6b7280);
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    /* ===== 录音波形动画 ===== */
+    .waveform {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      height: 64px;
+      margin: 0 auto var(--space-md);
+      max-width: 280px;
+    }
+    .waveform .wave-bar {
+      width: 6px;
+      height: 12px;
+      background: var(--color-primary);
+      border-radius: 3px;
+      transition: height 0.08s ease-out;
+    }
+    /* Mock 模式下使用 CSS 动画模拟波形（真实模式下由 JS 驱动高度） */
+    .waveform.mock-mode .wave-bar {
+      animation: wave-mock 1.1s ease-in-out infinite;
+    }
+    .waveform.mock-mode .wave-bar:nth-child(1) { animation-delay: 0.0s; }
+    .waveform.mock-mode .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+    .waveform.mock-mode .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+    .waveform.mock-mode .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+    .waveform.mock-mode .wave-bar:nth-child(5) { animation-delay: 0.4s; }
+    .waveform.mock-mode .wave-bar:nth-child(6) { animation-delay: 0.5s; }
+    .waveform.mock-mode .wave-bar:nth-child(7) { animation-delay: 0.2s; }
+    .waveform.mock-mode .wave-bar:nth-child(8) { animation-delay: 0.35s; }
+    .waveform.mock-mode .wave-bar:nth-child(9) { animation-delay: 0.15s; }
+    .waveform.mock-mode .wave-bar:nth-child(10) { animation-delay: 0.45s; }
+    .waveform.mock-mode .wave-bar:nth-child(11) { animation-delay: 0.25s; }
+    .waveform.mock-mode .wave-bar:nth-child(12) { animation-delay: 0.05s; }
+    @keyframes wave-mock {
+      0%, 100% { height: 10px; }
+      50% { height: 48px; }
+    }
+
+    /* ===== 计时器 ===== */
+    .record-timer {
+      font-size: var(--font-l);
+      font-weight: 600;
+      color: var(--color-primary);
+      margin: var(--space-sm) 0 0;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 1px;
+    }
+    .record-mode-hint {
+      font-size: var(--font-xs);
+      color: var(--color-text-weak, #6b7280);
+      margin: var(--space-xs) 0 0;
+    }
+
+    /* ===== 处理过渡动画 ===== */
+    .processing-transition {
+      text-align: center;
+      padding: var(--space-lg) 0;
+    }
+    .processing-spinner {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto var(--space-sm);
+      border: 5px solid rgba(255,123,66,0.2);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      animation: spinner-rotate 0.9s linear infinite;
+    }
+    @keyframes spinner-rotate {
+      to { transform: rotate(360deg); }
+    }
+    .processing-text {
+      font-size: var(--font-m);
+      color: var(--color-text, #1f2937);
+      margin: 0;
+    }
+
+    /* ===== 录音回放区域 ===== */
+    .playback-audio {
+      width: 100%;
+      margin-bottom: var(--space-sm);
+    }
+    .playback-info {
+      font-size: var(--font-xs);
+      color: var(--color-text-weak, #6b7280);
+      margin: 0 0 var(--space-sm);
+    }
+
+    /* ===== 模式切换标签（语音录音 / 拍照记录） ===== */
+    .mode-switcher {
+      display: flex;
+      margin: 0 var(--space-xl) var(--space-md);
+      background: var(--color-bg-gray, #f5f5f5);
+      border-radius: var(--radius-lg, 16px);
+      padding: 4px;
+      gap: 4px;
+    }
+    .mode-tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: var(--space-sm) var(--space-md);
+      font-size: var(--font-m);
+      font-weight: 600;
+      color: var(--color-text-secondary, #6b7280);
+      text-decoration: none;
+      border-radius: var(--radius-md, 12px);
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mode-tab.active {
+      background: var(--color-primary, #D84315);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(216,67,21,0.3);
+    }
+    .mode-tab:not(.active):active {
+      background: rgba(0,0,0,0.06);
+    }
+
+    /* 适老模式：切换标签放大，字体≥20px，高度≥56px */
+    .theme-accessible .mode-switcher {
+      border-radius: var(--radius-xl, 20px);
+      padding: 6px;
+    }
+    .theme-accessible .mode-tab {
+      min-height: 56px;
+      font-size: 20px;
+      font-weight: 700;
+      border-radius: var(--radius-lg, 16px);
+    }
+
+    /* ===== 适老模式：引导文字与关键元素放大 ===== */
+    .theme-accessible .record-guide-title {
+      font-size: var(--font-xxl);
+    }
+    .theme-accessible .record-guide-example {
+      font-size: var(--font-m);
+    }
+    .theme-accessible .record-timer {
+      font-size: var(--font-xxl);
+    }
+    .theme-accessible .processing-text {
+      font-size: var(--font-l);
+    }
+    .theme-accessible .processing-spinner {
+      width: 72px;
+      height: 72px;
+      border-width: 6px;
+    }
+    .theme-accessible .waveform {
+      height: 80px;
+    }
+    .theme-accessible .waveform .wave-bar {
+      width: 8px;
+    }
+  </style>
+</head>
+<body class="theme-accessible">
+  <div class="page">
+    <nav class="navbar">
+      <button class="navbar-back" onclick="goBack()">← 返回</button>
+      <span class="navbar-title">就诊录音</span>
+    </nav>
+
+    <main class="page-content">
+
+      <!-- ===== 模式切换：语音录音 / 拍照记录 ===== -->
+      <div class="mode-switcher">
+        <a class="mode-tab active">🎙️ 语音录音</a>
+        <a class="mode-tab" href="me_photo.html">📷 拍照记录</a>
+      </div>
+
+      <!-- 录音前引导说明 -->
+      <div class="record-guide" id="recordGuide">
+        <h2 class="record-guide-title">请录制医生的话</h2>
+        <p class="record-guide-example">就诊时把医生说的诊断、用药、注意事项录下来，AI 自动整理</p>
+        <!-- 体验模式标注：透明告知当前能力状态 -->
+        <p style="margin-top: var(--space-sm); padding: 6px 12px; background: #E3F2FD; border-radius: var(--radius-sm); border-left: 3px solid #1976D2; font-size: var(--font-xs); color: #0D47A1; line-height: 1.5; display: inline-block;">
+          ℹ️ 体验模式：使用预置示例语音文本展示完整链路（真实 ASR 引擎接入中）
+        </p>
+      </div>
+
+      <!-- ===== 统一折叠区：演示说明 + 技术栈对照 + 音频保留策略 =====
+           渐进式披露原则：默认收起，评委/用户按需展开，避免页面信息过载 -->
+      <div style="margin: 0 var(--space-xl) var(--space-md); background: var(--color-primary-light); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); border-left: 3px solid var(--color-primary);">
+        <div id="techStackToggle" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; -webkit-tap-highlight-color: transparent;" onclick="toggleTechStack()">
+          <span style="font-size: var(--font-s); font-weight: 600; color: var(--color-primary);">ℹ️ 能力说明 · 技术栈对照 · 音频保留策略（点击展开）</span>
+          <span id="techStackArrow" style="font-size: var(--font-m); color: var(--color-primary); transition: transform 0.2s;">▶</span>
+        </div>
+        <div id="techStackDetail" style="display: none; margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid rgba(91,108,249,0.2);">
+          <div style="font-size: var(--font-xs); color: var(--color-text); line-height: 1.6;">
+            <!-- 音频云端保留说明 -->
+            <div style="margin-bottom: 10px; padding: 8px 10px; background: #E3F2FD; border-radius: var(--radius-sm); border-left: 3px solid #1976D2; color: #0D47A1;">
+              💾 <strong>音频云端保留</strong>：录音上传服务器 AI 处理后，原始音频默认销毁；付费用户可授权选择保留。
+              <span style="color: #1565C0;">（高级版保留 30 天 / 旗舰版永久保留 · 用户可随时撤回授权）</span>
+            </div>
+            <!-- 双栏对比表 -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+              <!-- 左栏：体验模式（当前） -->
+              <div style="background: #FFF3E0; border: 1px solid #FFB74D; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-weight: 700; color: #E65100; margin-bottom: 6px; font-size: 12px;">ℹ️ 体验模式（当前）</div>
+                <div style="color: #5D4037; line-height: 1.6;">
+                  · ASR：预设示例文本<br>
+                  · 方言守护：静态标签<br>
+                  · LLM 结构化：示例摘要<br>
+                  · OCR：占位提示<br>
+                  · TTS：<strong style="color:#2E7D32;">✅ 真实可用</strong><br>
+                  · NMPA 规则：<strong style="color:#2E7D32;">✅ 真实可用</strong>
+                </div>
+              </div>
+              <!-- 右栏：真实模式（复赛） -->
+              <div style="background: #E3F2FD; border: 1px solid #1976D2; border-radius: 8px; padding: 8px 10px;">
+                <div style="font-weight: 700; color: #0D47A1; margin-bottom: 6px; font-size: 12px;">🚀 真实模式（复赛接入）</div>
+                <div style="color: #0D47A1; line-height: 1.6;">
+                  · ASR：Fun-ASR-Nano-2512 (0.8B)<br>
+                  · 方言守护：171 条实时映射<br>
+                  · LLM：DeepSeek API 结构化<br>
+                  · OCR：Tesseract.js 识别处方<br>
+                  · VAD：FSMN 端点检测<br>
+                  · 首 Partial ≤160ms · 显存 ≤4.8GB
+                </div>
+              </div>
+            </div>
+            <!-- 详细技术栈 -->
+            <div style="padding: 8px 10px; background: rgba(255,255,255,0.6); border-radius: var(--radius-sm); color: var(--color-text-secondary);">
+              <div style="margin-bottom: 4px;"><strong>🎙️ ASR 引擎</strong>：Fun-ASR-Nano-2512 + Qwen3-0.6B + FSMN-VAD · WS /ws/v1/asr/{session_id}</div>
+              <div style="margin-bottom: 4px;"><strong>🛡️ 方言守护</strong>：171 条映射（四川话57/粤语56/上海话29/东北话29）</div>
+              <div style="margin-bottom: 4px;"><strong>⚙️ 安全分级</strong>：38 条药物禁忌 + 三级（绿/黄/红）+ 5 秒冷静期</div>
+              <div style="margin-bottom: 4px;"><strong>🔊 TTS 播报</strong>：edge-tts 预生成 + Web Speech API 双通道（适老参数 rate=0.9）</div>
+              <div style="margin-bottom: 4px;"><strong>🧠 LLM 结构化</strong>：DeepSeek API（复赛接入）</div>
+              <div><strong>📷 OCR 识别</strong>：Tesseract.js（处方/化验单）</div>
+            </div>
+            <div style="margin-top: 8px; padding: 8px 10px; background: rgba(255,255,255,0.6); border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: var(--font-xs);">
+              ℹ️ <strong>当前为体验模式</strong>，使用预置示例数据展示完整流程。<br>
+              可点击 <a href="../common/ai_capabilities.html" style="color: var(--color-primary); font-weight: 600;">AI 能力展示页</a> 查看引擎实时状态 + TTS 在线试听 + 完整规格文档。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 录音状态区域 -->
+      <div style="text-align:center; padding: var(--space-md) 0;">
+        <!-- 录音波形动画（录音中显示） -->
+        <div class="waveform" id="waveform" style="display: none;">
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+        </div>
+
+        <button class="btn-record" id="recordBtn" onclick="onRecordClick()">
+          <span class="record-icon" id="recordIcon">🎙️</span>
+          <span class="record-label" id="recordLabel">点击说话</span>
+        </button>
+        <p class="record-timer" id="recordDuration" style="display: none;"></p>
+        <p class="record-mode-hint" id="recordModeHint" style="display: none;"></p>
+      </div>
+
+      <!-- 录音完成后的回放区域（默认隐藏） -->
+      <div id="playbackSection" style="display: none; padding: var(--space-sm) 0;">
+        <div class="card">
+          <div class="card-header">录音回放</div>
+          <div class="card-body">
+            <audio id="audioPlayer" class="playback-audio" controls></audio>
+            <p class="playback-info" id="playbackInfo"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 处理过渡动画：正在处理...（默认隐藏） -->
+      <div id="processingTransition" class="processing-transition" style="display: none;">
+        <div class="processing-spinner"></div>
+        <p class="processing-text">正在处理...</p>
+      </div>
+
+      <!-- 处理中进度条（默认隐藏） -->
+      <div id="processingSection" style="display: none;">
+        <div class="card">
+          <div class="card-header">处理进度</div>
+          <div class="card-body">
+            <div style="margin-bottom: var(--space-md);">
+              <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xs);">
+                <span>ASR 转写</span>
+                <span class="text-weak" id="step1Percent">0%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="step1Fill" style="width: 0%;"></div>
+              </div>
+            </div>
+            <div style="margin-bottom: var(--space-md);">
+              <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xs);">
+                <span>结构化提取</span>
+                <span class="text-weak" id="step2Percent">0%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="step2Fill" style="width: 0%;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xs);">
+                <span>安全分级</span>
+                <span class="text-weak" id="step3Percent">0%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill safe" id="step3Fill" style="width: 0%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 完成后的操作按钮（默认隐藏） -->
+      <div id="doneSection" style="display: none; padding: var(--space-md) 0;">
+        <button class="btn-primary" id="submitBtn" onclick="submitToProcessing()">AI处理并查看摘要</button>
+        <div style="height: var(--space-sm);"></div>
+        <button class="btn-secondary" onclick="resetAll()">重新录音</button>
+      </div>
+
+      <!-- ASR 识别状态提示（默认隐藏） -->
+      <div id="asrStatusSection" style="display: none; text-align: center; padding: var(--space-sm) 0;">
+        <p class="text-m" id="asrStatusText" style="color: var(--color-primary);"></p>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="../../shared/js/mock-data.js"></script>
+  <script src="../../shared/js/dialect-map.js"></script>
+  <script src="../../shared/js/storage.js"></script>
+  <script src="../../shared/js/navigation.js"></script>
+  <script src="../../shared/js/theme.js"></script>
+  <script src="../../shared/js/utils.js"></script>
+  <script src="../../shared/js/toast.js"></script>
+  <script src="../../shared/js/asr-bridge.js"></script>
+  <script src="../../shared/js/demo-recording.js"></script>
+  <script>
+    initMockData();
+
+    // ===== 加载主题 =====
+    (function() {
+      var savedTheme = getCurrentTheme();
+      document.body.classList.remove('theme-standard','theme-accessible'); document.body.classList.add(savedTheme === 'standard' ? 'theme-standard' : 'theme-accessible');
+    })();
+
+    var recordBtn = document.getElementById('recordBtn');
+    var recordIcon = document.getElementById('recordIcon');
+    var recordLabel = document.getElementById('recordLabel');
+    var recordDuration = document.getElementById('recordDuration');
+    var recordGuide = document.getElementById('recordGuide');
+    var waveform = document.getElementById('waveform');
+    var recordModeHint = document.getElementById('recordModeHint');
+    var playbackSection = document.getElementById('playbackSection');
+    var audioPlayer = document.getElementById('audioPlayer');
+    var playbackInfo = document.getElementById('playbackInfo');
+    var processingTransition = document.getElementById('processingTransition');
+    var processingSection = document.getElementById('processingSection');
+    var doneSection = document.getElementById('doneSection');
+
+    var step1Fill = document.getElementById('step1Fill');
+    var step2Fill = document.getElementById('step2Fill');
+    var step3Fill = document.getElementById('step3Fill');
+    var step1Percent = document.getElementById('step1Percent');
+    var step2Percent = document.getElementById('step2Percent');
+    var step3Percent = document.getElementById('step3Percent');
+
+    var submitBtn = document.getElementById('submitBtn');
+    var asrStatusSection = document.getElementById('asrStatusSection');
+    var asrStatusText = document.getElementById('asrStatusText');
+
+    var waveBars = waveform ? waveform.querySelectorAll('.wave-bar') : [];
+
+    // ===== 评委易用：技术栈折叠 =====
+    function toggleTechStack() {
+      var detail = document.getElementById('techStackDetail');
+      var arrow = document.getElementById('techStackArrow');
+      if (detail.style.display === 'none') {
+        detail.style.display = 'block';
+        arrow.textContent = '▼';
+        arrow.style.transform = 'rotate(0deg)';
+      } else {
+        detail.style.display = 'none';
+        arrow.textContent = '▶';
+      }
+    }
+
+    // 点击录音按钮：纯演示模式，不调用浏览器录音
+    function onRecordClick() {
+      var state = getRecordingState();
+      if (state === 'idle') {
+        startDemoRecording();
+      } else if (state === 'recording') {
+        stopDemoRecording();
+      }
+    }
+
+    // 示例录音：模拟 3 秒录音过程，不调用浏览器麦克风
+    var demoRecordingTimer = null;
+    var demoSeconds = 0;
+    function startDemoRecording() {
+      demoSeconds = 0;
+      // 隐藏引导，显示波形+计时器
+      recordGuide.style.display = 'none';
+      recordBtn.classList.add('recording');
+      recordBtn.classList.add('animate-pulse-record');
+      recordBtn.classList.remove('animate-ripple');
+      recordIcon.textContent = '🎙️';
+      recordLabel.textContent = '点击停止';
+      waveform.style.display = 'flex';
+      waveform.classList.add('mock-mode');
+      recordDuration.style.display = 'block';
+      recordDuration.textContent = '00:00';
+      recordModeHint.style.display = 'block';
+      recordModeHint.textContent = '🎙 示例录音中';
+      playbackSection.style.display = 'none';
+      processingTransition.style.display = 'none';
+      processingSection.style.display = 'none';
+      doneSection.style.display = 'none';
+
+      // 计时器
+      demoRecordingTimer = setInterval(function() {
+        demoSeconds++;
+        recordDuration.textContent = formatRecordingTime(demoSeconds);
+        // 3 秒后自动停止
+        if (demoSeconds >= 3) {
+          stopDemoRecording();
+        }
+      }, 1000);
+    }
+
+    function stopDemoRecording() {
+      if (demoRecordingTimer) {
+        clearInterval(demoRecordingTimer);
+        demoRecordingTimer = null;
+      }
+      recordBtn.classList.remove('recording');
+      recordBtn.classList.remove('animate-pulse-record');
+      waveform.style.display = 'none';
+      recordDuration.style.display = 'none';
+      recordModeHint.style.display = 'none';
+
+      // 直接进入处理流程
+      submitToProcessing();
+    }
+
+    // 根据真实/模拟模式设置波形显示方式
+    function applyWaveformMode(isReal) {
+      if (!waveform) return;
+      if (isReal) {
+        // 真实模式：高度由 JS 驱动，移除 CSS 动画
+        waveform.classList.remove('mock-mode');
+      } else {
+        // 模拟模式：使用 CSS 动画模拟波形
+        waveform.classList.add('mock-mode');
+      }
+    }
+
+    // 用真实音频频率数据更新波形条高度
+    function updateWaveformFromBuffer(buffer) {
+      if (!waveBars || !waveBars.length || !buffer) return;
+      for (var i = 0; i < waveBars.length; i++) {
+        // 从 buffer 中均匀采样，取值范围 0-255
+        var idx = Math.floor(i * buffer.length / waveBars.length);
+        var val = buffer[idx] || 0;
+        // 映射到 4px - 56px
+        var h = 4 + (val / 255) * 52;
+        waveBars[i].style.height = h + 'px';
+      }
+    }
+
+    function stateChangeCallback(state, seconds, step, extra) {
+      if (state === 'recording') {
+        // 录音中：隐藏引导，显示波形+计时器
+        recordGuide.style.display = 'none';
+        recordBtn.classList.add('recording');
+        recordBtn.classList.add('animate-pulse-record');
+        recordBtn.classList.remove('animate-ripple');
+        recordIcon.textContent = '🎙️';
+        recordLabel.textContent = '点击停止';
+        waveform.style.display = 'flex';
+        recordDuration.style.display = 'block';
+        recordDuration.textContent = formatRecordingTime(seconds);
+        // 标识真实/模拟模式
+        if (extra && typeof extra.real !== 'undefined') {
+          applyWaveformMode(extra.real);
+          recordModeHint.style.display = 'block';
+          recordModeHint.textContent = extra.real ? '🎙 真实录音中' : '🔇 示例录音中';
+        }
+        playbackSection.style.display = 'none';
+        processingTransition.style.display = 'none';
+        processingSection.style.display = 'none';
+        doneSection.style.display = 'none';
+      } else if (state === 'waveform') {
+        // 波形数据更新（仅真实录音模式）
+        updateWaveformFromBuffer(extra);
+      } else if (state === 'processing') {
+        // 处理中：显示"正在处理..."过渡动画 + 进度条
+        recordGuide.style.display = 'none';
+        recordBtn.classList.remove('recording');
+        recordBtn.classList.remove('animate-pulse-record');
+        recordBtn.classList.add('animate-ripple');
+        recordIcon.textContent = '⏳';
+        recordLabel.textContent = '处理中...';
+        waveform.style.display = 'none';
+        recordDuration.style.display = 'none';
+        recordModeHint.style.display = 'none';
+        // 显示处理过渡动画
+        processingTransition.style.display = 'block';
+        processingSection.style.display = 'block';
+        playbackSection.style.display = 'none';
+        doneSection.style.display = 'none';
+
+        // 更新三个进度条（6步，每步约1秒）
+        // ASR 转写：最多 40%（前2步）
+        var asrProgress = Math.min(step * 20, 40);
+        // 结构化提取：最多 30%（第3-4步）
+        var structProgress = Math.max(0, Math.min((step - 2) * 15, 30));
+        // 安全分级：最多 30%（第5-6步）
+        var safetyProgress = Math.max(0, Math.min((step - 4) * 15, 30));
+
+        step1Fill.style.width = asrProgress + '%';
+        step1Percent.textContent = asrProgress + '%';
+        step2Fill.style.width = structProgress + '%';
+        step2Percent.textContent = structProgress + '%';
+        step3Fill.style.width = safetyProgress + '%';
+        step3Percent.textContent = safetyProgress + '%';
+      } else if (state === 'done') {
+        // 完成：显示回放（真实录音时）+ 操作按钮
+        recordGuide.style.display = 'none';
+        recordBtn.classList.remove('recording');
+        recordBtn.classList.remove('animate-pulse-record');
+        recordBtn.classList.remove('animate-ripple');
+        recordIcon.textContent = '✅';
+        recordLabel.textContent = '录音完成';
+        waveform.style.display = 'none';
+        recordDuration.style.display = 'none';
+        recordModeHint.style.display = 'none';
+        processingTransition.style.display = 'none';
+        processingSection.style.display = 'none';
+        doneSection.style.display = 'block';
+
+        // 显示录音回放（真实录音时才有音频 URL）
+        var audioUrl = getAudioUrl();
+        if (audioUrl) {
+          audioPlayer.src = audioUrl;
+          playbackInfo.textContent = '录音时长 ' + formatRecordingTime(seconds) + '，可点击播放回听';
+          playbackSection.style.display = 'block';
+        } else {
+          playbackSection.style.display = 'none';
+        }
+
+        // 最终进度条填满
+        step1Fill.style.width = '100%';
+        step1Percent.textContent = '100%';
+        step2Fill.style.width = '100%';
+        step2Percent.textContent = '100%';
+        step3Fill.style.width = '100%';
+        step3Percent.textContent = '100%';
+      } else {
+        // idle：显示引导，隐藏其它
+        recordGuide.style.display = 'block';
+        recordBtn.classList.remove('recording');
+        recordBtn.classList.remove('animate-pulse-record');
+        recordBtn.classList.remove('animate-ripple');
+        recordIcon.textContent = '🎙️';
+        recordLabel.textContent = '点击说话';
+        waveform.style.display = 'none';
+        recordDuration.style.display = 'none';
+        recordModeHint.style.display = 'none';
+        playbackSection.style.display = 'none';
+        processingTransition.style.display = 'none';
+        processingSection.style.display = 'none';
+        doneSection.style.display = 'none';
+
+        // 重置进度条
+        step1Fill.style.width = '0%';
+        step1Percent.textContent = '0%';
+        step2Fill.style.width = '0%';
+        step2Percent.textContent = '0%';
+        step3Fill.style.width = '0%';
+        step3Percent.textContent = '0%';
+        // 清空音频播放器
+        if (audioPlayer) audioPlayer.removeAttribute('src');
+      }
+    }
+
+    // 播放录音回放
+    function playRecording() {
+      if (audioPlayer && audioPlayer.src) {
+        audioPlayer.play();
+      } else if (typeof showToast === 'function') {
+        showToast('暂无可播放的录音', 'warning');
+      }
+    }
+
+    function resetAll() {
+      resetRecording(stateChangeCallback);
+    }
+
+    // ===== 提交录音到处理页 =====
+    // Demo 模式：直接使用预置示例数据，不调用 ASR 引擎（避免 localhost:28020 不可达导致卡死）
+    // 真实 ASR 集成代码保留在 asr-bridge.js，复赛接入引擎后可一键启用
+    function submitToProcessing() {
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '正在准备数据...';
+      }
+      if (asrStatusSection) asrStatusSection.style.display = 'block';
+      if (asrStatusText) asrStatusText.textContent = 'ℹ️ 体验模式：使用预置示例语音文本（真实 ASR 引擎接入中）';
+
+      // 使用预置示例数据（体验模式）
+      var payload = {
+        timestamp: Date.now(),
+        isRealRecording: false,
+        audioDuration: recordingSeconds,
+        asrSource: 'mock',
+        asrText: '',
+        asrConfidence: 0,
+        asrInferMs: 0,
+        asrSegments: [],
+        mockText: '张阿姨，您这是冠心病合并高脂血症，我给您开美托洛尔，每天两次每次半片；阿托伐他汀睡前吃一片。注意别吃西柚，定期复查肝功能。两周后心来复查。'
+      };
+      try {
+        localStorage.setItem('silvercare_last_asr_result', JSON.stringify(payload));
+      } catch (e) {
+        console.error('[me_recording] 存储ASR结果失败:', e);
+      }
+
+      // 短暂展示状态后跳转
+      setTimeout(function() {
+        navigateTo('me_processing.html');
+      }, 500);
+    }
+  </script>
+</body>
+</html>

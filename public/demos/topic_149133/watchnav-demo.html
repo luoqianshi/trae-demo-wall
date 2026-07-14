@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WatchNav — Apple Watch 骑行导航辅助工具</title>
+<style>
+  :root {
+    --bg: #000000;
+    --fg: #FFFFFF;
+    --accent: #00C853;
+    --accent-dim: rgba(0, 200, 83, 0.3);
+    --accent-glow: rgba(0, 200, 83, 0.15);
+    --danger: #FF5A46;
+    --warn: #FFB400;
+    --watch-bezel: #1A1A1A;
+    --watch-frame: #2A2A2A;
+    --font-display: 'SF Pro Display', -apple-system, 'Helvetica Neue', sans-serif;
+    --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-display);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 80%, var(--accent-glow) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgba(255,255,255,0.03) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ===== 首屏：标题 + 模拟器 + 散落标签 ===== */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 90vh;
+    position: relative;
+    animation: fadeIn 0.8s ease-out;
+  }
+
+  .hero-title {
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+    z-index: 10;
+  }
+
+  .hero-title .accent { color: var(--accent); }
+
+  .hero-sub {
+    font-size: 1rem;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.02em;
+    margin-bottom: 8px;
+    z-index: 10;
+    font-weight: 500;
+  }
+
+  .hero-sub .accent { color: var(--accent); font-weight: 600; }
+
+  .hero-tagline {
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.28);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 28px;
+    z-index: 10;
+  }
+
+  /* 模拟器居中 */
+  .watch-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    z-index: 10;
+  }
+
+  .watch-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.25);
+  }
+
+  .watch {
+    width: 260px;
+    height: 316px;
+    background: var(--watch-frame);
+    border-radius: 46px;
+    padding: 11px;
+    position: relative;
+    box-shadow:
+      0 0 0 2px var(--watch-bezel),
+      0 0 0 7px #333,
+      0 0 0 9px #1a1a1a,
+      0 20px 60px rgba(0, 200, 83, 0.12),
+      0 8px 32px rgba(0,0,0,0.8);
+  }
+
+  .watch::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: 112px;
+    width: 7px;
+    height: 38px;
+    background: linear-gradient(to right, #444, #666, #444);
+    border-radius: 2px;
+  }
+
+  .watch::before {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: 168px;
+    width: 6px;
+    height: 22px;
+    background: linear-gradient(to right, #333, #555, #333);
+    border-radius: 2px;
+  }
+
+  .screen {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    border-radius: 36px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nav-canvas {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .nav-canvas svg { width: 100%; height: 100%; }
+
+  .route-completed {
+    fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round;
+    filter: drop-shadow(0 0 6px rgba(0,200,83,0.4));
+  }
+
+  .route-remaining {
+    fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; opacity: 0.25;
+  }
+
+  .user-marker {
+    fill: var(--fg); filter: drop-shadow(0 0 8px rgba(255,255,255,0.6));
+    transition: cx 0.5s ease, cy 0.5s ease;
+  }
+
+  .user-marker.offroute { fill: var(--danger); filter: drop-shadow(0 0 8px rgba(255,90,70,0.6)); }
+
+  .user-pulse {
+    fill: none; stroke: var(--fg); stroke-width: 1.5; opacity: 0;
+    animation: pulse 2s ease-out infinite;
+  }
+
+  .user-pulse.offroute { stroke: var(--danger); }
+
+  @keyframes pulse {
+    0% { r: 6; opacity: 0.8; }
+    100% { r: 18; opacity: 0; }
+  }
+
+  .status-bar {
+    padding: 9px 14px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    transition: color 0.3s ease;
+  }
+
+  .status-bar.navigating { color: var(--accent); }
+  .status-bar.offroute { color: var(--danger); }
+  .status-bar.paused { color: var(--warn); }
+  .status-bar.arrived { color: var(--accent); }
+  .status-bar.idle { color: rgba(255,255,255,0.4); }
+
+  .status-bar .speed { font-family: var(--font-mono); font-size: 9px; opacity: 0.6; }
+
+  .haptic-indicator {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+    padding: 3px 10px; border-radius: 10px;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    opacity: 0; transition: opacity 0.3s ease; pointer-events: none; white-space: nowrap;
+  }
+
+  .haptic-indicator.show { opacity: 1; }
+  .haptic-indicator.offroute { color: var(--danger); border: 1px solid rgba(255,90,70,0.3); }
+  .haptic-indicator.back { color: var(--accent); border: 1px solid var(--accent-dim); }
+  .haptic-indicator.arrived { color: var(--accent); border: 1px solid var(--accent-dim); }
+
+  .continue-btn {
+    position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%);
+    background: transparent; border: 1.5px solid var(--accent); color: var(--accent);
+    font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    padding: 7px 20px; border-radius: 18px; cursor: pointer;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s ease, transform 0.2s ease;
+  }
+
+  .continue-btn.show { opacity: 1; pointer-events: auto; }
+  .continue-btn:hover { background: var(--accent); color: var(--bg); transform: translateX(-50%) scale(1.05); }
+
+  /* ===== 散落标签 ===== */
+  .floating-tags {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .ftag {
+    position: absolute;
+    pointer-events: auto;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.4);
+    padding: 7px 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 24px;
+    background: rgba(255,255,255,0.015);
+    backdrop-filter: blur(6px);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
+
+  .ftag:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(0, 200, 83, 0.06);
+    transform: scale(1.06) translateY(-1px);
+    box-shadow: 0 4px 20px rgba(0, 200, 83, 0.12);
+  }
+
+  .ftag .tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    padding: 10px 14px;
+    background: rgba(0, 200, 83, 0.1);
+    border: 1px solid var(--accent-dim);
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.5;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  .ftag:hover .tooltip { opacity: 1; }
+
+  /* 标签位置 */
+  .ftag-1 { top: 12%; left: 8%; }
+  .ftag-2 { top: 8%; right: 10%; }
+  .ftag-3 { top: 22%; left: 4%; }
+  .ftag-4 { top: 18%; right: 5%; }
+  .ftag-5 { top: 42%; left: 2%; }
+  .ftag-6 { top: 48%; right: 2%; }
+  .ftag-7 { bottom: 28%; left: 6%; }
+  .ftag-8 { bottom: 22%; right: 8%; }
+
+  /* ===== 控制面板（模拟器下方） ===== */
+  .controls-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 28px;
+    flex-wrap: wrap;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .control-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 16px;
+    width: 200px;
+  }
+
+  .control-card h3 {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255,255,255,0.35); margin-bottom: 10px;
+  }
+
+  .scenario-btns { display: flex; flex-direction: column; gap: 6px; }
+
+  .scenario-btn {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--fg); font-family: var(--font-display);
+    font-size: 12px; font-weight: 600; padding: 8px 12px;
+    border-radius: 8px; cursor: pointer; transition: all 0.2s ease;
+    text-align: left; display: flex; align-items: center; gap: 8px;
+  }
+
+  .scenario-btn:hover { background: rgba(0, 200, 83, 0.08); border-color: var(--accent-dim); }
+  .scenario-btn.active { background: rgba(0, 200, 83, 0.12); border-color: var(--accent); color: var(--accent); }
+  .scenario-btn .icon { font-size: 14px; }
+
+  .slider-group { display: flex; flex-direction: column; gap: 4px; }
+  .slider-group + .slider-group { margin-top: 10px; }
+
+  .slider-group label {
+    font-size: 11px; color: rgba(255,255,255,0.4);
+    display: flex; justify-content: space-between;
+  }
+
+  .slider-group label .value { color: var(--accent); font-family: var(--font-mono); }
+
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 3px;
+    background: rgba(255,255,255,0.1); border-radius: 2px; outline: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    background: var(--accent); border-radius: 50%; cursor: pointer;
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+
+  .log-panel {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 10px; height: 120px; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
+  }
+
+  .log-panel::-webkit-scrollbar { width: 3px; }
+  .log-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  .log-entry { color: rgba(255,255,255,0.35); margin-bottom: 1px; }
+  .log-entry .time { color: rgba(255,255,255,0.2); margin-right: 6px; }
+  .log-entry.event { color: var(--accent); }
+  .log-entry.warn { color: var(--danger); }
+  .log-entry.info { color: rgba(255,255,255,0.5); }
+
+  /* ===== 下方整合卖点区 ===== */
+  .features {
+    margin-top: 80px;
+    margin-bottom: 56px;
+    animation: fadeInUp 0.8s ease-out 0.3s both;
+  }
+
+  .features-title {
+    text-align: center;
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin-bottom: 32px;
+    color: rgba(255,255,255,0.8);
+  }
+
+  .features-title .accent { color: var(--accent); }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+  }
+
+  .feature-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px;
+    padding: 24px;
+    transition: border-color 0.3s ease;
+  }
+
+  .feature-card:hover { border-color: var(--accent-dim); }
+
+  .feature-card .num {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    margin-bottom: 6px;
+  }
+
+  .feature-card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .feature-card .one-liner {
+    font-size: 0.85rem;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .feature-card p {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.35);
+    line-height: 1.6;
+  }
+
+  /* ===== 技术规格 ===== */
+  .tech-strip {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 32px;
+    padding: 28px 0;
+    margin-bottom: 40px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    animation: fadeInUp 0.8s ease-out 0.5s both;
+  }
+
+  .tech-item {
+    text-align: center;
+  }
+
+  .tech-item .val {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--accent);
+    font-family: var(--font-mono);
+  }
+
+  .tech-item .lbl {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.25);
+    margin-top: 4px;
+  }
+
+  .footer {
+    text-align: center;
+    padding: 20px 0;
+    font-size: 11px;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 0.05em;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes hapticBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .haptic-active { animation: hapticBlink 0.3s ease-in-out 2; }
+
+  @media (max-width: 768px) {
+    .ftag { display: none; }
+    .control-card { width: 100%; max-width: 280px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 首屏 -->
+  <div class="hero">
+    <h1 class="hero-title">Watch<span class="accent">Nav</span></h1>
+    <p class="hero-sub">骑车不用再看手机。<span class="accent">手腕会告诉你往哪走。</span></p>
+    <p class="hero-tagline">专为骑行设计的 Apple Watch 导航辅助工具</p>
+
+    <!-- 散落标签 -->
+    <div class="floating-tags">
+      <div class="ftag ftag-1">路口前轻震一下<span class="tooltip">快到转弯点，手腕会轻轻震一下。不用低头看屏幕，你知道该准备转向了。</span></div>
+      <div class="ftag ftag-2">走偏了会提醒你<span class="tooltip">偏离路线超过 5 秒，手腕震动一次。你不用时刻盯着地图，走偏了它主动告诉你。</span></div>
+      <div class="ftag ftag-3">回到路线自动恢复<span class="tooltip">重新骑回路线后，导航自动继续。不需要任何操作，不丢路线，不丢进度。</span></div>
+      <div class="ftag ftag-4">抬手一秒就够<span class="tooltip">画面只显示你的位置和下一步方向。看一眼就知道该往哪走，然后放下手腕继续骑。</span></div>
+      <div class="ftag ftag-5">停车不丢路线<span class="tooltip">等红灯或短暂停留，路线和进度完整保留。继续骑时一键恢复，像没停过一样。</span></div>
+      <div class="ftag ftag-6">眼睛始终看着路<span class="tooltip">三种震动覆盖全程：转弯提醒、偏航提醒、到达提醒。不需要看屏幕也能完成导航。</span></div>
+      <div class="ftag ftag-7">专为骑行而生<span class="tooltip">不是手机导航缩水版。从零开始为骑行场景设计，只解决"认路不迷路"这一件事。</span></div>
+      <div class="ftag ftag-8">画面只有三个颜色<span class="tooltip">黑、白、绿。没有多余装饰，骑行中不分散注意力。简洁到你看一眼就懂。</span></div>
+    </div>
+
+    <!-- Apple Watch 模拟器 -->
+    <div class="watch-wrapper">
+      <div class="watch-label">watchOS 模拟器</div>
+      <div class="watch">
+        <div class="screen">
+          <div class="nav-canvas">
+            <div class="haptic-indicator" id="hapticIndicator"></div>
+            <svg viewBox="0 0 200 240" preserveAspectRatio="xMidYMid slice">
+              <path class="route-remaining" id="routeRemaining"
+                d="M 40 200 L 40 160 L 60 140 L 60 110 L 90 90 L 90 60 L 130 50 L 160 50"
+              />
+              <path class="route-completed" id="routeCompleted"
+                d="M 40 200 L 40 160 L 60 140 L 60 110 L 90 90 L 90 60 L 130 50 L 160 50"
+                stroke-dasharray="0 1000"
+              />
+              <circle class="user-pulse" id="userPulse" cx="40" cy="200" r="6"/>
+              <circle class="user-marker" id="userMarker" cx="40" cy="200" r="5"/>
+            </svg>
+            <button class="continue-btn" id="continueBtn" onclick="resumeNavigation()">CONTINUE</button>
+          </div>
+          <div class="status-bar idle" id="statusBar">
+            <span id="statusText">WATCHNAV</span>
+            <span class="speed" id="speedText">0.0 m/s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 控制面板 -->
+    <div class="controls-row">
+      <div class="control-card">
+        <h3>场景</h3>
+        <div class="scenario-btns">
+          <button class="scenario-btn active" onclick="runScenario('normal')" id="btn-normal">
+            <span class="icon">🚲</span>正常导航
+          </button>
+          <button class="scenario-btn" onclick="runScenario('offroute')" id="btn-offroute">
+            <span class="icon">⚠️</span>偏航自闭环
+          </button>
+          <button class="scenario-btn" onclick="runScenario('pause')" id="btn-pause">
+            <span class="icon">⏸</span>暂停恢复
+          </button>
+          <button class="scenario-btn" onclick="runScenario('arrived')" id="btn-arrived">
+            <span class="icon">🏁</span>到达终点
+          </button>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <h3>状态</h3>
+        <div class="slider-group">
+          <label>进度 <span class="value" id="progressVal">0%</span></label>
+          <input type="range" id="progressSlider" min="0" max="100" value="0" oninput="seekProgress(this.value)">
+        </div>
+        <div class="slider-group">
+          <label>速度 <span class="value" id="speedVal">6.0 m/s</span></label>
+          <input type="range" id="speedSlider" min="0" max="15" value="6" step="0.5" oninput="updateSpeed(this.value)">
+        </div>
+      </div>
+
+      <div class="control-card">
+        <h3>日志</h3>
+        <div class="log-panel" id="logPanel">
+          <div class="log-entry info"><span class="time">--:--</span>就绪</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 技术规格条 -->
+  <div class="tech-strip">
+    <div class="tech-item"><div class="val">5s</div><div class="lbl">偏航提醒</div></div>
+    <div class="tech-item"><div class="val">5min</div><div class="lbl">自动暂停</div></div>
+    <div class="tech-item"><div class="val">3 种</div><div class="lbl">震动模式</div></div>
+    <div class="tech-item"><div class="val">0 操作</div><div class="lbl">正常骑行</div></div>
+    <div class="tech-item"><div class="val">3 色</div><div class="lbl">画面设计</div></div>
+    <div class="tech-item"><div class="val">197</div><div class="lbl">测试覆盖</div></div>
+  </div>
+
+  <!-- 整合卖点 -->
+  <div class="features">
+    <h2 class="features-title">为什么骑行车<span class="accent">需要它</span></h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="num">01</div>
+        <h3>不用低头看手机</h3>
+        <div class="one-liner">手腕震动代替屏幕，眼睛始终看着路</div>
+        <p>快到路口轻震一下预告，走偏了震动提醒一次。三种震动覆盖全程，你不需要低头就知道接下来怎么走。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="num">02</div>
+        <h3>走偏了它会主动告诉你</h3>
+        <div class="one-liner">不用时刻盯地图，偏了它提醒你</div>
+        <p>偏离路线超过 5 秒，手腕震动一次。你重新骑回路线后，导航自动继续，全程不需要任何操作。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="num">03</div>
+        <h3>停车等红灯不丢路线</h3>
+        <div class="one-liner">停久了自动暂停，继续骑一键恢复</div>
+        <p>停下超过 5 分钟自动进入暂停状态。继续骑时点一下 CONTINUE，路线和进度完整保留，像没停过一样。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="num">04</div>
+        <h3>画面简洁到一眼就懂</h3>
+        <div class="one-liner">只有黑、白、绿三个颜色</div>
+        <p>没有多余装饰，没有复杂信息。绿色路线告诉你方向，白色标记告诉你位置。抬手一秒，放下继续骑。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="num">05</div>
+        <h3>方向准，不乱飘</h3>
+        <div class="one-liner">慢的时候信罗盘，快的时候信 GPS</div>
+        <p>骑行速度不同，方向来源自动切换。低速用罗盘避免漂移，高速用 GPS 保证精准，中间智能过渡。</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="num">06</div>
+        <h3>只做骑行这一件事</h3>
+        <div class="one-liner">不是汽车导航缩水版</div>
+        <p>从零开始为骑行场景设计，只解决"认路不迷路"。不塞运动记录，不塞社交，保持轻量和专注。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    WatchNav — 基于 TRAE IDE 开发 · 硬件交互赛道 · 2026 TRAE AI 创造力大赛
+  </div>
+</div>
+
+<script>
+  const routePoints = [
+    {x:40,y:200},{x:40,y:160},{x:60,y:140},{x:60,y:110},
+    {x:90,y:90},{x:90,y:60},{x:130,y:50},{x:160,y:50}
+  ];
+  let routeSegments=[], totalLen=0;
+  for(let i=0;i<routePoints.length-1;i++){
+    const dx=routePoints[i+1].x-routePoints[i].x, dy=routePoints[i+1].y-routePoints[i].y;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    routeSegments.push({start:routePoints[i],end:routePoints[i+1],len,cumLen:totalLen});
+    totalLen+=len;
+  }
+
+  let currentPhase='idle', currentProgress=0, currentSpeed=6.0, isOffRoute=false, animationId=null, hapticTimeout=null;
+  let resumeOverride=null;
+
+  const $=id=>document.getElementById(id);
+  const userMarker=$('userMarker'),userPulse=$('userPulse'),routeCompleted=$('routeCompleted');
+  const statusBar=$('statusBar'),statusText=$('statusText'),speedText=$('speedText');
+  const hapticIndicator=$('hapticIndicator'),continueBtn=$('continueBtn');
+  const progressSlider=$('progressSlider'),progressVal=$('progressVal');
+  const speedSlider=$('speedSlider'),speedVal=$('speedVal'),logPanel=$('logPanel');
+
+  function interpolateRoute(f){
+    const t=f*totalLen;
+    for(const s of routeSegments){
+      if(t<=s.cumLen+s.len){
+        const r=(t-s.cumLen)/s.len;
+        return{x:s.start.x+(s.end.x-s.start.x)*r,y:s.start.y+(s.end.y-s.start.y)*r};
+      }
+    }
+    return routePoints[routePoints.length-1];
+  }
+
+  function setPhase(p){
+    currentPhase=p; statusBar.className='status-bar '+p;
+    const m={idle:'WATCHNAV',navigating:'ON ROUTE',offroute:'OFF ROUTE',paused:'PAUSED',arrived:'ARRIVED'};
+    statusText.textContent=m[p]||'WATCHNAV';
+    continueBtn.classList.toggle('show',p==='paused');
+  }
+
+  function showHaptic(type,label){
+    hapticIndicator.className='haptic-indicator show '+type;
+    hapticIndicator.textContent=label;
+    if(hapticTimeout)clearTimeout(hapticTimeout);
+    hapticTimeout=setTimeout(()=>hapticIndicator.classList.remove('show'),2000);
+    userMarker.classList.add('haptic-active');
+    setTimeout(()=>userMarker.classList.remove('haptic-active'),600);
+  }
+
+  function log(msg,type='info'){
+    const n=new Date();
+    const time=String(n.getMinutes()).padStart(2,'0')+':'+String(n.getSeconds()).padStart(2,'0');
+    const e=document.createElement('div'); e.className='log-entry '+type;
+    e.innerHTML=`<span class="time">${time}</span>${msg}`;
+    logPanel.appendChild(e); logPanel.scrollTop=logPanel.scrollHeight;
+  }
+
+  function updateUserPosition(p){
+    const pos=interpolateRoute(p);
+    const ox=isOffRoute?25:0;
+    userMarker.setAttribute('cx',pos.x+ox); userMarker.setAttribute('cy',pos.y);
+    userPulse.setAttribute('cx',pos.x+ox); userPulse.setAttribute('cy',pos.y);
+    userMarker.classList.toggle('offroute',isOffRoute);
+    userPulse.classList.toggle('offroute',isOffRoute);
+    routeCompleted.setAttribute('stroke-dasharray',`${p*totalLen} ${totalLen}`);
+  }
+
+  function updateProgressUI(p){
+    currentProgress=p; const pct=Math.round(p*100);
+    progressSlider.value=pct; progressVal.textContent=pct+'%'; updateUserPosition(p);
+  }
+
+  function updateSpeed(s){
+    currentSpeed=parseFloat(s); speedVal.textContent=currentSpeed.toFixed(1)+' m/s';
+    speedText.textContent=currentSpeed.toFixed(1)+' m/s';
+  }
+
+  function seekProgress(v){ updateProgressUI(v/100); }
+
+  function resumeNavigation(){
+    if(currentPhase!=='paused')return;
+    if(resumeOverride){ resumeOverride(); return; }
+    setPhase('navigating'); log('用户点击 CONTINUE，恢复导航','event');
+  }
+
+  function stopAnimation(){ if(animationId){cancelAnimationFrame(animationId);animationId=null;} }
+  function setActiveBtn(id){
+    document.querySelectorAll('.scenario-btn').forEach(b=>b.classList.remove('active'));
+    $(id).classList.add('active');
+  }
+
+  function runScenario(name){
+    stopAnimation(); isOffRoute=false; continueBtn.classList.remove('show'); resumeOverride=null;
+    if(name==='normal'){setActiveBtn('btn-normal');runNormal();}
+    else if(name==='offroute'){setActiveBtn('btn-offroute');runOffRoute();}
+    else if(name==='pause'){setActiveBtn('btn-pause');runPause();}
+    else if(name==='arrived'){setActiveBtn('btn-arrived');runArrived();}
+  }
+
+  function runNormal(){
+    log('场景：正常骑行导航','event'); setPhase('navigating'); updateSpeed('6');
+    let p=0;
+    function step(){
+      p+=0.005;
+      if(p>=1){p=1;updateProgressUI(p);setPhase('arrived');showHaptic('arrived','🏁 ARRIVED');log('到达终点！','event');return;}
+      updateProgressUI(p);
+      [0.2,0.4,0.6,0.8].forEach(m=>{if(Math.abs(p-m)<0.003){showHaptic('back','方向震动');log(`拐点 ${Math.round(m*100)}%`,'info');}});
+      animationId=requestAnimationFrame(step);
+    }
+    step();
+  }
+
+  function runOffRoute(){
+    log('场景：偏航自闭环','event'); setPhase('navigating'); updateSpeed('6');
+    let p=0, ph='normal';
+    function step(){
+      p+=0.004;
+      if(p>=1){p=1;updateProgressUI(p);setPhase('arrived');showHaptic('arrived','🏁 ARRIVED');log('到达终点！','event');return;}
+      if(ph==='normal'&&p>=0.25){ph='offroute';isOffRoute=true;setPhase('offroute');showHaptic('offroute','⚠️ 偏航震动');log('偏航！触发震动','warn');}
+      else if(ph==='offroute'&&p>=0.55){ph='back';isOffRoute=false;setPhase('navigating');showHaptic('back','✅ 回到路线');log('回到路线','event');}
+      updateProgressUI(p); animationId=requestAnimationFrame(step);
+    }
+    step();
+  }
+
+  function runPause(){
+    log('场景：低速暂停恢复','event'); setPhase('navigating'); updateSpeed('6');
+    let p=0, ph='normal', pc=0;
+    function step(){
+      if(ph==='normal'){p+=0.006;if(p>=0.3){ph='slow';updateSpeed('0.3');log('速度降至 0.3 m/s','info');}}
+      else if(ph==='slow'){pc++;if(pc>=120){ph='paused';setPhase('paused');log('低速满 5 分钟，暂停','warn');log('等待 CONTINUE...','info');return;}}
+      else if(ph==='resumed'){p+=0.006;if(p>=1){p=1;updateProgressUI(p);setPhase('arrived');showHaptic('arrived','🏁 ARRIVED');log('到达终点！','event');return;}}
+      if(ph!=='paused')updateProgressUI(p);
+      animationId=requestAnimationFrame(step);
+    }
+    resumeOverride=()=>{if(currentPhase!=='paused')return;setPhase('navigating');updateSpeed('6');ph='resumed';pc=0;log('CONTINUE，恢复导航','event');step();};
+    step();
+  }
+
+  function runArrived(){
+    log('场景：到达终点','event'); setPhase('navigating'); updateSpeed('6');
+    let p=0.5;
+    function step(){
+      p+=0.008;
+      if(p>=1){p=1;updateProgressUI(p);setPhase('arrived');showHaptic('arrived','🏁 ARRIVED');log('到达终点！','event');return;}
+      updateProgressUI(p); animationId=requestAnimationFrame(step);
+    }
+    step();
+  }
+
+  updateProgressUI(0);
+  log('WatchNav 就绪，选择场景体验','info');
+</script>
+
+</body>
+</html>

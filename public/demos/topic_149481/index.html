@@ -1,0 +1,3791 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AI胶片模拟与构图辅助器</title>
+<style>
+/* ==================== 全局变量与重置 ==================== */
+:root {
+  --primary: #1a1a2e;
+  --accent: #e94560;
+  --gold: #f5c518;
+  --cream: #f8f0e3;
+  --dark: #0f0f1a;
+  --card-bg: rgba(255,255,255,0.06);
+  --glass: rgba(255,255,255,0.08);
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --radius: 12px;
+  --shadow: 0 8px 32px rgba(0,0,0,0.3);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; font-size: 16px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: var(--dark);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ==================== 导航栏 ==================== */
+.nav {
+  position: fixed; top:0; left:0; right:0; z-index:1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px;
+  background: rgba(15,15,26,0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  transition: all 0.3s;
+}
+.nav-logo {
+  font-size: 1.1rem; font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--gold));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.nav-links { display:flex; gap:20px; list-style:none; }
+.nav-links a {
+  color: var(--text-dim); text-decoration:none; font-size:0.85rem;
+  transition: color 0.3s; position:relative;
+}
+.nav-links a:hover, .nav-links a.active { color: var(--gold); }
+.nav-links a::after {
+  content:''; position:absolute; bottom:-4px; left:0; width:0; height:2px;
+  background: var(--gold); transition: width 0.3s;
+}
+.nav-links a:hover::after, .nav-links a.active::after { width:100%; }
+.nav-toggle { display:none; background:none; border:none; color:var(--text); font-size:1.5rem; cursor:pointer; }
+
+/* ==================== Hero 区域 ==================== */
+.hero {
+  min-height: 100vh; display:flex; align-items:center; justify-content:center;
+  flex-direction:column; text-align:center; padding:100px 20px 60px;
+  position:relative; overflow:hidden;
+}
+.hero::before {
+  content:''; position:absolute; inset:0;
+  background: radial-gradient(ellipse at 30% 20%, rgba(233,69,96,0.15) 0%, transparent 50%),
+              radial-gradient(ellipse at 70% 80%, rgba(245,197,24,0.1) 0%, transparent 50%);
+}
+.hero-particles { position:absolute; inset:0; pointer-events:none; }
+.particle {
+  position:absolute; width:3px; height:3px; border-radius:50%;
+  background: rgba(245,197,24,0.4);
+  animation: float-particle linear infinite;
+}
+@keyframes float-particle {
+  0% { transform: translateY(100vh) scale(0); opacity:0; }
+  10% { opacity:1; } 90% { opacity:1; }
+  100% { transform: translateY(-10vh) scale(1); opacity:0; }
+}
+.hero-badge {
+  display:inline-block; padding:6px 16px; border-radius:20px;
+  background: rgba(233,69,96,0.15); border:1px solid rgba(233,69,96,0.3);
+  color: var(--accent); font-size:0.8rem; margin-bottom:20px;
+  animation: fadeInUp 0.8s ease;
+}
+.hero h1 {
+  font-size: clamp(2rem, 5vw, 3.5rem); font-weight:800;
+  line-height:1.2; margin-bottom:16px;
+  animation: fadeInUp 0.8s ease 0.1s both;
+}
+.hero h1 span {
+  background: linear-gradient(135deg, var(--accent), var(--gold));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.hero p {
+  font-size: clamp(0.95rem, 2vw, 1.15rem); color:var(--text-dim);
+  max-width:600px; margin-bottom:32px;
+  animation: fadeInUp 0.8s ease 0.2s both;
+}
+.hero-buttons {
+  display:flex; gap:12px; flex-wrap:wrap; justify-content:center;
+  animation: fadeInUp 0.8s ease 0.3s both;
+}
+.btn {
+  padding: 12px 28px; border-radius:8px; font-size:0.95rem;
+  font-weight:600; cursor:pointer; border:none;
+  transition: all 0.3s; text-decoration:none; display:inline-flex;
+  align-items:center; gap:8px;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #c0392b);
+  color:#fff; box-shadow: 0 4px 20px rgba(233,69,96,0.3);
+}
+.btn-primary:hover { transform:translateY(-2px); box-shadow: 0 6px 30px rgba(233,69,96,0.4); }
+.btn-outline { background:transparent; color:var(--text); border:1px solid rgba(255,255,255,0.2); }
+.btn-outline:hover { border-color:var(--gold); color:var(--gold); }
+
+/* ==================== 通用区块 ==================== */
+.section { padding: 80px 20px; max-width:1100px; margin:0 auto; }
+.section-header { text-align:center; margin-bottom:48px; }
+.section-tag {
+  display:inline-block; padding:4px 12px; border-radius:12px;
+  font-size:0.75rem; font-weight:600; text-transform:uppercase;
+  letter-spacing:1px; margin-bottom:12px;
+}
+.tag-red { background:rgba(233,69,96,0.15); color:var(--accent); }
+.tag-gold { background:rgba(245,197,24,0.15); color:var(--gold); }
+.tag-blue { background:rgba(52,152,219,0.15); color:#3498db; }
+.section-header h2 { font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight:700; margin-bottom:12px; }
+.section-header p { color:var(--text-dim); max-width:560px; margin:0 auto; }
+
+/* ==================== 痛点区域 ==================== */
+.pain-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:20px; }
+.pain-card {
+  background: var(--card-bg); border:1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius); padding:28px; transition: all 0.4s; position:relative; overflow:hidden;
+}
+.pain-card:hover { transform:translateY(-4px); border-color: rgba(233,69,96,0.3); box-shadow: 0 12px 40px rgba(233,69,96,0.1); }
+.pain-icon { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.4rem; margin-bottom:16px; }
+.pain-card h3 { font-size:1.05rem; margin-bottom:8px; }
+.pain-card p { color:var(--text-dim); font-size:0.9rem; }
+
+/* ==================== 功能区域 ==================== */
+.feature-showcase { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:24px; }
+.feature-card {
+  background: var(--card-bg); border:1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius); padding:32px; position:relative; transition: all 0.4s; overflow:hidden;
+}
+.feature-card:hover { transform:translateY(-4px); border-color:rgba(245,197,24,0.3); }
+.feature-num { position:absolute; top:16px; right:20px; font-size:3rem; font-weight:800; color:rgba(255,255,255,0.03); line-height:1; }
+.feature-card h3 { font-size:1.1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.feature-card p { color:var(--text-dim); font-size:0.9rem; }
+
+/* ==================== 创新价值 ==================== */
+.value-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:20px; }
+.value-item {
+  text-align:center; padding:32px 20px;
+  background: var(--card-bg); border-radius:var(--radius); border:1px solid rgba(255,255,255,0.06);
+  transition: all 0.4s;
+}
+.value-item:hover { transform:translateY(-4px); border-color:rgba(245,197,24,0.3); }
+.value-icon { width:56px; height:56px; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; font-size:1.5rem; }
+.value-item h3 { font-size:1rem; margin-bottom:8px; }
+.value-item p { color:var(--text-dim); font-size:0.85rem; }
+
+/* ==================== 应用主界面 ==================== */
+.app-container { display:none; position:relative; min-height:100vh; background: var(--dark); }
+.app-container.active { display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+
+/* 顶部工具栏 */
+.app-toolbar {
+  position:relative; z-index:100; flex-shrink:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 12px;
+  background:rgba(15,15,26,0.95); backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.toolbar-left, .toolbar-right { display:flex; align-items:center; gap:8px; }
+.toolbar-btn {
+  width:38px; height:38px; border-radius:10px; border:none;
+  background:rgba(255,255,255,0.1); color:var(--text);
+  font-size:1rem; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; transition: all 0.3s;
+}
+.toolbar-btn:hover { background:rgba(255,255,255,0.2); }
+.toolbar-btn.active { background:var(--accent); }
+.weather-badge {
+  display:flex; align-items:center; gap:4px;
+  padding:4px 10px; border-radius:16px;
+  background:rgba(255,255,255,0.08); font-size:0.75rem;
+}
+.light-meter {
+  display:flex; align-items:center; gap:4px;
+  padding:4px 10px; border-radius:16px;
+  background:rgba(255,255,255,0.08); font-size:0.75rem;
+}
+.light-dot { width:8px; height:8px; border-radius:50%; transition: background 0.5s; }
+
+/* 滤镜名称大标签 */
+.filter-name-badge {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  z-index:10; padding:8px 20px; border-radius:20px;
+  background:rgba(0,0,0,0.7); backdrop-filter:blur(10px);
+  font-size:1rem; font-weight:600; color:var(--gold);
+  pointer-events:none; opacity:0; transition: opacity 0.4s;
+  white-space:nowrap;
+}
+.filter-name-badge.show { opacity:1; animation: filterNamePop 1.5s ease forwards; }
+@keyframes filterNamePop {
+  0% { opacity:0; transform:translate(-50%,-50%) scale(0.8); }
+  15% { opacity:1; transform:translate(-50%,-50%) scale(1.05); }
+  70% { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  100% { opacity:0; transform:translate(-50%,-50%) scale(0.95); }
+}
+
+/* 摄像头取景器 - 居中填充 */
+.viewfinder-wrapper {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  position:relative; overflow:hidden; background:#000;
+}
+.viewfinder-area {
+  position:relative; width:100%; height:100%;
+  max-width:100%; max-height:100%;
+  background:#000; overflow:hidden;
+}
+.viewfinder-area video, .viewfinder-area canvas {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+}
+#viewfinderCanvas { z-index:2; }
+/* 示例预览图（无摄像头时显示） */
+#samplePreview {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+  z-index:1; display:none;
+}
+#samplePreview.visible { display:block; }
+
+/* 构图辅助线 */
+.composition-overlay {
+  position:absolute; inset:0; z-index:3; pointer-events:none;
+  opacity:0.5; transition: opacity 0.5s;
+}
+.comp-thirds .comp-line-h, .comp-thirds .comp-line-v { position:absolute; background:rgba(255,255,255,0.5); }
+.comp-thirds .comp-line-h { left:0; right:0; height:1px; }
+.comp-thirds .comp-line-h:nth-child(1) { top:33.33%; }
+.comp-thirds .comp-line-h:nth-child(2) { top:66.66%; }
+.comp-thirds .comp-line-v { top:0; bottom:0; width:1px; }
+.comp-thirds .comp-line-v:nth-child(3) { left:33.33%; }
+.comp-thirds .comp-line-v:nth-child(4) { left:66.66%; }
+
+.comp-golden .comp-line-h, .comp-golden .comp-line-v { position:absolute; background:rgba(245,197,24,0.5); }
+.comp-golden .comp-line-h { left:0; right:0; height:1px; }
+.comp-golden .comp-line-h:nth-child(1) { top:38.2%; }
+.comp-golden .comp-line-h:nth-child(2) { top:61.8%; }
+.comp-golden .comp-line-v { top:0; bottom:0; width:1px; }
+.comp-golden .comp-line-v:nth-child(3) { left:38.2%; }
+.comp-golden .comp-line-v:nth-child(4) { left:61.8%; }
+
+.comp-center .comp-cross-h, .comp-center .comp-cross-v { position:absolute; background:rgba(52,152,219,0.5); }
+.comp-center .comp-cross-h { left:10%; right:10%; top:50%; height:1px; }
+.comp-center .comp-cross-v { top:10%; bottom:10%; left:50%; width:1px; }
+
+.comp-diagonal .comp-diag { position:absolute; top:0; left:0; width:141%; height:1px; background:rgba(46,204,113,0.5); transform-origin:0 0; }
+.comp-diagonal .comp-diag:nth-child(1) { transform:rotate(45deg); }
+.comp-diagonal .comp-diag:nth-child(2) { transform:rotate(-45deg); top:auto; bottom:0; left:0; transform-origin:0 100%; }
+
+/* 框架构图 */
+.comp-frame .frame-rect {
+  position:absolute; border:2px solid rgba(255,165,0,0.5);
+  top:15%; left:15%; right:15%; bottom:15%;
+  border-radius:4px;
+}
+.comp-frame .frame-cross-h { position:absolute; left:15%; right:15%; top:50%; height:1px; background:rgba(255,165,0,0.3); }
+.comp-frame .frame-cross-v { position:absolute; top:15%; bottom:15%; left:50%; width:1px; background:rgba(255,165,0,0.3); }
+
+/* 对称构图 */
+.comp-symmetry .sym-line-h { position:absolute; left:0; right:0; top:50%; height:2px; background:rgba(0,206,209,0.5); }
+.comp-symmetry .sym-line-v { position:absolute; top:0; bottom:0; left:50%; width:2px; background:rgba(0,206,209,0.5); }
+.comp-symmetry .sym-mirror-h { position:absolute; top:0; left:0; right:0; height:50%; border-bottom:2px dashed rgba(0,206,209,0.3); }
+.comp-symmetry .sym-mirror-v { position:absolute; top:0; bottom:0; left:0; width:50%; border-right:2px dashed rgba(0,206,209,0.3); }
+
+/* 引导线构图 */
+.comp-leading .lead-line { position:absolute; height:2px; background:rgba(255,105,180,0.5); transform-origin:0 50%; }
+.comp-leading .lead-line:nth-child(1) { top:30%; left:0; width:70%; transform:rotate(-15deg); }
+.comp-leading .lead-line:nth-child(2) { top:70%; left:0; width:70%; transform:rotate(15deg); }
+.comp-leading .lead-vanish { position:absolute; top:45%; left:65%; width:12px; height:12px; border:2px solid rgba(255,105,180,0.6); border-radius:50%; }
+.comp-leading .lead-vanish::before { content:''; position:absolute; top:50%; left:-20px; right:calc(100% + 20px); height:1px; background:rgba(255,105,180,0.3); }
+
+/* 三角构图 */
+.comp-triangle .tri-line { position:absolute; height:2px; background:rgba(255,215,0,0.5); }
+.comp-triangle .tri-line:nth-child(1) { top:20%; left:10%; width:45%; transform:rotate(20deg); }
+.comp-triangle .tri-line:nth-child(2) { top:20%; right:10%; width:45%; transform:rotate(-20deg); }
+.comp-triangle .tri-line:nth-child(3) { bottom:25%; left:15%; width:70%; }
+.comp-triangle .tri-point { position:absolute; top:18%; left:50%; transform:translateX(-50%); width:10px; height:10px; border:2px solid rgba(255,215,0,0.6); border-radius:50%; }
+
+/* S曲线构图 */
+.comp-scurve .scurve-path {
+  position:absolute; inset:0;
+  border:3px solid transparent;
+  border-top-color: rgba(147,112,219,0.4);
+  border-radius: 0 0 50% 50%;
+  transform: scaleY(0.7);
+}
+.comp-scurve .scurve-path2 {
+  position:absolute; top:30%; left:10%; right:10%; bottom:10%;
+  border:3px solid transparent;
+  border-bottom-color: rgba(147,112,219,0.4);
+  border-radius: 50% 50% 0 0;
+  transform: scaleY(0.6);
+}
+
+/* 构图详情面板 */
+.comp-detail-panel {
+  position:fixed; top:52px; left:0; right:0; z-index:80;
+  background:rgba(15,15,26,0.97); backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  padding:16px; display:none;
+  max-height:60vh; overflow-y:auto;
+}
+.comp-detail-panel.active { display:block; }
+.comp-detail-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:12px;
+}
+.comp-detail-header h3 { font-size:1rem; }
+.comp-detail-close {
+  width:32px; height:32px; border-radius:50%; border:none;
+  background:rgba(255,255,255,0.1); color:#fff; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+}
+.comp-detail-content { font-size:0.85rem; line-height:1.8; color:var(--text-dim); }
+.comp-detail-content h4 { color:var(--gold); font-size:0.9rem; margin:12px 0 6px; }
+.comp-detail-content ul { padding-left:18px; }
+.comp-detail-content li { margin-bottom:4px; }
+.comp-detail-content .tip-box {
+  margin-top:12px; padding:12px; border-radius:8px;
+  background:rgba(245,197,24,0.08); border-left:3px solid var(--gold);
+  font-size:0.8rem;
+}
+.comp-detail-content .tip-box strong { color:var(--gold); }
+
+/* 构图推荐提示 */
+.comp-suggestion {
+  position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+  z-index:5; padding:6px 14px; border-radius:20px;
+  background:rgba(0,0,0,0.7); backdrop-filter:blur(10px);
+  font-size:0.75rem; white-space:nowrap; animation: fadeInUp 0.5s ease;
+}
+
+/* ==================== 底部操作区（改进：整合拍照+滤镜） ==================== */
+.bottom-bar {
+  flex-shrink:0; position:relative; z-index:90;
+  background:rgba(15,15,26,0.97); backdrop-filter:blur(20px);
+  border-top:1px solid rgba(255,255,255,0.06);
+  padding-bottom: var(--safe-bottom);
+}
+
+/* 拍照行 */
+.capture-row {
+  display:flex; align-items:center; justify-content:center;
+  gap:16px; padding:12px 16px 8px;
+}
+.capture-btn {
+  width:68px; height:68px; border-radius:50%; border:3px solid #fff;
+  background:transparent; cursor:pointer; position:relative; transition: all 0.3s;
+  flex-shrink:0;
+}
+.capture-btn::after {
+  content:''; position:absolute; inset:4px; border-radius:50%;
+  background:#fff; transition: all 0.15s;
+}
+.capture-btn:active::after { transform:scale(0.85); }
+.capture-btn.flash::after { background:var(--accent); }
+
+.side-btn {
+  width:46px; height:46px; border-radius:50%; border:none;
+  background:rgba(255,255,255,0.1); color:#fff; font-size:1.1rem;
+  cursor:pointer; transition: all 0.3s;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.side-btn:hover { background:rgba(255,255,255,0.2); }
+.side-btn.active { background:var(--accent); }
+
+/* 滤镜快捷行 */
+.filter-row {
+  display:flex; gap:6px; overflow-x:auto; padding:6px 12px 10px;
+  scrollbar-width:none; -ms-overflow-style:none;
+}
+.filter-row::-webkit-scrollbar { display:none; }
+.filter-chip {
+  flex-shrink:0; display:flex; align-items:center; gap:5px;
+  padding:3px 3px 3px 3px; border-radius:10px; border:1.5px solid rgba(255,255,255,0.12);
+  background:transparent; color:var(--text-dim); font-size:0.7rem;
+  cursor:pointer; transition: all 0.3s; white-space:nowrap;
+}
+.filter-chip:hover { border-color:rgba(255,255,255,0.3); color:var(--text); }
+.filter-chip.active { border-color:var(--gold); color:var(--gold); background:rgba(245,197,24,0.08); }
+.filter-chip .chip-thumb {
+  width:28px; height:28px; border-radius:6px; flex-shrink:0;
+  overflow:hidden; position:relative;
+}
+.filter-chip .chip-thumb canvas {
+  width:100%; height:100%; display:block;
+}
+.filter-chip .chip-label { padding-right:6px; }
+
+/* 滤镜全屏面板（点击"更多"展开） */
+.filter-fullscreen {
+  position:fixed; inset:0; z-index:200;
+  background:rgba(15,15,26,0.98); backdrop-filter:blur(20px);
+  display:none; flex-direction:column;
+}
+.filter-fullscreen.active { display:flex; }
+.filter-fullscreen-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px; border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.filter-fullscreen-header h3 { font-size:1rem; }
+.filter-fullscreen-close {
+  width:36px; height:36px; border-radius:50%; border:none;
+  background:rgba(255,255,255,0.1); color:#fff; font-size:1.2rem; cursor:pointer;
+}
+/* 对比预览区 */
+.filter-compare {
+  display:flex; align-items:center; justify-content:center;
+  gap:16px; padding:16px; flex-shrink:0;
+}
+.filter-compare-box {
+  width:120px; height:160px; border-radius:12px; overflow:hidden;
+  border:2px solid rgba(255,255,255,0.1); position:relative;
+}
+.filter-compare-box canvas { width:100%; height:100%; object-fit:cover; }
+.filter-compare-label {
+  position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
+  padding:3px 10px; border-radius:10px; background:rgba(0,0,0,0.7);
+  font-size:0.7rem; white-space:nowrap;
+}
+.filter-compare-box.selected { border-color:var(--gold); box-shadow:0 0 16px rgba(245,197,24,0.3); }
+
+/* 滤镜网格 */
+.filter-grid {
+  flex:1; overflow-y:auto; padding:12px;
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap:12px; align-content:start;
+}
+.filter-grid-item {
+  cursor:pointer; border-radius:12px; overflow:hidden;
+  border:2px solid transparent; transition: all 0.3s;
+  background:var(--card-bg);
+}
+.filter-grid-item:hover { transform:scale(1.03); border-color:rgba(255,255,255,0.2); }
+.filter-grid-item.active { border-color:var(--gold); box-shadow:0 0 16px rgba(245,197,24,0.3); }
+.filter-grid-preview {
+  width:100%; aspect-ratio:3/4; position:relative; overflow:hidden;
+}
+.filter-grid-preview canvas { width:100%; height:100%; display:block; }
+.filter-grid-info { padding:8px; text-align:center; }
+.filter-grid-info .fg-name { font-size:0.8rem; font-weight:600; }
+.filter-grid-info .fg-desc { font-size:0.65rem; color:var(--text-dim); margin-top:2px; }
+
+/* 上传区域 */
+.upload-area {
+  max-width:600px; margin:16px auto; padding:24px;
+  border:2px dashed rgba(255,255,255,0.15); border-radius:var(--radius);
+  text-align:center; cursor:pointer; transition: all 0.3s;
+}
+.upload-area:hover { border-color:var(--gold); background:rgba(245,197,24,0.05); }
+.upload-area.dragover { border-color:var(--accent); background:rgba(233,69,96,0.05); }
+.upload-icon { font-size:2rem; margin-bottom:8px; }
+.upload-text { font-size:0.9rem; color:var(--text-dim); }
+
+/* 照片计数器（沉浸模式） */
+.photo-counter {
+  position:fixed; top:56px; right:12px; z-index:95;
+  padding:6px 14px; border-radius:20px;
+  background:rgba(0,0,0,0.7); backdrop-filter:blur(10px);
+  font-size:0.8rem; display:none;
+}
+.photo-counter.active { display:block; }
+
+/* 沉浸模式遮罩 */
+.immersive-overlay {
+  position:fixed; inset:0; z-index:200;
+  background:rgba(0,0,0,0.95);
+  display:none; align-items:center; justify-content:center; flex-direction:column;
+}
+.immersive-overlay.active { display:flex; }
+
+/* 洗胶片动画 */
+.film-developing { text-align:center; padding:40px; }
+.film-strip {
+  width:280px; height:60px; margin:20px auto;
+  background:#222; border-radius:4px; position:relative;
+  overflow:hidden; border:2px solid #333;
+}
+.film-strip-inner { position:absolute; top:8px; left:8px; right:8px; bottom:8px; display:flex; gap:4px; }
+.film-frame { flex:1; background:#111; border-radius:2px; transition: background 1s; }
+.film-frame.revealed { animation: revealFrame 0.5s ease forwards; }
+@keyframes revealFrame {
+  0% { opacity:0; filter:brightness(0); }
+  50% { opacity:0.5; filter:brightness(1.5) sepia(0.8); }
+  100% { opacity:1; filter:brightness(1); }
+}
+.develop-text { font-size:1.1rem; margin-top:20px; color:var(--text-dim); }
+.develop-progress { width:200px; height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin:16px auto 0; overflow:hidden; }
+.develop-progress-bar { height:100%; background:var(--gold); border-radius:2px; width:0%; transition: width 0.3s; }
+
+/* 照片预览网格 */
+.preview-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:12px; padding:20px; max-width:800px; margin:0 auto; }
+.preview-item { aspect-ratio:1; border-radius:8px; overflow:hidden; position:relative; cursor:pointer; transition: transform 0.3s; }
+.preview-item:hover { transform:scale(1.03); }
+.preview-item img { width:100%; height:100%; object-fit:cover; }
+.preview-item .save-btn {
+  position:absolute; bottom:8px; right:8px;
+  width:32px; height:32px; border-radius:50%; border:none;
+  background:rgba(0,0,0,0.6); color:#fff; font-size:0.9rem;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  opacity:0; transition: opacity 0.3s;
+}
+.preview-item:hover .save-btn { opacity:1; }
+
+/* 构图推荐面板 */
+.comp-panel {
+  position:fixed; top:52px; left:0; right:0; z-index:80;
+  background:rgba(15,15,26,0.95); backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  padding:12px; display:none;
+}
+.comp-panel.active { display:block; }
+.comp-options { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+.comp-options::-webkit-scrollbar { display:none; }
+.comp-option {
+  flex-shrink:0; padding:8px 16px; border-radius:20px;
+  border:1px solid rgba(255,255,255,0.15); background:transparent;
+  color:var(--text); font-size:0.8rem; cursor:pointer; transition: all 0.3s;
+}
+.comp-option:hover { border-color:var(--gold); }
+.comp-option.active { background:var(--gold); color:var(--dark); border-color:var(--gold); }
+
+/* 参数推荐面板 */
+.param-panel {
+  position:fixed; top:52px; right:0; bottom:0; width:280px; z-index:85;
+  background:rgba(15,15,26,0.95); backdrop-filter:blur(20px);
+  border-left:1px solid rgba(255,255,255,0.06);
+  padding:20px; transform:translateX(100%);
+  transition: transform 0.4s; overflow-y:auto;
+}
+.param-panel.active { transform:translateX(0); }
+.param-panel h3 { font-size:1rem; margin-bottom:16px; }
+.param-item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06); }
+.param-label { font-size:0.85rem; color:var(--text-dim); }
+.param-value { font-size:0.85rem; font-weight:600; color:var(--gold); }
+
+/* ==================== 水印设置面板 ==================== */
+.watermark-panel {
+  position:fixed; top:52px; right:0; bottom:0; width:300px; z-index:85;
+  background:rgba(15,15,26,0.97); backdrop-filter:blur(20px);
+  border-left:1px solid rgba(255,255,255,0.06);
+  padding:20px; transform:translateX(100%);
+  transition: transform 0.4s; overflow-y:auto;
+}
+.watermark-panel.active { transform:translateX(0); }
+.watermark-panel h3 { font-size:1rem; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.wm-field { margin-bottom:14px; }
+.wm-field label { display:block; font-size:0.8rem; color:var(--text-dim); margin-bottom:6px; }
+.wm-field input[type="text"],
+.wm-field input[type="range"] {
+  width:100%; padding:8px 12px; border-radius:8px;
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12);
+  color:var(--text); font-size:0.85rem; outline:none;
+}
+.wm-field input[type="text"]:focus { border-color:var(--gold); }
+.wm-field input[type="range"] {
+  -webkit-appearance:none; height:6px; padding:0; border:none; border-radius:3px;
+  background:rgba(255,255,255,0.15); cursor:pointer;
+}
+.wm-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+  background:var(--gold); cursor:pointer;
+}
+.wm-range-row { display:flex; align-items:center; gap:10px; }
+.wm-range-row input[type="range"] { flex:1; }
+.wm-range-val { font-size:0.8rem; color:var(--gold); min-width:36px; text-align:right; }
+.wm-position-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:6px;
+}
+.wm-pos-btn {
+  padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.12);
+  background:transparent; color:var(--text-dim); font-size:0.75rem;
+  cursor:pointer; transition: all 0.3s; text-align:center;
+}
+.wm-pos-btn:hover { border-color:rgba(255,255,255,0.3); }
+.wm-pos-btn.active { border-color:var(--gold); color:var(--gold); background:rgba(245,197,24,0.1); }
+.wm-toggle-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.wm-toggle-row span { font-size:0.85rem; }
+.wm-switch {
+  position:relative; width:44px; height:24px; border-radius:12px;
+  background:rgba(255,255,255,0.15); cursor:pointer; transition:background 0.3s;
+  border:none; padding:0;
+}
+.wm-switch.on { background:var(--accent); }
+.wm-switch::after {
+  content:''; position:absolute; top:3px; left:3px;
+  width:18px; height:18px; border-radius:50%;
+  background:#fff; transition:transform 0.3s;
+}
+.wm-switch.on::after { transform:translateX(20px); }
+
+/* Toast 通知 */
+.toast {
+  position:fixed; top:20px; left:50%; transform:translateX(-50%) translateY(-100px);
+  z-index:9999; padding:12px 24px; border-radius:8px;
+  background:rgba(15,15,26,0.95); border:1px solid rgba(255,255,255,0.1);
+  backdrop-filter:blur(20px); font-size:0.9rem;
+  transition: transform 0.4s cubic-bezier(0.4,0,0.2,1); white-space:nowrap;
+}
+.toast.show { transform:translateX(-50%) translateY(0); }
+
+/* 全屏预览 */
+.fullscreen-preview {
+  position:fixed; inset:0; z-index:300;
+  background:rgba(0,0,0,0.95); display:none;
+  align-items:center; justify-content:center;
+}
+.fullscreen-preview.active { display:flex; }
+.fullscreen-preview img { max-width:90%; max-height:90%; object-fit:contain; border-radius:4px; }
+.fullscreen-close {
+  position:absolute; top:20px; right:20px;
+  width:40px; height:40px; border-radius:50%; border:none;
+  background:rgba(255,255,255,0.1); color:#fff; font-size:1.2rem; cursor:pointer;
+}
+
+/* ==================== 动画 ==================== */
+@keyframes fadeInUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+.animate-on-scroll { opacity:0; transform:translateY(30px); transition: all 0.6s cubic-bezier(0.4,0,0.2,1); }
+.animate-on-scroll.visible { opacity:1; transform:translateY(0); }
+
+/* ==================== Footer ==================== */
+.footer { text-align:center; padding:40px 20px; border-top:1px solid rgba(255,255,255,0.06); color:var(--text-dim); font-size:0.85rem; }
+
+/* ==================== 超级模拟模式 ==================== */
+/* 全屏暗室风格遮罩 */
+.super-overlay {
+  position:fixed; inset:0; z-index:250;
+  background: radial-gradient(ellipse at 50% 40%, #1a1520 0%, #0a0810 70%, #050308 100%);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  user-select:none; -webkit-user-select:none; overflow:hidden; padding:10px;
+}
+.super-overlay.active { display:flex; }
+
+/* 暗室氛围光效 */
+.super-overlay::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background: radial-gradient(ellipse at 50% 40%, rgba(200,50,30,0.06) 0%, transparent 60%);
+  animation: superAmbient 8s ease-in-out infinite alternate;
+}
+@keyframes superAmbient { 0% { opacity:0.3; } 100% { opacity:0.8; } }
+
+/* 横屏旋转提示 */
+.super-rotate-hint {
+  display:none; position:absolute; z-index:300; inset:0;
+  background:rgba(0,0,0,0.92); flex-direction:column; align-items:center;
+  justify-content:center; gap:20px; color:#fff; font-size:1.1rem;
+  text-align:center;
+}
+.super-rotate-hint.show { display:flex; }
+.super-rotate-hint .rotate-icon {
+  width:80px; height:80px; border:3px solid var(--accent); border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  animation: rotatePhone 2s ease-in-out infinite;
+  font-size:2.5rem;
+}
+@keyframes rotatePhone {
+  0%, 100% { transform:rotate(0deg); }
+  50% { transform:rotate(90deg); }
+}
+.super-rotate-hint .skip-btn {
+  margin-top:10px; padding:10px 30px; border-radius:20px;
+  background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2);
+  color:#fff; font-size:0.85rem; cursor:pointer;
+}
+
+/* 胶片相机主体 - 横屏布局 */
+.film-camera {
+  position:relative; z-index:2;
+  width: min(680px, 95vw);
+  max-width:100%;
+  animation: cameraFloat 6s ease-in-out infinite;
+  /* 竖屏时缩放 */
+  transform-origin:center center;
+}
+@keyframes cameraFloat {
+  0%, 100% { transform:translateY(0); }
+  50% { transform:translateY(-4px); }
+}
+
+/* ======== 相机顶部面板 ======== */
+.cam-top-plate {
+  position:relative; z-index:3;
+  background: linear-gradient(180deg, #3a3448 0%, #2d2838 60%, #252130 100%);
+  border-radius: 6px 6px 0 0;
+  padding: 6px 10px;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:6px;
+  box-shadow: 0 -1px 0 rgba(255,255,255,0.06) inset;
+  border:1px solid rgba(255,255,255,0.07);
+  border-bottom:none;
+  flex-wrap:wrap;
+}
+.cam-top-plate::after {
+  content:''; position:absolute; bottom:0; left:4px; right:4px;
+  height:1px; background:rgba(0,0,0,0.4);
+}
+
+/* 热靴座 */
+.cam-hotshoe {
+  width:32px; height:20px; background:linear-gradient(180deg, #555, #3a3548);
+  border-radius:3px 3px 0 0; position:relative;
+  border:1px solid rgba(0,0,0,0.5);
+  flex-shrink:0;
+}
+.cam-hotshoe::after {
+  content:''; position:absolute; top:4px; left:4px; right:4px; bottom:4px;
+  background:#1a1520; border-radius:1px;
+}
+
+/* 回卷钮 */
+.cam-rewind-knob {
+  width:26px; height:26px; border-radius:50%;
+  background: linear-gradient(145deg, #5a5568, #3a3548);
+  border:2px solid #1a1520;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.1), 0 2px 3px rgba(0,0,0,0.4);
+  position:relative; cursor:pointer; flex-shrink:0;
+  transition:transform 0.3s;
+}
+.cam-rewind-knob:hover { transform:rotate(30deg); }
+.cam-rewind-knob::after {
+  content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:4px; height:6px; background:var(--accent); border-radius:1px;
+}
+
+/* 快门速度拨盘 */
+.cam-speed-dial {
+  width:36px; height:36px; border-radius:50%;
+  background: linear-gradient(145deg, #5a5568, #3a3548);
+  border:2px solid #1a1520;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.4);
+  position:relative; cursor:pointer; flex-shrink:0;
+  transition:transform 0.3s;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.6rem; color:var(--text); font-weight:700;
+}
+.cam-speed-dial:hover { transform:rotate(15deg); }
+.cam-speed-dial:active { transform:rotate(30deg) scale(0.95); }
+.cam-speed-dial .speed-notch {
+  position:absolute; top:3px; left:50%; transform:translateX(-50%);
+  width:2px; height:4px; background:var(--accent); border-radius:1px;
+}
+
+/* 快门按钮 - 更大的立体按钮 */
+.cam-shutter-btn {
+  width:40px; height:40px; border-radius:50%;
+  background: linear-gradient(145deg, #d44050, #b83240);
+  border:3px solid #2a2535; cursor:pointer;
+  position:relative; flex-shrink:0;
+  box-shadow: 0 3px 10px rgba(233,69,96,0.4), inset 0 1px 0 rgba(255,255,255,0.15);
+  transition:all 0.15s;
+}
+.cam-shutter-btn::after {
+  content:''; position:absolute; inset:5px; border-radius:50%;
+  background: linear-gradient(145deg, #e94560, #c0392b);
+  border:1px solid rgba(255,255,255,0.1);
+}
+.cam-shutter-btn:active { transform:scale(0.85); box-shadow: 0 1px 4px rgba(233,69,96,0.3); }
+
+/* 帧计数器 */
+.cam-frame-counter {
+  width:28px; height:28px; border-radius:4px;
+  background:#1a1520; border:1px solid rgba(255,255,255,0.1);
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.55rem; color:var(--gold); font-weight:600;
+  font-family:monospace; flex-shrink:0;
+}
+
+/* 过片拨杆 */
+.cam-advance-lever {
+  width:34px; height:10px; border-radius:5px;
+  background: linear-gradient(180deg, #5a5568, #3a3548);
+  border:1px solid #1a1520; cursor:pointer;
+  position:relative; flex-shrink:0;
+  transition:transform 0.2s;
+}
+.cam-advance-lever::after {
+  content:''; position:absolute; right:-2px; top:-2px; width:8px; height:8px;
+  border-radius:50%; background:#5a5568; border:1px solid #1a1520;
+}
+.cam-advance-lever:active { transform:rotate(30deg); }
+
+/* 品牌铭牌 */
+.cam-brand {
+  font-size:0.55rem; color:rgba(255,255,255,0.3); font-weight:600;
+  letter-spacing:2px; flex-shrink:0; text-transform:uppercase;
+  font-style:italic;
+}
+
+/* ======== 相机机身主体 ======== */
+.cam-body {
+  position:relative;
+  background: linear-gradient(180deg, #2d2838 0%, #1e1a28 50%, #161220 100%);
+  border-radius: 0 0 8px 8px;
+  padding:12px;
+  display:flex; flex-direction:row; gap:12px; align-items:stretch;
+  box-shadow: 0 6px 0 #0e0c14, 0 10px 30px rgba(0,0,0,0.6),
+              inset 0 1px 0 rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.06);
+  border-top:none;
+  transition: transform 0.15s, box-shadow 0.15s;
+  /* 皮革纹理 */
+  background-image:
+    radial-gradient(ellipse at 20% 20%, rgba(255,255,255,0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 50%);
+}
+/* 皮革颗粒纹理 */
+.cam-body::before {
+  content:''; position:absolute; inset:0; border-radius:0 0 8px 8px;
+  background-image: repeating-linear-gradient(
+    0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 3px
+  ), repeating-linear-gradient(
+    90deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 3px
+  );
+  pointer-events:none; z-index:0;
+}
+.cam-body.shake { animation: camShake 0.3s ease; }
+@keyframes camShake {
+  0%, 100% { transform:translateX(0); }
+  25% { transform:translateX(-3px); }
+  75% { transform:translateX(3px); }
+}
+
+/* 左侧区：镜头 */
+.cam-left-section {
+  flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:8px; z-index:1; padding:4px;
+}
+.cam-lens {
+  width:90px; height:90px; border-radius:50%;
+  background: radial-gradient(circle at 45% 40%, #1a1525 0%, #0e0c14 60%, #06040a 100%);
+  border:4px solid #2a2535;
+  box-shadow: 0 0 0 3px #161220, 0 0 0 5px rgba(42,37,53,0.5),
+              inset 0 0 30px rgba(0,0,0,0.6), 0 0 20px rgba(233,69,96,0.08);
+  position:relative; cursor:pointer; transition:all 0.3s;
+}
+.cam-lens:hover { box-shadow: 0 0 0 3px #161220, 0 0 0 5px rgba(42,37,53,0.5), inset 0 0 30px rgba(0,0,0,0.6), 0 0 30px rgba(233,69,96,0.15); }
+.cam-lens:active { transform:scale(0.93); }
+/* 镜头内圈 */
+.cam-lens::before {
+  content:''; position:absolute; inset:12px; border-radius:50%;
+  background: radial-gradient(circle, rgba(40,35,55,0.9) 0%, rgba(20,16,28,0.95) 100%);
+  border:2px solid rgba(255,255,255,0.04);
+}
+/* 镜头反光 */
+.cam-lens::after {
+  content:''; position:absolute; top:18%; left:20%; width:35%; height:22%;
+  background: radial-gradient(ellipse, rgba(255,255,255,0.1) 0%, transparent 100%);
+  border-radius:50%; transform:rotate(-25deg);
+}
+/* 光圈环 */
+.cam-lens .aperture-ring {
+  position:absolute; inset:6px; border-radius:50%;
+  border:2px solid rgba(233,69,96,0.25);
+  transition:all 0.3s;
+}
+.cam-lens .aperture-ring.shutter { animation: apertureClose 0.3s ease; }
+@keyframes apertureClose {
+  0% { transform:scale(1); opacity:1; }
+  50% { transform:scale(0.3); opacity:0.5; }
+  100% { transform:scale(1); opacity:1; }
+}
+
+/* 镜头品牌环 */
+.cam-lens-ring {
+  font-size:0.5rem; color:rgba(255,255,255,0.2); letter-spacing:1px;
+  text-align:center; font-weight:600;
+}
+
+/* 中间区：取景器 + 信息 */
+.cam-center-section {
+  flex:1; display:flex; flex-direction:column; gap:8px; z-index:1; min-width:0;
+}
+.cam-viewfinder {
+  flex:1; aspect-ratio:auto;
+  min-height:80px;
+  background:radial-gradient(ellipse at 50% 40%, #0e0c18 0%, #06040a 100%);
+  border-radius:8px;
+  border:2px solid rgba(255,255,255,0.06);
+  position:relative; overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+  transition:all 0.3s; cursor:pointer;
+}
+.cam-viewfinder:active { transform:scale(0.98); }
+.cam-viewfinder .blind-text {
+  color:rgba(255,255,255,0.12); font-size:0.75rem; text-align:center;
+  line-height:1.8; z-index:1;
+}
+.cam-viewfinder .shot-flash {
+  position:absolute; inset:0; background:#fff; opacity:0;
+  pointer-events:none; border-radius:6px; z-index:2;
+}
+.cam-viewfinder .shot-flash.flash { animation: shotFlash 0.4s ease-out; }
+@keyframes shotFlash {
+  0% { opacity:0.9; } 100% { opacity:0; }
+}
+/* 取景器角标 */
+.cam-vf-corner {
+  position:absolute; width:14px; height:14px; z-index:3;
+  border:2px solid rgba(255,255,255,0.15);
+}
+.cam-vf-corner.tl { top:6px; left:6px; border-right:none; border-bottom:none; border-radius:3px 0 0 0; }
+.cam-vf-corner.tr { top:6px; right:6px; border-left:none; border-bottom:none; border-radius:0 3px 0 0; }
+.cam-vf-corner.bl { bottom:6px; left:6px; border-right:none; border-top:none; border-radius:0 0 0 3px; }
+.cam-vf-corner.br { bottom:6px; right:6px; border-left:none; border-top:none; border-radius:0 0 3px 0; }
+
+/* 构图网格 */
+.cam-grid { position:absolute; inset:0; pointer-events:none; z-index:2; }
+.cam-grid .grid-line-h { position:absolute; left:0; right:0; height:1px; background:rgba(255,255,255,0.12); }
+.cam-grid .grid-line-v { position:absolute; top:0; bottom:0; width:1px; background:rgba(255,255,255,0.12); }
+
+/* 取景器内指示器 */
+.cam-viewfinder .flash-indicator,
+.cam-viewfinder .timer-indicator {
+  position:absolute; z-index:4; font-size:0.6rem; font-weight:700;
+  padding:2px 8px; border-radius:8px; pointer-events:none;
+}
+.flash-indicator { top:6px; left:50%; transform:translateX(-50%); color:var(--gold); background:rgba(0,0,0,0.5); }
+.timer-indicator { bottom:6px; left:50%; transform:translateX(-50%); color:var(--accent); background:rgba(0,0,0,0.5); }
+
+/* 底部信息行 */
+.cam-info-row {
+  display:flex; justify-content:space-around; align-items:center;
+  padding:6px 0; border-top:1px solid rgba(255,255,255,0.05);
+  z-index:1;
+}
+.cam-info-item { text-align:center; font-size:0.6rem; color:var(--text-dim); }
+.cam-info-item .val { font-size:0.75rem; color:var(--text); font-weight:700; display:block; margin-top:1px; }
+
+/* 右侧区：控制按钮 */
+.cam-right-section {
+  flex:0 0 auto; display:flex; flex-direction:column; gap:6px; z-index:1;
+  justify-content:center; padding:4px 0;
+}
+.cam-ctrl-btn {
+  width:36px; height:36px; border-radius:8px;
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.06);
+  color:var(--text-dim); font-size:0.85rem; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  transition:all 0.2s; position:relative; gap:1px;
+}
+.cam-ctrl-btn:hover { background:rgba(255,255,255,0.1); color:var(--text); }
+.cam-ctrl-btn:active { transform:scale(0.9); }
+.cam-ctrl-btn.active { background:rgba(233,69,96,0.2); color:var(--accent); border-color:rgba(233,69,96,0.3); }
+.cam-ctrl-btn .ctrl-label {
+  font-size:0.5rem; color:inherit; white-space:nowrap; opacity:0.8;
+}
+
+/* 胶片帧计数条 */
+.cam-film-strip {
+  display:flex; gap:2px; padding:6px 0 0; z-index:1;
+}
+.cam-film-frame {
+  flex:1; aspect-ratio:1; border-radius:2px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.04);
+  transition:all 0.4s; position:relative; min-width:6px;
+}
+.cam-film-frame.shot {
+  background:rgba(245,197,24,0.12);
+  border-color:rgba(245,197,24,0.25);
+}
+.cam-film-frame.shot::after {
+  content:'✓'; position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  color:var(--gold); font-size:0.5rem;
+}
+
+/* 底部金属条 */
+.cam-bottom-bar {
+  height:6px; background:linear-gradient(180deg, #2d2838, #1a1520);
+  border-radius:0 0 8px 8px; border:1px solid rgba(255,255,255,0.06);
+  border-top:none; box-shadow:0 2px 0 #0e0c14;
+  position:relative;
+}
+.cam-bottom-bar::after {
+  content:''; position:absolute; bottom:2px; left:15%; right:15%;
+  height:1px; background:rgba(255,255,255,0.04);
+}
+
+/* 背带环 */
+.cam-strap-lug {
+  position:absolute; width:10px; height:10px; border-radius:50%;
+  background:linear-gradient(145deg, #5a5568, #3a3548);
+  border:2px solid #1a1520; z-index:4;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.cam-strap-lug.left { top:50%; left:-14px; transform:translateY(-50%); }
+.cam-strap-lug.right { top:50%; right:-14px; transform:translateY(-50%); }
+.cam-strap-lug::after {
+  content:''; position:absolute; width:18px; height:2px;
+  background:linear-gradient(90deg, transparent, #5a5568, transparent);
+  top:50%; transform:translateY(-50%);
+}
+.cam-strap-lug.left::after { left:8px; }
+.cam-strap-lug.right::after { right:8px; }
+
+/* 提示文字 */
+.super-hint {
+  position:relative; z-index:2;
+  margin-top:10px; padding:8px 18px; border-radius:16px;
+  background:rgba(255,255,255,0.04); backdrop-filter:blur(10px);
+  font-size:0.72rem; color:var(--text-dim); text-align:center;
+  max-width:400px;
+}
+.super-hint strong { color:var(--gold); }
+
+/* 底部操作 */
+.super-actions {
+  position:relative; z-index:2;
+  display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; justify-content:center;
+}
+.super-act-btn {
+  padding:8px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.04); color:var(--text); font-size:0.72rem;
+  cursor:pointer; transition:all 0.3s; display:flex; align-items:center; gap:5px;
+}
+.super-act-btn:hover { background:rgba(255,255,255,0.08); }
+.super-act-btn.primary { border-color:rgba(233,69,96,0.35); color:var(--accent); }
+.super-act-btn.primary:hover { background:rgba(233,69,96,0.08); }
+.super-act-btn:disabled { opacity:0.3; cursor:not-allowed; }
+
+/* 超级模拟：洗胶片 + 选风格界面 */
+.super-develop-overlay {
+  position:fixed; inset:0; z-index:260;
+  background:rgba(5,3,8,0.98);
+  display:none; flex-direction:column; align-items:center;
+  padding:20px; overflow-y:auto;
+}
+.super-develop-overlay.active { display:flex; }
+.super-dev-title { font-size:1.2rem; margin:20px 0 16px; text-align:center; }
+.dev-steps {
+  display:flex; align-items:center; gap:4px; margin-bottom:24px;
+  flex-wrap:wrap; justify-content:center;
+}
+.dev-step {
+  padding:6px 14px; border-radius:16px; font-size:0.7rem;
+  background:rgba(255,255,255,0.05); color:var(--text-dim);
+  transition:all 0.4s;
+}
+.dev-step.active { background:rgba(245,197,24,0.15); color:var(--gold); }
+.dev-step.done { background:rgba(46,204,113,0.15); color:#2ecc71; }
+.super-film-strip {
+  width:100%; max-width:400px; margin:0 auto 20px;
+  background:#1a1520; border-radius:8px;
+  padding:10px; border:1px solid rgba(255,255,255,0.06);
+}
+.super-film-frames {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr));
+  gap:8px;
+}
+.super-film-frame {
+  aspect-ratio:1; border-radius:4px; background:#0a0810;
+  border:1px solid rgba(255,255,255,0.06);
+  overflow:hidden; position:relative;
+}
+.super-film-frame img { width:100%; height:100%; object-fit:cover; display:none; }
+.super-film-frame.revealed img { display:block; animation: revealFrame 0.8s ease forwards; }
+.style-select-area { width:100%; max-width:500px; margin:16px auto; }
+.style-select-area h3 { font-size:1rem; margin-bottom:12px; text-align:center; }
+.style-select-hint { text-align:center; font-size:0.8rem; color:var(--text-dim); margin-bottom:12px; }
+.style-grid {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr));
+  gap:8px;
+}
+.style-card {
+  aspect-ratio:1; border-radius:10px; overflow:hidden;
+  border:2px solid rgba(255,255,255,0.08); cursor:pointer;
+  position:relative; transition:all 0.3s;
+}
+.style-card:hover { border-color:rgba(255,255,255,0.2); transform:scale(1.03); }
+.style-card.selected { border-color:var(--gold); box-shadow:0 0 12px rgba(245,197,24,0.3); }
+.style-card canvas { width:100%; height:100%; display:block; }
+.style-card .style-check {
+  position:absolute; top:4px; right:4px; width:20px; height:20px;
+  border-radius:50%; background:var(--gold); color:#000;
+  font-size:0.7rem; display:none; align-items:center; justify-content:center;
+  font-weight:bold;
+}
+.style-card.selected .style-check { display:flex; }
+.style-card .style-name {
+  position:absolute; bottom:0; left:0; right:0;
+  padding:3px; text-align:center; font-size:0.65rem;
+  background:rgba(0,0,0,0.7); color:#fff;
+}
+.style-apply-all-row {
+  display:flex; justify-content:center; gap:12px; margin-top:16px;
+  flex-wrap:wrap;
+}
+
+@media (max-width:700px) {
+  .film-camera { width:98vw; }
+  .cam-body { flex-direction:column; gap:8px; padding:8px; }
+  .cam-left-section { flex-direction:row; gap:10px; }
+  .cam-right-section { flex-direction:row; flex-wrap:wrap; justify-content:center; }
+  .cam-viewfinder { min-height:60px; }
+  .cam-lens { width:60px; height:60px; }
+  .cam-shutter-btn { width:32px; height:32px; }
+  .cam-speed-dial { width:28px; height:28px; font-size:0.5rem; }
+  .cam-rewind-knob { width:22px; height:22px; }
+  .cam-ctrl-btn { width:30px; height:30px; font-size:0.7rem; }
+  .cam-top-plate { padding:4px 6px; gap:4px; font-size:0.65rem; }
+  .super-film-frames { grid-template-columns:repeat(auto-fill, minmax(55px, 1fr)); }
+  .style-grid { grid-template-columns:repeat(auto-fill, minmax(72px, 1fr)); }
+}
+@media (max-width:400px) {
+  .cam-hotshoe { width:24px; height:16px; }
+  .cam-frame-counter { width:24px; height:24px; font-size:0.5rem; }
+  .cam-advance-lever { width:26px; height:8px; }
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width:768px) {
+  .nav-links { display:none; }
+  .nav-links.open {
+    display:flex; flex-direction:column; position:absolute; top:100%; left:0; right:0;
+    background:rgba(15,15,26,0.98); padding:16px; border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .nav-toggle { display:block; }
+  .section { padding:60px 16px; }
+  .hero { padding:80px 16px 40px; }
+  .param-panel, .watermark-panel { width:100%; }
+  .preview-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap:8px; padding:12px; }
+  .capture-btn { width:62px; height:62px; }
+  .filter-compare-box { width:90px; height:120px; }
+  .filter-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap:8px; }
+}
+@media (max-width:480px) {
+  .hero h1 { font-size:1.8rem; }
+  .pain-grid, .feature-showcase { grid-template-columns:1fr; }
+  .value-grid { grid-template-columns:repeat(2, 1fr); }
+  .toolbar-left .weather-badge, .toolbar-left .light-meter { display:none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ==================== 导航栏 ==================== -->
+<nav class="nav" id="mainNav">
+  <div class="nav-logo">📷 FilmAI</div>
+  <ul class="nav-links" id="navLinks">
+    <li><a href="#hero" class="active">首页</a></li>
+    <li><a href="#pain">痛点</a></li>
+    <li><a href="#features">功能</a></li>
+    <li><a href="#value">创新</a></li>
+    <li><a href="#" onclick="openApp();return false;">开始体验</a></li>
+  </ul>
+  <button class="nav-toggle" onclick="toggleNav()">☰</button>
+</nav>
+
+<!-- ==================== Hero 区域 ==================== -->
+<section class="hero" id="hero">
+  <div class="hero-particles" id="particles"></div>
+  <div class="hero-badge">🏆 TRAI大赛 · 生活娱乐赛道</div>
+  <h1>AI胶片模拟<br>与<span>构图辅助器</span></h1>
+  <p>融合天气感知、智能构图推荐与20种经典胶片滤镜，让每一次快门都充满电影质感。沉浸式拍摄体验，还原真实胶片冲洗流程。</p>
+  <div class="hero-buttons">
+    <button class="btn btn-primary" onclick="openApp()">🎬 开始体验</button>
+    <a href="#features" class="btn btn-outline">了解更多 ↓</a>
+  </div>
+</section>
+
+<!-- ==================== 痛点区域 ==================== -->
+<section class="section" id="pain">
+  <div class="section-header animate-on-scroll">
+    <div class="section-tag tag-red">Pain Points</div>
+    <h2>当前摄影痛点</h2>
+    <p>数字时代，我们失去了胶片摄影的仪式感与独特质感</p>
+  </div>
+  <div class="pain-grid">
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(233,69,96,0.15);">🎨</div>
+      <h3>滤镜千篇一律</h3>
+      <p>主流App滤镜同质化严重，缺乏真正还原胶片质感的选项，照片缺乏个性与故事感。</p>
+    </div>
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(245,197,24,0.15);">📐</div>
+      <h3>构图全靠感觉</h3>
+      <p>新手缺乏构图知识，拍摄时不知道如何安排画面元素，导致照片平庸无趣。</p>
+    </div>
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(52,152,219,0.15);">🌤️</div>
+      <h3>忽视环境光线</h3>
+      <p>拍照时不考虑天气与光线条件，导致曝光不当、色彩偏差，错失最佳拍摄时机。</p>
+    </div>
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(46,204,113,0.15);">⚡</div>
+      <h3>缺少拍摄仪式感</h3>
+      <p>手机随手一拍，缺乏胶片时代"每一张都珍贵"的仪式感，导致大量废片。</p>
+    </div>
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(155,89,182,0.15);">📷</div>
+      <h3>硬件参数难调</h3>
+      <p>不了解ISO、光圈、快门等参数如何配合场景设置，无法充分发挥相机潜力。</p>
+    </div>
+    <div class="pain-card animate-on-scroll">
+      <div class="pain-icon" style="background:rgba(230,126,34,0.15);">💾</div>
+      <h3>照片管理混乱</h3>
+      <p>拍完即忘，缺乏整理与回顾机制，珍贵的影像记忆被淹没在海量照片中。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 核心功能 ==================== -->
+<section class="section" id="features">
+  <div class="section-header animate-on-scroll">
+    <div class="section-tag tag-gold">Core Features</div>
+    <h2>核心功能</h2>
+    <p>七大核心模块，打造完整的胶片摄影体验</p>
+  </div>
+  <div class="feature-showcase">
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">01</div>
+      <h3>🌤️ 天气感知系统</h3>
+      <p>自动获取当地天气信息，根据晴、阴、雨、雪等天气条件，智能推荐最佳拍摄参数与胶片类型。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">02</div>
+      <h3>💡 明暗侦测器</h3>
+      <p>通过摄像头实时分析环境光线亮度，自动调节曝光建议。内置EV值计算，帮助选择合适的参数组合。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">03</div>
+      <h3>📐 智能构图推荐</h3>
+      <p>提供三分法、黄金分割、中心对称、对角线等多种构图辅助线，结合AI推荐最适合的构图方式。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">04</div>
+      <h3>🎞️ 20种胶片滤镜</h3>
+      <p>内置Portra、Velvia、Tri-X等20种经典胶片模拟滤镜，实时预览对比，切换时伴有专属音效与触觉反馈。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">05</div>
+      <h3>🎭 沉浸拍摄模式</h3>
+      <p>拍摄20~30张后触发"洗胶片"流程，模拟显影、定影、晾干等步骤，一次性呈现所有照片。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">06</div>
+      <h3>🖼️ 图片上传与风格化</h3>
+      <p>支持上传已有照片，自动分析画面特征并推荐匹配的胶片风格，一键应用滤镜效果。</p>
+    </div>
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-num">07</div>
+      <h3>✏️ 自定义水印</h3>
+      <p>支持自定义文字水印，可调节位置、大小、透明度和颜色，为每张照片打上专属印记。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 创新价值 ==================== -->
+<section class="section" id="value">
+  <div class="section-header animate-on-scroll">
+    <div class="section-tag tag-blue">Innovation</div>
+    <h2>创新价值</h2>
+    <p>重新定义手机摄影体验，让科技回归人文</p>
+  </div>
+  <div class="value-grid">
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(233,69,96,0.15);">🧠</div>
+      <h3>AI驱动</h3>
+      <p>智能分析场景、光线、天气，自动推荐最佳拍摄方案</p>
+    </div>
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(245,197,24,0.15);">🎬</div>
+      <h3>沉浸体验</h3>
+      <p>模拟真实胶片冲洗流程，让摄影重新充满仪式感</p>
+    </div>
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(52,152,219,0.15);">📱</div>
+      <h3>多端适配</h3>
+      <p>响应式设计，手机、平板、电脑均可完美使用</p>
+    </div>
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(46,204,113,0.15);">🎓</div>
+      <h3>摄影教学</h3>
+      <p>构图辅助与参数推荐，边拍边学提升摄影技能</p>
+    </div>
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(155,89,182,0.15);">🔊</div>
+      <h3>多感官反馈</h3>
+      <p>音效、震动、视觉动画，全方位模拟真实操作体验</p>
+    </div>
+    <div class="value-item animate-on-scroll">
+      <div class="value-icon" style="background:rgba(230,126,34,0.15);">💾</div>
+      <h3>一键保存</h3>
+      <p>所有照片可随时保存到本地，珍贵记忆永不丢失</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Footer ==================== -->
+<footer class="footer">
+  <p>📷 AI胶片模拟与构图辅助器 · TRAI大赛生活娱乐赛道</p>
+  <p style="margin-top:8px;font-size:0.75rem;">让每一次快门都充满电影质感</p>
+</footer>
+
+<!-- ==================== 应用主界面 ==================== -->
+<div class="app-container" id="appContainer">
+
+  <!-- 顶部工具栏 -->
+  <div class="app-toolbar">
+    <div class="toolbar-left">
+      <button class="toolbar-btn" onclick="closeApp()" title="返回">←</button>
+      <div class="weather-badge" id="weatherBadge">🌤️ 获取中...</div>
+      <div class="light-meter">
+        <div class="light-dot" id="lightDot" style="background:#555;"></div>
+        <span id="lightValue">-- EV</span>
+      </div>
+    </div>
+    <div class="toolbar-right">
+      <button class="toolbar-btn" id="compToggle" onclick="toggleCompPanel()" title="构图辅助">📐</button>
+      <button class="toolbar-btn" id="paramToggle" onclick="toggleParamPanel()" title="参数推荐">⚙️</button>
+      <button class="toolbar-btn" id="wmToggle" onclick="toggleWatermarkPanel()" title="水印设置">✏️</button>
+      <button class="toolbar-btn" id="immersiveToggle" onclick="toggleImmersive()" title="沉浸模式">🎭</button>
+      <button class="toolbar-btn" id="superToggle" onclick="toggleSuperMode()" title="超级模拟模式" style="background:linear-gradient(135deg,rgba(233,69,96,0.2),rgba(245,197,24,0.2));border:1px solid rgba(245,197,24,0.3);">📷</button>
+    </div>
+  </div>
+
+  <!-- 构图推荐面板 -->
+  <div class="comp-panel" id="compPanel">
+    <div class="comp-options">
+      <button class="comp-option active" data-comp="thirds" onclick="setComposition('thirds',this)">三分法</button>
+      <button class="comp-option" data-comp="golden" onclick="setComposition('golden',this)">黄金分割</button>
+      <button class="comp-option" data-comp="center" onclick="setComposition('center',this)">中心对称</button>
+      <button class="comp-option" data-comp="diagonal" onclick="setComposition('diagonal',this)">对角线</button>
+      <button class="comp-option" data-comp="frame" onclick="setComposition('frame',this)">框架构图</button>
+      <button class="comp-option" data-comp="symmetry" onclick="setComposition('symmetry',this)">对称构图</button>
+      <button class="comp-option" data-comp="leading" onclick="setComposition('leading',this)">引导线</button>
+      <button class="comp-option" data-comp="triangle" onclick="setComposition('triangle',this)">三角构图</button>
+      <button class="comp-option" data-comp="scurve" onclick="setComposition('scurve',this)">S曲线</button>
+      <button class="comp-option" data-comp="none" onclick="setComposition('none',this)">关闭</button>
+    </div>
+  </div>
+
+  <!-- 构图详情面板 -->
+  <div class="comp-detail-panel" id="compDetailPanel">
+    <div class="comp-detail-header">
+      <h3 id="compDetailTitle">📐 三分法构图详解</h3>
+      <button class="comp-detail-close" onclick="closeCompDetail()">✕</button>
+    </div>
+    <div class="comp-detail-content" id="compDetailContent"></div>
+  </div>
+
+  <!-- 参数推荐面板 -->
+  <div class="param-panel" id="paramPanel">
+    <h3>📷 推荐参数</h3>
+    <div class="param-item"><span class="param-label">胶片类型</span><span class="param-value" id="paramFilm">Portra 400</span></div>
+    <div class="param-item"><span class="param-label">ISO</span><span class="param-value" id="paramISO">400</span></div>
+    <div class="param-item"><span class="param-label">光圈</span><span class="param-value" id="paramAperture">f/2.8</span></div>
+    <div class="param-item"><span class="param-label">快门速度</span><span class="param-value" id="paramShutter">1/125s</span></div>
+    <div class="param-item"><span class="param-label">白平衡</span><span class="param-value" id="paramWB">日光 5500K</span></div>
+    <div class="param-item"><span class="param-label">曝光补偿</span><span class="param-value" id="paramEV">±0</span></div>
+    <div class="param-item"><span class="param-label">环境亮度</span><span class="param-value" id="paramLight">--</span></div>
+    <div class="param-item"><span class="param-label">天气建议</span><span class="param-value" id="paramWeather">--</span></div>
+    <div class="param-item"><span class="param-label">构图建议</span><span class="param-value" id="paramComp">三分法</span></div>
+  </div>
+
+  <!-- 水印设置面板 -->
+  <div class="watermark-panel" id="watermarkPanel">
+    <h3>✏️ 水印设置</h3>
+    <div class="wm-toggle-row">
+      <span>启用水印</span>
+      <button class="wm-switch" id="wmSwitch" onclick="toggleWatermark()"></button>
+    </div>
+    <div class="wm-field">
+      <label>水印文字</label>
+      <input type="text" id="wmText" value="FilmAI" placeholder="输入水印文字" oninput="updateWatermarkPreview()">
+    </div>
+    <div class="wm-field">
+      <label>字体大小</label>
+      <div class="wm-range-row">
+        <input type="range" id="wmSize" min="12" max="60" value="24" oninput="updateWatermarkPreview()">
+        <span class="wm-range-val" id="wmSizeVal">24</span>
+      </div>
+    </div>
+    <div class="wm-field">
+      <label>透明度</label>
+      <div class="wm-range-row">
+        <input type="range" id="wmOpacity" min="10" max="100" value="50" oninput="updateWatermarkPreview()">
+        <span class="wm-range-val" id="wmOpacityVal">50%</span>
+      </div>
+    </div>
+    <div class="wm-field">
+      <label>旋转角度</label>
+      <div class="wm-range-row">
+        <input type="range" id="wmAngle" min="-45" max="45" value="-30" oninput="updateWatermarkPreview()">
+        <span class="wm-range-val" id="wmAngleVal">-30°</span>
+      </div>
+    </div>
+    <div class="wm-field">
+      <label>水印颜色</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="wm-pos-btn active" data-color="#ffffff" onclick="setWmColor(this)" style="color:#fff;border-color:rgba(255,255,255,0.4);">白色</button>
+        <button class="wm-pos-btn" data-color="#000000" onclick="setWmColor(this)" style="color:#888;">黑色</button>
+        <button class="wm-pos-btn" data-color="#f5c518" onclick="setWmColor(this)" style="color:#f5c518;">金色</button>
+        <button class="wm-pos-btn" data-color="#e94560" onclick="setWmColor(this)" style="color:#e94560;">红色</button>
+      </div>
+    </div>
+    <div class="wm-field">
+      <label>水印位置</label>
+      <div class="wm-position-grid">
+        <button class="wm-pos-btn" data-pos="top-left" onclick="setWmPosition(this)">左上</button>
+        <button class="wm-pos-btn" data-pos="top-center" onclick="setWmPosition(this)">上中</button>
+        <button class="wm-pos-btn" data-pos="top-right" onclick="setWmPosition(this)">右上</button>
+        <button class="wm-pos-btn" data-pos="center-left" onclick="setWmPosition(this)">左中</button>
+        <button class="wm-pos-btn active" data-pos="center" onclick="setWmPosition(this)">居中</button>
+        <button class="wm-pos-btn" data-pos="center-right" onclick="setWmPosition(this)">右中</button>
+        <button class="wm-pos-btn" data-pos="bottom-left" onclick="setWmPosition(this)">左下</button>
+        <button class="wm-pos-btn" data-pos="bottom-center" onclick="setWmPosition(this)">下中</button>
+        <button class="wm-pos-btn" data-pos="bottom-right" onclick="setWmPosition(this)">右下</button>
+      </div>
+    </div>
+    <div class="wm-field">
+      <label>水印样式</label>
+      <div style="display:flex;gap:8px;">
+        <button class="wm-pos-btn active" data-style="text" onclick="setWmStyle(this)">纯文字</button>
+        <button class="wm-pos-btn" data-style="camera" onclick="setWmStyle(this)">📷 + 文字</button>
+        <button class="wm-pos-btn" data-style="border" onclick="setWmStyle(this)">边框 + 文字</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 拍照计数器 -->
+  <div class="photo-counter" id="photoCounter">
+    🎞️ <span id="counterText">0 / 24</span>
+  </div>
+
+  <!-- 摄像头取景器 -->
+  <div class="viewfinder-wrapper">
+    <div class="viewfinder-area" id="viewfinderArea">
+      <video id="cameraVideo" autoplay playsinline muted style="opacity:0;"></video>
+      <!-- 示例预览图（无摄像头时显示，用于预览滤镜效果） -->
+      <canvas id="samplePreview"></canvas>
+      <canvas id="viewfinderCanvas"></canvas>
+      <!-- 构图辅助线 -->
+      <div class="composition-overlay comp-thirds" id="compOverlay">
+        <div class="comp-line-h"></div><div class="comp-line-h"></div>
+        <div class="comp-line-v"></div><div class="comp-line-v"></div>
+      </div>
+      <!-- 额外构图元素（由JS动态切换） -->
+      <div id="compExtra" style="position:absolute;inset:0;z-index:3;pointer-events:none;opacity:0.5;transition:opacity 0.5s;display:none;"></div>
+      <!-- 构图推荐提示 -->
+      <div class="comp-suggestion" id="compSuggestion" style="display:none;">💡 建议：将主体放在交叉点上</div>
+      <!-- 滤镜名称弹出 -->
+      <div class="filter-name-badge" id="filterNameBadge"></div>
+    </div>
+  </div>
+
+  <!-- 上传区域 -->
+  <div class="upload-area" id="uploadArea" style="display:none;">
+    <div class="upload-icon">📁</div>
+    <div class="upload-text">点击或拖拽上传图片，自动分析并推荐胶片风格</div>
+    <input type="file" id="fileInput" accept="image/*" style="display:none;" multiple>
+  </div>
+
+  <!-- 上传图片预览 -->
+  <div id="uploadPreview" style="display:none; max-width:600px; margin:16px auto; padding:0 16px;">
+    <canvas id="uploadCanvas" style="width:100%; border-radius:8px;"></canvas>
+    <div style="text-align:center; margin-top:12px;">
+      <button class="btn btn-outline" onclick="closeUploadReturnCamera()">📷 返回拍照</button>
+    </div>
+  </div>
+
+  <!-- ==================== 底部操作栏（改进版） ==================== -->
+  <div class="bottom-bar" id="bottomBar">
+    <!-- 拍照行 -->
+    <div class="capture-row">
+      <button class="side-btn" id="switchCamBtn" onclick="switchCamera()" title="切换摄像头">🔄</button>
+      <button class="capture-btn" id="captureBtn" onclick="capturePhoto()"></button>
+      <button class="side-btn" id="uploadBtn" onclick="toggleUpload()" title="上传图片">📁</button>
+    </div>
+    <!-- 滤镜快捷行 -->
+    <div class="filter-row" id="filterRow">
+      <!-- 由JS动态生成 -->
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 滤镜全屏面板 ==================== -->
+<div class="filter-fullscreen" id="filterFullscreen">
+  <div class="filter-fullscreen-header">
+    <h3>🎞️ 选择胶片滤镜</h3>
+    <button class="filter-fullscreen-close" onclick="closeFilterFullscreen()">✕</button>
+  </div>
+  <!-- 对比预览 -->
+  <div class="filter-compare" id="filterCompare">
+    <div class="filter-compare-box" id="compareOriginal">
+      <canvas id="compareOrigCanvas"></canvas>
+      <div class="filter-compare-label">原图</div>
+    </div>
+    <div class="filter-compare-box selected" id="compareFiltered">
+      <canvas id="compareFilterCanvas"></canvas>
+      <div class="filter-compare-label" id="compareFilterLabel">Portra 400</div>
+    </div>
+  </div>
+  <!-- 滤镜网格 -->
+  <div class="filter-grid" id="filterGrid">
+    <!-- 由JS动态生成 -->
+  </div>
+</div>
+
+<!-- ==================== 沉浸模式遮罩 ==================== -->
+<div class="immersive-overlay" id="immersiveOverlay">
+  <div class="film-developing" id="filmDeveloping">
+    <div style="font-size:2rem;margin-bottom:16px;">🎞️</div>
+    <h2 style="margin-bottom:8px;">胶片冲洗中...</h2>
+    <p style="color:var(--text-dim);font-size:0.9rem;" id="developStage">准备显影液...</p>
+    <div class="film-strip" id="filmStrip">
+      <div class="film-strip-inner" id="filmStripInner"></div>
+    </div>
+    <div class="develop-progress">
+      <div class="develop-progress-bar" id="developProgressBar"></div>
+    </div>
+    <div class="develop-text" id="developText">请耐心等待，好照片值得等待...</div>
+  </div>
+  <div id="developedPreview" style="display:none; width:100%; max-width:800px; padding:20px; overflow-y:auto; max-height:100vh;">
+    <h2 style="text-align:center; margin-bottom:20px;">🎬 您的胶片已冲洗完成</h2>
+    <div class="preview-grid" id="developedGrid"></div>
+    <div style="text-align:center; margin-top:20px;">
+      <button class="btn btn-primary" onclick="saveAllPhotos()">💾 保存全部照片</button>
+      <button class="btn btn-outline" onclick="closeImmersive()" style="margin-left:12px;">返回拍摄</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 全屏预览 ==================== -->
+<div class="fullscreen-preview" id="fullscreenPreview">
+  <button class="fullscreen-close" onclick="closeFullscreen()">✕</button>
+  <img id="fullscreenImg" src="" alt="预览">
+</div>
+
+<!-- ==================== 超级模拟模式 ==================== -->
+<div class="super-overlay" id="superOverlay">
+  <!-- 横屏旋转提示 -->
+  <div class="super-rotate-hint" id="superRotateHint">
+    <div class="rotate-icon">📱</div>
+    <div>请旋转手机至横屏<br>以体验胶片相机拍摄</div>
+    <button class="skip-btn" onclick="superSkipRotate()">跳过，竖屏使用</button>
+  </div>
+
+  <!-- 胶片相机完整外观 -->
+  <div class="film-camera" id="filmCamera">
+    <!-- 背带环 -->
+    <div class="cam-strap-lug left"></div>
+    <div class="cam-strap-lug right"></div>
+
+    <!-- ======== 顶部面板 ======== -->
+    <div class="cam-top-plate">
+      <div class="cam-brand">FilmAI</div>
+      <div class="cam-hotshoe"></div>
+      <div class="cam-rewind-knob" id="rewindKnob" onclick="superChangeFilm()" title="换胶卷/ISO"></div>
+      <div class="cam-speed-dial" id="speedDial" onclick="superToggleDial()" title="拍摄模式">
+        <span class="speed-notch"></span>
+        <span id="speedDialLabel">P</span>
+      </div>
+      <div class="cam-shutter-btn" onclick="event.stopPropagation(); superCapture();" title="快门"></div>
+      <div class="cam-frame-counter" id="frameCounter">00</div>
+      <div class="cam-advance-lever" id="advanceLever" onclick="event.stopPropagation(); superToggleExposure();" title="曝光补偿"></div>
+      <span style="font-size:0.55rem;color:var(--text-dim);flex-shrink:0;" id="topFilmType">Portra 400</span>
+    </div>
+
+    <!-- ======== 机身主体 ======== -->
+    <div class="cam-body" id="camBody" onclick="superCapture()">
+      <!-- 左侧：镜头区 -->
+      <div class="cam-left-section">
+        <div class="cam-lens" id="camLens" onclick="event.stopPropagation();">
+          <div class="aperture-ring" id="apertureRing"></div>
+        </div>
+        <div class="cam-lens-ring">50mm f/1.4</div>
+      </div>
+
+      <!-- 中间：取景器 + 信息 -->
+      <div class="cam-center-section">
+        <!-- 取景器窗 -->
+        <div class="cam-viewfinder" id="camViewfinder">
+          <div class="cam-vf-corner tl"></div>
+          <div class="cam-vf-corner tr"></div>
+          <div class="cam-vf-corner bl"></div>
+          <div class="cam-vf-corner br"></div>
+          <div class="cam-grid" id="camGrid" style="display:none;">
+            <div class="grid-line-h" style="top:33.3%;"></div>
+            <div class="grid-line-h" style="top:66.6%;"></div>
+            <div class="grid-line-v" style="left:33.3%;"></div>
+            <div class="grid-line-v" style="left:66.6%;"></div>
+          </div>
+          <div class="blind-text">
+            🎞️ 超级模拟模式<br>
+            <span style="font-size:0.7rem;">看不见画面 · 信任你的直觉</span>
+          </div>
+          <div class="flash-indicator" id="flashIndicator" style="display:none;">⚡ 闪光灯已开</div>
+          <div class="timer-indicator" id="timerIndicator" style="display:none;">⏱️ 自拍 3秒</div>
+          <div class="shot-flash" id="superFlash"></div>
+        </div>
+
+        <!-- 底部信息行 -->
+        <div class="cam-info-row">
+          <div class="cam-info-item">ISO<span class="val" id="superISO">400</span></div>
+          <div class="cam-info-item">光圈<span class="val" id="superAperture">f/2.8</span></div>
+          <div class="cam-info-item">快门<span class="val" id="superShutter">1/125</span></div>
+          <div class="cam-info-item">已拍<span class="val" id="superShotCount">0/12</span></div>
+        </div>
+      </div>
+
+      <!-- 右侧：控制按钮 -->
+      <div class="cam-right-section">
+        <button class="cam-ctrl-btn" id="ctrlFlash" onclick="event.stopPropagation(); superToggleFlash();" title="闪光灯">
+          ⚡<span class="ctrl-label">闪光</span>
+        </button>
+        <button class="cam-ctrl-btn" id="ctrlTimer" onclick="event.stopPropagation(); superToggleTimer();" title="自拍定时">
+          ⏱️<span class="ctrl-label">定时</span>
+        </button>
+        <button class="cam-ctrl-btn" id="ctrlGrid" onclick="event.stopPropagation(); superToggleGrid();" title="构图网格">
+          ⊞<span class="ctrl-label">网格</span>
+        </button>
+        <button class="cam-ctrl-btn" id="ctrlBurst" onclick="event.stopPropagation(); superToggleBurst();" title="连拍模式">
+          📸<span class="ctrl-label">连拍</span>
+        </button>
+        <button class="cam-ctrl-btn" id="ctrlSound" onclick="event.stopPropagation(); superToggleSound();" title="快门音效">
+          🔊<span class="ctrl-label">音效</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 底部金属条 -->
+    <div class="cam-bottom-bar"></div>
+
+    <!-- 胶片帧计数条 -->
+    <div class="cam-film-strip" id="superFilmStrip" style="margin-top:4px;">
+      <!-- 由JS生成12个帧 -->
+    </div>
+  </div>
+
+  <!-- 提示 -->
+  <div class="super-hint" id="superHintText">
+    点击<strong>相机机身</strong>或<strong>快门按钮</strong>拍照 · 拍满12张后自动洗胶片
+  </div>
+  <!-- 操作按钮 -->
+  <div class="super-actions">
+    <button class="super-act-btn" onclick="superToggleISO()" title="ISO设置">📥 ISO</button>
+    <button class="super-act-btn primary" id="superDevelopBtn" onclick="superStartDevelop()" disabled>🧪 洗胶片</button>
+    <button class="super-act-btn" onclick="superExit()">✕ 退出</button>
+  </div>
+</div>
+
+<!-- ==================== 超级模拟：洗胶片 + 选风格界面 ==================== -->
+<div class="super-develop-overlay" id="superDevelopOverlay">
+  <h2 class="super-dev-title" id="superDevTitle">🎞️ 胶片冲洗中...</h2>
+  <!-- 步骤条 -->
+  <div class="dev-steps" id="devSteps">
+    <span class="dev-step" data-step="0">显影</span>
+    <span class="dev-step" data-step="1">停影</span>
+    <span class="dev-step" data-step="2">定影</span>
+    <span class="dev-step" data-step="3">水洗</span>
+    <span class="dev-step" data-step="4">晾干</span>
+    <span class="dev-step" data-step="5">选风格</span>
+  </div>
+  <!-- 洗胶片帧 -->
+  <div class="super-film-strip">
+    <div class="super-film-frames" id="superFilmFrames">
+      <!-- 由JS动态生成 -->
+    </div>
+  </div>
+  <!-- 风格选择区（洗完后显示） -->
+  <div class="style-select-area" id="styleSelectArea" style="display:none;">
+    <h3>🎨 为照片选择胶片风格</h3>
+    <p class="style-select-hint">点击照片，然后选择想要的胶片风格（可每张不同）</p>
+    <div class="style-grid" id="styleGrid">
+      <!-- 由JS生成 -->
+    </div>
+    <div class="style-apply-all-row">
+      <button class="super-act-btn" onclick="styleApplyAll()">✨ 全部应用当前风格</button>
+      <button class="super-act-btn primary" onclick="superFinish()">💾 确认并保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== Toast ==================== -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ==================== 全局状态 ====================
+const state = {
+  currentFilter: 0,
+  isImmersive: false,
+  photos: [],
+  immersivePhotos: [],
+  cameraStream: null,
+  facingMode: 'environment',
+  lightLevel: 0,
+  weather: null,
+  currentComp: 'thirds',
+  isAppOpen: false,
+  audioCtx: null,
+  // 水印设置
+  watermark: {
+    enabled: false,
+    text: 'FilmAI',
+    size: 24,
+    opacity: 0.5,
+    angle: -30,
+    color: '#ffffff',
+    position: 'center',
+    style: 'text'
+  },
+  // 滤镜示例图（用于预览）
+  sampleImage: null,
+};
+
+// ==================== 20种胶片滤镜定义 ====================
+const filters = [
+  { name: 'Portra 400', css: 'saturate(0.85) contrast(1.05) sepia(0.08) brightness(1.05)', tone: '#e8d5b7', desc: '经典人像胶片', px: { sat:0.85, con:1.05, sep:0.08, bri:1.05, hue:0, gray:0 } },
+  { name: 'Portra 160', css: 'saturate(0.8) contrast(1.02) sepia(0.12) brightness(1.08)', tone: '#f0e0c8', desc: '柔和肤色', px: { sat:0.8, con:1.02, sep:0.12, bri:1.08, hue:0, gray:0 } },
+  { name: 'Velvia 50', css: 'saturate(1.4) contrast(1.15) sepia(0.02) brightness(1.0)', tone: '#4a90d9', desc: '鲜艳风光', px: { sat:1.4, con:1.15, sep:0.02, bri:1.0, hue:0, gray:0 } },
+  { name: 'Ektar 100', css: 'saturate(1.3) contrast(1.1) sepia(0.03) brightness(1.02)', tone: '#5ba3e6', desc: '超高饱和', px: { sat:1.3, con:1.1, sep:0.03, bri:1.02, hue:0, gray:0 } },
+  { name: 'Tri-X 400', css: 'grayscale(0.85) contrast(1.3) brightness(1.05)', tone: '#888', desc: '经典黑白', px: { sat:0, con:1.3, sep:0, bri:1.05, hue:0, gray:0.85 } },
+  { name: 'HP5 Plus', css: 'grayscale(0.9) contrast(1.25) brightness(1.0) sepia(0.05)', tone: '#999', desc: '颗粒黑白', px: { sat:0, con:1.25, sep:0.05, bri:1.0, hue:0, gray:0.9 } },
+  { name: 'FP4 Plus', css: 'grayscale(0.88) contrast(1.15) brightness(1.08) sepia(0.08)', tone: '#aaa', desc: '细腻黑白', px: { sat:0, con:1.15, sep:0.08, bri:1.08, hue:0, gray:0.88 } },
+  { name: 'Provia 100', css: 'saturate(1.1) contrast(1.08) sepia(0.02) brightness(1.03)', tone: '#6bb5e0', desc: '自然色彩', px: { sat:1.1, con:1.08, sep:0.02, bri:1.03, hue:0, gray:0 } },
+  { name: 'Astia 100', css: 'saturate(0.9) contrast(1.0) sepia(0.05) brightness(1.05)', tone: '#d4a574', desc: '柔和人像', px: { sat:0.9, con:1.0, sep:0.05, bri:1.05, hue:0, gray:0 } },
+  { name: 'Superia 400', css: 'saturate(1.15) contrast(1.08) sepia(0.06) brightness(1.0)', tone: '#7bc67e', desc: '日常胶片', px: { sat:1.15, con:1.08, sep:0.06, bri:1.0, hue:0, gray:0 } },
+  { name: 'CineStill 800', css: 'saturate(1.0) contrast(1.12) sepia(0.1) brightness(1.02) hue-rotate(-5deg)', tone: '#c9a96e', desc: '电影感', px: { sat:1.0, con:1.12, sep:0.1, bri:1.02, hue:-5, gray:0 } },
+  { name: 'Gold 200', css: 'saturate(1.2) contrast(1.05) sepia(0.15) brightness(1.05)', tone: '#e8c170', desc: '温暖日常', px: { sat:1.2, con:1.05, sep:0.15, bri:1.05, hue:0, gray:0 } },
+  { name: 'UltraMax 400', css: 'saturate(1.25) contrast(1.1) sepia(0.08) brightness(1.0)', tone: '#68b8d7', desc: '明亮鲜艳', px: { sat:1.25, con:1.1, sep:0.08, bri:1.0, hue:0, gray:0 } },
+  { name: 'Lomo 800', css: 'saturate(1.5) contrast(1.2) sepia(0.05) brightness(0.95) hue-rotate(10deg)', tone: '#e06040', desc: 'Lomo风格', px: { sat:1.5, con:1.2, sep:0.05, bri:0.95, hue:10, gray:0 } },
+  { name: 'Kodachrome', css: 'saturate(1.2) contrast(1.15) sepia(0.1) brightness(1.0) hue-rotate(-3deg)', tone: '#d4a050', desc: '经典柯达', px: { sat:1.2, con:1.15, sep:0.1, bri:1.0, hue:-3, gray:0 } },
+  { name: 'Polaroid', css: 'saturate(0.85) contrast(1.1) sepia(0.15) brightness(1.08)', tone: '#e8d0b0', desc: '拍立得', px: { sat:0.85, con:1.1, sep:0.15, bri:1.08, hue:0, gray:0 } },
+  { name: 'Instax', css: 'saturate(1.1) contrast(1.05) sepia(0.12) brightness(1.1)', tone: '#f0d8c0', desc: '富士拍立得', px: { sat:1.1, con:1.05, sep:0.12, bri:1.1, hue:0, gray:0 } },
+  { name: 'Cross Process', css: 'saturate(1.4) contrast(1.15) hue-rotate(30deg) brightness(1.0)', tone: '#50c878', desc: '交叉冲洗', px: { sat:1.4, con:1.15, sep:0, bri:1.0, hue:30, gray:0 } },
+  { name: 'Bleach Bypass', css: 'saturate(0.6) contrast(1.4) brightness(0.95)', tone: '#a0a0a0', desc: '漂白旁路', px: { sat:0.6, con:1.4, sep:0, bri:0.95, hue:0, gray:0 } },
+  { name: 'Sepia Tone', css: 'sepia(0.6) contrast(1.05) brightness(1.05)', tone: '#8b7355', desc: '复古棕褐', px: { sat:0, con:1.05, sep:0.6, bri:1.05, hue:0, gray:0 } },
+];
+
+// ==================== 初始化 ====================
+document.addEventListener('DOMContentLoaded', () => {
+  initParticles();
+  initScrollAnimations();
+  initFilterRow();
+  initFilterGrid();
+  initUploadArea();
+  initNavigation();
+  generateSampleImage();
+  // 监听屏幕方向变化
+  window.addEventListener('resize', () => {
+    if (superState.active) checkOrientation();
+  });
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => { if (superState.active) checkOrientation(); }, 200);
+  });
+});
+
+// ==================== 生成滤镜预览示例图 ==================== */
+function generateSampleImage() {
+  // 创建一个丰富的示例场景图（城市日落+建筑剪影）
+  const c = document.createElement('canvas');
+  c.width = 300; c.height = 400;
+  const ctx = c.getContext('2d');
+
+  // 天空渐变（更丰富）
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 240);
+  skyGrad.addColorStop(0, '#0a0020');
+  skyGrad.addColorStop(0.15, '#1a0533');
+  skyGrad.addColorStop(0.35, '#4a1942');
+  skyGrad.addColorStop(0.55, '#c0392b');
+  skyGrad.addColorStop(0.75, '#e67e22');
+  skyGrad.addColorStop(0.9, '#f39c12');
+  skyGrad.addColorStop(1, '#f5c518');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, 300, 240);
+
+  // 太阳光晕
+  const sunGrad = ctx.createRadialGradient(150, 190, 10, 150, 190, 60);
+  sunGrad.addColorStop(0, 'rgba(255,255,220,1)');
+  sunGrad.addColorStop(0.3, 'rgba(255,220,130,0.8)');
+  sunGrad.addColorStop(0.6, 'rgba(255,160,60,0.3)');
+  sunGrad.addColorStop(1, 'rgba(255,100,30,0)');
+  ctx.fillStyle = sunGrad;
+  ctx.beginPath();
+  ctx.arc(150, 190, 60, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 太阳本体
+  ctx.fillStyle = '#fff8e0';
+  ctx.beginPath();
+  ctx.arc(150, 190, 12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 云彩
+  ctx.globalAlpha = 0.15;
+  for (let i = 0; i < 5; i++) {
+    const cx = 30 + i * 65;
+    const cy = 60 + Math.sin(i) * 30;
+    ctx.fillStyle = '#ff8866';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 40 + i * 5, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // 星星
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 25; i++) {
+    const x = Math.random() * 300;
+    const y = Math.random() * 100;
+    const s = Math.random() * 1.5 + 0.5;
+    ctx.globalAlpha = Math.random() * 0.7 + 0.3;
+    ctx.fillRect(x, y, s, s);
+  }
+  ctx.globalAlpha = 1;
+
+  // 远处山脉
+  ctx.fillStyle = '#2a1040';
+  ctx.beginPath();
+  ctx.moveTo(0, 230);
+  ctx.lineTo(30, 180); ctx.lineTo(60, 200); ctx.lineTo(100, 160);
+  ctx.lineTo(140, 185); ctx.lineTo(180, 155); ctx.lineTo(220, 175);
+  ctx.lineTo(260, 150); ctx.lineTo(300, 190);
+  ctx.lineTo(300, 240);
+  ctx.closePath();
+  ctx.fill();
+
+  // 城市建筑剪影
+  ctx.fillStyle = '#0f0a1a';
+  const buildings = [
+    [0, 220, 25, 60], [25, 200, 20, 80], [45, 210, 15, 70],
+    [60, 195, 22, 85], [82, 215, 18, 65], [100, 190, 25, 90],
+    [125, 205, 15, 75], [140, 185, 20, 95], [160, 200, 18, 80],
+    [178, 210, 22, 70], [200, 190, 25, 90], [225, 200, 15, 80],
+    [240, 185, 20, 95], [260, 205, 18, 75], [278, 195, 22, 85]
+  ];
+  buildings.forEach(([x, y, w, h]) => {
+    ctx.fillRect(x, y, w, h);
+    // 窗户灯光
+    ctx.fillStyle = `rgba(255,200,100,${0.3 + Math.random() * 0.5})`;
+    for (let wy = y + 8; wy < y + h - 5; wy += 12) {
+      for (let wx = x + 4; wx < x + w - 4; wx += 7) {
+        if (Math.random() > 0.4) ctx.fillRect(wx, wy, 3, 4);
+      }
+    }
+    ctx.fillStyle = '#0f0a1a';
+  });
+
+  // 地面/水面
+  const waterGrad = ctx.createLinearGradient(0, 240, 0, 400);
+  waterGrad.addColorStop(0, '#1a0f20');
+  waterGrad.addColorStop(0.3, '#120a18');
+  waterGrad.addColorStop(1, '#080510');
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(0, 240, 300, 160);
+
+  // 水面反射（太阳倒影）
+  ctx.globalAlpha = 0.4;
+  const refGrad = ctx.createLinearGradient(0, 240, 0, 360);
+  refGrad.addColorStop(0, 'rgba(245,197,24,0.5)');
+  refGrad.addColorStop(0.5, 'rgba(200,100,50,0.2)');
+  refGrad.addColorStop(1, 'rgba(100,50,30,0)');
+  ctx.fillStyle = refGrad;
+  ctx.fillRect(120, 240, 60, 120);
+
+  // 水面波纹
+  for (let i = 0; i < 15; i++) {
+    const y = 245 + i * 10;
+    const w = 10 + Math.random() * 60;
+    const x = 150 - w/2 + (Math.random() - 0.5) * 40;
+    ctx.fillStyle = `rgba(245,197,24,${0.2 - i * 0.012})`;
+    ctx.fillRect(x, y, w, 1.5);
+  }
+  ctx.globalAlpha = 1;
+
+  // 路灯剪影
+  ctx.fillStyle = '#0a0510';
+  ctx.fillRect(55, 220, 3, 40);
+  ctx.beginPath();
+  ctx.arc(56, 218, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(245, 220, 3, 40);
+  ctx.beginPath();
+  ctx.arc(246, 218, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 路灯光晕
+  const lampGlow = ctx.createRadialGradient(56, 218, 2, 56, 218, 20);
+  lampGlow.addColorStop(0, 'rgba(255,220,150,0.4)');
+  lampGlow.addColorStop(1, 'rgba(255,150,50,0)');
+  ctx.fillStyle = lampGlow;
+  ctx.beginPath();
+  ctx.arc(56, 218, 20, 0, Math.PI * 2);
+  ctx.fill();
+
+  const lampGlow2 = ctx.createRadialGradient(246, 218, 2, 246, 218, 20);
+  lampGlow2.addColorStop(0, 'rgba(255,220,150,0.4)');
+  lampGlow2.addColorStop(1, 'rgba(255,150,50,0)');
+  ctx.fillStyle = lampGlow2;
+  ctx.beginPath();
+  ctx.arc(246, 218, 20, 0, Math.PI * 2);
+  ctx.fill();
+
+  state.sampleImage = c;
+
+  // 同时将示例图绘制到取景器区域的预览canvas
+  updateSamplePreview();
+}
+
+// 更新取景器区域中的示例预览图（像素级滤镜处理）
+function updateSamplePreview() {
+  const preview = document.getElementById('samplePreview');
+  if (!preview || !state.sampleImage) return;
+  const w = state.sampleImage.width;
+  const h = state.sampleImage.height;
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = w; tmpCanvas.height = h;
+  tmpCanvas.getContext('2d').drawImage(state.sampleImage, 0, 0);
+  preview.width = w;
+  preview.height = h;
+  applyPixelFilter(tmpCanvas, preview, state.currentFilter, true);
+}
+
+// ==================== 粒子效果 ==================== */
+function initParticles() {
+  const container = document.getElementById('particles');
+  for (let i = 0; i < 30; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = Math.random() * 100 + '%';
+    p.style.animationDuration = (8 + Math.random() * 12) + 's';
+    p.style.animationDelay = Math.random() * 10 + 's';
+    p.style.width = p.style.height = (2 + Math.random() * 3) + 'px';
+    container.appendChild(p);
+  }
+}
+
+// ==================== 滚动动画 ==================== */
+function initScrollAnimations() {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('visible'); });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
+}
+
+// ==================== 像素级滤镜处理（兼容所有浏览器，包括Safari） ==================== */
+// RGB <-> HSL 转换工具
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return [h * 360, s, l];
+}
+function hslToRgb(h, s, l) {
+  h /= 360;
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1/6) return p + (q - p) * 6 * t; if (t < 1/2) return q; if (t < 2/3) return p + (q - p) * (2/3 - t) * 6; return p; };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+// 用像素处理方式将滤镜应用到canvas（预览+保存通用）
+// previewMode: true时降采样加速（取景器预览），false时全分辨率（保存照片）
+function applyPixelFilter(sourceCanvas, destCanvas, filterIdx, previewMode) {
+  const px = filters[filterIdx].px;
+  const srcCtx = sourceCanvas.getContext('2d');
+  const dstCtx = destCanvas.getContext('2d');
+  const w = sourceCanvas.width, h = sourceCanvas.height;
+  destCanvas.width = w; destCanvas.height = h;
+
+  // 先将原图绘制到目标canvas
+  dstCtx.drawImage(sourceCanvas, 0, 0);
+
+  const imgData = dstCtx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  const hueShift = px.hue;
+
+  for (let i = 0; i < data.length; i += 4) {
+    let r = data[i], g = data[i+1], b = data[i+2];
+
+    // 1. Brightness
+    if (px.bri !== 1) { r *= px.bri; g *= px.bri; b *= px.bri; }
+
+    // 2. Contrast（标准公式）
+    if (px.con !== 1) {
+      r = px.con * (r - 128) + 128;
+      g = px.con * (g - 128) + 128;
+      b = px.con * (b - 128) + 128;
+    }
+
+    // 3. Hue rotation + Saturation（通过HSL空间）
+    if (hueShift !== 0 || px.sat !== 1) {
+      let [h, s, l] = rgbToHsl(
+        Math.max(0, Math.min(255, r)),
+        Math.max(0, Math.min(255, g)),
+        Math.max(0, Math.min(255, b))
+      );
+      h = (h + hueShift + 360) % 360;
+      s = Math.max(0, Math.min(1, s * px.sat));
+      [r, g, b] = hslToRgb(h, s, l);
+    }
+
+    // 4. Grayscale
+    if (px.gray > 0) {
+      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      r = r * (1 - px.gray) + gray * px.gray;
+      g = g * (1 - px.gray) + gray * px.gray;
+      b = b * (1 - px.gray) + gray * px.gray;
+    }
+
+    // 5. Sepia
+    if (px.sep > 0) {
+      const sr = Math.min(255, r * 0.393 + g * 0.769 + b * 0.189);
+      const sg = Math.min(255, r * 0.349 + g * 0.686 + b * 0.168);
+      const sb = Math.min(255, r * 0.272 + g * 0.534 + b * 0.131);
+      r = r * (1 - px.sep) + sr * px.sep;
+      g = g * (1 - px.sep) + sg * px.sep;
+      b = b * (1 - px.sep) + sb * px.sep;
+    }
+
+    // 写回像素
+    data[i]   = Math.max(0, Math.min(255, Math.round(r)));
+    data[i+1] = Math.max(0, Math.min(255, Math.round(g)));
+    data[i+2] = Math.max(0, Math.min(255, Math.round(b)));
+  }
+
+  dstCtx.putImageData(imgData, 0, 0);
+}
+
+// ==================== 初始化 ==================== */
+function initNavigation() {
+  const sections = document.querySelectorAll('section[id]');
+  window.addEventListener('scroll', () => {
+    const scrollY = window.scrollY + 100;
+    sections.forEach(section => {
+      const top = section.offsetTop, height = section.offsetHeight, id = section.getAttribute('id');
+      const link = document.querySelector(`.nav-links a[href="#${id}"]`);
+      if (link) { link.classList.toggle('active', scrollY >= top && scrollY < top + height); }
+    });
+  });
+}
+function toggleNav() { document.getElementById('navLinks').classList.toggle('open'); }
+
+// ==================== 底部滤镜快捷行 ==================== */
+function initFilterRow() {
+  const row = document.getElementById('filterRow');
+  // 显示前6个常用滤镜 + "更多"按钮（减少拥挤）
+  const quickFilters = [0, 2, 4, 11, 14, 19];
+  quickFilters.forEach(i => {
+    const chip = document.createElement('button');
+    chip.className = 'filter-chip' + (i === 0 ? ' active' : '');
+    chip.dataset.index = i;
+    chip.onclick = () => selectFilter(i);
+    // 缩略图预览
+    const thumb = document.createElement('div');
+    thumb.className = 'chip-thumb';
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 56; thumbCanvas.height = 56;
+    thumb.appendChild(thumbCanvas);
+    const label = document.createElement('span');
+    label.className = 'chip-label';
+    label.textContent = filters[i].name;
+    chip.appendChild(thumb);
+    chip.appendChild(label);
+    row.appendChild(chip);
+  });
+  // 延迟渲染缩略图（等sampleImage生成后）
+  setTimeout(() => renderFilterChipThumbnails(), 200);
+  // "更多滤镜"按钮
+  const moreBtn = document.createElement('button');
+  moreBtn.className = 'filter-chip';
+  moreBtn.style.borderColor = 'rgba(233,69,96,0.4)';
+  moreBtn.style.color = 'var(--accent)';
+  moreBtn.innerHTML = '<span class="chip-label" style="padding:0 8px;">更多 →</span>';
+  moreBtn.onclick = openFilterFullscreen;
+  row.appendChild(moreBtn);
+}
+
+// 渲染底部滤镜chip的缩略图
+function renderFilterChipThumbnails() {
+  if (!state.sampleImage) return;
+  document.querySelectorAll('.filter-chip[data-index]').forEach(chip => {
+    const i = parseInt(chip.dataset.index);
+    const canvas = chip.querySelector('.chip-thumb canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 56, 56);
+    ctx.filter = filters[i].css;
+    ctx.drawImage(state.sampleImage, 0, 0, 56, 56);
+    ctx.filter = 'none';
+  });
+}
+
+// ==================== 滤镜全屏面板 ==================== */
+function initFilterGrid() {
+  const grid = document.getElementById('filterGrid');
+  filters.forEach((f, i) => {
+    const item = document.createElement('div');
+    item.className = 'filter-grid-item' + (i === 0 ? ' active' : '');
+    item.dataset.index = i;
+    item.onclick = () => selectFilterFromGrid(i);
+
+    const preview = document.createElement('div');
+    preview.className = 'filter-grid-preview';
+    const canvas = document.createElement('canvas');
+    canvas.width = 150; canvas.height = 200;
+    preview.appendChild(canvas);
+
+    const info = document.createElement('div');
+    info.className = 'filter-grid-info';
+    info.innerHTML = `<div class="fg-name">${f.name}</div><div class="fg-desc">${f.desc}</div>`;
+
+    item.appendChild(preview);
+    item.appendChild(info);
+    grid.appendChild(item);
+  });
+}
+
+function openFilterFullscreen() {
+  const panel = document.getElementById('filterFullscreen');
+  panel.classList.add('active');
+  // 渲染所有滤镜预览
+  setTimeout(() => renderFilterGridPreviews(), 100);
+  // 渲染对比图
+  renderCompareImages();
+}
+
+function closeFilterFullscreen() {
+  document.getElementById('filterFullscreen').classList.remove('active');
+}
+
+function renderFilterGridPreviews() {
+  if (!state.sampleImage) return;
+  const items = document.querySelectorAll('.filter-grid-item');
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = 150; tempCanvas.height = 200;
+  tempCanvas.getContext('2d').drawImage(state.sampleImage, 0, 0, 150, 200);
+  items.forEach((item, i) => {
+    const canvas = item.querySelector('canvas');
+    if (!canvas) return;
+    applyPixelFilter(tempCanvas, canvas, i, true);
+  });
+}
+
+function renderCompareImages() {
+  if (!state.sampleImage) return;
+  // 原图
+  const origCanvas = document.getElementById('compareOrigCanvas');
+  origCanvas.width = 120; origCanvas.height = 160;
+  origCanvas.getContext('2d').drawImage(state.sampleImage, 0, 0, 120, 160);
+  // 滤镜图（像素处理）
+  const filterCanvas = document.getElementById('compareFilterCanvas');
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = 120; tempCanvas.height = 160;
+  tempCanvas.getContext('2d').drawImage(state.sampleImage, 0, 0, 120, 160);
+  applyPixelFilter(tempCanvas, filterCanvas, state.currentFilter, true);
+  document.getElementById('compareFilterLabel').textContent = filters[state.currentFilter].name;
+}
+
+function selectFilterFromGrid(index) {
+  selectFilter(index);
+  renderCompareImages();
+  // 更新网格高亮
+  document.querySelectorAll('.filter-grid-item').forEach((item, i) => {
+    item.classList.toggle('active', i === index);
+  });
+}
+
+// ==================== 辅助：调整颜色亮度 ==================== */
+function adjustColor(hex, amount) {
+  hex = hex.replace('#', '');
+  const r = Math.max(0, Math.min(255, parseInt(hex.substr(0,2),16) + amount));
+  const g = Math.max(0, Math.min(255, parseInt(hex.substr(2,2),16) + amount));
+  const b = Math.max(0, Math.min(255, parseInt(hex.substr(4,2),16) + amount));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ==================== 滤镜切换 ==================== */
+function selectFilter(index) {
+  state.currentFilter = index;
+
+  // 更新底部快捷行高亮
+  document.querySelectorAll('.filter-chip[data-index]').forEach(chip => {
+    chip.classList.toggle('active', parseInt(chip.dataset.index) === index);
+  });
+
+  // 应用滤镜到取景器摄像头（CSS filter作为备用，主要靠canvas像素渲染）
+    const video = document.getElementById('cameraVideo');
+    video.style.filter = 'none'; // 取消CSS filter，改用canvas像素渲染
+
+  // 同时更新示例预览图（无论摄像头是否开启）
+  updateSamplePreview();
+
+  // 播放音效 + 震动
+  playFilterSound(index);
+  triggerVibration();
+
+  // 显示滤镜名称弹出动画
+  showFilterNameBadge(filters[index].name);
+
+  // 更新参数面板
+  document.getElementById('paramFilm').textContent = filters[index].name;
+
+  showToast(`🎞️ ${filters[index].name} · ${filters[index].desc}`);
+}
+
+// 滤镜名称弹出提示
+function showFilterNameBadge(name) {
+  const badge = document.getElementById('filterNameBadge');
+  badge.textContent = name;
+  badge.classList.remove('show');
+  void badge.offsetWidth; // 触发reflow
+  badge.classList.add('show');
+}
+
+// ==================== 音效系统（Web Audio API） ==================== */
+function getAudioCtx() {
+  if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return state.audioCtx;
+}
+
+// 滤镜切换音效
+function playFilterSound(index) {
+  try {
+    const ctx = getAudioCtx(), now = ctx.currentTime;
+    const baseFreq = 200 + (index * 25);
+    // 主音调
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.5, now + 0.15);
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.start(now); osc.stop(now + 0.15);
+    // 噪声成分
+    const bufferSize = ctx.sampleRate * 0.08;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.3;
+    const noise = ctx.createBufferSource(); noise.buffer = buffer;
+    const noiseGain = ctx.createGain();
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass'; noiseFilter.frequency.value = 800 + index * 50; noiseFilter.Q.value = 2;
+    noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(ctx.destination);
+    noiseGain.gain.setValueAtTime(0.08, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    noise.start(now); noise.stop(now + 0.08);
+    // 第二声咔嗒
+    const osc2 = ctx.createOscillator(), gain2 = ctx.createGain();
+    osc2.connect(gain2); gain2.connect(ctx.destination);
+    osc2.frequency.setValueAtTime(baseFreq * 1.5, now + 0.06);
+    osc2.frequency.exponentialRampToValueAtTime(baseFreq * 0.8, now + 0.12);
+    osc2.type = 'triangle';
+    gain2.gain.setValueAtTime(0.1, now + 0.06);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc2.start(now + 0.06); osc2.stop(now + 0.12);
+  } catch(e) {}
+}
+
+// 拍照音效
+function playShutterSound() {
+  try {
+    const ctx = getAudioCtx(), now = ctx.currentTime;
+    const bufferSize = ctx.sampleRate * 0.15;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / ctx.sampleRate * 30) * 0.5;
+    const noise = ctx.createBufferSource(); noise.buffer = buffer;
+    const gain = ctx.createGain(), filter = ctx.createBiquadFilter();
+    filter.type = 'highpass'; filter.frequency.value = 1000;
+    noise.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    noise.start(now); noise.stop(now + 0.15);
+    const osc = ctx.createOscillator(), oscGain = ctx.createGain();
+    osc.connect(oscGain); oscGain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(80, now); osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+    osc.type = 'sine';
+    oscGain.gain.setValueAtTime(0.2, now); oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.start(now); osc.stop(now + 0.1);
+  } catch(e) {}
+}
+
+// ==================== 震动反馈 ==================== */
+function triggerVibration() { if (navigator.vibrate) navigator.vibrate(30); }
+function triggerShutterVibration() { if (navigator.vibrate) navigator.vibrate([20, 30, 15]); }
+
+// ==================== Toast ==================== */
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// ==================== 应用打开/关闭 ==================== */
+function openApp() {
+  state.isAppOpen = true;
+  document.getElementById('appContainer').classList.add('active');
+  document.getElementById('mainNav').style.display = 'none';
+  document.querySelector('.hero').style.display = 'none';
+  document.querySelectorAll('.section, .footer').forEach(el => el.style.display = 'none');
+  // 先显示示例预览（摄像头启动成功后会自动隐藏）
+  document.getElementById('samplePreview').classList.add('visible');
+  startCamera();
+  fetchWeather();
+  startLightDetection();
+  updateParamRecommendations();
+}
+function closeApp() {
+  state.isAppOpen = false;
+  document.getElementById('appContainer').classList.remove('active');
+  document.getElementById('mainNav').style.display = '';
+  document.querySelector('.hero').style.display = '';
+  document.querySelectorAll('.section, .footer').forEach(el => el.style.display = '');
+  stopCamera();
+}
+
+// ==================== 摄像头控制 ==================== */
+async function startCamera() {
+  try {
+    if (state.cameraStream) state.cameraStream.getTracks().forEach(t => t.stop());
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: state.facingMode, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false
+    });
+    state.cameraStream = stream;
+    const video = document.getElementById('cameraVideo');
+    video.srcObject = stream;
+    video.style.filter = filters[state.currentFilter].css;
+    // 摄像头开启后隐藏示例预览
+    document.getElementById('samplePreview').classList.remove('visible');
+    showToast('📷 摄像头已启动');
+  } catch(e) {
+    // 摄像头不可用时显示示例预览
+    document.getElementById('samplePreview').classList.add('visible');
+    showToast('📷 摄像头不可用，已显示示例预览 · 可切换滤镜查看效果');
+  }
+}
+function stopCamera() {
+  if (state.cameraStream) { state.cameraStream.getTracks().forEach(t => t.stop()); state.cameraStream = null; }
+  // 摄像头关闭后重新显示示例预览
+  document.getElementById('samplePreview').classList.add('visible');
+}
+function switchCamera() { state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment'; startCamera(); triggerVibration(); }
+
+// ==================== 天气获取 ==================== */
+async function fetchWeather() {
+  const badge = document.getElementById('weatherBadge');
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+    });
+    const { latitude, longitude } = pos.coords;
+    const resp = await fetch(`https://wttr.in/${latitude},${longitude}?format=%C+%t+%h+%w`, {
+      headers: { 'Accept': 'text/plain' }
+    });
+    const text = await resp.text();
+    const parts = text.trim().split(/\s+/);
+    state.weather = { condition: parts[0] || 'Unknown', temp: parts[1] || '--', humidity: parts[2] || '--', wind: parts[3] || '--' };
+    badge.textContent = `${getWeatherIcon(parts[0] || '')} ${state.weather.temp}`;
+    document.getElementById('paramWeather').textContent = state.weather.condition;
+    updateParamRecommendations();
+  } catch(e) {
+    const conditions = ['Sunny', 'Cloudy', 'Rain', 'Clear'];
+    const temps = ['22°C', '18°C', '15°C', '25°C'];
+    const idx = Math.floor(Math.random() * conditions.length);
+    state.weather = { condition: conditions[idx], temp: temps[idx] };
+    badge.textContent = `${getWeatherIcon(conditions[idx])} ${temps[idx]}`;
+    document.getElementById('paramWeather').textContent = conditions[idx];
+    updateParamRecommendations();
+  }
+}
+function getWeatherIcon(condition) {
+  const c = condition.toLowerCase();
+  if (c.includes('sun') || c.includes('clear')) return '☀️';
+  if (c.includes('cloud') || c.includes('overcast')) return '☁️';
+  if (c.includes('rain') || c.includes('drizzle')) return '🌧️';
+  if (c.includes('snow')) return '❄️';
+  if (c.includes('fog') || c.includes('mist')) return '🌫️';
+  if (c.includes('thunder') || c.includes('storm')) return '⛈️';
+  return '🌤️';
+}
+
+// ==================== 明暗侦测 + 滤镜预览渲染 ==================== */
+function startLightDetection() {
+  const canvas = document.getElementById('viewfinderCanvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const video = document.getElementById('cameraVideo');
+  // 用于像素处理的临时canvas
+  const tempCanvas = document.createElement('canvas');
+
+  function detect() {
+    if (!state.isAppOpen || video.readyState < 2) { requestAnimationFrame(detect); return; }
+    // 使用较低分辨率提升性能
+    const vw = video.videoWidth || 320;
+    const vh = video.videoHeight || 240;
+    const scale = 0.5; // 降采样到一半
+    const pw = Math.round(vw * scale);
+    const ph = Math.round(vh * scale);
+    canvas.width = pw;
+    canvas.height = ph;
+
+    // 绘制视频帧到canvas
+    ctx.drawImage(video, 0, 0, pw, ph);
+
+    // 用像素处理方式应用滤镜（替代CSS filter，确保手机/平板也能正确显示）
+    tempCanvas.width = pw;
+    tempCanvas.height = ph;
+    tempCanvas.getContext('2d').drawImage(canvas, 0, 0);
+    applyPixelFilter(tempCanvas, canvas, state.currentFilter, true);
+
+    // 亮度检测（在滤镜处理后的图像上取样）
+    const imageData = ctx.getImageData(0, 0, pw, ph);
+    const data = imageData.data;
+    let totalBrightness = 0;
+    const sampleStep = 20;
+    let sampleCount = 0;
+    for (let i = 0; i < data.length; i += 4 * sampleStep) {
+      totalBrightness += (0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2]);
+      sampleCount++;
+    }
+    const avgBrightness = totalBrightness / Math.max(sampleCount, 1);
+    state.lightLevel = avgBrightness;
+    const ev = Math.round(Math.log2(Math.max(avgBrightness, 1) / 0.125));
+    const lightDot = document.getElementById('lightDot');
+    const lightValue = document.getElementById('lightValue');
+    if (avgBrightness < 50) { lightDot.style.background = '#e74c3c'; lightValue.textContent = `暗 ${ev}EV`; }
+    else if (avgBrightness < 120) { lightDot.style.background = '#f39c12'; lightValue.textContent = `偏暗 ${ev}EV`; }
+    else if (avgBrightness < 200) { lightDot.style.background = '#2ecc71'; lightValue.textContent = `适宜 ${ev}EV`; }
+    else { lightDot.style.background = '#3498db'; lightValue.textContent = `明亮 ${ev}EV`; }
+    document.getElementById('paramLight').textContent = `${Math.round(avgBrightness)} (${ev}EV)`;
+    updateParamRecommendations();
+    requestAnimationFrame(detect);
+  }
+  detect();
+}
+
+// ==================== 参数推荐 ==================== */
+function updateParamRecommendations() {
+  const light = state.lightLevel;
+  const weather = state.weather ? state.weather.condition.toLowerCase() : '';
+  let iso = 400, aperture = 'f/2.8', shutter = '1/125s';
+  if (light < 50) { iso = 1600; aperture = 'f/1.4'; shutter = '1/30s'; }
+  else if (light < 100) { iso = 800; aperture = 'f/2.0'; shutter = '1/60s'; }
+  else if (light < 180) { iso = 400; aperture = 'f/2.8'; shutter = '1/125s'; }
+  else { iso = 100; aperture = 'f/5.6'; shutter = '1/250s'; }
+  let wb = '日光 5500K';
+  if (weather.includes('cloud')) wb = '阴天 6500K';
+  else if (weather.includes('rain')) wb = '雨天 7000K';
+  else if (weather.includes('snow')) wb = '雪天 7500K';
+  let ev = '±0';
+  if (light < 50) ev = '+1.5';
+  else if (light < 100) ev = '+0.7';
+  else if (light > 220) ev = '-0.3';
+  let comp = '三分法';
+  if (light > 200) comp = '黄金分割';
+  else if (light < 80) comp = '中心对称';
+  document.getElementById('paramISO').textContent = iso;
+  document.getElementById('paramAperture').textContent = aperture;
+  document.getElementById('paramShutter').textContent = shutter;
+  document.getElementById('paramWB').textContent = wb;
+  document.getElementById('paramEV').textContent = ev;
+  document.getElementById('paramComp').textContent = comp;
+}
+
+// ==================== 构图辅助 ==================== */
+// 构图详细说明数据
+const compDetails = {
+  thirds: {
+    title: '📐 三分法构图详解',
+    html: `<h4>什么是三分法？</h4>
+<p>将画面用两条水平线和两条垂直线等分为九宫格，是摄影中最基础也最实用的构图法则。</p>
+<h4>核心要点</h4>
+<ul>
+<li>将画面主体放在<strong>四个交叉点</strong>之一，而非正中央</li>
+<li>地平线放在上1/3或下1/3处，避免从正中间切割画面</li>
+<li>垂直线条（如树干、建筑边缘）放在左1/3或右1/3处</li>
+<li>人像摄影中，眼睛通常放在上1/3线附近</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>风光摄影：天空与地面的分配</li>
+<li>人像摄影：人物站位与视线方向</li>
+<li>街拍：决定画面重心位置</li>
+<li>静物：产品摆放与背景平衡</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>三分法不是死板的规则，而是帮助你打破"什么都放中间"的习惯。熟练后可以尝试微调偏离交叉点来创造动态感。</div>`
+  },
+  golden: {
+    title: '📏 黄金分割构图详解',
+    html: `<h4>什么是黄金分割？</h4>
+<p>基于数学比例1:1.618，将画面按38.2%和61.8%分割。被认为是最具美感的比例关系，广泛应用于艺术和建筑。</p>
+<h4>核心要点</h4>
+<ul>
+<li>画面分割线位于<strong>38.2%和61.8%</strong>位置（比三分法更靠近中心）</li>
+<li>四个交叉点称为"黄金点"，是视觉最舒适的位置</li>
+<li>比三分法更精细，适合追求画面和谐感的场景</li>
+<li>螺旋构图（黄金螺旋）是黄金分割的延伸形式</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>建筑摄影：强调对称与比例美感</li>
+<li>微距摄影：精确控制主体位置</li>
+<li>肖像摄影：面部关键元素定位</li>
+<li>产品摄影：高端商业质感</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>黄金分割与三分法类似但更精确。在实际拍摄中，两者差异不大，选择你直觉上更舒服的位置即可。</div>`
+  },
+  center: {
+    title: '🎯 中心对称构图详解',
+    html: `<h4>什么是中心对称？</h4>
+<p>将主体直接放在画面正中央，利用对称性创造强烈的视觉冲击力和稳定感。</p>
+<h4>核心要点</h4>
+<ul>
+<li>主体必须<strong>足够吸引眼球</strong>，否则画面会显得平淡</li>
+<li>背景尽量简洁，避免干扰主体的元素</li>
+<li>适合具有强烈对称性的主体（如人脸、花朵、建筑正立面）</li>
+<li>可以结合浅景深虚化背景来突出主体</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>人像特写：眼神直视镜头</li>
+<li>花卉摄影：花朵正面拍摄</li>
+<li>建筑摄影：对称建筑正面</li>
+<li>食物摄影：俯拍摆盘</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>中心构图看似简单，实际上最难驾驭。关键在于主体本身的吸引力和背景的简洁程度。如果主体不够强，画面会显得呆板。</div>`
+  },
+  diagonal: {
+    title: '↗️ 对角线构图详解',
+    html: `<h4>什么是对角线构图？</h4>
+<p>利用画面中对角线方向安排主要元素，创造动态感和深度感，让画面更有活力。</p>
+<h4>核心要点</h4>
+<ul>
+<li>从左下到右上的对角线给人<strong>积极向上</strong>的感觉</li>
+<li>从左上到右下的对角线给人<strong>紧张不安</strong>的感觉</li>
+<li>可以利用实际线条（道路、河流、栏杆）或虚拟线条（视线方向）</li>
+<li>对角线构图增加画面的纵深感和三维空间感</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>风光摄影：山脊线、河流走向</li>
+<li>街拍：道路、楼梯、走廊</li>
+<li>体育摄影：运动员的动态轨迹</li>
+<li>建筑摄影：斜角拍摄创造戏剧效果</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>拍摄时可以倾斜手机来强化对角线效果，但注意保持水平线的合理性。也可以在后期裁剪时调整对角线构图。</div>`
+  },
+  frame: {
+    title: '🖼️ 框架构图详解',
+    html: `<h4>什么是框架构图？</h4>
+<p>利用画面中的自然框架（门窗、树枝、拱门等）包围主体，创造层次感和聚焦效果。</p>
+<h4>核心要点</h4>
+<ul>
+<li>框架可以是<strong>任何形状</strong>：矩形、圆形、三角形、不规则形</li>
+<li>框架本身不需要完整，部分遮挡也能产生效果</li>
+<li>框架应与主体形成对比（明暗、虚实、色彩）</li>
+<li>框架增加画面的层次感和纵深感</li>
+</ul>
+<h4>常见框架元素</h4>
+<ul>
+<li>门框、窗框、拱门</li>
+<li>树枝、树叶、花丛</li>
+<li>隧道、桥梁、走廊</li>
+<li>人群剪影、阴影</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>寻找框架需要观察力。走路时注意身边的门、窗、树枝。用框架构图时，确保对焦在框架内的主体上，而非框架本身。</div>`
+  },
+  symmetry: {
+    title: '🪞 对称构图详解',
+    html: `<h4>什么是对称构图？</h4>
+<p>利用画面上下或左右的镜像对称，创造秩序感和庄严感，是最具视觉冲击力的构图方式之一。</p>
+<h4>核心要点</h4>
+<ul>
+<li><strong>完美对称</strong>：画面左右或上下完全镜像，如水面倒影</li>
+<li><strong>近似对称</strong>：大体对称但有细微差异，更自然生动</li>
+<li>对称构图要求拍摄角度非常精确</li>
+<li>打破对称的一小部分可以创造视觉焦点</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>倒影摄影：湖面、雨后地面反射</li>
+<li>建筑摄影：对称建筑、走廊</li>
+<li>人像摄影：正面肖像</li>
+<li>抽象摄影：图案和纹理</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>拍摄倒影时，手机要尽量贴近水面。对称构图虽然美，但完全对称有时会显得呆板，可以尝试在画面中加入一个不对称的元素来打破平衡。</div>`
+  },
+  leading: {
+    title: '🛤️ 引导线构图详解',
+    html: `<h4>什么是引导线构图？</h4>
+<p>利用画面中的线条元素引导观众视线从前景延伸到主体或消失点，创造强烈的纵深感。</p>
+<h4>核心要点</h4>
+<ul>
+<li>引导线可以是<strong>实际线条</strong>（道路、栏杆、河流）或<strong>虚拟线条</strong>（阴影、色彩变化）</li>
+<li>引导线的<strong>消失点</strong>应指向主体或画面兴趣中心</li>
+<li>多条引导线汇聚于一点时效果最强</li>
+<li>引导线从画面底部角落出发效果最佳</li>
+</ul>
+<h4>常见引导线元素</h4>
+<ul>
+<li>道路、铁轨、桥梁</li>
+<li>河流、海岸线</li>
+<li>栅栏、墙壁边缘</li>
+<li>光影分界线、色彩过渡</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>低角度拍摄可以强化引导线效果，让线条看起来更长更有冲击力。消失点放在画面上方1/3处通常效果最好。</div>`
+  },
+  triangle: {
+    title: '🔺 三角构图详解',
+    html: `<h4>什么是三角构图？</h4>
+<p>将画面中的主要元素排列成三角形，创造稳定感和视觉平衡。三角形是最稳定的几何形状。</p>
+<h4>核心要点</h4>
+<ul>
+<li><strong>正三角</strong>：底边在下，给人稳定、庄重的感觉</li>
+<li><strong>倒三角</strong>：顶点在下，给人紧张、动感的感觉</li>
+<li>三角形的三顶点应放置关键视觉元素</li>
+<li>可以是显性三角形（三个物体）或隐性三角形（视线连线）</li>
+</ul>
+<h4>适用场景</h4>
+<ul>
+<li>群像摄影：三人站位</li>
+<li>风光摄影：山峰、树木排列</li>
+<li>建筑摄影：尖顶建筑</li>
+<li>食物摄影：三角形摆盘</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>人像摄影中，可以让主体头部在三角形顶点，双手或肩膀构成底边。这样既稳定又有层次感。</div>`
+  },
+  scurve: {
+    title: '🌊 S曲线构图详解',
+    html: `<h4>什么是S曲线构图？</h4>
+<p>利用S形曲线贯穿画面，创造优雅的流动感和韵律感，是最具美感的构图方式之一。</p>
+<h4>核心要点</h4>
+<ul>
+<li>S曲线应从画面一端流畅地延伸到另一端</li>
+<li>曲线的<strong>弧度和节奏</strong>是关键，太直或太弯都不理想</li>
+<li>S曲线引导视线自然地在画面中游走</li>
+<li>可以结合黄金分割来确定曲线的转折点</li>
+</ul>
+<h4>常见S曲线元素</h4>
+<ul>
+<li>蜿蜒的河流、溪流</li>
+<li>山路、乡间小径</li>
+<li>海岸线、沙丘轮廓</li>
+<li>人体曲线、舞蹈姿态</li>
+</ul>
+<div class="tip-box"><strong>💡 小贴士：</strong>拍摄S曲线时，寻找高处俯拍角度效果最佳。无人机或高楼视角可以更好地展现S曲线的优美形态。</div>`
+  }
+};
+
+function toggleCompPanel() {
+  document.getElementById('compPanel').classList.toggle('active');
+  document.getElementById('compToggle').classList.toggle('active');
+}
+
+function setComposition(type, btn) {
+  state.currentComp = type;
+  const overlay = document.getElementById('compOverlay');
+  const suggestion = document.getElementById('compSuggestion');
+  const extra = document.getElementById('compExtra');
+
+  // 更新按钮状态
+  document.querySelectorAll('.comp-option').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  // 隐藏额外构图元素
+  extra.style.display = 'none';
+  extra.innerHTML = '';
+
+  // 更新基础构图线（三分法、黄金分割、中心、对角线使用overlay）
+  overlay.className = 'composition-overlay';
+  if (['thirds', 'golden', 'center', 'diagonal'].includes(type)) {
+    overlay.classList.add(`comp-${type}`);
+    overlay.style.opacity = '0.5';
+  } else {
+    overlay.style.opacity = '0';
+  }
+
+  // 新增构图模式使用extra元素
+  if (['frame', 'symmetry', 'leading', 'triangle', 'scurve'].includes(type)) {
+    extra.style.display = 'block';
+    extra.className = `comp-${type}`;
+    const innerHtml = {
+      frame: '<div class="frame-rect"></div><div class="frame-cross-h"></div><div class="frame-cross-v"></div>',
+      symmetry: '<div class="sym-line-h"></div><div class="sym-line-v"></div><div class="sym-mirror-h"></div><div class="sym-mirror-v"></div>',
+      leading: '<div class="lead-line"></div><div class="lead-line"></div><div class="lead-vanish"></div>',
+      triangle: '<div class="tri-line"></div><div class="tri-line"></div><div class="tri-line"></div><div class="tri-point"></div>',
+      scurve: '<div class="scurve-path"></div><div class="scurve-path2"></div>'
+    };
+    extra.innerHTML = innerHtml[type] || '';
+  }
+
+  // 显示构图建议
+  const suggestions = {
+    thirds: '💡 将主体放在交叉点上，地平线放在上/下1/3处',
+    golden: '💡 利用38.2%/61.8%分割线，追求精确美感',
+    center: '💡 主体居中，背景简洁，适合特写',
+    diagonal: '💡 沿对角线安排元素，创造动感',
+    frame: '💡 利用门框/树枝等自然框架包围主体',
+    symmetry: '💡 寻找镜像对称场景，精确对准中线',
+    leading: '💡 利用道路/河流引导视线至消失点',
+    triangle: '💡 三个关键元素构成稳定三角形',
+    scurve: '💡 S形曲线贯穿画面，创造流动感'
+  };
+  suggestion.textContent = suggestions[type] || '';
+  suggestion.style.display = type !== 'none' ? 'block' : 'none';
+
+  // 自动显示构图详情
+  if (type !== 'none' && compDetails[type]) {
+    showCompDetail(type);
+  }
+}
+
+// 显示构图详情面板
+function showCompDetail(type) {
+  const detail = compDetails[type];
+  if (!detail) return;
+  document.getElementById('compDetailTitle').textContent = detail.title;
+  document.getElementById('compDetailContent').innerHTML = detail.html;
+  document.getElementById('compDetailPanel').classList.add('active');
+}
+
+function closeCompDetail() {
+  document.getElementById('compDetailPanel').classList.remove('active');
+}
+
+// ==================== 参数面板 ==================== */
+function toggleParamPanel() {
+  document.getElementById('paramPanel').classList.toggle('active');
+  document.getElementById('paramToggle').classList.toggle('active');
+}
+
+// ==================== 水印功能 ==================== */
+function toggleWatermarkPanel() {
+  document.getElementById('watermarkPanel').classList.toggle('active');
+  document.getElementById('wmToggle').classList.toggle('active');
+}
+function toggleWatermark() {
+  state.watermark.enabled = !state.watermark.enabled;
+  document.getElementById('wmSwitch').classList.toggle('on', state.watermark.enabled);
+  showToast(state.watermark.enabled ? '✏️ 水印已开启' : '✏️ 水印已关闭');
+}
+function updateWatermarkPreview() {
+  state.watermark.text = document.getElementById('wmText').value || 'FilmAI';
+  state.watermark.size = parseInt(document.getElementById('wmSize').value);
+  state.watermark.opacity = parseInt(document.getElementById('wmOpacity').value) / 100;
+  state.watermark.angle = parseInt(document.getElementById('wmAngle').value);
+  document.getElementById('wmSizeVal').textContent = state.watermark.size;
+  document.getElementById('wmOpacityVal').textContent = Math.round(state.watermark.opacity * 100) + '%';
+  document.getElementById('wmAngleVal').textContent = state.watermark.angle + '°';
+}
+function setWmColor(btn) {
+  state.watermark.color = btn.dataset.color;
+  btn.parentElement.querySelectorAll('.wm-pos-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setWmPosition(btn) {
+  state.watermark.position = btn.dataset.pos;
+  document.querySelectorAll('.wm-position-grid .wm-pos-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setWmStyle(btn) {
+  state.watermark.style = btn.dataset.style;
+  btn.parentElement.querySelectorAll('.wm-pos-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// 在Canvas上绘制水印
+function drawWatermark(ctx, w, h) {
+  if (!state.watermark.enabled || !state.watermark.text) return;
+  const wm = state.watermark;
+  ctx.save();
+  ctx.globalAlpha = wm.opacity;
+  ctx.fillStyle = wm.color;
+  ctx.font = `${wm.size}px -apple-system, "PingFang SC", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // 计算位置
+  let x = w / 2, y = h / 2;
+  const pos = wm.position;
+  const margin = wm.size + 10;
+  if (pos.includes('left')) x = margin + ctx.measureText(wm.text).width / 2;
+  else if (pos.includes('right')) x = w - margin - ctx.measureText(wm.text).width / 2;
+  if (pos.includes('top')) y = margin;
+  else if (pos.includes('bottom')) y = h - margin - 20; // 留出胶片边框空间
+
+  // 旋转
+  ctx.translate(x, y);
+  ctx.rotate((wm.angle * Math.PI) / 180);
+
+  // 样式
+  let displayText = wm.text;
+  if (wm.style === 'camera') displayText = '📷 ' + wm.text;
+  if (wm.style === 'border') {
+    // 边框样式：在文字周围画细框
+    const textW = ctx.measureText(displayText).width;
+    ctx.strokeStyle = wm.color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-textW/2 - 8, -wm.size/2 - 4, textW + 16, wm.size + 8);
+  }
+
+  // 文字阴影
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetX = 1;
+  ctx.shadowOffsetY = 1;
+
+  ctx.fillText(displayText, 0, 0);
+  ctx.restore();
+}
+
+// ==================== 上传功能 ==================== */
+function initUploadArea() {
+  const area = document.getElementById('uploadArea');
+  const input = document.getElementById('fileInput');
+  area.addEventListener('click', () => input.click());
+  area.addEventListener('dragover', (e) => { e.preventDefault(); area.classList.add('dragover'); });
+  area.addEventListener('dragleave', () => area.classList.remove('dragover'));
+  area.addEventListener('drop', (e) => { e.preventDefault(); area.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+  input.addEventListener('change', (e) => handleFiles(e.target.files));
+}
+function toggleUpload() {
+  const area = document.getElementById('uploadArea');
+  const preview = document.getElementById('uploadPreview');
+  const viewfinder = document.getElementById('viewfinderArea');
+  const bottomBar = document.getElementById('bottomBar');
+  if (area.style.display === 'none') {
+    area.style.display = 'block';
+    viewfinder.style.display = 'none';
+    bottomBar.style.display = 'none';
+    stopCamera();
+  } else {
+    area.style.display = 'none';
+    preview.style.display = 'none';
+    viewfinder.style.display = '';
+    bottomBar.style.display = '';
+    startCamera();
+  }
+}
+// 上传图片后返回拍照界面
+function closeUploadReturnCamera() {
+  document.getElementById('uploadArea').style.display = 'none';
+  document.getElementById('uploadPreview').style.display = 'none';
+  document.getElementById('viewfinderArea').style.display = '';
+  document.getElementById('bottomBar').style.display = '';
+  startCamera();
+  showToast('📷 已返回拍照界面');
+}
+function handleFiles(files) {
+  if (!files.length) return;
+  const file = files[0];
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('uploadCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.width; canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      canvas.style.filter = filters[state.currentFilter].css;
+      document.getElementById('uploadPreview').style.display = 'block';
+      analyzeImageAndRecommend(ctx, img.width, img.height);
+      showToast('🖼️ 图片已加载，已应用当前滤镜');
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function analyzeImageAndRecommend(ctx, w, h) {
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let totalR = 0, totalG = 0, totalB = 0, totalBright = 0;
+  const step = 100; let count = 0;
+  for (let i = 0; i < data.length; i += 4 * step) {
+    totalR += data[i]; totalG += data[i+1]; totalB += data[i+2];
+    totalBright += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+    count++;
+  }
+  const avgBright = totalBright / count;
+  let recommended = 0;
+  if (avgBright < 80) recommended = 4;
+  else if (totalR/count > totalG/count && totalR/count > totalB/count) recommended = 2;
+  else if (totalB/count > totalR/count && totalB/count > totalG/count) recommended = 3;
+  else if (avgBright > 180) recommended = 11;
+  showToast(`💡 推荐滤镜：${filters[recommended].name}（点击底部"更多滤镜"切换）`);
+}
+
+// ==================== 拍照功能 ==================== */
+function capturePhoto() {
+  const video = document.getElementById('cameraVideo');
+  if (!video.srcObject) { showToast('⚠️ 请先启动摄像头'); return; }
+  playShutterSound();
+  triggerShutterVibration();
+  const btn = document.getElementById('captureBtn');
+  btn.classList.add('flash');
+  setTimeout(() => btn.classList.remove('flash'), 200);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  // 先绘制原始画面
+  ctx.drawImage(video, 0, 0);
+  // 用像素处理方式应用滤镜（替代ctx.filter，确保保存的照片有滤镜效果）
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = canvas.width;
+  tempCanvas.height = canvas.height;
+  tempCanvas.getContext('2d').drawImage(canvas, 0, 0);
+  applyPixelFilter(tempCanvas, canvas, state.currentFilter, false);
+  // 添加胶片边框
+  addFilmBorder(ctx, canvas.width, canvas.height);
+  // 添加水印
+  drawWatermark(ctx, canvas.width, canvas.height);
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const photoData = { url: dataUrl, filter: filters[state.currentFilter].name, timestamp: new Date().toLocaleString() };
+
+  if (state.isImmersive) {
+    state.immersivePhotos.push(photoData);
+    const count = state.immersivePhotos.length;
+    document.getElementById('counterText').textContent = `${count} / 24`;
+    if (count >= 24) startFilmDeveloping();
+  } else {
+    state.photos.push(photoData);
+    savePhoto(dataUrl);
+    showToast(`📸 已拍摄 (${state.photos.length}张)`);
+  }
+}
+
+// 添加胶片风格边框
+function addFilmBorder(ctx, w, h) {
+  ctx.fillStyle = 'rgba(240,235,225,0.9)';
+  ctx.fillRect(0, h - 40, w, 40);
+  ctx.fillStyle = '#c0392b';
+  ctx.font = '14px monospace';
+  ctx.fillText(`📷 ${filters[state.currentFilter].name}`, 12, h - 16);
+  ctx.fillStyle = '#666';
+  ctx.font = '11px monospace';
+  ctx.fillText(new Date().toLocaleDateString(), w - 80, h - 16);
+  ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, h - 40);
+  ctx.lineTo(w, h - 40);
+  ctx.stroke();
+}
+
+// ==================== 沉浸模式 ==================== */
+function toggleImmersive() {
+  state.isImmersive = !state.isImmersive;
+  const btn = document.getElementById('immersiveToggle');
+  const counter = document.getElementById('photoCounter');
+  if (state.isImmersive) {
+    btn.classList.add('active');
+    counter.classList.add('active');
+    state.immersivePhotos = [];
+    document.getElementById('counterText').textContent = '0 / 24';
+    showToast('🎭 沉浸模式已开启 · 拍满24张自动冲洗');
+  } else {
+    btn.classList.remove('active');
+    counter.classList.remove('active');
+    if (state.immersivePhotos.length > 0) {
+      showToast('⚠️ 退出沉浸模式，已拍照片将保留');
+      state.immersivePhotos.forEach(p => state.photos.push(p));
+    }
+    state.immersivePhotos = [];
+  }
+}
+
+// ==================== 洗胶片流程 ==================== */
+function startFilmDeveloping() {
+  const overlay = document.getElementById('immersiveOverlay');
+  overlay.classList.add('active');
+  document.getElementById('filmDeveloping').style.display = 'block';
+  document.getElementById('developedPreview').style.display = 'none';
+  const stripInner = document.getElementById('filmStripInner');
+  stripInner.innerHTML = '';
+  const photoCount = state.immersivePhotos.length;
+  for (let i = 0; i < Math.min(photoCount, 12); i++) {
+    const frame = document.createElement('div');
+    frame.className = 'film-frame';
+    stripInner.appendChild(frame);
+  }
+  const stages = [
+    { text: '准备显影液...', progress: 10, duration: 1500 },
+    { text: '显影中... 🧪', progress: 30, duration: 2000 },
+    { text: '停止显影...', progress: 45, duration: 1000 },
+    { text: '定影中... 💧', progress: 65, duration: 2000 },
+    { text: '水洗中... 🚿', progress: 80, duration: 1500 },
+    { text: '晾干中... 🌬️', progress: 95, duration: 2000 },
+    { text: '完成！🎉', progress: 100, duration: 1000 },
+  ];
+  let stageIndex = 0;
+  const progressBar = document.getElementById('developProgressBar');
+  const stageText = document.getElementById('developStage');
+  function nextStage() {
+    if (stageIndex >= stages.length) { showDevelopedPhotos(); return; }
+    const stage = stages[stageIndex];
+    stageText.textContent = stage.text;
+    progressBar.style.width = stage.progress + '%';
+    if (stage.progress >= 30) {
+      const frames = stripInner.querySelectorAll('.film-frame');
+      const revealIndex = Math.floor((stage.progress - 30) / 70 * frames.length);
+      frames.forEach((f, i) => {
+        if (i <= revealIndex && !f.classList.contains('revealed')) {
+          setTimeout(() => { f.classList.add('revealed'); f.style.background = `url(${state.immersivePhotos[i % photoCount].url}) center/cover`; playDevelopSound(i); }, i * 100);
+        }
+      });
+    }
+    stageIndex++;
+    setTimeout(nextStage, stage.duration);
+  }
+  playDevelopStartSound();
+  setTimeout(nextStage, 500);
+}
+function showDevelopedPhotos() {
+  document.getElementById('filmDeveloping').style.display = 'none';
+  const preview = document.getElementById('developedPreview');
+  preview.style.display = 'block';
+  const grid = document.getElementById('developedGrid');
+  grid.innerHTML = '';
+  state.immersivePhotos.forEach((photo, i) => {
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+    item.style.animation = `fadeInUp 0.5s ease ${i * 0.1}s both`;
+    item.innerHTML = `<img src="${photo.url}" alt="照片 ${i+1}" onclick="openFullscreen('${photo.url}')"><button class="save-btn" onclick="savePhoto('${photo.url}');event.stopPropagation();" title="保存">💾</button>`;
+    grid.appendChild(item);
+  });
+  playDevelopCompleteSound();
+}
+function closeImmersive() {
+  document.getElementById('immersiveOverlay').classList.remove('active');
+  state.immersivePhotos.forEach(p => state.photos.push(p));
+  state.immersivePhotos = [];
+  state.isImmersive = false;
+  document.getElementById('immersiveToggle').classList.remove('active');
+  document.getElementById('photoCounter').classList.remove('active');
+}
+
+// 洗胶片音效
+function playDevelopStartSound() {
+  try {
+    const ctx = getAudioCtx(), now = ctx.currentTime;
+    const bufferSize = ctx.sampleRate * 0.5;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.1 * Math.sin(i / ctx.sampleRate * Math.PI * 2);
+    const source = ctx.createBufferSource(); source.buffer = buffer;
+    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 400;
+    const gain = ctx.createGain();
+    source.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.15, now); gain.gain.linearRampToValueAtTime(0.05, now + 0.5);
+    source.start(now); source.stop(now + 0.5);
+  } catch(e) {}
+}
+function playDevelopSound(index) {
+  try {
+    const ctx = getAudioCtx(), now = ctx.currentTime;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 600 + index * 50; osc.type = 'sine';
+    gain.gain.setValueAtTime(0.05, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.start(now); osc.stop(now + 0.1);
+  } catch(e) {}
+}
+function playDevelopCompleteSound() {
+  try {
+    const ctx = getAudioCtx(), now = ctx.currentTime;
+    [523, 659, 784].forEach((freq, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq; osc.type = 'sine';
+      gain.gain.setValueAtTime(0, now + i * 0.15);
+      gain.gain.linearRampToValueAtTime(0.15, now + i * 0.15 + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.4);
+      osc.start(now + i * 0.15); osc.stop(now + i * 0.15 + 0.4);
+    });
+  } catch(e) {}
+}
+
+// ==================== 照片保存 ==================== */
+function savePhoto(dataUrl) {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = `FilmAI_${Date.now()}.jpg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast('💾 照片已保存');
+}
+function saveAllPhotos() {
+  state.immersivePhotos.forEach((photo, i) => { setTimeout(() => savePhoto(photo.url), i * 300); });
+}
+
+// ==================== 全屏预览 ==================== */
+function openFullscreen(src) {
+  document.getElementById('fullscreenImg').src = src;
+  document.getElementById('fullscreenPreview').classList.add('active');
+}
+function closeFullscreen() { document.getElementById('fullscreenPreview').classList.remove('active'); }
+
+// ==================== 超级模拟模式 ==================== */
+const superState = {
+  active: false,
+  photos: [],         // 盲拍存储的原始照片（无滤镜）
+  maxShots: 12,
+  currentFilmIdx: 0,
+  filmRolls: [0, 2, 4, 11, 14, 15, 19], // 可选胶卷索引
+  selectedPhotoIdx: -1, // 当前选中的照片（用于分配风格）
+  photoStyles: {},     // 每张照片选择的风格索引 { photoIdx: filterIdx }
+  currentStyleIdx: -1, // 当前选中的风格卡索引（用于"全部应用"）
+  // 交互控制状态
+  flashOn: false,      // 闪光灯开关
+  timerOn: false,      // 自拍定时器开关
+  gridOn: false,       // 构图网格开关
+  burstOn: false,      // 连拍模式开关
+  soundOn: true,       // 快门音效开关
+  dialMode: 0,         // 拍摄模式: 0=P, 1=A, 2=S, 3=M
+  dialModes: ['P', 'A', 'S', 'M'],
+  isoMode: 0,          // ISO模式: 0=AUTO, 1=100, 2=400, 3=800, 4=1600
+  isoModes: ['AUTO', '100', '400', '800', '1600'],
+  expComp: 0,          // 曝光补偿: -2, -1, 0, +1, +2
+  expComps: ['-2', '-1', '±0', '+1', '+2'],
+};
+
+function toggleSuperMode() {
+  superState.active = !superState.active;
+  const btn = document.getElementById('superToggle');
+  if (superState.active) {
+    btn.classList.add('active');
+    superEnter();
+  } else {
+    btn.classList.remove('active');
+    superExit();
+  }
+}
+
+function superEnter() {
+  // 初始化超级模拟状态
+  superState.photos = [];
+  superState.selectedPhotoIdx = -1;
+  superState.photoStyles = {};
+  superState.currentFilmIdx = 0;
+
+  // 重置交互控制状态
+  superState.flashOn = false;
+  superState.timerOn = false;
+  superState.gridOn = false;
+  superState.burstOn = false;
+  superState.soundOn = true;
+  superState.dialMode = 0;
+  superState.isoMode = 0;
+  superState.expComp = 0;
+  superState.currentStyleIdx = -1;
+
+  // 显示超级模拟界面
+  document.getElementById('superOverlay').classList.add('active');
+  // 停用取景器（停止摄像头预览，进入盲拍模式）
+  stopCamera();
+  // 隐藏取景器和底部工具栏
+  document.getElementById('viewfinderArea').style.display = 'none';
+  document.getElementById('bottomBar').style.display = 'none';
+
+  // 重置交互按钮UI
+  const btnMap = {
+    'ctrlFlash': false, 'ctrlTimer': false, 'ctrlGrid': false,
+    'ctrlBurst': false, 'ctrlSound': true
+  };
+  Object.entries(btnMap).forEach(([id, active]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('active', active);
+  });
+  // 重置音效按钮图标
+  const soundBtn = document.getElementById('ctrlSound');
+  if (soundBtn) soundBtn.innerHTML = '🔊<span class="ctrl-label">音效</span>';
+  // 重置指示器
+  document.getElementById('flashIndicator').style.display = 'none';
+  document.getElementById('timerIndicator').style.display = 'none';
+  document.getElementById('camGrid').style.display = 'none';
+  // 重置顶部面板
+  document.getElementById('speedDialLabel').textContent = 'P';
+  document.getElementById('frameCounter').textContent = '00';
+  document.getElementById('topFilmType').textContent = 'Portra 400';
+
+  // 检查屏幕方向
+  checkOrientation();
+
+  // 生成胶片帧计数条
+  const strip = document.getElementById('superFilmStrip');
+  strip.innerHTML = '';
+  for (let i = 0; i < superState.maxShots; i++) {
+    const frame = document.createElement('div');
+    frame.className = 'cam-film-frame';
+    frame.id = `superFrame${i}`;
+    strip.appendChild(frame);
+  }
+
+  // 更新胶卷类型显示
+  updateSuperFilmDisplay();
+  // 更新参数
+  updateSuperParams();
+
+  showToast('📷 超级模拟模式 · 取景器已停用，盲拍开始');
+  playDevelopStartSound();
+}
+
+function superExit() {
+  document.getElementById('superOverlay').classList.remove('active');
+  document.getElementById('superDevelopOverlay').classList.remove('active');
+  superState.active = false;
+  document.getElementById('superToggle').classList.remove('active');
+  // 恢复取景器和底部工具栏
+  document.getElementById('viewfinderArea').style.display = '';
+  document.getElementById('bottomBar').style.display = '';
+  // 重新启动摄像头
+  startCamera();
+}
+
+// 横屏检测
+function checkOrientation() {
+  const hint = document.getElementById('superRotateHint');
+  if (!hint) return;
+  const isLandscape = window.innerWidth > window.innerHeight;
+  if (isLandscape) {
+    hint.classList.remove('show');
+  } else {
+    hint.classList.add('show');
+  }
+}
+
+// 跳过横屏提示
+function superSkipRotate() {
+  const hint = document.getElementById('superRotateHint');
+  if (hint) hint.classList.remove('show');
+}
+
+// 更新胶卷显示
+function updateSuperFilmDisplay() {
+  const filmIdx = superState.filmRolls[superState.currentFilmIdx];
+  document.getElementById('topFilmType').textContent = filters[filmIdx].name;
+  document.getElementById('superShotCount').textContent = `${superState.photos.length}/${superState.maxShots}`;
+  document.getElementById('frameCounter').textContent = String(superState.photos.length).padStart(2, '0');
+}
+
+// 更新相机参数显示（根据环境光线）
+function updateSuperParams() {
+  const light = state.lightLevel;
+  let iso = 400, aperture = 'f/2.8', shutter = '1/125';
+  if (light < 50) { iso = 1600; aperture = 'f/1.4'; shutter = '1/30'; }
+  else if (light < 100) { iso = 800; aperture = 'f/2.0'; shutter = '1/60'; }
+  else if (light < 180) { iso = 400; aperture = 'f/2.8'; shutter = '1/125'; }
+  else { iso = 100; aperture = 'f/5.6'; shutter = '1/250'; }
+  document.getElementById('superISO').textContent = iso;
+  document.getElementById('superAperture').textContent = aperture;
+  document.getElementById('superShutter').textContent = shutter;
+}
+
+// 切换胶卷
+function superChangeFilm() {
+  if (superState.photos.length > 0) {
+    showToast('⚠️ 请先冲洗当前胶卷再更换');
+    return;
+  }
+  superState.currentFilmIdx = (superState.currentFilmIdx + 1) % superState.filmRolls.length;
+  updateSuperFilmDisplay();
+  playFilterSound(superState.filmRolls[superState.currentFilmIdx]);
+  triggerVibration();
+  showToast(`🎞️ 已装入 ${filters[superState.filmRolls[superState.currentFilmIdx]].name}`);
+}
+
+// ==================== 超级模拟：交互控制按钮 ====================
+
+// 切换拍摄模式 (P→A→S→M→P)
+function superToggleDial() {
+  superState.dialMode = (superState.dialMode + 1) % superState.dialModes.length;
+  const label = superState.dialModes[superState.dialMode];
+  document.getElementById('speedDialLabel').textContent = label;
+  triggerVibration();
+  const modeNames = { 'P': '程序自动', 'A': '光圈优先', 'S': '快门优先', 'M': '全手动' };
+  showToast(`📸 模式: ${label} - ${modeNames[label]}`);
+}
+
+// 切换ISO设置
+function superToggleISO() {
+  superState.isoMode = (superState.isoMode + 1) % superState.isoModes.length;
+  const label = superState.isoModes[superState.isoMode];
+  triggerVibration();
+  showToast(`📥 ISO: ${label}`);
+}
+
+// 切换曝光补偿
+function superToggleExposure() {
+  superState.expComp = (superState.expComp + 1) % superState.expComps.length;
+  const label = superState.expComps[superState.expComp];
+  triggerVibration();
+  showToast(`💡 曝光补偿: ${label} EV`);
+}
+
+// 切换闪光灯
+function superToggleFlash() {
+  superState.flashOn = !superState.flashOn;
+  const btn = document.getElementById('ctrlFlash');
+  const indicator = document.getElementById('flashIndicator');
+  btn.classList.toggle('active', superState.flashOn);
+  indicator.style.display = superState.flashOn ? '' : 'none';
+  triggerVibration();
+  showToast(superState.flashOn ? '⚡ 闪光灯已开启' : '⚡ 闪光灯已关闭');
+}
+
+// 切换自拍定时器
+function superToggleTimer() {
+  superState.timerOn = !superState.timerOn;
+  const btn = document.getElementById('ctrlTimer');
+  const indicator = document.getElementById('timerIndicator');
+  btn.classList.toggle('active', superState.timerOn);
+  indicator.style.display = superState.timerOn ? '' : 'none';
+  triggerVibration();
+  showToast(superState.timerOn ? '⏱️ 自拍定时器已开启 (3秒)' : '⏱️ 自拍定时器已关闭');
+}
+
+// 切换构图网格
+function superToggleGrid() {
+  superState.gridOn = !superState.gridOn;
+  const btn = document.getElementById('ctrlGrid');
+  const grid = document.getElementById('camGrid');
+  btn.classList.toggle('active', superState.gridOn);
+  grid.style.display = superState.gridOn ? '' : 'none';
+  triggerVibration();
+  showToast(superState.gridOn ? '⊞ 构图网格已开启' : '⊞ 构图网格已关闭');
+}
+
+// 切换连拍模式
+function superToggleBurst() {
+  superState.burstOn = !superState.burstOn;
+  const btn = document.getElementById('ctrlBurst');
+  btn.classList.toggle('active', superState.burstOn);
+  triggerVibration();
+  showToast(superState.burstOn ? '📸 连拍模式已开启 (每次3张)' : '📸 连拍模式已关闭');
+}
+
+// 切换快门音效
+function superToggleSound() {
+  superState.soundOn = !superState.soundOn;
+  const btn = document.getElementById('ctrlSound');
+  btn.classList.toggle('active', superState.soundOn);
+  btn.innerHTML = (superState.soundOn ? '🔊' : '🔇') + '<span class="ctrl-label">音效</span>';
+  triggerVibration();
+  showToast(superState.soundOn ? '🔊 快门音效已开启' : '🔇 快门音效已关闭');
+}
+
+// 超级模式拍照（盲拍）
+function superCapture() {
+  if (superState.photos.length >= superState.maxShots) {
+    showToast('🎞️ 胶卷已满，请冲洗');
+    return;
+  }
+
+  // 自拍定时器模式
+  if (superState.timerOn) {
+    let countdown = 3;
+    showToast(`⏱️ ${countdown} 秒后拍摄...`);
+    const camBody = document.getElementById('camBody');
+    camBody.classList.add('shake');
+    setTimeout(() => camBody.classList.remove('shake'), 300);
+    const timerInterval = setInterval(() => {
+      countdown--;
+      if (countdown > 0) {
+        showToast(`⏱️ ${countdown} 秒后拍摄...`);
+        camBody.classList.add('shake');
+        setTimeout(() => camBody.classList.remove('shake'), 300);
+      } else {
+        clearInterval(timerInterval);
+        doSuperCapture();
+      }
+    }, 1000);
+  } else {
+    doSuperCapture();
+  }
+}
+
+// 实际执行拍照（支持连拍）
+function doSuperCapture() {
+  const burstCount = superState.burstOn ? 3 : 1;
+  const remaining = superState.maxShots - superState.photos.length;
+  const actualBurst = Math.min(burstCount, remaining);
+
+  for (let i = 0; i < actualBurst; i++) {
+    if (superState.photos.length >= superState.maxShots) break;
+
+    // 快门音效
+    if (superState.soundOn) {
+      playShutterSound();
+    }
+    triggerShutterVibration();
+
+    // 闪光动画（闪光灯开启时更亮）
+    const flash = document.getElementById('superFlash');
+    flash.classList.remove('flash');
+    void flash.offsetWidth;
+    flash.style.background = superState.flashOn ? '#fffae0' : '#fff';
+    flash.style.opacity = superState.flashOn ? '1' : '0.9';
+    flash.classList.add('flash');
+
+    // 镜头光圈动画
+    const ring = document.getElementById('apertureRing');
+    ring.classList.remove('shutter');
+    void ring.offsetWidth;
+    ring.classList.add('shutter');
+
+    // 相机震动
+    const camBody = document.getElementById('camBody');
+    camBody.classList.add('shake');
+    setTimeout(() => camBody.classList.remove('shake'), 300);
+
+    // 截取摄像头画面（原始，无滤镜）
+    const video = document.getElementById('cameraVideo');
+    if (video.srcObject) {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      // 连拍时轻微偏移模拟手持抖动
+      const offsetX = superState.burstOn ? (Math.random() - 0.5) * 8 : 0;
+      const offsetY = superState.burstOn ? (Math.random() - 0.5) * 8 : 0;
+      ctx.drawImage(video, offsetX, offsetY);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      superState.photos.push({ url: dataUrl, timestamp: new Date().toLocaleString() });
+    } else {
+      // 无摄像头时用示例图
+      if (state.sampleImage) {
+        const c = document.createElement('canvas');
+        c.width = state.sampleImage.width; c.height = state.sampleImage.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(state.sampleImage, 0, 0);
+        superState.photos.push({ url: c.toDataURL('image/jpeg', 0.92), timestamp: new Date().toLocaleString() });
+      }
+    }
+
+    // 更新胶片帧计数
+    const count = superState.photos.length;
+    const frame = document.getElementById(`superFrame${count - 1}`);
+    if (frame) frame.classList.add('shot');
+    document.getElementById('superShotCount').textContent = `${count}/${superState.maxShots}`;
+    document.getElementById('frameCounter').textContent = String(count).padStart(2, '0');
+
+    // 连拍间隔
+    if (i < actualBurst - 1) {
+      // 同步等待 (无法async，用短延迟近似)
+    }
+  }
+
+  // 启用洗胶片按钮
+  const count = superState.photos.length;
+  if (count > 0) document.getElementById('superDevelopBtn').disabled = false;
+
+  // 自动触发洗胶片
+  if (count >= superState.maxShots) {
+    setTimeout(() => superStartDevelop(), 600);
+  } else {
+    const burstInfo = superState.burstOn && actualBurst > 1 ? ` (连拍${actualBurst}张)` : '';
+    showToast(`📸 第 ${count} 张 · 剩余 ${superState.maxShots - count} 张${burstInfo}`);
+  }
+}
+
+// 开始洗胶片流程
+function superStartDevelop() {
+  if (superState.photos.length === 0) {
+    showToast('⚠️ 还没有拍照');
+    return;
+  }
+
+  // 切换到洗胶片界面
+  document.getElementById('superDevelopOverlay').classList.add('active');
+  document.getElementById('styleSelectArea').style.display = 'none';
+  document.getElementById('superDevTitle').textContent = '🎞️ 胶片冲洗中...';
+
+  // 生成胶片帧
+  const framesContainer = document.getElementById('superFilmFrames');
+  framesContainer.innerHTML = '';
+  superState.photos.forEach((photo, i) => {
+    const frame = document.createElement('div');
+    frame.className = 'super-film-frame';
+    frame.id = `devFrame${i}`;
+    const img = document.createElement('img');
+    img.src = photo.url;
+    frame.appendChild(img);
+    frame.onclick = () => selectDevPhoto(i);
+    framesContainer.appendChild(frame);
+  });
+
+  // 洗胶片动画步骤
+  const steps = document.querySelectorAll('.dev-step');
+  steps.forEach(s => { s.classList.remove('active', 'done'); });
+
+  const stageNames = ['准备显影液...', '显影中 🧪', '停止显影...', '定影中 💧', '水洗中 🚿', '晾干中 🌬️'];
+  let stageIdx = 0;
+
+  playDevelopStartSound();
+
+  function nextDevStage() {
+    if (stageIdx >= 6) {
+      // 所有步骤完成，显示风格选择
+      steps.forEach(s => { s.classList.remove('active'); s.classList.add('done'); });
+      document.getElementById('superDevTitle').textContent = '🎨 冲洗完成！请选择风格';
+      showStyleSelect();
+      return;
+    }
+
+    steps[stageIdx].classList.add('active');
+    document.getElementById('superDevTitle').textContent = `🎞️ ${stageNames[stageIdx]}`;
+
+    // 逐步显示照片
+    const totalPhotos = superState.photos.length;
+    const revealStart = stageIdx >= 1 ? Math.floor((stageIdx - 1) / 5 * totalPhotos) : 0;
+    const revealEnd = stageIdx >= 1 ? Math.floor(stageIdx / 5 * totalPhotos) : 0;
+    for (let i = revealStart; i < Math.min(revealEnd, totalPhotos); i++) {
+      const frame = document.getElementById(`devFrame${i}`);
+      if (frame && !frame.classList.contains('revealed')) {
+        setTimeout(() => {
+          frame.classList.add('revealed');
+          playDevelopSound(i);
+        }, (i - revealStart) * 150);
+      }
+    }
+
+    stageIdx++;
+    setTimeout(nextDevStage, stageIdx <= 5 ? 1500 : 800);
+  }
+
+  setTimeout(nextDevStage, 500);
+}
+
+// 选择某张照片（准备分配风格）
+function selectDevPhoto(idx) {
+  superState.selectedPhotoIdx = idx;
+  document.querySelectorAll('.super-film-frame').forEach((f, i) => {
+    f.style.outline = i === idx ? '3px solid var(--gold)' : 'none';
+    f.style.outlineOffset = '-2px';
+  });
+}
+
+// 显示风格选择区
+function showStyleSelect() {
+  document.getElementById('styleSelectArea').style.display = 'block';
+  const grid = document.getElementById('styleGrid');
+  grid.innerHTML = '';
+
+  filters.forEach((f, i) => {
+    const card = document.createElement('div');
+    card.className = 'style-card';
+    card.dataset.filterIdx = i;
+    card.onclick = () => selectStyleCard(i);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 90; canvas.height = 90;
+    if (state.sampleImage) {
+      const ctx = canvas.getContext('2d');
+      ctx.filter = f.css;
+      ctx.drawImage(state.sampleImage, 0, 0, 90, 90);
+      ctx.filter = 'none';
+    }
+    card.appendChild(canvas);
+
+    const check = document.createElement('div');
+    check.className = 'style-check';
+    check.textContent = '✓';
+    card.appendChild(check);
+
+    const name = document.createElement('div');
+    name.className = 'style-name';
+    name.textContent = f.name;
+    card.appendChild(name);
+
+    grid.appendChild(card);
+  });
+
+  // 默认选中第一个风格卡，确保"全部应用"有默认目标
+  superState.currentStyleIdx = 0;
+  const firstCard = grid.querySelector('.style-card');
+  if (firstCard) firstCard.classList.add('selected');
+
+  showToast('💡 点击下方照片选中，再点击风格即可分配');
+}
+
+// 选中风格卡（更新 currentStyleIdx 和卡片样式，有选中照片时同步应用）
+function selectStyleCard(filterIdx) {
+  // 更新 currentStyleIdx（无论是否选中照片）
+  superState.currentStyleIdx = filterIdx;
+
+  // 更新卡片选中样式
+  document.querySelectorAll('.style-card').forEach((c, i) => {
+    c.classList.toggle('selected', i === filterIdx);
+  });
+
+  // 如果已选中照片，同时应用到该照片
+  if (superState.selectedPhotoIdx >= 0) {
+    applyStyleToPhoto(filterIdx);
+  } else {
+    showToast(`🎞️ 已选中风格: ${filters[filterIdx].name} · 可点击"全部应用"`);
+  }
+}
+
+// 为选中照片应用风格
+function applyStyleToPhoto(filterIdx) {
+  if (superState.selectedPhotoIdx < 0) {
+    showToast('⚠️ 请先点击上方一张照片');
+    return;
+  }
+
+  const photoIdx = superState.selectedPhotoIdx;
+  superState.photoStyles[photoIdx] = filterIdx;
+  superState.currentStyleIdx = filterIdx; // 记录当前选中的风格
+
+  // 将滤镜应用到该照片的帧上（像素级渲染预览）
+  const frame = document.getElementById(`devFrame${photoIdx}`);
+  if (frame) {
+    const img = frame.querySelector('img');
+    // 在帧上覆盖一个canvas来显示滤镜效果
+    let overlayCanvas = frame.querySelector('canvas');
+    if (!overlayCanvas) {
+      overlayCanvas = document.createElement('canvas');
+      overlayCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+      frame.appendChild(overlayCanvas);
+    }
+    img.onload = () => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = w; tmpCanvas.height = h;
+      tmpCanvas.getContext('2d').drawImage(img, 0, 0);
+      overlayCanvas.width = w;
+      overlayCanvas.height = h;
+      applyPixelFilter(tmpCanvas, overlayCanvas, filterIdx, true);
+    };
+    if (img.complete) img.onload();
+    playFilterSound(filterIdx);
+    triggerVibration();
+  }
+
+  // 更新风格卡选中状态
+  document.querySelectorAll('.style-card').forEach((c, i) => {
+    c.classList.toggle('selected', i === filterIdx);
+  });
+
+  showToast(`🎨 第${photoIdx + 1}张 → ${filters[filterIdx].name}`);
+}
+
+// 全部应用当前风格
+function styleApplyAll() {
+  const filterIdx = superState.currentStyleIdx;
+  if (filterIdx < 0 || filterIdx >= filters.length) {
+    showToast('⚠️ 请先点击选择一个风格');
+    return;
+  }
+  superState.photos.forEach((_, i) => {
+    superState.photoStyles[i] = filterIdx;
+    const frame = document.getElementById(`devFrame${i}`);
+    if (frame) {
+      const img = frame.querySelector('img');
+      let overlayCanvas = frame.querySelector('canvas');
+      if (!overlayCanvas) {
+        overlayCanvas = document.createElement('canvas');
+        overlayCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+        frame.appendChild(overlayCanvas);
+      }
+      if (img.complete) {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        // 先把图片画到临时canvas，applyPixelFilter需要canvas作为source
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = w; tmpCanvas.height = h;
+        tmpCanvas.getContext('2d').drawImage(img, 0, 0);
+        overlayCanvas.width = w;
+        overlayCanvas.height = h;
+        applyPixelFilter(tmpCanvas, overlayCanvas, filterIdx, true);
+      }
+    }
+  });
+  playFilterSound(filterIdx);
+  triggerVibration();
+  showToast(`✨ 全部 ${superState.photos.length} 张应用 ${filters[filterIdx].name}`);
+}
+
+// 完成并保存
+function superFinish() {
+  // 为每张照片应用选择的风格并保存
+  const total = superState.photos.length;
+  let savedCount = 0;
+
+  superState.photos.forEach((photo, i) => {
+    const filterIdx = superState.photoStyles[i] !== undefined ? superState.photoStyles[i] : 0;
+
+    // 创建带滤镜的图片
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width; canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      // 用像素处理方式应用滤镜（兼容所有浏览器）
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = img.width; tmpCanvas.height = img.height;
+      tmpCanvas.getContext('2d').drawImage(img, 0, 0);
+      applyPixelFilter(tmpCanvas, canvas, filterIdx, false);
+      // 添加胶片边框
+      addFilmBorder(ctx, canvas.width, canvas.height);
+      // 添加水印
+      drawWatermark(ctx, canvas.width, canvas.height);
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      state.photos.push({
+        url: dataUrl,
+        filter: filters[filterIdx].name,
+        timestamp: photo.timestamp
+      });
+
+      savedCount++;
+      if (savedCount === total) {
+        playDevelopCompleteSound();
+        showToast(`💾 全部 ${total} 张照片已保存到相册`);
+        // 关闭所有超级模式界面
+        setTimeout(() => {
+          document.getElementById('superDevelopOverlay').classList.remove('active');
+          document.getElementById('superOverlay').classList.remove('active');
+          superState.active = false;
+          document.getElementById('superToggle').classList.remove('active');
+          startCamera();
+        }, 500);
+      }
+    };
+    img.src = photo.url;
+  });
+}
+
+// ==================== 键盘快捷键 ==================== */
+document.addEventListener('keydown', (e) => {
+  if (!state.isAppOpen && !superState.active) return;
+  // 超级模拟模式下的快捷键
+  if (superState.active) {
+    if (e.code === 'Space') { e.preventDefault(); superCapture(); }
+    if (e.code === 'Escape') { superExit(); }
+    return;
+  }
+  if (e.code === 'Space') { e.preventDefault(); capturePhoto(); }
+  if (e.code === 'ArrowLeft') { selectFilter((state.currentFilter - 1 + filters.length) % filters.length); }
+  if (e.code === 'ArrowRight') { selectFilter((state.currentFilter + 1) % filters.length); }
+  if (e.code === 'Escape') { closeFullscreen(); closeImmersive(); closeFilterFullscreen(); }
+});
+
+// ==================== 触摸手势支持 ==================== */
+let touchStartX = 0;
+document.getElementById('filterRow')?.addEventListener('touchstart', (e) => {
+  touchStartX = e.touches[0].clientX;
+}, { passive: true });
+</script>
+</body>
+</html>

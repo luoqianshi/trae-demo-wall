@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图幻 3D · 眼动立体卡片</title>
+    <script src="./lib/mediapipe-face-mesh/face_mesh.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0a0f1a;
+            --panel: #111827;
+            --panel-border: #1f2937;
+            --text: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        header {
+            text-align: center;
+            padding: 24px 16px 16px;
+            background: linear-gradient(180deg, rgba(59,130,246,0.12) 0%, transparent 100%);
+        }
+        header h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
+        header p { color: var(--text-muted); font-size: 14px; }
+        .container { max-width: 1280px; margin: 0 auto; padding: 16px; }
+        .intro {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-bottom: 18px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-muted);
+        }
+        .intro strong { color: var(--text); }
+        .intro ol { margin: 6px 0 0 18px; }
+        .upload-zone {
+            border: 2px dashed #374151;
+            border-radius: 16px;
+            padding: 36px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--panel);
+            margin-bottom: 18px;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(59,130,246,0.05);
+        }
+        .upload-zone input { display: none; }
+        .upload-zone h2 { font-size: 18px; margin-bottom: 8px; }
+        .upload-zone p { color: var(--text-muted); font-size: 13px; }
+        .status {
+            padding: 12px 18px;
+            border-radius: 10px;
+            margin-bottom: 18px;
+            font-size: 14px;
+            display: none;
+        }
+        .status.active { display: block; }
+        .status.info { background: rgba(59,130,246,0.15); color: #bfdbfe; }
+        .status.success { background: rgba(34,197,94,0.15); color: #bbf7d0; }
+        .status.error { background: rgba(239,68,68,0.15); color: #fecaca; }
+        .status.pending { background: rgba(234,179,8,0.15); color: #fef08a; }
+        .workspace { display: none; }
+        .workspace.active { display: block; }
+        .main-stage {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 20px;
+            align-items: start;
+        }
+        @media (max-width: 960px) {
+            .main-stage { grid-template-columns: 1fr; }
+        }
+
+        /* 3D Viewer */
+        .viewer-wrap {
+            background: radial-gradient(circle at 50% 40%, #1f2937 0%, var(--bg) 70%);
+            border-radius: 20px;
+            min-height: 560px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            perspective: 1200px;
+            overflow: hidden;
+            border: 1px solid var(--panel-border);
+            position: relative;
+            padding: 40px 20px;
+        }
+
+        .tilt-card {
+            position: relative;
+            width: fit-content;
+            transform-style: preserve-3d;
+            will-change: transform;
+            transition: transform 0.05s linear;
+        }
+
+        /* 动态阴影层 */
+        .card-shadow {
+            position: absolute;
+            inset: -20px;
+            border-radius: 32px;
+            background: rgba(0,0,0,0.55);
+            filter: blur(50px);
+            transform: translateZ(-120px) translateY(50px) scale(0.85);
+            pointer-events: none;
+            transition: transform 0.15s ease-out, opacity 0.15s ease-out;
+        }
+
+        /* 卡片主体容器 */
+        .card-body {
+            position: relative;
+            width: fit-content;
+            transform-style: preserve-3d;
+            border-radius: 24px;
+            perspective: 1200px;
+            transform-style: preserve-3d;
+        }
+
+        /* 边框 + 内阴影，制造卡片厚度 */
+        .card-frame {
+            position: absolute;
+            inset: 0;
+            border-radius: 24px;
+            border: 1px solid rgba(255,255,255,0.18);
+            box-shadow:
+                inset 0 1px 1px rgba(255,255,255,0.25),
+                inset 0 -1px 1px rgba(0,0,0,0.3);
+            transform: translateZ(95px);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* 图片层 */
+        .layer-image {
+            position: relative;
+            border-radius: 24px;
+            overflow: hidden;
+            transform: translateZ(-60px) scale(1.1);
+            transform-style: preserve-3d;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+        #cardCanvas {
+            display: block;
+            max-width: 100%;
+            max-height: 520px;
+            border-radius: 24px;
+        }
+
+        /* 文字层 */
+        .layer-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 32px;
+            text-align: center;
+            transform: translateZ(55px);
+            transform-style: preserve-3d;
+            pointer-events: none;
+        }
+        .layer-text.top { justify-content: flex-start; padding-top: 48px; }
+        .layer-text.bottom { justify-content: flex-end; padding-bottom: 48px; }
+        .main-title {
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 12px;
+            text-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35);
+            letter-spacing: -0.02em;
+        }
+        .sub-title {
+            font-weight: 500;
+            line-height: 1.4;
+            opacity: 0.95;
+            text-shadow: 0 3px 16px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+        }
+
+        /* 光泽层 */
+        .layer-glare {
+            position: absolute;
+            inset: 0;
+            border-radius: 24px;
+            pointer-events: none;
+            background: radial-gradient(
+                circle at var(--gx, 50%) var(--gy, 50%),
+                rgba(255,255,255,0.55) 0%,
+                rgba(255,255,255,0.2) 18%,
+                transparent 50%
+            );
+            mix-blend-mode: overlay;
+            transform: translateZ(90px);
+            z-index: 5;
+        }
+
+        /* 边缘高光 */
+        .layer-rim {
+            position: absolute;
+            inset: 0;
+            border-radius: 24px;
+            pointer-events: none;
+            background: linear-gradient(
+                var(--rim-angle, 135deg),
+                rgba(255,255,255,0.35) 0%,
+                rgba(255,255,255,0.08) 25%,
+                transparent 50%,
+                transparent 70%,
+                rgba(255,255,255,0.12) 100%
+            );
+            transform: translateZ(92px);
+            z-index: 6;
+            opacity: 0.8;
+        }
+
+        .sidebar { display: flex; flex-direction: column; gap: 16px; }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 18px;
+        }
+        .panel h3 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+        .control-group { margin-bottom: 16px; }
+        .control-group:last-child { margin-bottom: 0; }
+        .control-group label {
+            display: block;
+            font-size: 13px;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        .control-group input[type="text"],
+        .control-group textarea,
+        .control-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #374151;
+            background: #0b0f19;
+            color: var(--text);
+            font-size: 14px;
+            outline: none;
+        }
+        .control-group input[type="text"]:focus,
+        .control-group textarea:focus,
+        .control-group select:focus { border-color: var(--accent); }
+        .control-group textarea { min-height: 64px; resize: vertical; }
+        .control-group input[type="color"] {
+            width: 100%;
+            height: 40px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .control-group input[type="range"] { width: 100%; cursor: pointer; }
+        .value-display { color: var(--accent); font-weight: 700; float: right; }
+        .mode-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+        .mode-tab {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #374151;
+            background: #0b0f19;
+            color: var(--text-muted);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            text-align: center;
+            transition: all 0.15s;
+        }
+        .mode-tab:hover { border-color: #4b5563; }
+        .mode-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .camera-preview {
+            width: 100%;
+            border-radius: 10px;
+            background: #0b0f19;
+            transform: scaleX(-1);
+            border: 1px solid var(--panel-border);
+        }
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 12px;
+        }
+        .toggle-row input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            background: var(--accent);
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .btn:hover { background: var(--accent-hover); }
+        .btn:disabled { background: #374151; cursor: not-allowed; }
+        .btn-export { background: #10b981; }
+        .btn-export:hover { background: #059669; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>图幻 3D</h1>
+        <p>上传图片、添加文字，用眼动或鼠标让卡片立体转动</p>
+    </header>
+
+    <div class="container">
+        <div class="intro">
+            <strong>使用方法：</strong>
+            <ol>
+                <li>上传一张背景图片</li>
+                <li>输入主标题、副标题，调整样式</li>
+                <li>允许摄像头权限，或切换到鼠标模式</li>
+                <li>移动头部或鼠标，卡片会跟随视线 3D 倾斜，文字浮于图片之上</li>
+                <li>点击导出，保存你的立体卡片</li>
+            </ol>
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+            <input type="file" id="fileInput" accept="image/*">
+            <h2>🖼️ 点击或拖拽上传图片</h2>
+            <p>JPG、PNG、WEBP · 图片仅在本地处理，不会上传</p>
+        </div>
+
+        <div id="status" class="status info active">等待上传图片...</div>
+
+        <div id="workspace" class="workspace">
+            <div class="main-stage">
+                <div class="viewer-wrap" id="viewerWrap">
+                    <div class="tilt-card" id="tiltCard">
+                        <div class="card-shadow" id="cardShadow"></div>
+                        <div class="card-body" id="cardBody">
+                            <div class="layer-image">
+                                <canvas id="cardCanvas"></canvas>
+                            </div>
+                            <div class="layer-text" id="layerText">
+                                <div class="main-title" id="mainTitleEl">图幻 3D</div>
+                                <div class="sub-title" id="subTitleEl">图片一键裸眼立体转换</div>
+                            </div>
+                            <div class="layer-glare" id="layerGlare"></div>
+                            <div class="layer-rim" id="layerRim"></div>
+                            <div class="card-frame"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar">
+                    <div class="panel">
+                        <h3>控制模式</h3>
+                        <div class="mode-tabs">
+                            <div class="mode-tab active" data-mode="camera">👁️ 眼动追踪</div>
+                            <div class="mode-tab" data-mode="mouse">🖱️ 鼠标模拟</div>
+                        </div>
+                        <video id="inputVideo" class="camera-preview" autoplay playsinline muted></video>
+                        <div class="toggle-row">
+                            <span>显示摄像头小窗</span>
+                            <input type="checkbox" id="showCamera" checked>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>文字内容</h3>
+                        <div class="control-group">
+                            <label>主标题</label>
+                            <input type="text" id="mainTitle" value="图幻 3D" placeholder="输入主标题">
+                        </div>
+                        <div class="control-group">
+                            <label>副标题</label>
+                            <textarea id="subTitle" placeholder="输入副标题">图片一键裸眼立体转换</textarea>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>文字样式</h3>
+                        <div class="control-group">
+                            <label>主标题颜色 <input type="color" id="mainColor" value="#ffffff"></label>
+                        </div>
+                        <div class="control-group">
+                            <label>副标题颜色 <input type="color" id="subColor" value="#e5e7eb"></label>
+                        </div>
+                        <div class="control-group">
+                            <label>主标题字号 <span class="value-display" id="mainSizeValue">52</span>px</label>
+                            <input type="range" id="mainSize" min="24" max="140" value="52">
+                        </div>
+                        <div class="control-group">
+                            <label>副标题字号 <span class="value-display" id="subSizeValue">22</span>px</label>
+                            <input type="range" id="subSize" min="12" max="64" value="22">
+                        </div>
+                        <div class="control-group">
+                            <label>文字位置</label>
+                            <select id="textPosition">
+                                <option value="center">居中</option>
+                                <option value="top">顶部</option>
+                                <option value="bottom">底部</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>3D 效果</h3>
+                        <div class="control-group">
+                            <label>倾斜幅度 <span class="value-display" id="tiltValue">22</span>°</label>
+                            <input type="range" id="tiltRange" min="5" max="45" value="22">
+                        </div>
+                        <div class="control-group">
+                            <label>文字浮起 <span class="value-display" id="floatValue">55</span>px</label>
+                            <input type="range" id="floatDepth" min="0" max="120" value="55">
+                        </div>
+                        <div class="control-group">
+                            <label>光泽强度 <span class="value-display" id="glareValue">0.75</span></label>
+                            <input type="range" id="glareStrength" min="0" max="1.5" step="0.05" value="0.75">
+                        </div>
+                        <div class="control-group">
+                            <label>平滑度 <span class="value-display" id="smoothValue">0.12</span></label>
+                            <input type="range" id="smoothFactor" min="0.05" max="0.5" step="0.05" value="0.12">
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>导出</h3>
+                        <button id="exportBtn" class="btn btn-export" disabled>导出立体卡片 PNG</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let faceMesh = null;
+        let currentMode = 'camera';
+        let cameraReady = false;
+        let targetAngle = { x: 0, y: 0 };
+        let currentAngle = { x: 0, y: 0 };
+        let bgImage = null;
+        let animationId = null;
+
+        const statusEl = document.getElementById('status');
+        const workspaceEl = document.getElementById('workspace');
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const tiltCard = document.getElementById('tiltCard');
+        const cardBody = document.getElementById('cardBody');
+        const cardShadow = document.getElementById('cardShadow');
+        const cardCanvas = document.getElementById('cardCanvas');
+        const layerText = document.getElementById('layerText');
+        const layerGlare = document.getElementById('layerGlare');
+        const layerRim = document.getElementById('layerRim');
+        const mainTitleEl = document.getElementById('mainTitleEl');
+        const subTitleEl = document.getElementById('subTitleEl');
+        const inputVideo = document.getElementById('inputVideo');
+        const showCameraCheck = document.getElementById('showCamera');
+        const exportBtn = document.getElementById('exportBtn');
+        const viewerWrap = document.getElementById('viewerWrap');
+
+        function setStatus(type, message) {
+            statusEl.className = `status ${type} active`;
+            statusEl.textContent = message;
+        }
+        function hideStatus() { statusEl.classList.remove('active'); }
+
+        function initFaceMesh() {
+            return new Promise((resolve, reject) => {
+                try {
+                    faceMesh = new FaceMesh({ locateFile: (file) => `./lib/mediapipe-face-mesh/${file}` });
+                    faceMesh.setOptions({
+                        maxNumFaces: 1,
+                        refineLandmarks: false,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
+                    faceMesh.onResults((results) => {
+                        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                            const lm = results.multiFaceLandmarks[0];
+                            const nose = lm[1];
+                            const leftEye = lm[33];
+                            const rightEye = lm[263];
+                            const centerX = (nose.x + (leftEye.x + rightEye.x) / 2) / 2;
+                            const centerY = (nose.y + (leftEye.y + rightEye.y) / 2) / 2;
+                            targetAngle.x = (0.5 - centerX) * 2;
+                            targetAngle.y = (centerY - 0.5) * 2;
+                        }
+                    });
+                    resolve();
+                } catch (err) { reject(err); }
+            });
+        }
+
+        async function startCamera() {
+            if (cameraReady) return;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 320, height: 240, facingMode: 'user' }
+                });
+                inputVideo.srcObject = stream;
+                inputVideo.addEventListener('loadeddata', () => {
+                    cameraReady = true;
+                    if (currentMode === 'camera') processCameraFrame();
+                });
+            } catch (err) {
+                console.error(err);
+                setStatus('error', `摄像头启动失败：${err.message}，已切换到鼠标模式`);
+                switchMode('mouse');
+            }
+        }
+
+        async function processCameraFrame() {
+            if (currentMode !== 'camera' || !cameraReady) return;
+            await faceMesh.send({ image: inputVideo });
+            requestAnimationFrame(processCameraFrame);
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.mode === mode);
+            });
+            targetAngle = { x: 0, y: 0 };
+            if (mode === 'camera') startCamera();
+        }
+
+        // ===== 渲染图片到 Canvas =====
+        function renderImage() {
+            if (!bgImage) return;
+            const maxW = 760;
+            const maxH = 560;
+            let w = bgImage.width;
+            let h = bgImage.height;
+            const scale = Math.min(maxW / w, maxH / h, 1);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+
+            cardCanvas.width = w;
+            cardCanvas.height = h;
+            const ctx = cardCanvas.getContext('2d');
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(bgImage, 0, 0, w, h);
+        }
+
+        // ===== 更新文字层样式 =====
+        function updateTextLayer() {
+            const mainTitle = document.getElementById('mainTitle').value;
+            const subTitle = document.getElementById('subTitle').value;
+            const mainColor = document.getElementById('mainColor').value;
+            const subColor = document.getElementById('subColor').value;
+            const mainSize = document.getElementById('mainSize').value;
+            const subSize = document.getElementById('subSize').value;
+            const position = document.getElementById('textPosition').value;
+
+            mainTitleEl.textContent = mainTitle;
+            subTitleEl.textContent = subTitle;
+            mainTitleEl.style.color = mainColor;
+            subTitleEl.style.color = subColor;
+            mainTitleEl.style.fontSize = `${mainSize}px`;
+            subTitleEl.style.fontSize = `${subSize}px`;
+
+            layerText.className = 'layer-text';
+            if (position === 'top') layerText.classList.add('top');
+            else if (position === 'bottom') layerText.classList.add('bottom');
+        }
+
+        // ===== 3D 倾斜 + 光泽/阴影动画 =====
+        function updateTilt() {
+            const smooth = parseFloat(document.getElementById('smoothFactor').value);
+            const tiltRange = parseInt(document.getElementById('tiltRange').value, 10);
+            const floatDepth = parseInt(document.getElementById('floatDepth').value, 10);
+            const glareStrength = parseFloat(document.getElementById('glareStrength').value);
+
+            currentAngle.x += (targetAngle.x - currentAngle.x) * smooth;
+            currentAngle.y += (targetAngle.y - currentAngle.y) * smooth;
+
+            const rotateY = currentAngle.x * tiltRange;
+            const rotateX = -currentAngle.y * tiltRange;
+
+            // 外层整体旋转
+            tiltCard.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+
+            // 图片层：向倾斜方向的反方向移动（模拟在远处）
+            document.querySelector('.layer-image').style.transform = `
+                translateZ(-80px)
+                scale(1.12)
+                translateX(${currentAngle.x * 18}px)
+                translateY(${currentAngle.y * 18}px)
+            `;
+
+            // 文字层：向倾斜方向移动（模拟在近处），与图片相反
+            layerText.style.transform = `
+                translateZ(${floatDepth}px)
+                translateX(${-currentAngle.x * 35}px)
+                translateY(${-currentAngle.y * 35}px)
+            `;
+
+            // 动态阴影：根据倾斜方向和角度偏移
+            const shadowX = -currentAngle.x * 70;
+            const shadowY = 40 + currentAngle.y * 25;
+            const shadowBlur = 50 + Math.abs(currentAngle.x) * 20;
+            const shadowOpacity = 0.45 + Math.abs(currentAngle.y) * 0.15;
+            cardShadow.style.transform = `
+                translateZ(-120px)
+                translateX(${shadowX}px)
+                translateY(${shadowY}px)
+                scale(0.85)
+            `;
+            cardShadow.style.filter = `blur(${shadowBlur}px)`;
+            cardShadow.style.opacity = shadowOpacity;
+
+            // 光泽位置（反向移动）
+            const gx = 50 - currentAngle.x * 40;
+            const gy = 50 - currentAngle.y * 40;
+            layerGlare.style.setProperty('--gx', `${gx}%`);
+            layerGlare.style.setProperty('--gy', `${gy}%`);
+            layerGlare.style.opacity = glareStrength;
+
+            // 边缘高光角度
+            const rimAngle = 135 + currentAngle.x * 30 - currentAngle.y * 15;
+            layerRim.style.setProperty('--rim-angle', `${rimAngle}deg`);
+
+            animationId = requestAnimationFrame(updateTilt);
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        async function processImage(file) {
+            try {
+                setStatus('pending', '正在读取图片...');
+                bgImage = await loadImage(file);
+
+                renderImage();
+                updateTextLayer();
+                workspaceEl.classList.add('active');
+                exportBtn.disabled = false;
+
+                setStatus('success', '图片加载完成，正在启动追踪...');
+                await initFaceMesh();
+                await startCamera();
+                if (!animationId) updateTilt();
+
+                hideStatus();
+            } catch (err) {
+                console.error(err);
+                setStatus('error', `处理失败：${err.message}`);
+            }
+        }
+
+        // ===== 导出：合成图片+文字 =====
+        function exportCard() {
+            if (!bgImage) return;
+            const mainTitle = document.getElementById('mainTitle').value;
+            const subTitle = document.getElementById('subTitle').value;
+            const mainColor = document.getElementById('mainColor').value;
+            const subColor = document.getElementById('subColor').value;
+            const mainSize = parseInt(document.getElementById('mainSize').value, 10);
+            const subSize = parseInt(document.getElementById('subSize').value, 10);
+            const position = document.getElementById('textPosition').value;
+
+            const w = cardCanvas.width;
+            const h = cardCanvas.height;
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = w;
+            exportCanvas.height = h;
+            const ctx = exportCanvas.getContext('2d');
+
+            // 圆角裁切
+            const r = 24;
+            ctx.beginPath();
+            ctx.moveTo(r, 0);
+            ctx.lineTo(w - r, 0);
+            ctx.quadraticCurveTo(w, 0, w, r);
+            ctx.lineTo(w, h - r);
+            ctx.quadraticCurveTo(w, h, w - r, h);
+            ctx.lineTo(r, h);
+            ctx.quadraticCurveTo(0, h, 0, h - r);
+            ctx.lineTo(0, r);
+            ctx.quadraticCurveTo(0, 0, r, 0);
+            ctx.closePath();
+            ctx.clip();
+
+            // 背景图
+            ctx.drawImage(bgImage, 0, 0, w, h);
+
+            // 文字
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 18;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 4;
+
+            let textY;
+            if (position === 'center') textY = h / 2;
+            else if (position === 'top') textY = h * 0.22;
+            else textY = h * 0.78;
+
+            ctx.font = `bold ${mainSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            ctx.fillStyle = mainColor;
+            ctx.fillText(mainTitle, w / 2, textY - subSize * 0.5);
+
+            ctx.font = `${subSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            ctx.fillStyle = subColor;
+            ctx.fillText(subTitle, w / 2, textY + mainSize * 0.65);
+
+            const link = document.createElement('a');
+            link.download = `tuhuan_3d_card_${Date.now()}.png`;
+            link.href = exportCanvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // ===== 事件 =====
+        uploadZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) processImage(e.target.files[0]);
+        });
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) processImage(e.dataTransfer.files[0]);
+        });
+
+        document.querySelectorAll('.mode-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchMode(tab.dataset.mode));
+        });
+
+        showCameraCheck.addEventListener('change', () => {
+            inputVideo.classList.toggle('hidden', !showCameraCheck.checked);
+        });
+
+        viewerWrap.addEventListener('mousemove', (e) => {
+            if (currentMode !== 'mouse') return;
+            const rect = viewerWrap.getBoundingClientRect();
+            targetAngle.x = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+            targetAngle.y = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+        });
+
+        viewerWrap.addEventListener('mouseleave', () => {
+            if (currentMode !== 'mouse') return;
+            targetAngle = { x: 0, y: 0 };
+        });
+
+        const cardInputs = ['mainTitle', 'subTitle', 'mainColor', 'subColor', 'mainSize', 'subSize', 'textPosition'];
+        cardInputs.forEach(id => {
+            document.getElementById(id).addEventListener('input', updateTextLayer);
+        });
+
+        document.getElementById('mainSize').addEventListener('input', (e) => {
+            document.getElementById('mainSizeValue').textContent = e.target.value;
+        });
+        document.getElementById('subSize').addEventListener('input', (e) => {
+            document.getElementById('subSizeValue').textContent = e.target.value;
+        });
+        document.getElementById('tiltRange').addEventListener('input', (e) => {
+            document.getElementById('tiltValue').textContent = e.target.value;
+        });
+        document.getElementById('floatDepth').addEventListener('input', (e) => {
+            document.getElementById('floatValue').textContent = e.target.value;
+        });
+        document.getElementById('glareStrength').addEventListener('input', (e) => {
+            document.getElementById('glareValue').textContent = e.target.value;
+        });
+        document.getElementById('smoothFactor').addEventListener('input', (e) => {
+            document.getElementById('smoothValue').textContent = e.target.value;
+        });
+
+        exportBtn.addEventListener('click', exportCard);
+    </script>
+</body>
+</html>

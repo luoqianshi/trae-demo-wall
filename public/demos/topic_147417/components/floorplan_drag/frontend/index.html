@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floorplan Drag Component</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    </style>
+</head>
+<body>
+    <!-- 画布容器 -->
+    <div style="position: relative; width: 800px; height: 600px; background: #fafaf9; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        <div id="canvas-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+
+            <!-- 背景层：户型家具轮廓 SVG -->
+            <svg width="800" height="600" style="position: absolute; top: 0; left: 0; pointer-events: none;">
+                <rect width="800" height="600" fill="#fafaf9"/>
+
+                <!-- 客厅家具轮廓 -->
+                <rect x="30" y="60" width="340" height="220" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,4" rx="4"/>
+                <rect x="50" y="180" width="120" height="60" fill="#e5e7eb" rx="6"/>
+                <text x="110" y="215" fill="#9ca3af" font-size="10" text-anchor="middle">沙发</text>
+                <rect x="250" y="100" width="100" height="40" fill="#e5e7eb" rx="4"/>
+                <text x="300" y="125" fill="#9ca3af" font-size="10" text-anchor="middle">电视柜</text>
+                <ellipse cx="110" cy="150" rx="40" ry="20" fill="#e5e7eb"/>
+                <text x="110" y="155" fill="#9ca3af" font-size="10" text-anchor="middle">茶几</text>
+
+                <!-- 卧室家具轮廓 -->
+                <rect x="430" y="60" width="340" height="220" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,4" rx="4"/>
+                <rect x="450" y="130" width="140" height="100" fill="#e5e7eb" rx="8"/>
+                <text x="520" y="185" fill="#9ca3af" font-size="10" text-anchor="middle">床</text>
+                <rect x="600" y="140" width="50" height="50" fill="#e5e7eb" rx="4"/>
+                <text x="625" y="168" fill="#9ca3af" font-size="9" text-anchor="middle">床头柜</text>
+
+                <!-- 厨房家具轮廓 -->
+                <rect x="30" y="340" width="340" height="220" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,4" rx="4"/>
+                <rect x="50" y="360" width="200" height="50" fill="#e5e7eb" rx="4"/>
+                <text x="150" y="390" fill="#9ca3af" font-size="10" text-anchor="middle">橱柜</text>
+
+                <!-- 卫生间轮廓 -->
+                <rect x="430" y="340" width="340" height="220" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="4,4" rx="4"/>
+
+                <!-- 区域标签 -->
+                <text x="200" y="35" fill="#6b7280" font-size="14" text-anchor="middle" font-weight="500">客厅</text>
+                <text x="600" y="35" fill="#6b7280" font-size="14" text-anchor="middle" font-weight="500">卧室</text>
+                <text x="200" y="325" fill="#6b7280" font-size="13" text-anchor="middle">厨房</text>
+                <text x="600" y="325" fill="#6b7280" font-size="13" text-anchor="middle">卫生间</text>
+
+                <!-- 规则连线层（由 JS 动态渲染） -->
+                <g id="rule-lines"></g>
+            </svg>
+
+            <!-- 设备图标容器 -->
+            <div id="devices-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+
+            <!-- 拖拽提示 -->
+            <div id="drag-tooltip" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+                 background: rgba(0,0,0,0.75); color: white; padding: 8px 16px; border-radius: 20px;
+                 font-size: 13px; display: none; pointer-events: none;"></div>
+
+            <!-- 操作提示 -->
+            <div id="info-tooltip" style="position: absolute; top: 570px; left: 50%; transform: translateX(-50%);
+                 background: rgba(102, 126, 234, 0.9); color: white; padding: 6px 14px; border-radius: 16px;
+                 font-size: 12px;">
+                👆 点击设备查看详情 · 虚线箭头表示联动规则
+            </div>
+
+            <!-- 保存布局按钮 -->
+            <button id="save-layout-btn" style="position: absolute; top: 555px; right: 20px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; border: none; padding: 9px 20px; border-radius: 22px;
+                    font-size: 13px; font-weight: 600; cursor: pointer;
+                    box-shadow: 0 3px 10px rgba(102,126,234,0.45);">
+                💾 保存布局
+            </button>
+        </div>
+    </div>
+
+    <script>
+    // ============================================
+    // Streamlit 组件 API v1 协议（内联实现）
+    // ============================================
+    function sendToStreamlit(type, data) {
+        window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data), '*');
+    }
+
+    const Streamlit = {
+        setComponentValue: function(value) {
+            sendToStreamlit('streamlit:setComponentValue', { value: value });
+        },
+        setFrameHeight: function(height) {
+            sendToStreamlit('streamlit:setFrameHeight', { height: height });
+        }
+    };
+
+    // 通知 Streamlit 父窗口：组件已就绪，可以接收渲染数据
+    // apiVersion: 1 是必需字段，缺少会导致 "Unrecognized component API version: 'undefined'"
+    // 缺少此消息会导致 Streamlit 永远不发送 streamlit:render，组件停留在 stSkeleton
+    sendToStreamlit('streamlit:componentReady', { apiVersion: 1 });
+
+    // 初始化 iframe 高度
+    Streamlit.setFrameHeight(620);
+
+    // ============================================
+    // 全局状态
+    // ============================================
+    let devices = [];
+    let rules = [];
+    let TYPE_EMOJI = {};
+    let TYPE_COLOR = {};
+    let ruleLinePaths = [];
+
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 600;
+    const DEVICE_SIZE = 50;
+    const BOUNDARY_X_MIN = 0;
+    const BOUNDARY_X_MAX = CANVAS_WIDTH - DEVICE_SIZE;
+    const BOUNDARY_Y_MIN = 0;
+    const BOUNDARY_Y_MAX = CANVAS_HEIGHT - DEVICE_SIZE;
+
+    let isDragging = false;
+    let dragDevice = null;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let deviceStartX = 0;
+    let deviceStartY = 0;
+
+    // ============================================
+    // 接收 Python 端的渲染数据
+    // ============================================
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'streamlit:render') {
+            const args = event.data.args || {};
+            devices = args.devices || [];
+            rules = args.rules || [];
+            TYPE_EMOJI = args.type_emoji || {};
+            TYPE_COLOR = args.type_color || {};
+            ruleLinePaths = args.rule_lines || [];
+
+            // 重新渲染画布（清空保存中浮层）
+            clearSaveFeedback();
+            renderDevices();
+        }
+    });
+
+    // ============================================
+    // 渲染规则连线
+    // ============================================
+    function drawRuleLines() {
+        const linesGroup = document.getElementById('rule-lines');
+        if (!linesGroup) return;
+        linesGroup.innerHTML = '';
+
+        ruleLinePaths.forEach(function(d) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', '#4A90D9');
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-dasharray', '6,4');
+            path.setAttribute('opacity', '0.7');
+            linesGroup.appendChild(path);
+
+            const parts = d.split(' ');
+            const ax = parseFloat(parts[parts.length - 2]);
+            const ay = parseFloat(parts[parts.length - 1]);
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', ax);
+            dot.setAttribute('cy', ay);
+            dot.setAttribute('r', '4');
+            dot.setAttribute('fill', '#4A90D9');
+            dot.setAttribute('opacity', '0.7');
+            linesGroup.appendChild(dot);
+        });
+    }
+
+    // ============================================
+    // 渲染设备图标
+    // ============================================
+    function renderDevices() {
+        const container = document.getElementById('devices-container');
+        container.innerHTML = '';
+
+        devices.forEach(function(device) {
+            const emoji = TYPE_EMOJI[device.type] || '📦';
+            const color = TYPE_COLOR[device.type] || '#667eea';
+
+            const wrapperDiv = document.createElement('div');
+            wrapperDiv.id = 'wrapper-' + device.id;
+            wrapperDiv.className = 'device-wrapper';
+            wrapperDiv.style.cssText =
+                'position: absolute; left: ' + device.x + 'px; top: ' + device.y + 'px;' +
+                'width: ' + DEVICE_SIZE + 'px; cursor: grab; z-index: 10;' +
+                'transition: box-shadow 0.2s ease, transform 0.1s ease;';
+
+            const deviceDiv = document.createElement('div');
+            deviceDiv.className = 'device-icon';
+            const isOn = device.is_on !== false;
+            const bgColor = isOn ? 'white' : '#e2e8f0';
+            const opacity = isOn ? '1' : '0.55';
+            const borderColor = isOn ? color : '#94a3b8';
+            deviceDiv.style.cssText =
+                'position: relative; width: ' + DEVICE_SIZE + 'px; height: ' + DEVICE_SIZE + 'px;' +
+                'border-radius: 50%; background: ' + bgColor + '; border: 3px solid ' + borderColor + ';' +
+                'display: flex; align-items: center; justify-content: center; font-size: 24px;' +
+                'box-shadow: 0 4px 12px rgba(0,0,0,0.15); user-select: none; pointer-events: none;' +
+                'opacity: ' + opacity + (isOn ? '' : '; filter: grayscale(0.6);');
+            deviceDiv.innerHTML = emoji;
+
+            const labelDiv = document.createElement('div');
+            labelDiv.style.cssText =
+                'position: relative; margin-top: 5px; width: ' + DEVICE_SIZE + 'px;' +
+                'text-align: center; font-size: 11px; color: #475569;' +
+                'background: rgba(255,255,255,0.9); padding: 2px 4px; border-radius: 4px;' +
+                'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;';
+            labelDiv.textContent = device.label;
+
+            wrapperDiv.appendChild(deviceDiv);
+            wrapperDiv.appendChild(labelDiv);
+            container.appendChild(wrapperDiv);
+
+            wrapperDiv.addEventListener('mousedown', function(e) { startDrag(e, device); });
+            wrapperDiv.addEventListener('touchstart', function(e) { startDrag(e, device); }, { passive: false });
+            wrapperDiv.addEventListener('click', function(e) {
+                if (!isDragging) { showDeviceInfo(device); }
+            });
+        });
+
+        drawRuleLines();
+    }
+
+    // ============================================
+    // 拖拽逻辑
+    // ============================================
+    function startDrag(e, device) {
+        e.preventDefault();
+        isDragging = true;
+        dragDevice = device;
+
+        const wrapperDiv = document.getElementById('wrapper-' + device.id);
+        wrapperDiv.style.cursor = 'grabbing';
+        wrapperDiv.style.zIndex = '100';
+
+        const iconDiv = wrapperDiv.querySelector('.device-icon');
+        if (iconDiv) {
+            iconDiv.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.4)';
+            iconDiv.style.transform = 'scale(1.1)';
+        }
+
+        if (e.type === 'touchstart') {
+            dragStartX = e.touches[0].clientX;
+            dragStartY = e.touches[0].clientY;
+        } else {
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+        }
+        deviceStartX = device.x;
+        deviceStartY = device.y;
+
+        const tooltip = document.getElementById('drag-tooltip');
+        tooltip.textContent = '拖拽中: ' + device.label;
+        tooltip.style.display = 'block';
+
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchmove', onDrag, { passive: false });
+        document.addEventListener('touchend', endDrag);
+    }
+
+    function onDrag(e) {
+        if (!isDragging || !dragDevice) return;
+        e.preventDefault();
+
+        let clientX, clientY;
+        if (e.type === 'touchmove') {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        const deltaX = clientX - dragStartX;
+        const deltaY = clientY - dragStartY;
+
+        let newX = deviceStartX + deltaX;
+        let newY = deviceStartY + deltaY;
+        newX = Math.max(BOUNDARY_X_MIN, Math.min(BOUNDARY_X_MAX, newX));
+        newY = Math.max(BOUNDARY_Y_MIN, Math.min(BOUNDARY_Y_MAX, newY));
+
+        dragDevice.x = Math.round(newX);
+        dragDevice.y = Math.round(newY);
+
+        const wrapperDiv = document.getElementById('wrapper-' + dragDevice.id);
+        if (wrapperDiv) {
+            wrapperDiv.style.left = dragDevice.x + 'px';
+            wrapperDiv.style.top = dragDevice.y + 'px';
+        }
+
+        drawRuleLines();
+
+        const tooltip = document.getElementById('drag-tooltip');
+        tooltip.textContent = dragDevice.label + ' (' + dragDevice.x + ', ' + dragDevice.y + ')';
+    }
+
+    function endDrag(e) {
+        if (!isDragging || !dragDevice) return;
+        isDragging = false;
+
+        const wrapperDiv = document.getElementById('wrapper-' + dragDevice.id);
+        if (wrapperDiv) {
+            wrapperDiv.style.cursor = 'grab';
+            wrapperDiv.style.zIndex = '10';
+            const iconDiv = wrapperDiv.querySelector('.device-icon');
+            if (iconDiv) {
+                iconDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                iconDiv.style.transform = 'scale(1)';
+            }
+        }
+
+        const tooltip = document.getElementById('drag-tooltip');
+        tooltip.style.display = 'none';
+
+        document.removeEventListener('mousemove', onDrag);
+        document.removeEventListener('mouseup', endDrag);
+        document.removeEventListener('touchmove', onDrag);
+        document.removeEventListener('touchend', endDrag);
+
+        dragDevice = null;
+    }
+
+    // ============================================
+    // 设备详情展示
+    // ============================================
+    function showDeviceInfo(device) {
+        const emoji = TYPE_EMOJI[device.type] || '📦';
+        const infoTooltip = document.getElementById('info-tooltip');
+        infoTooltip.textContent = emoji + ' ' + device.label + ' | 区域: ' + device.room + ' | 位置: (' + device.x + ', ' + device.y + ')';
+        infoTooltip.style.background = 'rgba(34, 197, 94, 0.9)';
+
+        setTimeout(function() {
+            infoTooltip.textContent = '👆 点击设备查看详情 · 虚线箭头表示联动规则';
+            infoTooltip.style.background = 'rgba(102, 126, 234, 0.9)';
+        }, 3000);
+    }
+
+    // ============================================
+    // 保存布局：通过 Streamlit 组件协议回传坐标
+    // ============================================
+    function saveLayout() {
+        const positions = devices.map(function(d) { return { id: d.id, x: d.x, y: d.y }; });
+        const nonce = Date.now();
+        const btn = document.getElementById('save-layout-btn');
+        const canvas = document.getElementById('canvas-container');
+
+        // 显示"保存中"浮层
+        let tip = document.getElementById('save-feedback');
+        if (!tip) {
+            tip = document.createElement('div');
+            tip.id = 'save-feedback';
+            tip.style.cssText =
+                'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);' +
+                'background:rgba(102,126,234,0.96);color:white;padding:18px 34px;border-radius:14px;' +
+                'font-size:17px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,0.25);z-index:9999;' +
+                'text-align:center;line-height:1.6;';
+            canvas.appendChild(tip);
+        }
+        tip.innerHTML = '⏳ 正在保存布局...';
+        if (btn) { btn.textContent = '⏳ 保存中'; btn.disabled = true; }
+
+        // 通过 Streamlit 组件协议将坐标回传给 Python
+        // setComponentValue 会触发 Streamlit rerun，Python 端接收并处理 positions
+        Streamlit.setComponentValue({
+            action: 'save',
+            positions: positions,
+            nonce: nonce
+        });
+
+        // Streamlit rerun 后会触发新的 render 事件，届时 clearSaveFeedback() 会清除浮层
+        // 延迟 2 秒后显示"已保存"（此时 rerun 应已完成）
+        setTimeout(function() {
+            tip = document.getElementById('save-feedback');
+            if (tip) {
+                tip.innerHTML = '✅ 布局已保存<br><span style="font-size:13px;font-weight:400;">已同步到设备控制室</span>';
+                tip.style.background = 'rgba(34,197,94,0.96)';
+                if (btn) { btn.textContent = '💾 保存布局'; btn.disabled = false; }
+                setTimeout(function() {
+                    const t = document.getElementById('save-feedback');
+                    if (t && t.parentNode) t.parentNode.removeChild(t);
+                }, 2000);
+            }
+        }, 1500);
+    }
+
+    function clearSaveFeedback() {
+        const tip = document.getElementById('save-feedback');
+        if (tip && tip.parentNode) tip.parentNode.removeChild(tip);
+        const btn = document.getElementById('save-layout-btn');
+        if (btn) { btn.textContent = '💾 保存布局'; btn.disabled = false; }
+    }
+
+    // ============================================
+    // 绑定保存按钮
+    // ============================================
+    document.getElementById('save-layout-btn').addEventListener('click', saveLayout);
+    </script>
+</body>
+</html>

@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智行校园 - 校内地图导航系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #e8f5e9 0%, #e0f7fa 50%, #f3e5f5 100%);
+            min-height: 100vh;
+        }
+        
+        .map-container {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+        }
+        
+        .map-image {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .route-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .hotspot {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        .hotspot:hover {
+            transform: translate(-50%, -50%) scale(1.3);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        
+        .hotspot.dorm { background: linear-gradient(135deg, #4CAF50, #45a049); }
+        .hotspot.classroom { background: linear-gradient(135deg, #2196F3, #1976D2); }
+        .hotspot.canteen { background: linear-gradient(135deg, #FF9800, #F57C00); }
+        .hotspot.sport { background: linear-gradient(135deg, #E91E63, #C2185B); }
+        .hotspot.admin { background: linear-gradient(135deg, #9C27B0, #7B1FA2); }
+        .hotspot.shop { background: linear-gradient(135deg, #FFEB3B, #FBC02D); color: #333; }
+        .hotspot.training { background: linear-gradient(135deg, #00BCD4, #0097A7); }
+        .hotspot.gate { background: linear-gradient(135deg, #607D8B, #455A64); }
+        .hotspot.teacher { background: linear-gradient(135deg, #795548, #5D4037); }
+        
+        .hotspot.selected {
+            animation: pulse 1.5s infinite;
+            border: 3px solid white;
+        }
+        
+        .hotspot.new-point {
+            background: linear-gradient(135deg, #FF5722, #FF9800);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+        }
+        
+        .info-bubble {
+            position: absolute;
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            min-width: 260px;
+            max-width: 340px;
+            display: none;
+            pointer-events: auto;
+        }
+        
+        .info-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 8px 8px 0;
+            border-style: solid;
+            border-color: white transparent transparent transparent;
+        }
+        
+        .category-filter.active {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #FF5722, #FF7043);
+            color: white;
+            border-color: #FF5722;
+        }
+
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.05);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .modal-overlay.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            width: 90%;
+            max-width: 480px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">🏫 智行校园</h1>
+            <p class="text-gray-600">校内地图导航系统 - 支持自定义地图和点位</p>
+        </header>
+
+        <div class="bg-white rounded-2xl shadow-xl p-4 md:p-6 mb-6">
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <button class="category-filter active px-4 py-2 rounded-full text-sm font-medium transition-all" data-category="all">全部</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-green-100 text-green-700" data-category="dorm">宿舍</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-blue-100 text-blue-700" data-category="classroom">教学楼</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-orange-100 text-orange-700" data-category="canteen">食堂</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-pink-100 text-pink-700" data-category="sport">运动场馆</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-purple-100 text-purple-700" data-category="admin">行政办事</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-yellow-100 text-yellow-700" data-category="shop">商业设施</button>
+                <button class="category-filter px-4 py-2 rounded-full text-sm font-medium transition-all bg-cyan-100 text-cyan-700" data-category="training">实训中心</button>
+                
+                <div class="ml-auto flex gap-2">
+                    <button id="normal-mode-btn" class="mode-btn active px-4 py-2 rounded-full text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 transition-all">🖱️ 浏览</button>
+                    <button id="edit-mode-btn" class="mode-btn px-4 py-2 rounded-full text-sm font-medium border border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 transition-all">✏️ 编辑</button>
+                    <button id="upload-btn" class="px-4 py-2 rounded-full text-sm font-medium border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-all">📤 上传地图</button>
+                </div>
+            </div>
+
+            <div class="flex flex-col md:flex-row gap-4 mb-4">
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">起点</label>
+                    <select id="start-select" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                        <option value="">请选择起点</option>
+                    </select>
+                </div>
+                <button id="swap-btn" class="self-end md:self-center px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors" title="交换起点终点">↔️</button>
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">终点</label>
+                    <select id="end-select" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                        <option value="">请选择终点</option>
+                    </select>
+                </div>
+                <button id="navigate-btn" class="self-end md:self-center px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-medium hover:from-green-600 hover:to-green-700 transition-all shadow-lg">导航</button>
+            </div>
+
+            <div id="route-info" class="hidden mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p class="text-green-800 font-medium">🚶 步行导航</p>
+                <p id="route-distance" class="text-sm text-green-600"></p>
+            </div>
+        </div>
+
+        <div class="map-container" id="map-container">
+            <img src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=detailed%20campus%20map%20floor%20plan%20aerial%20view%20with%20labeled%20buildings%20dormitories%20teaching%20buildings%20canteen%20sports%20field%20roads%20green%20areas%20clean%20simple%20design%20white%20background%20professional&image_size=landscape_16_9" 
+                 alt="校园地图" class="map-image" id="map-image">
+            <canvas class="route-canvas" id="route-canvas"></canvas>
+            <div id="hotspots-container"></div>
+            <div class="info-bubble" id="info-bubble">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 id="bubble-title" class="text-lg font-bold text-gray-800"></h3>
+                    <span id="bubble-close" class="text-gray-400 cursor-pointer">✕</span>
+                </div>
+                <div id="bubble-content" class="text-sm text-gray-600 mb-3"></div>
+                <div class="flex gap-2">
+                    <button id="edit-point-btn" class="flex-1 px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-colors">编辑</button>
+                    <button id="delete-point-btn" class="flex-1 px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-colors">删除</button>
+                </div>
+            </div>
+            <div id="edit-hint" class="hidden absolute bottom-4 left-4 bg-black bg-opacity-70 text-white px-4 py-2 rounded-lg text-sm z-50">
+                ✏️ 编辑模式：点击地图添加点位，点击现有点位编辑
+            </div>
+        </div>
+
+        <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl p-4 shadow-lg text-center">
+                <div class="text-2xl mb-1">🏠</div>
+                <div class="font-bold text-gray-800">学生公寓</div>
+                <div class="text-sm text-gray-500" id="dorm-count">0</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 shadow-lg text-center">
+                <div class="text-2xl mb-1">🏫</div>
+                <div class="font-bold text-gray-800">教学楼</div>
+                <div class="text-sm text-gray-500" id="classroom-count">0</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 shadow-lg text-center">
+                <div class="text-2xl mb-1">🍜</div>
+                <div class="font-bold text-gray-800">食堂</div>
+                <div class="text-sm text-gray-500" id="canteen-count">0</div>
+            </div>
+            <div class="bg-white rounded-xl p-4 shadow-lg text-center">
+                <div class="text-2xl mb-1">⚽</div>
+                <div class="font-bold text-gray-800">运动场馆</div>
+                <div class="text-sm text-gray-500" id="sport-count">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="upload-modal">
+        <div class="modal-content">
+            <h3 class="text-xl font-bold mb-4">📤 上传校园地图</h3>
+            <div class="upload-area" id="upload-area">
+                <div class="text-4xl mb-2">🖼️</div>
+                <p class="text-gray-600">点击或拖拽图片到此处</p>
+                <p class="text-sm text-gray-400 mt-1">支持 JPG、PNG 格式</p>
+                <input type="file" id="file-input" accept="image/jpeg,image/png" class="hidden">
+            </div>
+            <div class="mt-4 flex gap-2">
+                <button id="close-upload-btn" class="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal-content">
+            <h3 class="text-xl font-bold mb-4" id="edit-modal-title">添加点位</h3>
+            <form id="point-form">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">点位名称</label>
+                    <input type="text" id="point-name" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" placeholder="如：1栋学生公寓">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">点位类别</label>
+                    <select id="point-category" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                        <option value="dorm">🏠 宿舍</option>
+                        <option value="classroom">🏫 教学楼</option>
+                        <option value="canteen">🍜 食堂</option>
+                        <option value="sport">⚽ 运动场馆</option>
+                        <option value="admin">🏢 行政办事</option>
+                        <option value="shop">🏪 商业设施</option>
+                        <option value="training">🔧 实训中心</option>
+                        <option value="gate">🚪 校门</option>
+                        <option value="teacher">👨‍🏫 教师公寓</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">详细信息</label>
+                    <textarea id="point-info" rows="4" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" placeholder="如：热水供应时间、开放时间等&#10;使用换行分隔不同信息"></textarea>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" id="cancel-edit-btn" class="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors">取消</button>
+                    <button type="submit" class="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const defaultBuildingData = {
+            'dorm-1': { name: '1栋学生公寓', category: 'dorm', left: 18, top: 22, info: '📍 地址：红椿路北侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-2': { name: '2栋学生公寓', category: 'dorm', left: 42, top: 25, info: '📍 地址：红椿路北侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-3': { name: '3栋学生公寓', category: 'dorm', left: 72, top: 52, info: '📍 地址：桃李路西侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-4': { name: '4栋学生公寓', category: 'dorm', left: 62, top: 42, info: '📍 地址：桂花园南侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-5': { name: '5栋学生公寓', category: 'dorm', left: 52, top: 47, info: '📍 地址：桂花园南侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-10': { name: '10栋学生公寓', category: 'dorm', left: 32, top: 52, info: '📍 地址：银杏路西侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：公共卫浴' },
+            'dorm-11': { name: '11栋学生公寓', category: 'dorm', left: 47, top: 32, info: '📍 地址：红椿路南侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-12': { name: '12栋学生公寓', category: 'dorm', left: 12, top: 82, info: '📍 地址：纸坊大街北侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-6': { name: '6栋学生公寓', category: 'dorm', left: 82, top: 45, info: '📍 地址：桃李路西侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-7': { name: '7栋学生公寓', category: 'dorm', left: 67, top: 39, info: '📍 地址：桂花园南侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：独立卫浴' },
+            'dorm-9': { name: '9栋学生公寓', category: 'dorm', left: 37, top: 62, info: '📍 地址：银杏路西侧\n🔥 热水供应：6:00-8:00, 11:30-13:30, 17:30-22:30\n🏢 楼层：6层\n🚻 卫浴：公共卫浴' },
+            
+            'classroom-1': { name: '1幢教学楼', category: 'classroom', left: 62, top: 85, info: '📍 地址：纸坊大街北侧\n⏰ 开放时间：7:00-22:00\n📚 教室数：40间\n💻 多媒体教室：20间' },
+            'classroom-2': { name: '2幢教学楼', category: 'classroom', left: 42, top: 59, info: '📍 地址：银杏路北侧\n⏰ 开放时间：7:00-22:00\n📚 教室数：35间\n💻 多媒体教室：15间' },
+            'classroom-3': { name: '3幢教学楼', category: 'classroom', left: 27, top: 69, info: '📍 地址：银杏路南侧\n⏰ 开放时间：7:00-22:00\n📚 教室数：30间\n💻 多媒体教室：12间' },
+            
+            'canteen-1': { name: '一食堂/大礼堂', category: 'canteen', left: 45, top: 82, info: '📍 地址：纸坊大街北侧\n⏰ 开放时间：\n 早餐：6:30-8:30\n 午餐：11:00-13:00\n 晚餐：17:00-19:00\n🍽️ 窗口数：25个\n🚗 停车场：有' },
+            'canteen-2': { name: '二食堂', category: 'canteen', left: 39, top: 17, info: '📍 地址：红椿路北侧\n⏰ 开放时间：\n 早餐：6:30-8:30\n 午餐：11:00-13:00\n 晚餐：17:00-19:00\n🍽️ 窗口数：20个\n🌿 特色：风味小吃' },
+            
+            'sport-1': { name: '运动场', category: 'sport', left: 69, top: 15, info: '📍 地址：校园东北部\n⏰ 开放时间：6:00-22:00\n⚽ 设施：标准足球场\n🏃 跑道：400米塑胶跑道\n🏟️ 看台：可容纳3000人' },
+            'sport-2': { name: '篮球场', category: 'sport', left: 22, top: 35, info: '📍 地址：1栋学生公寓南侧\n⏰ 开放时间：6:00-22:00\n🏀 场地数：6个\n🎾 灯光球场：4个' },
+            'sport-3': { name: '乒乓球场', category: 'sport', left: 17, top: 55, info: '📍 地址：科技大楼北侧\n⏰ 开放时间：8:00-21:00\n🏓 球台数：12张\n📱 预约：微信小程序' },
+            
+            'admin-1': { name: '科技大楼', category: 'admin', left: 22, top: 79, info: '📍 地址：纸坊大街北侧\n⏰ 办公时间：8:30-12:00, 14:00-17:30\n🏢 职能部门：\n • 教务处\n • 学生处\n • 财务处\n • 招生办' },
+            
+            'shop-1': { name: '商业街', category: 'shop', left: 59, top: 25, info: '📍 地址：运动场南侧\n🏪 设施：\n • 超市\n • 水果店\n • 奶茶店\n • 打印店\n⏰ 营业时间：8:00-22:00' },
+            
+            'gate-1': { name: '学校大门', category: 'gate', left: 29, top: 89, info: '📍 地址：纸坊大街\n🚗 进出通道：3条\n🛡️ 安保：24小时值班' },
+            
+            'teacher-1': { name: '1栋教师公寓', category: 'teacher', left: 12, top: 72, info: '📍 地址：翠竹路东侧' },
+            'teacher-2': { name: '2栋教师公寓', category: 'teacher', left: 9, top: 65, info: '📍 地址：翠竹路东侧' },
+            'teacher-3': { name: '3栋教师公寓', category: 'teacher', left: 15, top: 59, info: '📍 地址：翠竹路东侧' },
+            'teacher-4': { name: '4栋教师公寓', category: 'teacher', left: 19, top: 52, info: '📍 地址：翠竹路东侧' },
+            'teacher-5': { name: '5栋教师公寓', category: 'teacher', left: 85, top: 29, info: '📍 地址：桃李路东侧' },
+            'teacher-6': { name: '6栋教师公寓', category: 'teacher', left: 82, top: 19, info: '📍 地址：桃李路东侧' },
+            
+            'training-1': { name: '木材工艺实训中心', category: 'training', left: 45, top: 9, info: '📍 地址：校园北部\n🔧 实训项目：木材加工工艺' },
+            'training-2': { name: '园林工程实训中心', category: 'training', left: 32, top: 19, info: '📍 地址：校园西北部\n🌳 实训项目：园林设计与施工' },
+            'training-3': { name: '室内工程实训中心', category: 'training', left: 32, top: 32, info: '📍 地址：1栋学生公寓东侧\n🏠 实训项目：室内装修设计' },
+            'training-4': { name: '古建筑实训中心', category: 'training', left: 35, top: 47, info: '📍 地址：桂花园西侧\n🏯 实训项目：古建筑修缮' },
+            'training-5': { name: '机电教学实训基地', category: 'training', left: 55, top: 42, info: '📍 地址：桂花园东侧\n⚙️ 实训项目：机电设备维修' },
+            'training-6': { name: '园林植物实训中心', category: 'training', left: 39, top: 39, info: '📍 地址：桂花园中心\n🌿 实训项目：植物栽培' },
+            'training-7': { name: '红花玉兰培育基地', category: 'training', left: 22, top: 49, info: '📍 地址：校园西南部\n🌸 实训项目：花卉培育' },
+            'training-8': { name: '无人机实训中心', category: 'training', left: 75, top: 55, info: '📍 地址：3栋学生公寓东侧\n✈️ 实训项目：无人机操控' },
+            'training-9': { name: '湖北集训基地', category: 'training', left: 52, top: 7, info: '📍 地址：校园最北部' }
+        };
+
+        let buildingData = {};
+        let canvasCtx;
+        let mapContainer;
+        let mapImage;
+        let routeCanvas;
+        let currentMode = 'normal';
+        let currentEditId = null;
+        let selectedPointId = null;
+
+        function init() {
+            loadData();
+            
+            mapContainer = document.getElementById('map-container');
+            mapImage = document.getElementById('map-image');
+            routeCanvas = document.getElementById('route-canvas');
+            
+            mapImage.onload = function() {
+                routeCanvas.width = mapImage.offsetWidth;
+                routeCanvas.height = mapImage.offsetHeight;
+                canvasCtx = routeCanvas.getContext('2d');
+                renderHotspots();
+            };
+
+            renderHotspots();
+            populateSelects();
+            updateStats();
+            addEventListeners();
+        }
+
+        function loadData() {
+            const savedData = localStorage.getItem('campusMapData');
+            const savedImage = localStorage.getItem('campusMapImage');
+            
+            if (savedData) {
+                buildingData = JSON.parse(savedData);
+            } else {
+                buildingData = JSON.parse(JSON.stringify(defaultBuildingData));
+            }
+            
+            if (savedImage) {
+                mapImage.src = savedImage;
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('campusMapData', JSON.stringify(buildingData));
+        }
+
+        function renderHotspots() {
+            const container = document.getElementById('hotspots-container');
+            container.innerHTML = '';
+
+            for (const [id, data] of Object.entries(buildingData)) {
+                const hotspot = document.createElement('div');
+                hotspot.className = `hotspot ${data.category}`;
+                hotspot.setAttribute('data-id', id);
+                hotspot.setAttribute('data-category', data.category);
+                hotspot.style.left = data.left + '%';
+                hotspot.style.top = data.top + '%';
+                
+                const icon = getCategoryIcon(data.category);
+                hotspot.textContent = icon;
+                
+                hotspot.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (currentMode === 'edit') {
+                        currentEditId = id;
+                        openEditModal(data);
+                    } else {
+                        showInfoBubble(id, e);
+                    }
+                });
+                
+                container.appendChild(hotspot);
+            }
+        }
+
+        function getCategoryIcon(category) {
+            const icons = {
+                dorm: '🏠',
+                classroom: '🏫',
+                canteen: '🍜',
+                sport: '⚽',
+                admin: '🏢',
+                shop: '🏪',
+                training: '🔧',
+                gate: '🚪',
+                teacher: '👨‍🏫'
+            };
+            return icons[category] || '📍';
+        }
+
+        function showInfoBubble(id, event) {
+            const data = buildingData[id];
+            if (!data) return;
+
+            selectedPointId = id;
+            const bubble = document.getElementById('info-bubble');
+            document.getElementById('bubble-title').textContent = data.name;
+            document.getElementById('bubble-content').innerHTML = data.info.replace(/\n/g, '<br>');
+
+            const hotspot = event.target;
+            const rect = hotspot.getBoundingClientRect();
+            const containerRect = mapContainer.getBoundingClientRect();
+
+            let left = rect.left - containerRect.left + rect.width / 2;
+            let top = rect.top - containerRect.top - 10;
+
+            if (left > containerRect.width - 300) {
+                left = containerRect.width - 300;
+            }
+            if (top < 100) {
+                top = rect.top - containerRect.top + rect.height + 10;
+            }
+
+            bubble.style.left = left + 'px';
+            bubble.style.top = top + 'px';
+            bubble.style.display = 'block';
+        }
+
+        function hideInfoBubble() {
+            document.getElementById('info-bubble').style.display = 'none';
+            selectedPointId = null;
+        }
+
+        function populateSelects() {
+            const startSelect = document.getElementById('start-select');
+            const endSelect = document.getElementById('end-select');
+            
+            startSelect.innerHTML = '<option value="">请选择起点</option>';
+            endSelect.innerHTML = '<option value="">请选择终点</option>';
+
+            for (const [id, data] of Object.entries(buildingData)) {
+                const option1 = document.createElement('option');
+                option1.value = id;
+                option1.textContent = data.name;
+                startSelect.appendChild(option1);
+
+                const option2 = document.createElement('option');
+                option2.value = id;
+                option2.textContent = data.name;
+                endSelect.appendChild(option2);
+            }
+        }
+
+        function updateStats() {
+            const counts = {
+                dorm: 0, classroom: 0, canteen: 0, sport: 0,
+                admin: 0, shop: 0, training: 0, gate: 0, teacher: 0
+            };
+            
+            for (const data of Object.values(buildingData)) {
+                if (counts[data.category] !== undefined) {
+                    counts[data.category]++;
+                }
+            }
+            
+            document.getElementById('dorm-count').textContent = counts.dorm;
+            document.getElementById('classroom-count').textContent = counts.classroom;
+            document.getElementById('canteen-count').textContent = counts.canteen;
+            document.getElementById('sport-count').textContent = counts.sport;
+        }
+
+        function addEventListeners() {
+            document.getElementById('bubble-close').addEventListener('click', hideInfoBubble);
+            mapContainer.addEventListener('click', function(e) {
+                if (currentMode === 'edit' && e.target === mapImage) {
+                    addNewPoint(e);
+                } else if (e.target === mapImage || e.target === routeCanvas) {
+                    hideInfoBubble();
+                }
+            });
+
+            document.querySelectorAll('.category-filter').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.category-filter').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    filterHotspots(this.dataset.category);
+                });
+            });
+
+            document.getElementById('swap-btn').addEventListener('click', swapLocations);
+            document.getElementById('navigate-btn').addEventListener('click', navigate);
+
+            document.getElementById('normal-mode-btn').addEventListener('click', () => setMode('normal'));
+            document.getElementById('edit-mode-btn').addEventListener('click', () => setMode('edit'));
+
+            document.getElementById('upload-btn').addEventListener('click', () => {
+                document.getElementById('upload-modal').classList.add('show');
+            });
+            
+            document.getElementById('close-upload-btn').addEventListener('click', () => {
+                document.getElementById('upload-modal').classList.remove('show');
+            });
+
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+            
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+
+            document.getElementById('edit-point-btn').addEventListener('click', () => {
+                if (selectedPointId) {
+                    hideInfoBubble();
+                    currentEditId = selectedPointId;
+                    openEditModal(buildingData[selectedPointId]);
+                }
+            });
+
+            document.getElementById('delete-point-btn').addEventListener('click', () => {
+                if (selectedPointId && confirm('确定要删除这个点位吗？')) {
+                    delete buildingData[selectedPointId];
+                    saveData();
+                    renderHotspots();
+                    populateSelects();
+                    updateStats();
+                    hideInfoBubble();
+                }
+            });
+
+            document.getElementById('cancel-edit-btn').addEventListener('click', () => {
+                document.getElementById('edit-modal').classList.remove('show');
+                currentEditId = null;
+            });
+
+            document.getElementById('point-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                savePoint();
+            });
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('normal-mode-btn').classList.toggle('active', mode === 'normal');
+            document.getElementById('edit-mode-btn').classList.toggle('active', mode === 'edit');
+            document.getElementById('edit-hint').classList.toggle('hidden', mode !== 'edit');
+            hideInfoBubble();
+        }
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('请上传图片文件');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                mapImage.src = e.target.result;
+                localStorage.setItem('campusMapImage', e.target.result);
+                document.getElementById('upload-modal').classList.remove('show');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function addNewPoint(event) {
+            const rect = mapContainer.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            
+            const left = (x / rect.width) * 100;
+            const top = (y / rect.height) * 100;
+            
+            currentEditId = null;
+            openEditModal({
+                name: '',
+                category: 'dorm',
+                info: '',
+                left: left,
+                top: top
+            });
+        }
+
+        function openEditModal(data) {
+            document.getElementById('edit-modal-title').textContent = currentEditId ? '编辑点位' : '添加点位';
+            document.getElementById('point-name').value = data.name;
+            document.getElementById('point-category').value = data.category;
+            document.getElementById('point-info').value = data.info;
+            
+            if (!currentEditId) {
+                window.tempPointCoords = { left: data.left, top: data.top };
+            }
+            
+            document.getElementById('edit-modal').classList.add('show');
+        }
+
+        function savePoint() {
+            const name = document.getElementById('point-name').value;
+            const category = document.getElementById('point-category').value;
+            const info = document.getElementById('point-info').value;
+            
+            if (!name.trim()) {
+                alert('请输入点位名称');
+                return;
+            }
+            
+            if (currentEditId) {
+                buildingData[currentEditId].name = name;
+                buildingData[currentEditId].category = category;
+                buildingData[currentEditId].info = info;
+            } else {
+                const id = 'point-' + Date.now();
+                buildingData[id] = {
+                    name: name,
+                    category: category,
+                    info: info,
+                    left: window.tempPointCoords.left,
+                    top: window.tempPointCoords.top
+                };
+            }
+            
+            saveData();
+            renderHotspots();
+            populateSelects();
+            updateStats();
+            document.getElementById('edit-modal').classList.remove('show');
+            currentEditId = null;
+        }
+
+        function filterHotspots(category) {
+            const hotspots = document.querySelectorAll('.hotspot');
+            hotspots.forEach(hotspot => {
+                if (category === 'all' || hotspot.dataset.category === category) {
+                    hotspot.style.display = 'flex';
+                } else {
+                    hotspot.style.display = 'none';
+                }
+            });
+        }
+
+        function swapLocations() {
+            const startSelect = document.getElementById('start-select');
+            const endSelect = document.getElementById('end-select');
+            const temp = startSelect.value;
+            startSelect.value = endSelect.value;
+            endSelect.value = temp;
+        }
+
+        function navigate() {
+            const startId = document.getElementById('start-select').value;
+            const endId = document.getElementById('end-select').value;
+
+            if (!startId || !endId) {
+                alert('请选择起点和终点');
+                return;
+            }
+
+            if (startId === endId) {
+                alert('起点和终点不能相同');
+                return;
+            }
+
+            drawRoute(startId, endId);
+            showRouteInfo(startId, endId);
+        }
+
+        function drawRoute(startId, endId) {
+            const start = buildingData[startId];
+            const end = buildingData[endId];
+
+            if (!canvasCtx) return;
+
+            canvasCtx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
+
+            const startX = (start.left / 100) * routeCanvas.width;
+            const startY = (start.top / 100) * routeCanvas.height;
+            const endX = (end.left / 100) * routeCanvas.width;
+            const endY = (end.top / 100) * routeCanvas.height;
+
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(startX, startY);
+            
+            const midX = (startX + endX) / 2;
+            const midY = Math.min(startY, endY) - 50;
+            
+            canvasCtx.quadraticCurveTo(midX, midY, endX, endY);
+            
+            canvasCtx.strokeStyle = '#FF5722';
+            canvasCtx.lineWidth = 4;
+            canvasCtx.setLineDash([10, 5]);
+            canvasCtx.stroke();
+            canvasCtx.setLineDash([]);
+
+            canvasCtx.beginPath();
+            canvasCtx.arc(startX, startY, 8, 0, Math.PI * 2);
+            canvasCtx.fillStyle = '#4CAF50';
+            canvasCtx.fill();
+            canvasCtx.strokeStyle = 'white';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.stroke();
+
+            canvasCtx.beginPath();
+            canvasCtx.arc(endX, endY, 8, 0, Math.PI * 2);
+            canvasCtx.fillStyle = '#FF5722';
+            canvasCtx.fill();
+            canvasCtx.strokeStyle = 'white';
+            canvasCtx.lineWidth = 2;
+            canvasCtx.stroke();
+        }
+
+        function showRouteInfo(startId, endId) {
+            const start = buildingData[startId];
+            const end = buildingData[endId];
+
+            const dx = Math.abs(start.left - end.left);
+            const dy = Math.abs(start.top - end.top);
+            const distance = Math.sqrt(dx * dx + dy * dy) * 12;
+            const minutes = Math.ceil(distance / 80);
+
+            document.getElementById('route-distance').textContent = `距离约 ${Math.round(distance)} 米，预计步行 ${minutes} 分钟`;
+            document.getElementById('route-info').classList.remove('hidden');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

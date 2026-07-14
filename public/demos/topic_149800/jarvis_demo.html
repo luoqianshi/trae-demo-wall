@@ -1,0 +1,1780 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S. - 交互式体验 Demo</title>
+<style>
+/* ============================================================
+   全局变量与重置 - 复刻 dashboard.py 配色
+   ============================================================ */
+:root{
+  --bg:#05080f; --bg-2:#0a1018;
+  --panel:rgba(10,16,24,0.85);
+  --cyan:#00d4ff; --amber:#ffaa00; --gold:#ffd700;
+  --white:#ffffff; --red:#ff4444; --green:#4CAF50;
+  --text:#9fb4c8; --text-dim:#5a6b7d;
+  --border:rgba(0,212,255,0.18);
+  --border-strong:rgba(0,212,255,0.4);
+  --mono:'Consolas','SF Mono','Fira Code','Courier New',monospace;
+  --sans:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.7;overflow-x:hidden;min-height:100vh}
+::selection{background:var(--cyan);color:var(--bg)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:rgba(0,212,255,0.3);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,212,255,0.5)}
+
+/* 网格背景与扫描线 */
+.grid-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,212,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.04) 1px,transparent 1px);
+  background-size:60px 60px}
+.scanline{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:linear-gradient(180deg,transparent 0%,rgba(0,212,255,0.06) 50%,transparent 100%);
+  height:200px;animation:scan 8s linear infinite}
+@keyframes scan{0%{transform:translateY(-200px)}100%{transform:translateY(100vh)}}
+
+/* ============================================================
+   顶部导航栏
+   ============================================================ */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(5,8,15,0.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 24px;height:52px;font-family:var(--mono)}
+nav .brand{color:var(--cyan);font-weight:bold;font-size:14px;letter-spacing:4px;margin-right:32px}
+nav .tabs{display:flex;gap:4px;flex:1}
+nav .tab{background:none;border:1px solid transparent;color:var(--text-dim);
+  font-family:var(--mono);font-size:11px;letter-spacing:2px;
+  padding:6px 14px;border-radius:3px;cursor:pointer;transition:all 0.2s}
+nav .tab:hover{color:var(--cyan);background:rgba(0,212,255,0.08)}
+nav .tab.active{color:var(--cyan);border-color:var(--border-strong);background:rgba(0,212,255,0.06)}
+nav .nav-status{color:var(--green);font-size:10px;letter-spacing:1px;display:flex;align-items:center;gap:6px}
+nav .nav-status::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s infinite}
+@keyframes blink{50%{opacity:0.4}}
+
+/* ============================================================
+   通用
+   ============================================================ */
+.tab-view{display:none;position:relative;z-index:1}
+.tab-view.active{display:block}
+.section-tag{font-family:var(--mono);font-size:11px;color:var(--cyan);letter-spacing:3px;margin-bottom:8px;text-transform:uppercase}
+.section-title{font-family:var(--mono);font-size:26px;font-weight:bold;color:var(--white);letter-spacing:2px;margin-bottom:12px}
+.section-desc{color:var(--text-dim);font-size:14px;max-width:700px;margin-bottom:40px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:20px;transition:all 0.3s}
+.card:hover{border-color:var(--border-strong);box-shadow:0 0 20px rgba(0,212,255,0.1);transform:translateY(-2px)}
+
+/* ============================================================
+   仪表盘 - 全屏布局
+   ============================================================ */
+.dashboard{height:calc(100vh - 52px);display:flex;flex-direction:column;padding:12px;gap:8px}
+.db-topbar{display:flex;align-items:center;padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:rgba(0,212,255,0.03);font-family:var(--mono)}
+.db-topbar .db-title{color:var(--cyan);font-size:13px;font-weight:bold;letter-spacing:4px}
+.db-topbar .db-sub{color:var(--text-dim);font-size:10px;letter-spacing:2px;margin-left:16px}
+.db-topbar .db-online{margin-left:auto;color:var(--green);font-size:10px;letter-spacing:1px}
+.db-mid{flex:1;display:flex;gap:8px;min-height:0}
+
+/* 侧边面板 */
+.side-panel{width:150px;flex-shrink:0;background:rgba(10,16,24,0.8);border:1px solid var(--border);border-radius:6px;padding:12px 10px;font-family:var(--mono);font-size:9px;overflow-y:auto}
+.side-panel.right{width:210px}
+.sp-title{color:var(--cyan);font-size:9px;font-weight:bold;letter-spacing:2px;margin-bottom:8px}
+.sp-sep{height:1px;background:rgba(0,212,255,0.2);margin-bottom:8px}
+.sp-row{display:flex;justify-content:space-between;margin-bottom:5px;align-items:center}
+.sp-key{color:var(--text-dim);font-size:8px}
+.sp-val{color:var(--text);font-size:9px;font-weight:bold}
+.sp-val.active{color:var(--cyan)}
+.sp-val.warn{color:var(--amber)}
+.sp-val.err{color:var(--red)}
+.sp-val.gold{color:var(--gold)}
+
+/* 中央区域 */
+.center-area{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;position:relative}
+.reactor-stage{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:4px}
+.reactor{position:relative;width:160px;height:160px;cursor:pointer}
+.reactor .ticks{position:absolute;inset:-50px;border-radius:50%;animation:spin 40s linear infinite}
+.reactor .ticks::before,.reactor .ticks::after{content:'';position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0deg,transparent 4deg,rgba(0,212,255,0.25) 4deg,rgba(0,212,255,0.25) 6deg,transparent 6deg);
+  -webkit-mask:radial-gradient(circle,transparent 62%,#000 62%,#000 70%,transparent 70%);mask:radial-gradient(circle,transparent 62%,#000 62%,#000 70%,transparent 70%)}
+.reactor .ticks::after{background:conic-gradient(from 0deg,transparent 0deg,transparent 28deg,rgba(0,212,255,0.5) 28deg,rgba(0,212,255,0.5) 32deg,transparent 32deg);
+  -webkit-mask:radial-gradient(circle,transparent 60%,#000 60%,#000 72%,transparent 72%);mask:radial-gradient(circle,transparent 60%,#000 60%,#000 72%,transparent 72%)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.reactor .core{position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,rgba(255,255,255,0.9),var(--core-color,#00d4ff) 40%,rgba(0,212,255,0.1) 100%);
+  box-shadow:0 0 60px var(--core-glow,rgba(0,212,255,0.5)),0 0 120px var(--core-glow,rgba(0,212,255,0.3));
+  animation:breath 4s ease-in-out infinite}
+@keyframes breath{0%,100%{transform:scale(1);opacity:0.85}50%{transform:scale(1.06);opacity:1}}
+.reactor .halo{position:absolute;inset:-35px;border-radius:50%;
+  background:radial-gradient(circle,var(--core-glow,rgba(0,212,255,0.2)),transparent 60%);
+  animation:breath 4s ease-in-out infinite}
+.reactor .arc{position:absolute;inset:-16px;border-radius:50%;border:3px solid transparent;
+  border-top-color:var(--core-color,#00d4ff);border-right-color:var(--core-color,#00d4ff);
+  opacity:0;animation:spin 1.5s linear infinite}
+.reactor .ripple{position:absolute;inset:0;border-radius:50%;border:2px solid var(--core-color,#00d4ff);opacity:0}
+.reactor .flash{position:absolute;inset:-16px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,0.8),transparent 60%);opacity:0}
+.reactor.state-IDLE .core{--core-color:#00d4ff;--core-glow:rgba(0,212,255,0.5)}
+.reactor.state-LISTENING .core{--core-color:#00d4ff;--core-glow:rgba(0,212,255,0.7);animation:listen-pulse 0.6s ease-in-out infinite}
+@keyframes listen-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+.reactor.state-THINKING .core{--core-color:#ffaa00;--core-glow:rgba(255,170,0,0.5);animation:none;opacity:0.9}
+.reactor.state-THINKING .arc{opacity:1}
+.reactor.state-SPEAKING .core{--core-color:#ffd700;--core-glow:rgba(255,215,0,0.6);animation:speak-pulse 0.4s ease-in-out infinite}
+.reactor.state-SPEAKING .ripple{animation:ripple 0.8s ease-out infinite}
+.reactor.state-SPEAKING .ripple:nth-child(5){animation-delay:0.3s}
+@keyframes speak-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+@keyframes ripple{0%{transform:scale(1);opacity:0.8}100%{transform:scale(2.2);opacity:0}}
+.reactor.wake-flash .flash{animation:wake-flash 0.6s ease-out}
+@keyframes wake-flash{0%{opacity:0;transform:scale(0.8)}20%{opacity:0.9}100%{opacity:0;transform:scale(1.5)}}
+
+/* 状态标签 */
+.state-label{font-family:var(--mono);font-size:18px;font-weight:bold;letter-spacing:4px;color:var(--cyan);margin-top:4px;transition:color 0.3s}
+.state-hint{font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:1px;margin-top:2px;min-height:14px}
+.state-hint .key{color:var(--cyan)}
+
+/* 对话显示区 */
+.dialog-area{flex:1;width:100%;max-width:680px;background:rgba(5,8,15,0.6);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:8px;overflow-y:auto;font-family:var(--mono);font-size:12px;min-height:60px;max-height:200px}
+.dialog-line{margin-bottom:6px;animation:dlg-in 0.3s ease}
+@keyframes dlg-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.dlg-tag{font-weight:bold;margin-right:6px}
+.dialog-line.you .dlg-tag{color:var(--cyan)}
+.dialog-line.you .dlg-text{color:var(--text)}
+.dialog-line.jarvis-zh .dlg-tag{color:var(--gold)}
+.dialog-line.jarvis-zh .dlg-text{color:var(--text)}
+.dialog-line.jarvis-en .dlg-tag{color:var(--amber)}
+.dialog-line.jarvis-en .dlg-text{color:var(--text)}
+.dialog-line.system .dlg-tag{color:var(--red)}
+.dialog-line.system .dlg-text{color:var(--text-dim)}
+.dialog-line.skill .dlg-tag{color:var(--green)}
+.dialog-line.skill .dlg-text{color:var(--text-dim);font-size:11px}
+
+/* 流式预览 */
+.stream-preview{width:100%;max-width:680px;font-family:var(--mono);font-size:12px;color:var(--gold);min-height:18px;padding:2px 14px;opacity:0;transition:opacity 0.2s}
+.stream-preview.show{opacity:1}
+.stream-preview::before{content:'> ';color:var(--text-dim)}
+
+/* 输入区 */
+.input-area{display:flex;gap:8px;width:100%;max-width:680px;padding:0 0 4px}
+#user-input{flex:1;background:rgba(10,16,24,0.8);border:1px solid var(--border);border-radius:4px;
+  padding:10px 14px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;transition:border-color 0.2s}
+#user-input:focus{border-color:var(--cyan)}
+#user-input::placeholder{color:var(--text-dim)}
+#user-input:disabled{opacity:0.5}
+#send-btn{background:rgba(0,212,255,0.1);border:1px solid var(--border-strong);border-radius:4px;
+  padding:0 18px;color:var(--cyan);font-family:var(--mono);font-size:11px;letter-spacing:2px;cursor:pointer;transition:all 0.2s}
+#send-btn:hover:not(:disabled){background:var(--cyan);color:var(--bg)}
+#send-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+/* 快捷命令 */
+.quick-cmds{display:flex;flex-direction:column;gap:4px}
+.qc-btn{background:rgba(0,212,255,0.06);border:1px solid var(--border);border-radius:4px;
+  padding:7px 10px;color:var(--text);font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  cursor:pointer;transition:all 0.2s;text-align:left}
+.qc-btn:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(0,212,255,0.12)}
+.qc-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+/* 手势迷你面板 */
+.gesture-mini{margin-top:12px}
+.gesture-btns{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.gb{background:rgba(0,212,255,0.06);border:1px solid var(--border);border-radius:4px;
+  padding:6px 4px;color:var(--text);font-family:var(--mono);font-size:8px;letter-spacing:0.5px;
+  cursor:pointer;transition:all 0.2s;text-align:center}
+.gb:hover{border-color:var(--cyan);color:var(--cyan)}
+.gb.active{background:var(--cyan);color:var(--bg);border-color:var(--cyan)}
+
+/* 音量条 */
+.db-bottom{display:flex;flex-direction:column;gap:4px}
+.vol-bar{display:flex;gap:2px;height:18px;align-items:flex-end;padding:0 2px}
+.vol-bar .vbar{flex:1;background:rgba(0,212,255,0.08);border-radius:1px;height:30%;transition:height 0.1s}
+.vol-bar .vbar.on{background:var(--cyan);box-shadow:0 0 4px var(--cyan)}
+.vol-bar .vbar.gold{background:var(--gold);box-shadow:0 0 4px var(--gold)}
+.status-bar{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--text-dim);padding:0 4px}
+
+/* ============================================================
+   技能标签页
+   ============================================================ */
+.section-wrap{padding:80px 40px 60px;max-width:1200px;margin:0 auto}
+.skill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.skill-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:20px;transition:all 0.3s;position:relative;overflow:hidden}
+.skill-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),transparent);transform:scaleX(0);transform-origin:left;transition:transform 0.4s}
+.skill-card:hover::before{transform:scaleX(1)}
+.skill-card:hover{border-color:var(--border-strong);transform:translateY(-3px)}
+.skill-card .sk-cat{display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:2px 8px;border-radius:3px;margin-bottom:8px}
+.sk-cat.QUERY{background:rgba(0,212,255,0.12);color:var(--cyan)}
+.sk-cat.CONTROL{background:rgba(255,68,68,0.12);color:var(--red)}
+.sk-cat.NOTIFICATION{background:rgba(76,175,80,0.12);color:var(--green)}
+.skill-card h3{color:var(--white);font-size:14px;margin-bottom:6px;font-family:var(--mono);letter-spacing:1px}
+.skill-card .sk-desc{font-size:12px;color:var(--text-dim);line-height:1.6;margin-bottom:10px}
+.skill-card .sk-kw{display:flex;flex-wrap:wrap;gap:4px}
+.skill-card .sk-kw span{font-family:var(--mono);font-size:9px;background:rgba(0,212,255,0.08);border:1px solid var(--border);border-radius:3px;padding:2px 6px;color:var(--text)}
+.skill-card .sk-try{margin-top:10px;width:100%;background:rgba(0,212,255,0.08);border:1px solid var(--border);border-radius:4px;padding:6px;color:var(--cyan);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all 0.2s}
+.skill-card .sk-try:hover{background:var(--cyan);color:var(--bg)}
+
+/* ============================================================
+   手势模拟器
+   ============================================================ */
+.gesture-sim{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;align-items:flex-start;margin-top:20px}
+.hand-svg-wrap{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:30px;position:relative}
+.hand-svg-wrap h4{font-family:var(--mono);color:var(--cyan);font-size:12px;letter-spacing:2px;margin-bottom:16px;text-align:center}
+.hand-svg{width:240px;height:260px}
+.hand-svg .lm{fill:var(--text-dim);transition:all 0.3s}
+.hand-svg .lm.active{fill:var(--cyan);r:6}
+.hand-svg .bone{stroke:var(--text-dim);stroke-width:1.5;fill:none;transition:all 0.3s}
+.hand-svg .bone.active{stroke:var(--cyan);stroke-width:2.5}
+.gesture-selector{display:flex;flex-direction:column;gap:12px}
+.gs-btn{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px 20px;cursor:pointer;transition:all 0.3s;min-width:220px}
+.gs-btn:hover{border-color:var(--border-strong);background:rgba(0,212,255,0.04)}
+.gs-btn.active{border-color:var(--cyan);background:rgba(0,212,255,0.08);box-shadow:0 0 16px rgba(0,212,255,0.15)}
+.gs-btn .gs-name{font-family:var(--mono);font-size:13px;font-weight:bold;color:var(--white);letter-spacing:2px;margin-bottom:4px}
+.gs-btn.active .gs-name{color:var(--cyan)}
+.gs-btn .gs-desc{font-size:11px;color:var(--text-dim)}
+.gs-btn .gs-action{font-family:var(--mono);font-size:10px;color:var(--amber);margin-top:6px}
+.gesture-result{margin-top:20px;text-align:center;font-family:var(--mono);font-size:13px;color:var(--cyan);min-height:20px;letter-spacing:2px}
+
+/* ============================================================
+   配置面板
+   ============================================================ */
+.config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.config-section{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:20px}
+.config-section h4{font-family:var(--mono);color:var(--cyan);font-size:12px;letter-spacing:2px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.config-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
+.config-row label{font-size:12px;color:var(--text);font-family:var(--mono)}
+.config-row .cfg-val{font-family:var(--mono);font-size:11px;color:var(--cyan);min-width:40px;text-align:right}
+.toggle{position:relative;width:40px;height:20px;cursor:pointer;flex-shrink:0}
+.toggle input{display:none}
+.toggle .slider{position:absolute;inset:0;background:rgba(255,255,255,0.1);border:1px solid var(--border);border-radius:10px;transition:0.3s}
+.toggle .slider::before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--text-dim);border-radius:50%;transition:0.3s}
+.toggle input:checked+.slider{background:rgba(0,212,255,0.2);border-color:var(--cyan)}
+.toggle input:checked+.slider::before{transform:translateX(20px);background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.cfg-slider{flex:1;max-width:120px;-webkit-appearance:none;height:4px;background:rgba(0,212,255,0.15);border-radius:2px;outline:none}
+.cfg-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--cyan);cursor:pointer;box-shadow:0 0 6px var(--cyan)}
+.cfg-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--cyan);cursor:pointer;border:none}
+
+/* ============================================================
+   数据流管道
+   ============================================================ */
+.pipeline-wrap{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:30px;margin-top:20px}
+.pipeline-steps{display:flex;flex-direction:column;gap:0;position:relative}
+.pipe-step{display:flex;align-items:flex-start;gap:16px;padding:14px 16px;border:1px solid var(--border);border-radius:6px;background:rgba(0,212,255,0.02);margin-bottom:0;position:relative;transition:all 0.4s}
+.pipe-step+.pipe-step{margin-top:-1px;border-top-left-radius:0;border-top-right-radius:0}
+.pipe-step+.pipe-step::before{content:'';position:absolute;top:-12px;left:30px;width:2px;height:12px;background:var(--border)}
+.pipe-step.active{border-color:var(--amber);background:rgba(255,170,0,0.08);box-shadow:0 0 12px rgba(255,170,0,0.15)}
+.pipe-step.done{border-color:var(--cyan);background:rgba(0,212,255,0.04)}
+.pipe-step.active .pipe-num{background:var(--amber);color:var(--bg)}
+.pipe-step.done .pipe-num{background:var(--cyan);color:var(--bg)}
+.pipe-num{width:28px;height:28px;border-radius:50%;background:rgba(0,212,255,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;font-weight:bold;color:var(--cyan);flex-shrink:0;transition:all 0.3s}
+.pipe-body{flex:1}
+.pipe-body .pipe-name{font-family:var(--mono);font-size:13px;color:var(--white);font-weight:bold;margin-bottom:2px}
+.pipe-body .pipe-desc{font-size:11px;color:var(--text-dim)}
+.pipe-body .pipe-tag{display:inline-block;font-family:var(--mono);font-size:9px;background:rgba(0,212,255,0.08);border:1px solid var(--border);border-radius:3px;padding:1px 6px;color:var(--cyan);margin-top:4px}
+.pipe-step.active .pipe-tag{border-color:var(--amber);color:var(--amber);background:rgba(255,170,0,0.08)}
+
+/* ============================================================
+   视频弹窗
+   ============================================================ */
+.video-modal{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center}
+.video-modal.show{display:flex}
+.video-content{background:var(--bg-2);border:1px solid var(--border-strong);border-radius:8px;width:90%;max-width:720px;overflow:hidden}
+.video-header{display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border);font-family:var(--mono)}
+.video-header .vh-title{color:var(--cyan);font-size:13px;letter-spacing:2px;flex:1}
+.video-header .vh-close{color:var(--text-dim);font-size:20px;cursor:pointer}
+.video-header .vh-close:hover{color:var(--red)}
+.video-body{position:relative;height:360px;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.video-body .video-text{font-family:var(--mono);color:var(--cyan);font-size:24px;letter-spacing:4px;text-shadow:0 0 20px var(--cyan);animation:video-glow 2s ease-in-out infinite}
+@keyframes video-glow{0%,100%{opacity:0.7}50%{opacity:1}}
+.video-body .video-scan{position:absolute;inset:0;background:linear-gradient(180deg,transparent 0%,rgba(0,212,255,0.1) 50%,transparent 100%);height:100px;animation:scan 3s linear infinite}
+.video-body .video-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(0,212,255,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.05) 1px,transparent 1px);background-size:40px 40px}
+.video-footer{padding:12px 20px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-dim);display:flex;justify-content:space-between}
+
+/* ============================================================
+   搜索结果
+   ============================================================ */
+.search-results{background:rgba(0,212,255,0.03);border:1px solid var(--border);border-radius:4px;padding:10px;margin:6px 0}
+.search-results .sr-title{font-family:var(--mono);font-size:10px;color:var(--green);letter-spacing:1px;margin-bottom:6px}
+.sr-item{padding:4px 0;border-bottom:1px solid rgba(0,212,255,0.08)}
+.sr-item:last-child{border-bottom:none}
+.sr-item .sr-link{font-size:11px;color:var(--cyan);text-decoration:none}
+.sr-item .sr-link:hover{text-decoration:underline}
+.sr-item .sr-snippet{font-size:10px;color:var(--text-dim)}
+
+/* ============================================================
+   响应式
+   ============================================================ */
+@media(max-width:900px){
+  .db-mid{flex-direction:column}
+  .side-panel{width:100%;max-height:80px}
+  .side-panel.right{width:100%}
+  .reactor-stage{width:180px;height:180px}
+  .reactor{width:130px;height:130px}
+  nav .tab{padding:4px 8px;font-size:10px}
+  nav .brand{font-size:12px;margin-right:12px}
+  .gesture-sim{flex-direction:column;align-items:center}
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="scanline"></div>
+
+<!-- ============================================================
+     顶部导航栏
+     ============================================================ -->
+<nav>
+  <div class="brand">J.A.R.V.I.S.</div>
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard">DASHBOARD</button>
+    <button class="tab" data-tab="skills">SKILLS</button>
+    <button class="tab" data-tab="gesture">GESTURE</button>
+    <button class="tab" data-tab="config">CONFIG</button>
+    <button class="tab" data-tab="pipeline">PIPELINE</button>
+  </div>
+  <div class="nav-status">SYSTEM ONLINE</div>
+</nav>
+
+<!-- ============================================================
+     仪表盘视图
+     ============================================================ -->
+<div class="tab-view active" id="view-dashboard">
+  <div class="dashboard">
+    <div class="db-topbar">
+      <span class="db-title">J.A.R.V.I.S.</span>
+      <span class="db-sub">VOICE ASSISTANT // MARK IV</span>
+      <span class="db-online">● ONLINE</span>
+    </div>
+
+    <div class="db-mid">
+      <!-- 左侧面板 -->
+      <div class="side-panel">
+        <div class="sp-title">CORE STATUS</div>
+        <div class="sp-sep"></div>
+        <div class="sp-row"><span class="sp-key">STATE</span><span class="sp-val" id="sp-state">IDLE</span></div>
+        <div class="sp-row"><span class="sp-key">UPTIME</span><span class="sp-val" id="sp-uptime">00:00:00</span></div>
+        <div class="sp-row"><span class="sp-key">MODE</span><span class="sp-val">VOICE</span></div>
+        <div class="sp-row"><span class="sp-key">LANG</span><span class="sp-val">EN/ZH</span></div>
+        <div class="sp-row"><span class="sp-key">TURNS</span><span class="sp-val" id="sp-turns">0</span></div>
+        <div class="sp-title" style="margin-top:14px">SYSTEMS</div>
+        <div class="sp-sep"></div>
+        <div class="sp-row"><span class="sp-key">WAKE</span><span class="sp-val active">READY</span></div>
+        <div class="sp-row"><span class="sp-key">ASR</span><span class="sp-val active">READY</span></div>
+        <div class="sp-row"><span class="sp-key">LLM</span><span class="sp-val active">READY</span></div>
+        <div class="sp-row"><span class="sp-key">TTS</span><span class="sp-val active" id="sp-tts">READY</span></div>
+        <div class="sp-row"><span class="sp-key">AUDIO</span><span class="sp-val active">READY</span></div>
+        <div class="sp-row"><span class="sp-key">VISION</span><span class="sp-val" id="sp-vision">OFF</span></div>
+        <div class="sp-row"><span class="sp-key">MUSIC</span><span class="sp-val" id="sp-music">OFF</span></div>
+      </div>
+
+      <!-- 中央区域 -->
+      <div class="center-area">
+        <div class="reactor-stage">
+          <div class="reactor state-IDLE" id="reactor">
+            <div class="ticks"></div>
+            <div class="halo"></div>
+            <div class="arc"></div>
+            <div class="core"></div>
+            <div class="ripple"></div>
+            <div class="ripple"></div>
+            <div class="flash"></div>
+          </div>
+        </div>
+        <div class="state-label" id="state-label">STANDBY</div>
+        <div class="state-hint" id="state-hint">click reactor or press <span class="key">SPACE</span> to wake</div>
+
+        <!-- 对话显示区 -->
+        <div class="dialog-area" id="dialog-area">
+          <div class="dialog-line system"><span class="dlg-tag">[SYSTEM]</span><span class="dlg-text">J.A.R.V.I.S. initialized. Awaiting wake word.</span></div>
+        </div>
+
+        <!-- 流式预览 -->
+        <div class="stream-preview" id="stream-preview"></div>
+
+        <!-- 输入区 -->
+        <div class="input-area">
+          <input type="text" id="user-input" placeholder='say something to Jarvis...' disabled>
+          <button id="send-btn" disabled>SEND</button>
+        </div>
+      </div>
+
+      <!-- 右侧面板 -->
+      <div class="side-panel right">
+        <div class="sp-title">QUICK COMMANDS</div>
+        <div class="sp-sep"></div>
+        <div class="quick-cmds" id="quick-cmds">
+          <button class="qc-btn" data-cmd="现在几点了">现在几点</button>
+          <button class="qc-btn" data-cmd="北京今天天气怎么样">北京天气</button>
+          <button class="qc-btn" data-cmd="帮我搜索一下最新的AI新闻">搜索AI新闻</button>
+          <button class="qc-btn" data-cmd="帮我打开客厅的灯">开灯</button>
+          <button class="qc-btn" data-cmd="播放介绍视频">介绍视频</button>
+          <button class="qc-btn" data-cmd="开启鼠标控制">鼠标控制</button>
+          <button class="qc-btn" data-cmd="打开手部捕捉测试页面">手部测试</button>
+          <button class="qc-btn" data-cmd="停止音乐">停止音乐</button>
+        </div>
+        <div class="sp-title gesture-mini" style="margin-top:14px">GESTURE (SIM)</div>
+        <div class="sp-sep"></div>
+        <div class="gesture-btns">
+          <button class="gb" data-gesture="OPEN_PALM">OPEN_PALM</button>
+          <button class="gb" data-gesture="FIST">FIST</button>
+          <button class="gb" data-gesture="THUMBS_UP">THUMBS_UP</button>
+          <button class="gb" data-gesture="POINT">POINT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部 -->
+    <div class="db-bottom">
+      <div class="vol-bar" id="vol-bar"></div>
+      <div class="status-bar">
+        <span>JARVIS SYSTEM v0.6 // ENCRYPTED CHANNEL // DEMO MODE</span>
+        <span id="clock">00:00:00</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     技能标签页
+     ============================================================ -->
+<div class="tab-view" id="view-skills">
+  <div class="section-wrap">
+    <div class="section-tag">SKILL SYSTEM</div>
+    <div class="section-title">8 BUILT-IN SKILLS</div>
+    <div class="section-desc">可扩展技能系统，含安全白名单分级。点击「Try」按钮可直接在仪表盘中体验对应技能。</div>
+    <div class="skill-grid" id="skill-grid"></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     手势标签页
+     ============================================================ -->
+<div class="tab-view" id="view-gesture">
+  <div class="section-wrap">
+    <div class="section-tag">VISION & GESTURE</div>
+    <div class="section-title">HAND GESTURE SIMULATOR</div>
+    <div class="section-desc">MediaPipe 21 关键点手势识别模拟器。选择不同手势查看关键点高亮与对应动作。</div>
+    <div class="gesture-sim">
+      <div class="hand-svg-wrap">
+        <h4>HAND LANDMARKS // 21 POINTS</h4>
+        <svg class="hand-svg" id="hand-svg" viewBox="0 0 240 260">
+          <!-- 骨架连线 -->
+          <g id="hand-bones">
+            <!-- 拇指 -->
+            <line class="bone" data-bone="thumb" x1="80" y1="170" x2="60" y2="140"/>
+            <line class="bone" data-bone="thumb" x1="60" y1="140" x2="50" y2="110"/>
+            <line class="bone" data-bone="thumb" x1="50" y1="110" x2="55" y2="85"/>
+            <!-- 食指 -->
+            <line class="bone" data-bone="index" x1="100" y1="170" x2="100" y2="120"/>
+            <line class="bone" data-bone="index" x1="100" y1="120" x2="100" y2="80"/>
+            <line class="bone" data-bone="index" x1="100" y1="80" x2="100" y2="50"/>
+            <!-- 中指 -->
+            <line class="bone" data-bone="middle" x1="120" y1="170" x2="125" y2="120"/>
+            <line class="bone" data-bone="middle" x1="125" y1="120" x2="130" y2="75"/>
+            <line class="bone" data-bone="middle" x1="130" y1="75" x2="135" y2="45"/>
+            <!-- 无名指 -->
+            <line class="bone" data-bone="ring" x1="140" y1="170" x2="150" y2="125"/>
+            <line class="bone" data-bone="ring" x1="150" y1="125" x2="160" y2="85"/>
+            <line class="bone" data-bone="ring" x1="160" y1="85" x2="170" y2="55"/>
+            <!-- 小指 -->
+            <line class="bone" data-bone="pinky" x1="160" y1="170" x2="175" y2="140"/>
+            <line class="bone" data-bone="pinky" x1="175" y1="140" x2="190" y2="110"/>
+            <line class="bone" data-bone="pinky" x1="190" y1="110" x2="200" y2="85"/>
+            <!-- 掌心 -->
+            <line class="bone" data-bone="palm" x1="80" y1="170" x2="160" y2="170"/>
+          </g>
+          <!-- 关键点 -->
+          <g id="hand-points">
+            <!-- 拇指 1-4 -->
+            <circle class="lm" data-finger="thumb" cx="80" cy="170" r="4"/>
+            <circle class="lm" data-finger="thumb" cx="60" cy="140" r="4"/>
+            <circle class="lm" data-finger="thumb" cx="50" cy="110" r="4"/>
+            <circle class="lm" data-finger="thumb" cx="55" cy="85" r="4"/>
+            <!-- 食指 5-8 -->
+            <circle class="lm" data-finger="index" cx="100" cy="170" r="4"/>
+            <circle class="lm" data-finger="index" cx="100" cy="120" r="4"/>
+            <circle class="lm" data-finger="index" cx="100" cy="80" r="4"/>
+            <circle class="lm" data-finger="index" cx="100" cy="50" r="4"/>
+            <!-- 中指 9-12 -->
+            <circle class="lm" data-finger="middle" cx="120" cy="170" r="4"/>
+            <circle class="lm" data-finger="middle" cx="125" cy="120" r="4"/>
+            <circle class="lm" data-finger="middle" cx="130" cy="75" r="4"/>
+            <circle class="lm" data-finger="middle" cx="135" cy="45" r="4"/>
+            <!-- 无名指 13-16 -->
+            <circle class="lm" data-finger="ring" cx="140" cy="170" r="4"/>
+            <circle class="lm" data-finger="ring" cx="150" cy="125" r="4"/>
+            <circle class="lm" data-finger="ring" cx="160" cy="85" r="4"/>
+            <circle class="lm" data-finger="ring" cx="170" cy="55" r="4"/>
+            <!-- 小指 17-20 -->
+            <circle class="lm" data-finger="pinky" cx="160" cy="170" r="4"/>
+            <circle class="lm" data-finger="pinky" cx="175" cy="140" r="4"/>
+            <circle class="lm" data-finger="pinky" cx="190" cy="110" r="4"/>
+            <circle class="lm" data-finger="pinky" cx="200" cy="85" r="4"/>
+            <!-- 手腕 0 -->
+            <circle class="lm" data-finger="wrist" cx="100" cy="200" r="5"/>
+          </g>
+        </svg>
+      </div>
+      <div class="gesture-selector">
+        <button class="gs-btn" data-gesture="OPEN_PALM">
+          <div class="gs-name">OPEN_PALM</div>
+          <div class="gs-desc">2+ 手指伸出 + 拇指外展</div>
+          <div class="gs-action">→ 唤醒 / 鼠标移动</div>
+        </button>
+        <button class="gs-btn" data-gesture="FIST">
+          <div class="gs-name">FIST</div>
+          <div class="gs-desc">0 手指伸出，握拳</div>
+          <div class="gs-action">→ 结束会话 / Barge-in / 拖拽</div>
+        </button>
+        <button class="gs-btn" data-gesture="THUMBS_UP">
+          <div class="gs-name">THUMBS_UP</div>
+          <div class="gs-desc">0 手指 + 拇指朝上</div>
+          <div class="gs-action">→ 确认 / 右键单击</div>
+        </button>
+        <button class="gs-btn" data-gesture="POINT">
+          <div class="gs-name">POINT</div>
+          <div class="gs-desc">仅食指伸出</div>
+          <div class="gs-action">→ 滚轮滚动</div>
+        </button>
+      </div>
+    </div>
+    <div class="gesture-result" id="gesture-result">select a gesture to simulate</div>
+  </div>
+</div>
+
+<!-- ============================================================
+     配置标签页
+     ============================================================ -->
+<div class="tab-view" id="view-config">
+  <div class="section-wrap">
+    <div class="section-tag">CONFIGURATION</div>
+    <div class="section-title">SYSTEM SETTINGS</div>
+    <div class="section-desc">模拟 jarvis_gui.py 配置工具。所有设置实时影响 Demo 行为。</div>
+    <div class="config-grid">
+      <!-- 语音服务 -->
+      <div class="config-section">
+        <h4>▎ SPEECH & FEEDBACK</h4>
+        <div class="config-row">
+          <label>TTS Voice</label>
+          <div class="toggle"><input type="checkbox" id="cfg-tts" checked><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Bilingual</label>
+          <div class="toggle"><input type="checkbox" id="cfg-bilingual" checked><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>BG Music</label>
+          <div class="toggle"><input type="checkbox" id="cfg-music"><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Barge-in</label>
+          <div class="toggle"><input type="checkbox" id="cfg-bargein" checked><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>TTS Speed</label>
+          <input type="range" class="cfg-slider" id="cfg-speed" min="0.5" max="2" step="0.1" value="1">
+          <span class="cfg-val" id="cfg-speed-val">1.0</span>
+        </div>
+      </div>
+      <!-- 唤醒词 -->
+      <div class="config-section">
+        <h4>▎ WAKE WORD</h4>
+        <div class="config-row">
+          <label>Model</label>
+          <span class="cfg-val">hey_jarvis</span>
+        </div>
+        <div class="config-row">
+          <label>Sensitivity</label>
+          <input type="range" class="cfg-slider" id="cfg-sens" min="0.1" max="1" step="0.1" value="0.5">
+          <span class="cfg-val" id="cfg-sens-val">0.5</span>
+        </div>
+        <div class="config-row">
+          <label>Confirm Window</label>
+          <span class="cfg-val">2.0s / 2x</span>
+        </div>
+        <div class="config-row">
+          <label>Greeting</label>
+          <span class="cfg-val" style="font-size:10px">At your service, sir.</span>
+        </div>
+      </div>
+      <!-- LLM -->
+      <div class="config-section">
+        <h4>▎ LLM PARAMETERS</h4>
+        <div class="config-row">
+          <label>Model</label>
+          <span class="cfg-val">deepseek-chat</span>
+        </div>
+        <div class="config-row">
+          <label>Temperature</label>
+          <input type="range" class="cfg-slider" id="cfg-temp" min="0" max="2" step="0.1" value="0.7">
+          <span class="cfg-val" id="cfg-temp-val">0.7</span>
+        </div>
+        <div class="config-row">
+          <label>Max Tokens</label>
+          <input type="range" class="cfg-slider" id="cfg-tokens" min="128" max="2048" step="128" value="512">
+          <span class="cfg-val" id="cfg-tokens-val">512</span>
+        </div>
+        <div class="config-row">
+          <label>Streaming</label>
+          <div class="toggle"><input type="checkbox" id="cfg-stream" checked><span class="slider"></span></div>
+        </div>
+      </div>
+      <!-- 安全 -->
+      <div class="config-section">
+        <h4>▎ SECURITY & AGENT</h4>
+        <div class="config-row">
+          <label>Allow CONTROL</label>
+          <div class="toggle"><input type="checkbox" id="cfg-control"><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Web Search</label>
+          <div class="toggle"><input type="checkbox" id="cfg-search" checked><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Vision/Gesture</label>
+          <div class="toggle"><input type="checkbox" id="cfg-vision"><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Mouse Control</label>
+          <div class="toggle"><input type="checkbox" id="cfg-mouse"><span class="slider"></span></div>
+        </div>
+        <div class="config-row">
+          <label>Max Context</label>
+          <span class="cfg-val">20 turns</span>
+        </div>
+        <div class="config-row">
+          <label>Silence Threshold</label>
+          <span class="cfg-val">300</span>
+        </div>
+      </div>
+      <!-- PPT -->
+      <div class="config-section">
+        <h4>▎ PPT AUTO-SPEECH</h4>
+        <div class="config-row">
+          <label>Voice Mode</label>
+          <span class="cfg-val">Preset Voice</span>
+        </div>
+        <div class="config-row">
+          <label>Speed</label>
+          <input type="range" class="cfg-slider" min="0.5" max="2" step="0.1" value="1" disabled>
+          <span class="cfg-val">1.0</span>
+        </div>
+        <div class="config-row">
+          <label>Loudness</label>
+          <input type="range" class="cfg-slider" min="0" max="100" step="10" value="50" disabled>
+          <span class="cfg-val">50</span>
+        </div>
+        <div class="config-row">
+          <label>Slide Pause</label>
+          <span class="cfg-val">2.0s</span>
+        </div>
+      </div>
+      <!-- 连通性测试 -->
+      <div class="config-section">
+        <h4>▎ CONNECTION TEST</h4>
+        <div class="config-row"><label>WakeWord</label><span class="cfg-val active">PASS</span></div>
+        <div class="config-row"><label>ASR (Volcengine)</label><span class="cfg-val active">PASS</span></div>
+        <div class="config-row"><label>LLM (DeepSeek)</label><span class="cfg-val active">PASS</span></div>
+        <div class="config-row"><label>TTS (Volcengine)</label><span class="cfg-val active">PASS</span></div>
+        <div class="config-row"><label>Web Search</label><span class="cfg-val active">PASS</span></div>
+        <div class="config-row"><label>MediaPipe</label><span class="cfg-val warn">SIM</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     数据流管道标签页
+     ============================================================ -->
+<div class="tab-view" id="view-pipeline">
+  <div class="section-wrap">
+    <div class="section-tag">DATA FLOW PIPELINE</div>
+    <div class="section-title">CONVERSATION PIPELINE</div>
+    <div class="section-desc">完整对话流程的 11 步数据流管道。在仪表盘中发送消息时，此处将实时高亮当前执行步骤。</div>
+    <div class="pipeline-wrap">
+      <div class="pipeline-steps" id="pipeline-steps">
+        <div class="pipe-step" data-step="0">
+          <div class="pipe-num">1</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Wake Word Detection</div>
+            <div class="pipe-desc">OpenWakeWord ONNX 离线检测，每帧 80ms，2s 确认窗口内需 2 次检测</div>
+            <div class="pipe-tag">wake_word/detector.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="1">
+          <div class="pipe-num">2</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Wake Feedback</div>
+            <div class="pipe-desc">880Hz + 1320Hz 双音正弦波反馈，GUI 触发白色爆闪 + 双层波纹扩散</div>
+            <div class="pipe-tag">Web Audio API</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="2">
+          <div class="pipe-num">3</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Background Music + Greeting</div>
+            <div class="pipe-desc">后台线程启动音乐循环播放，TTS 播报 &quot;At your service, sir.&quot;</div>
+            <div class="pipe-tag">audio/music.py + tts</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="3">
+          <div class="pipe-num">4</div>
+          <div class="pipe-body">
+            <div class="pipe-name">VAD Recording</div>
+            <div class="pipe-desc">PyAudio 16kHz 录音 + numpy RMS 能量 VAD，静音 1.5s 停止，最长 15s</div>
+            <div class="pipe-tag">audio/recorder.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="4">
+          <div class="pipe-num">5</div>
+          <div class="pipe-body">
+            <div class="pipe-name">ASR Recognition</div>
+            <div class="pipe-desc">火山引擎豆包语音大模型，WAV base64 编码 -> submit -> 轮询 query</div>
+            <div class="pipe-tag">asr/volcengine_asr.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="5">
+          <div class="pipe-num">6</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Stop Music Check</div>
+            <div class="pipe-desc">检测&quot;停止音乐/stop music&quot;关键词，命中则结束会话</div>
+            <div class="pipe-tag">agent/runtime.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="6">
+          <div class="pipe-num">7</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Skill Routing + Security</div>
+            <div class="pipe-desc">关键词匹配技能 -> SecurityGuard 校验操作类别 (QUERY/NOTIFICATION/CONTROL/DANGEROUS)</div>
+            <div class="pipe-tag">agent/skills.py + utils/security.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="7">
+          <div class="pipe-num">8</div>
+          <div class="pipe-body">
+            <div class="pipe-name">LLM Streaming Generation</div>
+            <div class="pipe-desc">DeepSeek stream=True，逐 token yield，6 字符增量推送 GUI 打字机效果，首字 ~500ms</div>
+            <div class="pipe-tag">llm/client.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="8">
+          <div class="pipe-num">9</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Bilingual Parse + Honorific</div>
+            <div class="pipe-desc">正则解析 [中]/[英] 标记拆分双语，中文补全&quot;先生&quot;，英文补全&quot;sir&quot;</div>
+            <div class="pipe-tag">agent/runtime.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="9">
+          <div class="pipe-num">10</div>
+          <div class="pipe-body">
+            <div class="pipe-name">TTS Streaming + Playback</div>
+            <div class="pipe-desc">WebSocket 双向流式 TTS（首音 ~300ms），后台收 chunk 入 queue，主线程 play_stream 实时播放</div>
+            <div class="pipe-tag">tts/tts_ws_client.py + audio/player.py</div>
+          </div>
+        </div>
+        <div class="pipe-step" data-step="10">
+          <div class="pipe-num">11</div>
+          <div class="pipe-body">
+            <div class="pipe-name">Loop / End Session</div>
+            <div class="pipe-desc">TTS 完成 -> 回到步骤 4 继续录音。用户说&quot;停止音乐&quot;或手势 FIST -> 结束会话 -> 回 IDLE</div>
+            <div class="pipe-tag">agent/runtime.py</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     视频弹窗
+     ============================================================ -->
+<div class="video-modal" id="video-modal">
+  <div class="video-content">
+    <div class="video-header">
+      <span class="vh-title">J.A.R.V.I.S. INTRODUCTION VIDEO</span>
+      <span class="vh-close" id="video-close">&times;</span>
+    </div>
+    <div class="video-body">
+      <div class="video-grid"></div>
+      <div class="video-scan"></div>
+      <div class="video-text" id="video-text">INITIALIZING...</div>
+    </div>
+    <div class="video-footer">
+      <span>BACKGROUND MUSIC: PAUSED</span>
+      <span id="video-timer">00:00 / 00:08</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 配置对象
+// ============================================================
+const CFG = {
+  ttsEnabled: true,
+  bilingual: true,
+  musicEnabled: false,
+  bargeinEnabled: true,
+  ttsSpeed: 1.0,
+  sensitivity: 0.5,
+  temperature: 0.7,
+  maxTokens: 512,
+  streaming: true,
+  allowControl: false,
+  webSearch: true,
+  vision: false,
+  mouseControl: false,
+};
+
+// ============================================================
+// 预设回复库
+// ============================================================
+const SKILLS = [
+  { name:'DateTimeSkill', cat:'QUERY', desc:'查询当前时间和日期，返回格式化结果。', keywords:['时间','几点','日期','date','time','now','今天','几号','星期'], try:'现在几点了？' },
+  { name:'WeatherSkill', cat:'QUERY', desc:'Open-Meteo API 查询实时天气与 3 天预报，WMO 代码转中文，内置 40+ 城市映射。', keywords:['天气','weather','温度','下雨','气温'], try:'北京今天天气怎么样？' },
+  { name:'WebSearchSkill', cat:'QUERY', desc:'Bing + DuckDuckGo 双后端联网搜索，智能提取查询词，最多 3 条结果注入 LLM 上下文。', keywords:['搜索','搜一下','search','google','最新','新闻'], try:'帮我搜索一下最新的AI新闻' },
+  { name:'LightControlSkill', cat:'CONTROL', desc:'灯光控制（占位实现），需 SECURITY_ALLOW_CONTROL=true 才可执行。', keywords:['开灯','关灯','light','turn on','turn off'], try:'帮我打开客厅的灯' },
+  { name:'PlayIntroVideoSkill', cat:'NOTIFICATION', desc:'后台线程播放介绍视频，暂停背景音乐，播完自动恢复。', keywords:['介绍视频','intro video','play the video','播放视频'], try:'播放介绍视频' },
+  { name:'OpenHandTestPageSkill', cat:'NOTIFICATION', desc:'打开浏览器 MediaPipe JS 手部捕捉测试页面，先释放摄像头。', keywords:['画面捕捉','手部测试','hand test'], try:'打开手部捕捉测试页面' },
+  { name:'RestartGestureSkill', cat:'NOTIFICATION', desc:'重启后台 GestureWatcher 守护线程。', keywords:['恢复手势','重启手势识别','restart gesture'], try:'恢复手势识别' },
+  { name:'ToggleMouseControlSkill', cat:'CONTROL', desc:'开启/关闭手势鼠标控制，与 GestureWatcher 互斥占用摄像头。', keywords:['鼠标控制','手势鼠标','开启鼠标','mouse control'], try:'开启鼠标控制' },
+];
+
+const REPLY_DB = {
+  time: {
+    keywords:['时间','几点','日期','date','time','now','今天','几号','星期'],
+    generate() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2,'0');
+      const m = String(now.getMinutes()).padStart(2,'0');
+      const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const daysZh = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      return {
+        zh: `现在是 ${h}:${m}，${dateStr}，${daysZh[now.getDay()]}，先生。`,
+        en: `It is currently ${h}:${m}, ${dateStr}, ${days[now.getDay()]}, sir.`,
+        skill: 'DateTimeSkill'
+      };
+    }
+  },
+  weather: {
+    keywords:['天气','weather','温度','下雨','气温'],
+    generate(text) {
+      let city = '北京';
+      const cityMap = {'北京':'Beijing','上海':'Shanghai','广州':'Guangzhou','深圳':'Shenzhen','伦敦':'London','纽约':'New York','东京':'Tokyo','巴黎':'Paris'};
+      const cityZh = Object.keys(cityMap);
+      for (const c of cityZh) { if (text.includes(c)) { city = c; break; } }
+      const cityEn = cityMap[city] || 'Beijing';
+      const temps = [18,20,22,24,26,15,28];
+      const conds = ['晴','多云','阴','小雨'];
+      const condsEn = ['sunny','cloudy','overcast','light rain'];
+      const t = temps[Math.floor(Math.random()*temps.length)];
+      const ci = Math.floor(Math.random()*conds.length);
+      return {
+        zh: `${city}今天${conds[ci]}，气温 ${t} 摄氏度，湿度 45%，微风，能见度良好，先生。未来三天将持续${conds[ci]}天气。`,
+        en: `${cityEn} is ${condsEn[ci]} today, ${t} degrees Celsius, humidity 45%, gentle breeze, good visibility, sir. The ${condsEn[ci]} weather will continue for the next three days.`,
+        skill: 'WeatherSkill'
+      };
+    }
+  },
+  search: {
+    keywords:['搜索','搜一下','search','google','最新','新闻'],
+    generate(text) {
+      let query = text.replace(/帮我|搜索|搜一下|一下|search|for|google|最新|的/gi,'').trim() || 'AI news';
+      return {
+        zh: `我已为您搜索了"${query}"，先生。根据最新信息，${query}领域近期发展迅速，多项技术取得突破。以下是主要发现。`,
+        en: `I have searched for "${query}", sir. Based on the latest information, the field of ${query} has been developing rapidly with multiple technological breakthroughs. Here are the key findings.`,
+        skill: 'WebSearchSkill',
+        searchResults: [
+          { title: `${query} - 最新进展与突破`, link: 'https://example.com/result1', snippet: `近期${query}领域取得了显著进展，多项研究发表...` },
+          { title: `2024 ${query} 行业报告`, link: 'https://example.com/result2', snippet: `根据最新行业报告，${query}市场规模持续增长...` },
+          { title: `${query} 技术趋势分析`, link: 'https://example.com/result3', snippet: `专家分析指出，${query}将在未来几年内...` },
+        ]
+      };
+    }
+  },
+  light: {
+    keywords:['开灯','关灯','light','turn on','turn off','客厅','卧室'],
+    generate(text) {
+      const isOn = text.includes('开') || text.includes('on') || text.includes('open');
+      const room = text.includes('客厅') ? '客厅' : text.includes('卧室') ? '卧室' : '客厅';
+      const roomEn = room === '客厅' ? 'living room' : 'bedroom';
+      return {
+        zh: `${isOn?'已为您打开':'已为您关闭'}${room}的灯，先生。`,
+        en: `The ${roomEn} light has been ${isOn?'turned on':'turned off'}, sir.`,
+        skill: 'LightControlSkill',
+        requiresControl: true,
+        action: isOn ? 'light_on' : 'light_off'
+      };
+    }
+  },
+  video: {
+    keywords:['介绍视频','intro video','play the video','播放视频'],
+    generate() {
+      return {
+        zh: '正在为您播放介绍视频，先生。背景音乐已暂停，播完后将自动恢复。',
+        en: 'Playing the introduction video, sir. Background music has been paused and will resume after playback.',
+        skill: 'PlayIntroVideoSkill',
+        action: 'play_video'
+      };
+    }
+  },
+  handtest: {
+    keywords:['画面捕捉','手部测试','hand test','手部捕捉'],
+    generate() {
+      return {
+        zh: '正在打开手部捕捉测试页面，先生。已释放摄像头资源，请在浏览器中查看 MediaPipe 实时关键点检测。',
+        en: 'Opening the hand tracking test page, sir. Camera resource has been released. Please view the MediaPipe real-time landmark detection in your browser.',
+        skill: 'OpenHandTestPageSkill'
+      };
+    }
+  },
+  restartgesture: {
+    keywords:['恢复手势','重启手势识别','restart gesture'],
+    generate() {
+      return {
+        zh: '手势识别守护线程已重启，先生。摄像头和 MediaPipe 模型已重新初始化。',
+        en: 'The gesture recognition watchdog thread has been restarted, sir. Camera and MediaPipe model have been reinitialized.',
+        skill: 'RestartGestureSkill'
+      };
+    }
+  },
+  mouse: {
+    keywords:['鼠标控制','手势鼠标','开启鼠标','mouse control','关闭鼠标'],
+    generate(text) {
+      const isOn = text.includes('开') || text.includes('enable') || text.includes('on');
+      return {
+        zh: `手势鼠标控制已${isOn?'开启':'关闭'}，先生。${isOn?'请将手部保持在摄像头前方，张开手掌移动光标，握拳点击。':'摄像头资源已释放。'}`,
+        en: `Gesture mouse control has been ${isOn?'enabled':'disabled'}, sir. ${isOn?'Please keep your hand in front of the camera. Open palm to move cursor, fist to click.':'Camera resource has been released.'}`,
+        skill: 'ToggleMouseControlSkill',
+        requiresControl: true
+      };
+    }
+  },
+  stop_music: {
+    keywords:['停止音乐','关掉音乐','stop music','结束对话','结束会话'],
+    generate() {
+      return {
+        zh: '遵命，先生。音乐已停止，会话结束。',
+        en: 'As you wish, sir. Music stopped, session ended.',
+        skill: 'SessionEnd',
+        action: 'end_session'
+      };
+    }
+  },
+  greeting: {
+    keywords:['你好','hello','hi','hey','嗨'],
+    generate() {
+      return {
+        zh: '您好，先生。有什么可以为您效劳的吗？',
+        en: 'Hello, sir. How may I be of service?',
+        skill: null
+      };
+    }
+  },
+  thanks: {
+    keywords:['谢谢','感谢','thank','thanks'],
+    generate() {
+      return {
+        zh: '不客气，先生。能为您效劳是我的荣幸。',
+        en: 'You are most welcome, sir. It is my pleasure to be of service.',
+        skill: null
+      };
+    }
+  },
+  who: {
+    keywords:['你是谁','你叫什么','who are you','your name','介绍自己','自我介绍'],
+    generate() {
+      return {
+        zh: '我是 J.A.R.V.I.S.，您的智能语音管家，先生。我具备语音唤醒、流式对话、手势控制、联网搜索等能力，随时为您服务。',
+        en: 'I am J.A.R.V.I.S., your intelligent voice assistant, sir. I am equipped with wake word detection, streaming conversation, gesture control, web search capabilities, and more. At your service.',
+        skill: null
+      };
+    }
+  },
+  general: {
+    keywords:[],
+    generate(text) {
+      const replies = [
+        { zh:`我理解您说的"${text.length>12?text.slice(0,12)+'...':text}"，先生。让我为您处理。`, en:`I understand you said "${text.length>20?text.slice(0,20)+'...':text}", sir. Let me process that for you.` },
+        { zh:'收到，先生。我已记录您的请求并进行处理。', en:'Understood, sir. I have noted your request and am processing it.' },
+        { zh:'好的，先生。这是我的建议——您可以考虑多方面的因素后再做决定。', en:'Certainly, sir. My suggestion is that you may want to consider multiple factors before making a decision.' },
+        { zh:'当然可以，先生。请允许我为您详细说明。', en:'Of course, sir. Allow me to elaborate for you.' },
+        { zh:'明白了，先生。我会持续关注此事。', en:'Understood, sir. I shall keep monitoring this matter.' },
+        { zh:'很有趣的问题，先生。根据我的分析，这需要从多个角度来看待。', en:'A fascinating question, sir. Based on my analysis, this requires consideration from multiple angles.' },
+      ];
+      return replies[Math.floor(Math.random()*replies.length)];
+    }
+  }
+};
+
+// 技能匹配顺序（具体在前，通用在后）
+const MATCH_ORDER = ['time','weather','stop_music','search','light','video','handtest','restartgesture','mouse','greeting','thanks','who','general'];
+
+// ============================================================
+// DOM 引用
+// ============================================================
+const $ = id => document.getElementById(id);
+const reactor = $('reactor');
+const stateLabel = $('state-label');
+const stateHint = $('state-hint');
+const dialogArea = $('dialog-area');
+const streamPreview = $('stream-preview');
+const userInput = $('user-input');
+const sendBtn = $('send-btn');
+const volBar = $('vol-bar');
+const clock = $('clock');
+const spState = $('sp-state');
+const spUptime = $('sp-uptime');
+const spTurns = $('sp-turns');
+const spTts = $('sp-tts');
+const spVision = $('sp-vision');
+const spMusic = $('sp-music');
+const gestureResult = $('gesture-result');
+
+// ============================================================
+// 状态机
+// ============================================================
+let currentState = 'IDLE';
+let isAwake = false;
+let isSpeaking = false;
+let turnCount = 0;
+let startTime = Date.now();
+let bargeInFlag = false;
+let audioCtx = null;
+let musicNode = null;
+let musicGain = null;
+let currentUtterance = null;
+let typeTimer = null;
+let volInterval = null;
+
+const STATE_LABELS = {
+  'IDLE': { label:'STANDBY', color:'var(--cyan)', hint:'click reactor or press <span class="key">SPACE</span> to wake' },
+  'LISTENING': { label:'LISTENING', color:'var(--cyan)', hint:'speak or type your request...' },
+  'THINKING': { label:'PROCESSING', color:'var(--amber)', hint:'processing your request...' },
+  'SPEAKING': { label:'RESPONDING', color:'var(--gold)', hint:'speaking... press <span class="key">ESC</span> to interrupt' },
+  'ERROR': { label:'ERROR', color:'var(--red)', hint:'an error occurred, retrying...' },
+};
+
+function setState(state) {
+  currentState = state;
+  reactor.className = 'reactor state-' + state;
+  const info = STATE_LABELS[state] || STATE_LABELS.IDLE;
+  stateLabel.textContent = info.label;
+  stateLabel.style.color = info.color;
+  stateHint.innerHTML = info.hint;
+  spState.textContent = state;
+  spState.className = 'sp-val';
+  if (state === 'THINKING') spState.classList.add('warn');
+  else if (state === 'SPEAKING') spState.classList.add('gold');
+  else if (state === 'ERROR') spState.classList.add('err');
+  else spState.classList.add('active');
+
+  // 输入框状态
+  if (state === 'LISTENING') {
+    userInput.disabled = false;
+    sendBtn.disabled = false;
+    userInput.focus();
+  } else if (state === 'SPEAKING') {
+    if (CFG.bargeinEnabled) {
+      userInput.disabled = false;
+      sendBtn.disabled = false;
+    } else {
+      userInput.disabled = true;
+      sendBtn.disabled = true;
+    }
+  } else {
+    userInput.disabled = true;
+    sendBtn.disabled = true;
+  }
+
+  // 音量条
+  animateVolBars(state);
+
+  // 快捷命令按钮
+  document.querySelectorAll('.qc-btn').forEach(b => b.disabled = (state !== 'LISTENING'));
+  // 手势按钮在 IDLE/LISTENING 时可用
+  document.querySelectorAll('.gb').forEach(b => b.disabled = (state === 'THINKING' || state === 'SPEAKING' && !CFG.bargeinEnabled));
+}
+
+// ============================================================
+// Web Audio API - 唤醒音 + 背景音乐
+// ============================================================
+function initAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playWakeSound() {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  // 880Hz
+  const osc1 = audioCtx.createOscillator();
+  const gain1 = audioCtx.createGain();
+  osc1.frequency.value = 880;
+  osc1.type = 'sine';
+  gain1.gain.setValueAtTime(0, now);
+  gain1.gain.linearRampToValueAtTime(0.15, now + 0.01);
+  gain1.gain.linearRampToValueAtTime(0, now + 0.15);
+  osc1.connect(gain1).connect(audioCtx.destination);
+  osc1.start(now); osc1.stop(now + 0.15);
+  // 1320Hz
+  const osc2 = audioCtx.createOscillator();
+  const gain2 = audioCtx.createGain();
+  osc2.frequency.value = 1320;
+  osc2.type = 'sine';
+  gain2.gain.setValueAtTime(0, now + 0.08);
+  gain2.gain.linearRampToValueAtTime(0.12, now + 0.09);
+  gain2.gain.linearRampToValueAtTime(0, now + 0.23);
+  osc2.connect(gain2).connect(audioCtx.destination);
+  osc2.start(now + 0.08); osc2.stop(now + 0.23);
+}
+
+function startBgMusic() {
+  if (!audioCtx || musicNode) return;
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.03;
+  musicGain.connect(audioCtx.destination);
+  // 简单的环境音乐：低频振荡器序列
+  const notes = [130.81, 164.81, 196.00, 164.81]; // C3 E3 G3 E3
+  let noteIdx = 0;
+  musicNode = setInterval(() => {
+    if (!musicNode) return;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.frequency.value = notes[noteIdx % notes.length];
+    osc.type = 'sine';
+    const t = audioCtx.currentTime;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.5);
+    g.gain.linearRampToValueAtTime(0, t + 2.5);
+    osc.connect(g).connect(musicGain);
+    osc.start(t); osc.stop(t + 2.5);
+    noteIdx++;
+  }, 1200);
+  spMusic.textContent = 'ON';
+  spMusic.classList.add('active');
+}
+
+function stopBgMusic() {
+  if (musicNode) { clearInterval(musicNode); musicNode = null; }
+  if (musicGain) { musicGain.gain.setValueAtTime(musicGain.gain.value, audioCtx.currentTime); musicGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3); }
+  spMusic.textContent = 'OFF';
+  spMusic.classList.remove('active');
+}
+
+// ============================================================
+// Web Speech API - TTS
+// ============================================================
+let ttsVoice = null;
+function loadVoices() {
+  if (!('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices();
+  ttsVoice = voices.find(v => v.lang === 'en-GB' && /male|daniel|george/i.test(v.name)) ||
+             voices.find(v => v.lang === 'en-GB') ||
+             voices.find(v => v.lang === 'en-US' && /male|david|alex/i.test(v.name)) ||
+             voices.find(v => v.lang.startsWith('en')) ||
+             voices[0];
+}
+if ('speechSynthesis' in window) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+function speak(text) {
+  if (!CFG.ttsEnabled || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-GB';
+  if (ttsVoice) u.voice = ttsVoice;
+  u.rate = CFG.ttsSpeed;
+  u.pitch = 0.9;
+  u.volume = 1.0;
+  currentUtterance = u;
+  u.onend = () => { currentUtterance = null; onTtsEnd(); };
+  u.onerror = () => { currentUtterance = null; onTtsEnd(); };
+  speechSynthesis.speak(u);
+}
+
+function stopTts() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  currentUtterance = null;
+}
+
+// ============================================================
+// 唤醒流程
+// ============================================================
+function wakeUp() {
+  if (isAwake) return;
+  initAudio();
+  isAwake = true;
+
+  // 1. 唤醒闪光
+  reactor.classList.add('wake-flash');
+  setTimeout(() => reactor.classList.remove('wake-flash'), 600);
+
+  // 2. 双音反馈
+  playWakeSound();
+
+  // 3. 短暂延迟后进入 LISTENING
+  setTimeout(() => {
+    setState('LISTENING');
+
+    // 4. 背景音乐
+    if (CFG.musicEnabled) startBgMusic();
+
+    // 5. 问候
+    addDialogLine('system', 'SYSTEM', 'Wake word detected. Session started.');
+    setTimeout(() => {
+      const greeting = CFG.bilingual
+        ? { zh:'听您差遣，先生。', en:'At your service, sir.' }
+        : { en:'At your service, sir.' };
+      speakReply(greeting);
+    }, 400);
+  }, 300);
+}
+
+// ============================================================
+// 对话引擎
+// ============================================================
+function matchSkill(text) {
+  const lower = text.toLowerCase();
+  for (const key of MATCH_ORDER) {
+    const skill = REPLY_DB[key];
+    if (skill.keywords.length === 0) continue;
+    for (const kw of skill.keywords) {
+      if (lower.includes(kw.toLowerCase())) return skill.generate(text);
+    }
+  }
+  return REPLY_DB.general.generate(text);
+}
+
+async function processInput(text) {
+  if (!text.trim()) return;
+
+  // Barge-in: 如果正在说话，打断
+  if (currentState === 'SPEAKING' && CFG.bargeinEnabled) {
+    bargeInFlag = true;
+    stopTts();
+    if (typeTimer) { clearTimeout(typeTimer); typeTimer = null; }
+    addDialogLine('system', 'SYSTEM', '[BARGE-IN] Speech interrupted by user input.');
+    await sleep(200);
+  }
+
+  // 显示用户输入
+  addDialogLine('you', 'YOU', text);
+  turnCount++;
+  spTurns.textContent = turnCount;
+
+  // THINKING
+  setState('THINKING');
+  highlightPipeline(0, 7); // 高亮技能路由到LLM
+  await sleep(300 + Math.random() * 400);
+
+  // 匹配技能
+  const reply = matchSkill(text);
+
+  // 安全校验
+  if (reply.requiresControl && !CFG.allowControl) {
+    addDialogLine('skill', 'SECURITY', `[BLOCKED] ${reply.skill} requires CONTROL permission. Set SECURITY_ALLOW_CONTROL=true to enable.`);
+    await sleep(300);
+    const denied = {
+      zh: '抱歉，先生。该操作需要控制权限，当前安全设置不允许执行。请在配置面板中开启控制类操作权限。',
+      en: 'I apologize, sir. This operation requires control permission, which is not permitted under the current security settings. Please enable control operations in the configuration panel.'
+    };
+    setState('SPEAKING');
+    await streamReply(denied);
+    afterSpeak();
+    return;
+  }
+
+  // 搜索结果
+  if (reply.searchResults) {
+    addSearchResults(reply.searchResults);
+  }
+
+  // 特殊动作
+  if (reply.action === 'play_video') {
+    setState('SPEAKING');
+    await streamReply(reply);
+    openVideoModal();
+    afterSpeak();
+    return;
+  }
+
+  if (reply.action === 'end_session') {
+    setState('SPEAKING');
+    await streamReply(reply);
+    endSession();
+    return;
+  }
+
+  if (reply.action === 'light_on') {
+    document.body.style.transition = 'background 0.5s';
+    document.body.style.background = '#0a1018';
+    addDialogLine('skill', 'LIGHT', '[CONTROL] Living room light turned ON.');
+  } else if (reply.action === 'light_off') {
+    document.body.style.transition = 'background 0.5s';
+    document.body.style.background = '#05080f';
+    addDialogLine('skill', 'LIGHT', '[CONTROL] Living room light turned OFF.');
+  }
+
+  // 技能信息
+  if (reply.skill) {
+    addDialogLine('skill', 'SKILL', `[${reply.skill}] executed.`);
+  }
+
+  // SPEAKING
+  setState('SPEAKING');
+  highlightPipeline(7, 11);
+  await streamReply(reply);
+  afterSpeak();
+}
+
+function afterSpeak() {
+  highlightPipeline(-1, -1);
+  if (currentState === 'SPEAKING') {
+    setState('LISTENING');
+    userInput.focus();
+  }
+}
+
+function endSession() {
+  stopBgMusic();
+  isAwake = false;
+  setState('IDLE');
+  addDialogLine('system', 'SYSTEM', 'Session ended. Awaiting wake word.');
+}
+
+function onTtsEnd() {
+  if (bargeInFlag) { bargeInFlag = false; return; }
+  if (typeTimer) return; // 打字机还没结束
+  afterSpeak();
+}
+
+// ============================================================
+// 流式打字机输出
+// ============================================================
+async function streamReply(reply) {
+  return new Promise(async resolve => {
+    const fullText = CFG.bilingual ? `[中] ${reply.zh}\n[英] ${reply.en}` : `[英] ${reply.en}`;
+    streamPreview.textContent = '';
+    streamPreview.classList.add('show');
+
+    // TTS 播报英文
+    speak(reply.en);
+
+    let idx = 0;
+    const chars = [...fullText];
+    const streamSpeed = CFG.streaming ? 30 : 0;
+
+    function typeNext() {
+      if (bargeInFlag) {
+        streamPreview.classList.remove('show');
+        resolve();
+        return;
+      }
+      if (idx >= chars.length) {
+        // 打字机结束
+        streamPreview.classList.remove('show');
+        // 添加到对话区
+        if (CFG.bilingual && reply.zh) {
+          addDialogLine('jarvis-zh', 'J.A.R.V.I.S. [中]', reply.zh);
+        }
+        addDialogLine('jarvis-en', 'J.A.R.V.I.S. [EN]', reply.en);
+        // 如果 TTS 已结束或未启用
+        if (!CFG.ttsEnabled || !currentUtterance) {
+          resolve();
+        } else {
+          // 等待 TTS 结束
+          const checkEnd = setInterval(() => {
+            if (!currentUtterance) { clearInterval(checkEnd); resolve(); }
+          }, 100);
+        }
+        return;
+      }
+      // 积累 6 字符或遇到标记
+      let chunk = '';
+      while (idx < chars.length && chunk.length < 6) {
+        chunk += chars[idx++];
+      }
+      streamPreview.textContent += chunk;
+      typeTimer = setTimeout(typeNext, streamSpeed);
+    }
+    typeNext();
+  });
+}
+
+// ============================================================
+// 对话区操作
+// ============================================================
+function addDialogLine(cls, tag, text) {
+  const line = document.createElement('div');
+  line.className = 'dialog-line ' + cls;
+  line.innerHTML = `<span class="dlg-tag">[${tag}]</span><span class="dlg-text">${escapeHtml(text)}</span>`;
+  dialogArea.appendChild(line);
+  dialogArea.scrollTop = dialogArea.scrollHeight;
+}
+
+function addSearchResults(results) {
+  const div = document.createElement('div');
+  div.className = 'search-results';
+  div.innerHTML = `<div class="sr-title">SEARCH RESULTS (3)</div>` +
+    results.map(r => `<div class="sr-item"><a class="sr-link" href="#" onclick="return false">${r.title}</a><div class="sr-snippet">${r.snippet}</div></div>`).join('');
+  dialogArea.appendChild(div);
+  dialogArea.scrollTop = dialogArea.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+// 问候播报（唤醒后）
+// ============================================================
+async function speakReply(reply) {
+  setState('SPEAKING');
+  await streamReply(reply);
+  if (currentState === 'SPEAKING') {
+    setState('LISTENING');
+    userInput.focus();
+  }
+}
+
+// ============================================================
+// 音量条
+// ============================================================
+function initVolBar() {
+  for (let i = 0; i < 28; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'vbar';
+    volBar.appendChild(bar);
+  }
+}
+
+function animateVolBars(state) {
+  if (volInterval) { clearInterval(volInterval); volInterval = null; }
+  const bars = volBar.querySelectorAll('.vbar');
+  if (state === 'LISTENING' || state === 'SPEAKING') {
+    volInterval = setInterval(() => {
+      bars.forEach(bar => {
+        const h = Math.random();
+        if (h > 0.35) {
+          bar.classList.add('on');
+          if (state === 'SPEAKING') bar.classList.add('gold');
+          else bar.classList.remove('gold');
+          bar.style.height = (30 + h * 70) + '%';
+        } else {
+          bar.classList.remove('on','gold');
+          bar.style.height = '30%';
+        }
+      });
+    }, 120);
+  } else {
+    bars.forEach(bar => { bar.classList.remove('on','gold'); bar.style.height = '30%'; });
+  }
+}
+
+// ============================================================
+// 时钟 + 运行时间
+// ============================================================
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  clock.textContent = `${h}:${m}:${s}`;
+
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const eh = String(Math.floor(elapsed / 3600)).padStart(2,'0');
+  const em = String(Math.floor((elapsed % 3600) / 60)).padStart(2,'0');
+  const es = String(elapsed % 60).padStart(2,'0');
+  spUptime.textContent = `${eh}:${em}:${es}`;
+}
+
+// ============================================================
+// 数据流管道高亮
+// ============================================================
+function highlightPipeline(start, end) {
+  const steps = document.querySelectorAll('#pipeline-steps .pipe-step');
+  steps.forEach((step, i) => {
+    step.classList.remove('active', 'done');
+    if (i >= start && i < end) {
+      step.classList.add(i === end - 1 ? 'active' : 'done');
+    }
+  });
+}
+
+// ============================================================
+// 手势模拟器
+// ============================================================
+const GESTURE_FINGERS = {
+  OPEN_PALM: { fingers: ['thumb','index','middle','ring','pinky'], name: 'OPEN_PALM', desc: 'All fingers extended', action: 'Wake / Cursor Move' },
+  FIST: { fingers: [], name: 'FIST', desc: 'No fingers extended', action: 'End Session / Barge-in / Drag' },
+  THUMBS_UP: { fingers: ['thumb'], name: 'THUMBS_UP', desc: 'Thumb up only', action: 'Confirm / Right Click' },
+  POINT: { fingers: ['index'], name: 'POINT', desc: 'Index finger only', action: 'Scroll' },
+};
+
+function simulateGesture(gesture) {
+  const g = GESTURE_FINGERS[gesture];
+  if (!g) return;
+
+  // 高亮 SVG 关键点
+  document.querySelectorAll('#hand-svg .lm').forEach(lm => {
+    lm.classList.toggle('active', g.fingers.includes(lm.dataset.finger) || lm.dataset.finger === 'wrist');
+  });
+  document.querySelectorAll('#hand-svg .bone').forEach(bone => {
+    bone.classList.toggle('active', g.fingers.includes(bone.dataset.bone) || (g.fingers.length > 0 && bone.dataset.bone === 'palm'));
+  });
+
+  // 高亮按钮
+  document.querySelectorAll('.gs-btn').forEach(b => b.classList.toggle('active', b.dataset.gesture === gesture));
+  document.querySelectorAll('.gb').forEach(b => b.classList.toggle('active', b.dataset.gesture === gesture));
+
+  gestureResult.textContent = `GESTURE: ${g.name} → ${g.action}`;
+
+  // 触发对应动作
+  if (gesture === 'OPEN_PALM') {
+    if (!isAwake) {
+      gestureResult.textContent = `GESTURE: ${g.name} → WAKE EVENT TRIGGERED`;
+      setTimeout(() => wakeUp(), 300);
+    }
+  } else if (gesture === 'FIST') {
+    if (isAwake) {
+      if (currentState === 'SPEAKING' && CFG.bargeinEnabled) {
+        bargeInFlag = true;
+        stopTts();
+        if (typeTimer) { clearTimeout(typeTimer); typeTimer = null; }
+        gestureResult.textContent = `GESTURE: ${g.name} → BARGE-IN!`;
+        addDialogLine('system', 'SYSTEM', '[BARGE-IN] Speech interrupted by FIST gesture.');
+        setTimeout(() => { setState('LISTENING'); userInput.focus(); }, 200);
+      } else if (currentState === 'LISTENING') {
+        gestureResult.textContent = `GESTURE: ${g.name} → END SESSION`;
+        addDialogLine('system', 'SYSTEM', '[GESTURE] FIST detected. Ending session.');
+        endSession();
+      }
+    }
+  } else if (gesture === 'THUMBS_UP') {
+    gestureResult.textContent = `GESTURE: ${g.name} → CONFIRMED`;
+  } else if (gesture === 'POINT') {
+    gestureResult.textContent = `GESTURE: ${g.name} → SCROLL MODE`;
+  }
+}
+
+// ============================================================
+// 视频弹窗
+// ============================================================
+function openVideoModal() {
+  const modal = $('video-modal');
+  const text = $('video-text');
+  const timer = $('video-timer');
+  modal.classList.add('show');
+
+  // 暂停背景音乐
+  if (musicNode) {
+    if (musicGain) musicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+  }
+
+  const phases = ['INITIALIZING...','LOADING SYSTEMS...','J.A.R.V.I.S.','MARK IV','VOICE ASSISTANT','AT YOUR SERVICE'];
+  let phaseIdx = 0;
+  let sec = 0;
+  text.textContent = phases[0];
+
+  const videoInterval = setInterval(() => {
+    sec++;
+    phaseIdx = Math.min(phaseIdx + 1, phases.length - 1);
+    text.textContent = phases[phaseIdx];
+    timer.textContent = `00:0${sec} / 00:08`;
+    if (sec >= 8) {
+      clearInterval(videoInterval);
+      closeVideoModal();
+    }
+  }, 1000);
+}
+
+function closeVideoModal() {
+  $('video-modal').classList.remove('show');
+  // 恢复背景音乐
+  if (musicNode && musicGain) {
+    musicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    musicGain.gain.linearRampToValueAtTime(0.03, audioCtx.currentTime + 0.5);
+  }
+}
+
+// ============================================================
+// 技能卡片渲染
+// ============================================================
+function renderSkills() {
+  const grid = $('skill-grid');
+  grid.innerHTML = SKILLS.map(s => `
+    <div class="skill-card">
+      <span class="sk-cat ${s.cat}">${s.cat}</span>
+      <h3>${s.name}</h3>
+      <p class="sk-desc">${s.desc}</p>
+      <div class="sk-kw">${s.keywords.map(k=>`<span>${k}</span>`).join('')}</div>
+      <button class="sk-try" data-cmd="${s.try}">TRY: ${s.try}</button>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('.sk-try').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      switchTab('dashboard');
+      if (!isAwake) {
+        wakeUp();
+        setTimeout(() => { userInput.value = cmd; processInput(cmd); userInput.value = ''; }, 2000);
+      } else {
+        userInput.value = cmd;
+        processInput(cmd);
+        userInput.value = '';
+      }
+    });
+  });
+}
+
+// ============================================================
+// 标签页切换
+// ============================================================
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-view').forEach(v => v.classList.toggle('active', v.id === 'view-' + tab));
+  window.scrollTo(0, 0);
+}
+
+// ============================================================
+// 配置面板交互
+// ============================================================
+function initConfig() {
+  const bind = (id, key, fn) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      CFG[key] = el.checked;
+      if (fn) fn(el.checked);
+    });
+  };
+  bind('cfg-tts','ttsEnabled', v => {
+    spTts.textContent = v ? 'READY' : 'OFF';
+    spTts.classList.toggle('active', v);
+    if (!v) stopTts();
+  });
+  bind('cfg-bilingual','bilingual');
+  bind('cfg-music','musicEnabled', v => {
+    if (v && isAwake) startBgMusic();
+    if (!v) stopBgMusic();
+  });
+  bind('cfg-bargein','bargeinEnabled');
+  bind('cfg-stream','streaming');
+  bind('cfg-control','allowControl');
+  bind('cfg-search','webSearch');
+  bind('cfg-vision','vision', v => {
+    spVision.textContent = v ? 'ON' : 'OFF';
+    spVision.classList.toggle('active', v);
+  });
+  bind('cfg-mouse','mouseControl');
+
+  const slider = (id, key, valId, fmt) => {
+    const el = $(id), val = $(valId);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      CFG[key] = parseFloat(el.value);
+      if (val) val.textContent = fmt ? fmt(el.value) : el.value;
+    });
+  };
+  slider('cfg-speed','ttsSpeed','cfg-speed-val', v => parseFloat(v).toFixed(1));
+  slider('cfg-sens','sensitivity','cfg-sens-val', v => parseFloat(v).toFixed(1));
+  slider('cfg-temp','temperature','cfg-temp-val', v => parseFloat(v).toFixed(1));
+  slider('cfg-tokens','maxTokens','cfg-tokens-val');
+}
+
+// ============================================================
+// 事件绑定
+// ============================================================
+function initEvents() {
+  // 反应堆点击唤醒
+  reactor.addEventListener('click', () => { if (!isAwake) wakeUp(); });
+
+  // 空格键唤醒
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && document.activeElement !== userInput) {
+      e.preventDefault();
+      if (!isAwake) wakeUp();
+    }
+    // ESC: barge-in 或关闭弹窗
+    if (e.code === 'Escape') {
+      if ($('video-modal').classList.contains('show')) { closeVideoModal(); return; }
+      if (currentState === 'SPEAKING' && CFG.bargeinEnabled) {
+        bargeInFlag = true;
+        stopTts();
+        if (typeTimer) { clearTimeout(typeTimer); typeTimer = null; }
+        addDialogLine('system', 'SYSTEM', '[BARGE-IN] Speech interrupted by ESC.');
+        setState('LISTENING');
+        userInput.focus();
+      }
+    }
+  });
+
+  // 发送消息
+  function send() {
+    const text = userInput.value.trim();
+    if (!text) return;
+    userInput.value = '';
+    processInput(text);
+  }
+  sendBtn.addEventListener('click', send);
+  userInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') send();
+  });
+
+  // 快捷命令
+  document.querySelectorAll('.qc-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      userInput.value = cmd;
+      send();
+    });
+  });
+
+  // 手势按钮（迷你面板）
+  document.querySelectorAll('.gb').forEach(btn => {
+    btn.addEventListener('click', () => simulateGesture(btn.dataset.gesture));
+  });
+
+  // 手势按钮（大面板）
+  document.querySelectorAll('.gs-btn').forEach(btn => {
+    btn.addEventListener('click', () => simulateGesture(btn.dataset.gesture));
+  });
+
+  // 标签页切换
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  // 视频弹窗关闭
+  $('video-close').addEventListener('click', closeVideoModal);
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+function init() {
+  initVolBar();
+  renderSkills();
+  initConfig();
+  initEvents();
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // 页面加载后触发一次唤醒闪光
+  setTimeout(() => {
+    reactor.classList.add('wake-flash');
+    setTimeout(() => reactor.classList.remove('wake-flash'), 600);
+  }, 500);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

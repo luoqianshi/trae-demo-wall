@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MewCode — 终端 AI 编码助手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-void: #050810;
+            --bg-deep: #0a0e1a;
+            --bg-panel: #0f1623;
+            --bg-card: #131c2e;
+            --border: #1e2a42;
+            --border-bright: #2a3a5c;
+            --cyan: #00e5ff;
+            --cyan-dim: #00b8d4;
+            --green: #00ff88;
+            --green-dim: #00c46a;
+            --amber: #ffb300;
+            --magenta: #ff00aa;
+            --text: #c8d6e5;
+            --text-dim: #5a6a7e;
+            --text-bright: #e8f0ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-void);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* === Grid Background === */
+        .grid-bg {
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .grid-bg::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(0, 229, 255, 0.08) 0%, transparent 60%);
+        }
+
+        /* === Noise Overlay === */
+        .noise {
+            position: fixed;
+            inset: 0;
+            opacity: 0.015;
+            z-index: 1;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+
+        /* === Glow Effects === */
+        .glow-cyan { text-shadow: 0 0 20px rgba(0, 229, 255, 0.6), 0 0 40px rgba(0, 229, 255, 0.3); }
+        .glow-green { text-shadow: 0 0 20px rgba(0, 255, 136, 0.6), 0 0 40px rgba(0, 255, 136, 0.3); }
+
+        .glow-box-cyan { box-shadow: 0 0 30px rgba(0, 229, 255, 0.15), 0 0 60px rgba(0, 229, 255, 0.05); }
+        .glow-box-green { box-shadow: 0 0 30px rgba(0, 255, 136, 0.15), 0 0 60px rgba(0, 255, 136, 0.05); }
+
+        /* === Terminal Window === */
+        .terminal {
+            background: linear-gradient(180deg, #0a0e1a 0%, #050810 100%);
+            border: 1px solid var(--border-bright);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8), 0 0 60px rgba(0, 229, 255, 0.05);
+        }
+
+        .terminal-bar {
+            background: linear-gradient(180deg, #162030 0%, #0f1623 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .term-dot {
+            width: 11px; height: 11px; border-radius: 50%;
+        }
+        .term-dot.red { background: #ff5f56; }
+        .term-dot.yellow { background: #ffbd2e; }
+        .term-dot.green { background: #27c93f; }
+
+        .term-body {
+            padding: 18px 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .cursor-blink {
+            display: inline-block;
+            width: 8px; height: 16px;
+            background: var(--green);
+            animation: blink 1s step-end infinite;
+            vertical-align: text-bottom;
+        }
+
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+        /* === Animations === */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeRight {
+            from { opacity: 0; transform: translateX(-30px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+        @keyframes pulse-border {
+            0%, 100% { border-color: var(--border-bright); }
+            50% { border-color: var(--cyan); }
+        }
+        @keyframes scan-line {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100vh); }
+        }
+
+        .animate-fadeUp { animation: fadeUp 0.7s ease-out forwards; }
+        .animate-fadeRight { animation: fadeRight 0.6s ease-out forwards; }
+        .animate-scaleIn { animation: scaleIn 0.5s ease-out forwards; }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+
+        /* Reveal on scroll */
+        .reveal { opacity: 0; transition: opacity 0.8s ease, transform 0.8s ease; transform: translateY(40px); }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+
+        /* === Feature Cards === */
+        .feature-card {
+            background: linear-gradient(145deg, var(--bg-card), var(--bg-panel));
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 28px;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-6px);
+            border-color: var(--border-bright);
+            box-shadow: 0 20px 50px -10px rgba(0, 229, 255, 0.1);
+        }
+
+        .feature-card:hover::before { opacity: 1; }
+
+        .feature-icon {
+            width: 48px; height: 48px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            margin-bottom: 20px;
+        }
+
+        /* === Code Syntax === */
+        .syn-keyword { color: #c792ea; }
+        .syn-string { color: #c3e88d; }
+        .syn-func { color: #82aaff; }
+        .syn-comment { color: #546e7a; font-style: italic; }
+        .syn-class { color: #ffcb6b; }
+        .syn-num { color: #f78c6c; }
+        .syn-decorator { color: #ff9cac; }
+
+        /* === Architecture Nodes === */
+        .arch-node {
+            background: var(--bg-card);
+            border: 1px solid var(--border-bright);
+            border-radius: 10px;
+            padding: 16px 20px;
+            text-align: center;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .arch-node:hover {
+            border-color: var(--cyan);
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
+        }
+
+        .arch-line {
+            position: absolute;
+            background: var(--border-bright);
+        }
+
+        /* === Interactive Terminal === */
+        .cmd-input {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-bright);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            flex: 1;
+            caret-color: var(--green);
+        }
+
+        .cmd-prompt { color: var(--green); font-weight: 700; }
+
+        /* === Nav === */
+        .nav-link {
+            position: relative;
+            color: var(--text-dim);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-link:hover { color: var(--cyan); }
+
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: -6px; left: 0;
+            width: 0; height: 1px;
+            background: var(--cyan);
+            transition: width 0.3s;
+        }
+
+        .nav-link:hover::after { width: 100%; }
+
+        /* === Scan Line Effect === */
+        .scan-line {
+            position: fixed;
+            left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.3), transparent);
+            z-index: 2;
+            pointer-events: none;
+            animation: scan-line 8s linear infinite;
+        }
+
+        /* === Tag === */
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border-bright);
+            background: var(--bg-card);
+        }
+
+        /* === Stat Number === */
+        .stat-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 42px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--cyan), var(--green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* === Scrollbar === */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-deep); }
+        ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--cyan-dim); }
+
+        /* === Section Divider === */
+        .section-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--cyan);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        /* === Memory Layer === */
+        .memory-layer {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--cyan);
+            border-radius: 0 10px 10px 0;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            transition: all 0.3s;
+        }
+
+        .memory-layer:hover {
+            border-left-color: var(--green);
+            background: var(--bg-panel);
+            transform: translateX(4px);
+        }
+
+        /* === Button === */
+        .btn-primary {
+            background: linear-gradient(135deg, var(--cyan-dim), var(--green-dim));
+            color: #000;
+            font-weight: 700;
+            padding: 12px 28px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 229, 255, 0.3);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text);
+            font-weight: 600;
+            padding: 12px 28px;
+            border-radius: 8px;
+            border: 1px solid var(--border-bright);
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--cyan);
+            color: var(--cyan);
+        }
+
+        /* === Glow Orb === */
+        .glow-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            z-index: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-bg"></div>
+    <div class="noise"></div>
+    <div class="scan-line"></div>
+
+    <!-- ===== NAV ===== -->
+    <nav class="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl" style="background: rgba(5, 8, 16, 0.7); border-bottom: 1px solid var(--border);">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--cyan), var(--green));">
+                    <i class="fas fa-terminal text-black text-base"></i>
+                </div>
+                <span class="text-lg font-bold" style="color: var(--text-bright);">MewCode</span>
+                <span class="mono text-xs px-2 py-0.5 rounded" style="background: var(--bg-card); color: var(--cyan);">v0.2.0</span>
+            </div>
+            <div class="hidden md:flex items-center gap-8">
+                <a href="#features" class="nav-link">功能特性</a>
+                <a href="#architecture" class="nav-link">系统架构</a>
+                <a href="#memory" class="nav-link">记忆系统</a>
+                <a href="#demo" class="nav-link">在线演示</a>
+                <a href="#tech" class="nav-link">技术栈</a>
+            </div>
+            <a href="#demo" class="btn-primary text-sm" style="padding: 8px 20px;">
+                <i class="fas fa-play mr-1"></i> 体验 Demo
+            </a>
+        </div>
+    </nav>
+
+    <!-- ===== HERO ===== -->
+    <section class="relative min-h-screen flex items-center justify-center px-6 pt-20" style="z-index: 2;">
+        <div class="glow-orb" style="width: 400px; height: 400px; background: rgba(0, 229, 255, 0.15); top: 10%; left: 10%;"></div>
+        <div class="glow-orb" style="width: 500px; height: 500px; background: rgba(0, 255, 136, 0.1); bottom: 10%; right: 5%;"></div>
+
+        <div class="max-w-6xl w-full relative" style="z-index: 3;">
+            <div class="text-center mb-10 animate-fadeUp">
+                <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8" style="background: var(--bg-card); border: 1px solid var(--border-bright);">
+                    <span class="w-2 h-2 rounded-full animate-pulse" style="background: var(--green);"></span>
+                    <span class="mono text-xs" style="color: var(--text-dim);">Terminal-Native AI Coding Assistant</span>
+                </div>
+                <h1 class="font-bold mb-6" style="font-size: clamp(3rem, 8vw, 6rem); line-height: 1; letter-spacing: -0.04em;">
+                    <span style="color: var(--text-bright);">在终端里</span><br>
+                    <span class="glow-cyan" style="color: var(--cyan);">让 AI 替你写代码</span>
+                </h1>
+                <p class="text-lg md:text-xl max-w-2xl mx-auto mb-10" style="color: var(--text-dim); line-height: 1.6;">
+                    MewCode 是一款终端原生的 AI 编码助手，支持多 Provider、多 Agent 协作、MCP 协议、记忆分层与会话持久化。不离开终端，获得完整的 AI 编码体验。
+                </p>
+                <div class="flex flex-wrap items-center justify-center gap-4">
+                    <a href="#demo" class="btn-primary">
+                        <i class="fas fa-terminal mr-2"></i>开始体验
+                    </a>
+                    <a href="#architecture" class="btn-ghost">
+                        <i class="fas fa-sitemap mr-2"></i>查看架构
+                    </a>
+                </div>
+            </div>
+
+            <!-- Hero Terminal -->
+            <div class="terminal animate-scaleIn" style="animation-delay: 0.3s; max-width: 800px; margin: 0 auto;">
+                <div class="terminal-bar">
+                    <div class="term-dot red"></div>
+                    <div class="term-dot yellow"></div>
+                    <div class="term-dot green"></div>
+                    <span class="mono text-xs ml-3" style="color: var(--text-dim);">mewcode — 132x40</span>
+                    <span class="ml-auto mono text-xs" style="color: var(--text-dim);">deepseek-v4-pro</span>
+                </div>
+                <div class="term-body" id="heroTerminal" style="min-height: 280px;">
+                    <div style="color: var(--text-dim);">$ python -m mewcode</div>
+                    <div style="color: var(--green); margin-top: 8px;">
+                        <i class="fas fa-check-circle"></i> MewCode v0.2.0 started
+                    </div>
+                    <div style="color: var(--text-dim);">  Provider: deepseek-v4-pro | Context: 128K</div>
+                    <div style="color: var(--text-dim);">  Memory: loaded | Sandbox: active | MCP: 0 servers</div>
+                    <div style="margin-top: 12px; color: var(--cyan);">─ Ready ───────────────────────────────</div>
+                    <div style="margin-top: 12px;">
+                        <span class="cmd-prompt">user ></span> <span style="color: var(--text-bright);">分析这个项目的架构，并生成测试用例</span>
+                    </div>
+                    <div id="heroResponse" style="margin-top: 8px; color: var(--text);">
+                        <span style="color: var(--amber);">mewcode ></span> <span id="heroTyping"></span><span class="cursor-blink"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16 max-w-4xl mx-auto animate-fadeUp" style="animation-delay: 0.6s;">
+                <div class="text-center">
+                    <div class="stat-num">10+</div>
+                    <div class="text-sm mt-1" style="color: var(--text-dim);">内置工具</div>
+                </div>
+                <div class="text-center">
+                    <div class="stat-num">4</div>
+                    <div class="text-sm mt-1" style="color: var(--text-dim);">记忆层级</div>
+                </div>
+                <div class="text-center">
+                    <div class="stat-num">3+</div>
+                    <div class="text-sm mt-1" style="color: var(--text-dim);">AI Provider</div>
+                </div>
+                <div class="text-center">
+                    <div class="stat-num">16</div>
+                    <div class="text-sm mt-1" style="color: var(--text-dim);">测试模块</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== FEATURES ===== -->
+    <section id="features" class="relative py-28 px-6" style="z-index: 2;">
+        <div class="max-w-7xl mx-auto">
+            <div class="reveal text-center mb-20">
+                <div class="section-label">// FEATURES</div>
+                <h2 class="text-4xl md:text-5xl font-bold" style="color: var(--text-bright);">
+                    八大核心能力
+                </h2>
+                <p class="mt-4 text-lg" style="color: var(--text-dim);">从多模型支持到安全沙箱，覆盖终端 AI 编码全链路</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Feature 1 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(0, 229, 255, 0.1); color: var(--cyan);">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">多 AI Provider</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">兼容 Anthropic、OpenAI 及 DeepSeek 等兼容协议，配置文件一键切换模型。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--cyan);">Claude</span>
+                        <span class="tag" style="color: var(--green);">GPT</span>
+                        <span class="tag" style="color: var(--amber);">DeepSeek</span>
+                    </div>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(0, 255, 136, 0.1); color: var(--green);">
+                        <i class="fas fa-users-cog"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">多 Agent 协作</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">内置 Fork 子任务、Verification 验证、Task Manager 管理器，支持团队协作模式。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--green);">Fork</span>
+                        <span class="tag" style="color: var(--cyan);">Verify</span>
+                        <span class="tag" style="color: var(--magenta);">Team</span>
+                    </div>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(255, 0, 170, 0.1); color: var(--magenta);">
+                        <i class="fas fa-project-diagram"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">MCP 协议</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">完整支持 Model Context Protocol，接入外部工具与数据源，无限扩展 AI 能力。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--magenta);">stdio</span>
+                        <span class="tag" style="color: var(--cyan);">HTTP</span>
+                    </div>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(255, 179, 0, 0.1); color: var(--amber);">
+                        <i class="fas fa-layer-group"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">记忆分层架构</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">四层记忆管理：指令注入 → 自动提取 → 按需召回 → 会话回放。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--amber);">Auto</span>
+                        <span class="tag" style="color: var(--green);">Recall</span>
+                        <span class="tag" style="color: var(--cyan);">Session</span>
+                    </div>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(0, 229, 255, 0.1); color: var(--cyan);">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">权限沙箱</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">路径沙箱隔离、危险命令检测、三级权限模式，保护你的系统安全。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--cyan);">Sandbox</span>
+                        <span class="tag" style="color: var(--amber);">Rules</span>
+                    </div>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(0, 255, 136, 0.1); color: var(--green);">
+                        <i class="fas fa-code-branch"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">Git Worktree</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">隔离的 Git Worktree 工作区，支持并行开发多任务互不干扰。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--green);">Isolated</span>
+                        <span class="tag" style="color: var(--cyan);">Parallel</span>
+                    </div>
+                </div>
+
+                <!-- Feature 7 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(255, 0, 170, 0.1); color: var(--magenta);">
+                        <i class="fas fa-puzzle-piece"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">Skill 系统</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">可扩展的 Skill 加载器与执行器，内置 commit、review、test 等技能。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--magenta);">Plugin</span>
+                        <span class="tag" style="color: var(--green);">Custom</span>
+                    </div>
+                </div>
+
+                <!-- Feature 8 -->
+                <div class="feature-card reveal">
+                    <div class="feature-icon" style="background: rgba(255, 179, 0, 0.1); color: var(--amber);">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold mb-2" style="color: var(--text-bright);">Hook 引擎</h3>
+                    <p class="text-sm" style="color: var(--text-dim); line-height: 1.6;">事件驱动的 Hook 系统，支持条件触发、异步执行和自定义动作。</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="tag" style="color: var(--amber);">Event</span>
+                        <span class="tag" style="color: var(--cyan);">Async</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== ARCHITECTURE ===== -->
+    <section id="architecture" class="relative py-28 px-6" style="z-index: 2; background: rgba(10, 14, 26, 0.5);">
+        <div class="max-w-6xl mx-auto">
+            <div class="reveal text-center mb-20">
+                <div class="section-label">// ARCHITECTURE</div>
+                <h2 class="text-4xl md:text-5xl font-bold" style="color: var(--text-bright);">
+                    系统架构总览
+                </h2>
+                <p class="mt-4 text-lg" style="color: var(--text-dim);">模块化设计，每个组件可独立替换和扩展</p>
+            </div>
+
+            <div class="reveal terminal" style="max-width: 900px; margin: 0 auto;">
+                <div class="terminal-bar">
+                    <div class="term-dot red"></div>
+                    <div class="term-dot yellow"></div>
+                    <div class="term-dot green"></div>
+                    <span class="mono text-xs ml-3" style="color: var(--text-dim);">architecture.py</span>
+                </div>
+                <div class="term-body" style="padding: 24px;">
+<pre style="font-size: 12px; line-height: 1.8; color: var(--text);"><span class="syn-comment">"""
+MewCode 系统架构 — 模块依赖关系
+"""</span>
+
+<span class="syn-keyword">┌─────────────────────────────────────────────────────────┐</span>
+<span class="syn-keyword">│</span>                    <span style="color: var(--cyan);">TUI Layer (Textual)</span>                     <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>  <span style="color: var(--green);">app.py</span> → <span style="color: var(--green);">driver.py</span> → <span style="color: var(--green);">styles.tcss</span>               <span class="syn-keyword">│</span>
+<span class="syn-keyword">└──────────────────────┬──────────────────────────────────┘</span>
+                         <span class="syn-keyword">│</span>
+<span class="syn-keyword">┌──────────────────────▼──────────────────────────────────┐</span>
+<span class="syn-keyword">│</span>                   <span style="color: var(--cyan);">Agent Core</span>                          <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>  <span style="color: var(--green);">agent.py</span> → <span style="color: var(--green);">conversation.py</span> → <span style="color: var(--green);">prompts.py</span>         <span class="syn-keyword">│</span>
+<span class="syn-keyword">└───┬──────────┬──────────┬──────────┬──────────┬────────┘</span>
+    <span class="syn-keyword">│</span>          <span class="syn-keyword">│</span>          <span class="syn-keyword">│</span>          <span class="syn-keyword">│</span>          <span class="syn-keyword">│</span>
+    <span class="syn-keyword">▼</span>          <span class="syn-keyword">▼</span>          <span class="syn-keyword">▼</span>          <span class="syn-keyword">▼</span>          <span class="syn-keyword">▼</span>
+<span class="syn-comment">┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐</span>
+<span class="syn-keyword">│</span> <span style="color: var(--magenta);">LLM</span>    <span class="syn-keyword">│</span> <span style="color: var(--amber);">Memory</span> <span class="syn-keyword">│</span> <span style="color: var(--cyan);">Tools</span>  <span class="syn-keyword">│</span> <span style="color: var(--green);">Agents</span> <span class="syn-keyword">│</span> <span style="color: var(--amber);">Hooks</span>  <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>Client  <span class="syn-keyword">│</span>Manager <span class="syn-keyword">│</span>Registry<span class="syn-keyword">│</span> Loader  <span class="syn-keyword">│</span> Engine  <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>        <span class="syn-keyword">│</span>        <span class="syn-keyword">│</span>        <span class="syn-keyword">│</span>          <span class="syn-keyword">│</span>        <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>Anthropic<span class="syn-keyword">│</span>Auto    <span class="syn-keyword">│</span>Bash    <span class="syn-keyword">│</span>Fork     <span class="syn-keyword">│</span>PreTool <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>OpenAI  <span class="syn-keyword">│</span>Recall  <span class="syn-keyword">│</span>Edit    <span class="syn-keyword">│</span>Verify   <span class="syn-keyword">│</span>PostTool<span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>DeepSeek<span class="syn-keyword">│</span>Session <span class="syn-keyword">│</span>Grep    <span class="syn-keyword">│</span>TaskMgr  <span class="syn-keyword">│</span>Notify  <span class="syn-keyword">│</span>
+<span class="syn-comment">└────────┘ └────────┘ └────────┘ └────────┘ └────────┘</span>
+    <span class="syn-keyword">│</span>                     <span class="syn-keyword">│</span>
+    <span class="syn-keyword">▼</span>                     <span class="syn-keyword">▼</span>
+<span class="syn-comment">┌────────────────┐  ┌──────────────────────────────────┐</span>
+<span class="syn-keyword">│</span>  <span style="color: var(--magenta);">MCP Protocol</span>  <span class="syn-keyword">│</span>  <span style="color: var(--cyan);">Permissions &amp; Sandbox</span>          <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>  Client/Manager<span class="syn-keyword">│</span>  PathSandbox · DangerousDetector  <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>  stdio / HTTP  <span class="syn-keyword">│</span>  RuleEngine · PermissionChecker   <span class="syn-keyword">│</span>
+<span class="syn-comment">└────────────────┘  └──────────────────────────────────┘</span>
+
+<span class="syn-comment">┌──────────────────────────────────────────────────────────┐</span>
+<span class="syn-keyword">│</span>              <span style="color: var(--green);">Persistence Layer</span>                        <span class="syn-keyword">│</span>
+<span class="syn-keyword">│</span>  JSONL Session · Memory Files · Worktree State           <span class="syn-keyword">│</span>
+<span class="syn-comment">└──────────────────────────────────────────────────────────┘</span></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== MEMORY SYSTEM ===== -->
+    <section id="memory" class="relative py-28 px-6" style="z-index: 2;">
+        <div class="max-w-6xl mx-auto">
+            <div class="reveal text-center mb-20">
+                <div class="section-label">// MEMORY ARCHITECTURE</div>
+                <h2 class="text-4xl md:text-5xl font-bold" style="color: var(--text-bright);">
+                    四层记忆系统
+                </h2>
+                <p class="mt-4 text-lg" style="color: var(--text-dim);">AI 真正"记住"你的项目，而非每次从零开始</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <div class="reveal">
+                    <div class="memory-layer" style="border-left-color: var(--cyan);">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="mono text-xs px-2 py-1 rounded" style="background: rgba(0,229,255,0.1); color: var(--cyan);">LAYER 1</span>
+                            <h4 class="font-semibold" style="color: var(--text-bright);">指令注入</h4>
+                        </div>
+                        <p class="text-sm" style="color: var(--text-dim);">读取 <code class="mono" style="color: var(--green);">.mewcode/instructions.md</code>，将项目规范注入 System Prompt。用户偏好和项目规则始终生效。</p>
+                    </div>
+
+                    <div class="memory-layer" style="border-left-color: var(--green);">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="mono text-xs px-2 py-1 rounded" style="background: rgba(0,255,136,0.1); color: var(--green);">LAYER 2</span>
+                            <h4 class="font-semibold" style="color: var(--text-bright);">自动记忆提取</h4>
+                        </div>
+                        <p class="text-sm" style="color: var(--text-dim);">每 5 轮对话自动分析，提取用户偏好、纠正反馈、项目知识、参考资料，写入 <code class="mono" style="color: var(--green);">memories.md</code>。</p>
+                    </div>
+
+                    <div class="memory-layer" style="border-left-color: var(--amber);">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="mono text-xs px-2 py-1 rounded" style="background: rgba(255,179,0,0.1); color: var(--amber);">LAYER 3</span>
+                            <h4 class="font-semibold" style="color: var(--text-bright);">按需召回</h4>
+                        </div>
+                        <p class="text-sm" style="color: var(--text-dim);">根据当前对话内容，智能检索历史记忆中相关的条目，注入上下文。只召回相关信息。</p>
+                    </div>
+
+                    <div class="memory-layer" style="border-left-color: var(--magenta);">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="mono text-xs px-2 py-1 rounded" style="background: rgba(255,0,170,0.1); color: var(--magenta);">LAYER 4</span>
+                            <h4 class="font-semibold" style="color: var(--text-bright);">会话回放</h4>
+                        </div>
+                        <p class="text-sm" style="color: var(--text-dim);">对话自动落盘为 JSONL，支持 <code class="mono" style="color: var(--green);">/resume</code> 断点恢复。意外关闭也不丢失上下文。</p>
+                    </div>
+                </div>
+
+                <div class="reveal">
+                    <div class="terminal">
+                        <div class="terminal-bar">
+                            <div class="term-dot red"></div>
+                            <div class="term-dot yellow"></div>
+                            <div class="term-dot green"></div>
+                            <span class="mono text-xs ml-3" style="color: var(--text-dim);">memories.md</span>
+                        </div>
+                        <div class="term-body" style="font-size: 12px;">
+<pre><span class="syn-comment">### 用户偏好</span>
+<span class="syn-string">- 用户偏好简洁代码风格，不要过度注释</span>
+<span class="syn-string">- commit message 用英文</span>
+<span class="syn-string">- 变量命名用 snake_case</span>
+
+<span class="syn-comment">### 纠正反馈</span>
+<span class="syn-string">- 不要用 print 调试，用 logging</span>
+<span class="syn-string">- 测试文件放在 tests/ 目录下</span>
+
+<span class="syn-comment">### 项目知识</span>
+<span class="syn-string">- 项目使用 Python 3.11+ / Textual 框架</span>
+<span class="syn-string">- 包管理工具是 uv + Hatchling</span>
+<span class="syn-string">- AI Provider 配置在 .mewcode/config.yaml</span>
+
+<span class="syn-comment">### 参考资料</span>
+<span class="syn-string">- Textual 文档: textual.textualize.io</span>
+<span class="syn-string">- MCP 协议: modelcontextprotocol.io</span></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== INTERACTIVE DEMO ===== -->
+    <section id="demo" class="relative py-28 px-6" style="z-index: 2; background: rgba(10, 14, 26, 0.5);">
+        <div class="max-w-5xl mx-auto">
+            <div class="reveal text-center mb-20">
+                <div class="section-label">// LIVE DEMO</div>
+                <h2 class="text-4xl md:text-5xl font-bold" style="color: var(--text-bright);">
+                    在线交互演示
+                </h2>
+                <p class="mt-4 text-lg" style="color: var(--text-dim);">在下方终端中输入命令，体验 MewCode 的核心交互</p>
+                <p class="mt-2 text-sm" style="color: var(--text-dim);">试试输入: <span class="mono" style="color: var(--cyan);">help</span>, <span class="mono" style="color: var(--green);">analyze</span>, <span class="mono" style="color: var(--amber);">fix</span>, <span class="mono" style="color: var(--magenta);">test</span>, <span class="mono" style="color: var(--cyan);">memory</span></p>
+            </div>
+
+            <div class="reveal terminal glow-box-cyan">
+                <div class="terminal-bar">
+                    <div class="term-dot red"></div>
+                    <div class="term-dot yellow"></div>
+                    <div class="term-dot green"></div>
+                    <span class="mono text-xs ml-3" style="color: var(--text-dim);">mewcode@demo ~ interactive</span>
+                    <span class="ml-auto flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full animate-pulse" style="background: var(--green);"></span>
+                        <span class="mono text-xs" style="color: var(--green);">connected</span>
+                    </span>
+                </div>
+                <div class="term-body" style="min-height: 360px;" id="demoTerminal">
+                    <div style="color: var(--green);">
+                        <i class="fas fa-check-circle"></i> MewCode v0.2.0 — Demo Mode
+                    </div>
+                    <div style="color: var(--text-dim); margin-top: 4px;">  输入 <span style="color: var(--cyan);">help</span> 查看可用命令</div>
+                    <div id="cmdHistory" style="margin-top: 12px;"></div>
+                    <div class="flex items-center gap-2 mt-3" style="border-top: 1px solid var(--border); padding-top: 12px;">
+                        <span class="cmd-prompt">$</span>
+                        <input type="text" id="cmdInput" class="cmd-input" placeholder="输入命令..." autocomplete="off">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== TECH STACK ===== -->
+    <section id="tech" class="relative py-28 px-6" style="z-index: 2;">
+        <div class="max-w-6xl mx-auto">
+            <div class="reveal text-center mb-20">
+                <div class="section-label">// TECH STACK</div>
+                <h2 class="text-4xl md:text-5xl font-bold" style="color: var(--text-bright);">
+                    技术栈
+                </h2>
+                <p class="mt-4 text-lg" style="color: var(--text-dim);">纯 Python 实现，轻量且高效</p>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 reveal">
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fab fa-python text-4xl mb-3" style="color: #3776AB;"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">Python 3.11+</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">核心语言</div>
+                </div>
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fas fa-desktop text-4xl mb-3" style="color: var(--cyan);"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">Textual 2.1+</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">TUI 框架</div>
+                </div>
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fas fa-brain text-4xl mb-3" style="color: var(--amber);"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">Anthropic SDK</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">Claude API</div>
+                </div>
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fas fa-robot text-4xl mb-3" style="color: var(--green);"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">OpenAI SDK</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">GPT API</div>
+                </div>
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fas fa-shield-alt text-4xl mb-3" style="color: var(--magenta);"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">Pydantic 2</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">数据校验</div>
+                </div>
+                <div class="feature-card text-center" style="padding: 20px;">
+                    <i class="fas fa-network-wired text-4xl mb-3" style="color: var(--cyan);"></i>
+                    <div class="text-sm font-semibold" style="color: var(--text-bright);">MCP 1.12+</div>
+                    <div class="text-xs mt-1" style="color: var(--text-dim);">协议支持</div>
+                </div>
+            </div>
+
+            <!-- Code Snippet -->
+            <div class="reveal mt-16 terminal" style="max-width: 800px; margin: 0 auto;">
+                <div class="terminal-bar">
+                    <div class="term-dot red"></div>
+                    <div class="term-dot yellow"></div>
+                    <div class="term-dot green"></div>
+                    <span class="mono text-xs ml-3" style="color: var(--text-dim);">quickstart.py</span>
+                </div>
+                <div class="term-body">
+<pre style="font-size: 13px; line-height: 1.8;"><span class="syn-comment"># 安装 MewCode</span>
+<span class="syn-num">$</span> uv sync
+
+<span class="syn-comment"># 配置 AI Provider</span>
+<span class="syn-num">$</span> <span class="syn-keyword">cat</span> .mewcode/config.yaml
+<span class="syn-keyword">providers</span>:
+  - <span class="syn-keyword">name</span>: <span class="syn-string">"deepseek"</span>
+    <span class="syn-keyword">protocol</span>: <span class="syn-string">"openai-compat"</span>
+    <span class="syn-keyword">base_url</span>: <span class="syn-string">"https://api.deepseek.com/v1"</span>
+    <span class="syn-keyword">model</span>: <span class="syn-string">"deepseek-v4-pro"</span>
+    <span class="syn-keyword">api_key</span>: <span class="syn-string">"${DEEPSEEK_API_KEY}"</span>
+    <span class="syn-keyword">context_window</span>: <span class="syn-num">128000</span>
+
+<span class="syn-comment"># 启动 MewCode</span>
+<span class="syn-num">$</span> python -m mewcode
+
+<span class="syn-comment"># 或使用入口脚本</span>
+<span class="syn-num">$</span> ./mewcode.cmd</pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== FOOTER ===== -->
+    <footer class="relative py-16 px-6 border-t" style="z-index: 2; border-color: var(--border);">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-8">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--cyan), var(--green));">
+                        <i class="fas fa-terminal text-black text-lg"></i>
+                    </div>
+                    <div>
+                        <div class="font-bold text-lg" style="color: var(--text-bright);">MewCode</div>
+                        <div class="text-xs" style="color: var(--text-dim);">Terminal AI Coding Assistant · v0.2.0</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-6">
+                    <span class="tag" style="color: var(--cyan);">Python</span>
+                    <span class="tag" style="color: var(--green);">Textual</span>
+                    <span class="tag" style="color: var(--amber);">MCP</span>
+                    <span class="tag" style="color: var(--magenta);">AI</span>
+                </div>
+            </div>
+            <div class="text-center mt-10 text-sm" style="color: var(--text-dim);">
+                Built with TRAE IDE · MewCode © 2026
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // === Hero Typing Animation ===
+        const heroTexts = [
+            '正在分析项目结构... 检测到 Python + Textual 框架',
+            '识别到 7 个核心模块，生成 16 个测试文件',
+            '✓ 测试用例已生成，覆盖率 85%'
+        ];
+
+        let heroIdx = 0, heroChar = 0;
+        const heroEl = document.getElementById('heroTyping');
+
+        function heroType() {
+            if (heroIdx >= heroTexts.length) {
+                setTimeout(() => {
+                    heroEl.textContent = '';
+                    heroIdx = 0;
+                    heroChar = 0;
+                    heroType();
+                }, 4000);
+                return;
+            }
+            const text = heroTexts[heroIdx];
+            if (heroChar < text.length) {
+                heroEl.textContent += text.charAt(heroChar);
+                heroChar++;
+                setTimeout(heroType, 30 + Math.random() * 30);
+            } else {
+                heroEl.innerHTML += '<br>';
+                heroIdx++;
+                heroChar = 0;
+                setTimeout(heroType, 800);
+            }
+        }
+        setTimeout(heroType, 2000);
+
+        // === Interactive Terminal ===
+        const cmdInput = document.getElementById('cmdInput');
+        const cmdHistory = document.getElementById('cmdHistory');
+
+        const commands = {
+            'help': {
+                output: [
+                    { text: '可用命令:', color: 'var(--cyan)' },
+                    { text: '  help        — 显示帮助信息', color: 'var(--text)' },
+                    { text: '  analyze     — 分析项目架构', color: 'var(--text)' },
+                    { text: '  fix         — 修复代码 Bug', color: 'var(--text)' },
+                    { text: '  test        — 生成测试用例', color: 'var(--text)' },
+                    { text: '  memory      — 查看记忆状态', color: 'var(--text)' },
+                    { text: '  agent       — 查看 Agent 系统', color: 'var(--text)' },
+                    { text: '  mcp         — 查看 MCP 状态', color: 'var(--text)' },
+                    { text: '  worktree    — 查看工作区', color: 'var(--text)' },
+                    { text: '  clear       — 清屏', color: 'var(--text)' },
+                ]
+            },
+            'analyze': {
+                output: [
+                    { text: 'mewcode > 正在分析项目结构...', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  项目类型:    Python TUI Application', color: 'var(--text)' },
+                    { text: '  框架:        Textual 2.1+', color: 'var(--text)' },
+                    { text: '  包管理:      uv + Hatchling', color: 'var(--text)' },
+                    { text: '  核心模块:    7 个', color: 'var(--text)' },
+                    { text: '  工具数量:    10+ (Bash, Edit, Grep, Glob...)', color: 'var(--text)' },
+                    { text: '  Agent 数量:  3 (Fork, Verification, TaskMgr)', color: 'var(--text)' },
+                    { text: '  测试文件:    16 个', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  架构亮点:', color: 'var(--cyan)' },
+                    { text: '  ✓ 四层记忆系统 (auto_memory.py)', color: 'var(--green)' },
+                    { text: '  ✓ MCP 协议集成 (mcp/client.py)', color: 'var(--green)' },
+                    { text: '  ✓ 权限沙箱 (permissions/sandbox.py)', color: 'var(--green)' },
+                    { text: '  ✓ Hook 引擎 (hooks/engine.py)', color: 'var(--green)' },
+                    { text: '  ✓ Git Worktree 管理 (worktree/manager.py)', color: 'var(--green)' },
+                ]
+            },
+            'fix': {
+                output: [
+                    { text: 'mewcode > 启动 Bug 修复模式...', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  [1/3] 扫描代码库中的潜在问题...', color: 'var(--text)' },
+                    { text: '  [2/3] 发现 2 个潜在问题:', color: 'var(--text)' },
+                    { text: '    ⚠ agent.py:156 — 未处理的 asyncio.TimeoutError', color: 'var(--amber)' },
+                    { text: '    ⚠ sandbox.py:42 — 路径解析缺少 symlink 检查', color: 'var(--amber)' },
+                    { text: '  [3/3] 生成修复方案...', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  ✓ 已生成修复 patch (2 个文件)', color: 'var(--green)' },
+                    { text: '  输入 /apply 应用修复，或 /review 查看详情', color: 'var(--cyan)' },
+                ]
+            },
+            'test': {
+                output: [
+                    { text: 'mewcode > 正在生成测试用例...', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  分析模块: mewcode/agent.py', color: 'var(--text)' },
+                    { text: '  生成测试: tests/test_agent.py', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  测试用例:', color: 'var(--cyan)' },
+                    { text: '  ✓ test_agent_stream_text_response', color: 'var(--green)' },
+                    { text: '  ✓ test_agent_tool_call_execution', color: 'var(--green)' },
+                    { text: '  ✓ test_agent_thinking_block', color: 'var(--green)' },
+                    { text: '  ✓ test_agent_context_compaction', color: 'var(--green)' },
+                    { text: '  ✓ test_agent_permission_request', color: 'var(--green)' },
+                    { text: '', color: '' },
+                    { text: '  运行测试: uv run pytest tests/test_agent.py -v', color: 'var(--cyan)' },
+                    { text: '  结果: 5 passed, 0 failed (85% coverage)', color: 'var(--green)' },
+                ]
+            },
+            'memory': {
+                output: [
+                    { text: 'mewcode > 记忆系统状态', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  ┌─ Layer 1: 指令注入 ─────────────────┐', color: 'var(--cyan)' },
+                    { text: '  │ .mewcode/instructions.md  [已加载]  │', color: 'var(--text)' },
+                    { text: '  └──────────────────────────────────────┘', color: 'var(--cyan)' },
+                    { text: '  ┌─ Layer 2: 自动记忆 ─────────────────┐', color: 'var(--green)' },
+                    { text: '  │ memories.md  [4 条记忆]              │', color: 'var(--text)' },
+                    { text: '  │  · 用户偏好: snake_case 命名         │', color: 'var(--text)' },
+                    { text: '  │  · 纠正反馈: 用 logging 不用 print   │', color: 'var(--text)' },
+                    { text: '  │  · 项目知识: Python 3.11+ / Textual  │', color: 'var(--text)' },
+                    { text: '  │  · 参考资料: textual.textualize.io   │', color: 'var(--text)' },
+                    { text: '  └──────────────────────────────────────┘', color: 'var(--green)' },
+                    { text: '  ┌─ Layer 3: 按需召回 ─────────────────┐', color: 'var(--amber)' },
+                    { text: '  │ 最近召回: 3 条 (相关性 > 0.7)        │', color: 'var(--text)' },
+                    { text: '  └──────────────────────────────────────┘', color: 'var(--amber)' },
+                    { text: '  ┌─ Layer 4: 会话回放 ─────────────────┐', color: 'var(--magenta)' },
+                    { text: '  │ 当前会话: 12 轮对话                  │', color: 'var(--text)' },
+                    { text: '  │ 持久化:   .mewcode/session.jsonl     │', color: 'var(--text)' },
+                    { text: '  └──────────────────────────────────────┘', color: 'var(--magenta)' },
+                ]
+            },
+            'agent': {
+                output: [
+                    { text: 'mewcode > Agent 系统状态', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  内置 Agent:', color: 'var(--cyan)' },
+                    { text: '  ┌─ Fork ────────────────────────────┐', color: 'var(--green)' },
+                    { text: '  │ 分叉子任务，独立上下文执行          │', color: 'var(--text)' },
+                    { text: '  │ 状态: 就绪                         │', color: 'var(--text)' },
+                    { text: '  └────────────────────────────────────┘', color: 'var(--green)' },
+                    { text: '  ┌─ Verification ───────────────────┐', color: 'var(--cyan)' },
+                    { text: '  │ 只读验证 Agent，不可修改文件       │', color: 'var(--text)' },
+                    { text: '  │ 专注: 代码审查 & Bug 发现          │', color: 'var(--text)' },
+                    { text: '  └────────────────────────────────────┘', color: 'var(--cyan)' },
+                    { text: '  ┌─ Task Manager ───────────────────┐', color: 'var(--amber)' },
+                    { text: '  │ 多任务管理与进度跟踪              │', color: 'var(--text)' },
+                    { text: '  │ 当前任务: 0 个进行中              │', color: 'var(--text)' },
+                    { text: '  └────────────────────────────────────┘', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  Team 模式: 未启用', color: 'var(--text-dim)' },
+                    { text: '  Coordinator 模式: 未启用', color: 'var(--text-dim)' },
+                ]
+            },
+            'mcp': {
+                output: [
+                    { text: 'mewcode > MCP 协议状态', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  协议版本: Model Context Protocol v1.12+', color: 'var(--cyan)' },
+                    { text: '  传输方式: stdio / streamable_http', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  已连接 MCP 服务器: 0 个', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  配置示例 (.mewcode/config.yaml):', color: 'var(--cyan)' },
+                    { text: '    mcp_servers:', color: 'var(--green)' },
+                    { text: '      - name: "filesystem"', color: 'var(--text)' },
+                    { text: '        transport: stdio', color: 'var(--text)' },
+                    { text: '        command: "npx"', color: 'var(--text)' },
+                    { text: '        args: ["-y", "@modelcontextprotocol/server-filesystem"]', color: 'var(--text)' },
+                ]
+            },
+            'worktree': {
+                output: [
+                    { text: 'mewcode > Git Worktree 状态', color: 'var(--amber)' },
+                    { text: '', color: '' },
+                    { text: '  主仓库: e:\\work\\mewcode', color: 'var(--text)' },
+                    { text: '  Worktree 目录: .mewcode/worktrees/', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  活跃工作区: 0 个', color: 'var(--text)' },
+                    { text: '', color: '' },
+                    { text: '  功能特性:', color: 'var(--cyan)' },
+                    { text: '  ✓ 隔离的 Git 分支工作区', color: 'var(--green)' },
+                    { text: '  ✓ symlink 共享 (node_modules, .venv)', color: 'var(--green)' },
+                    { text: '  ✓ 自动清理过期工作区 (24h)', color: 'var(--green)' },
+                    { text: '  ✓ 变更检测与冲突提醒', color: 'var(--green)' },
+                ]
+            },
+            'clear': { clear: true }
+        };
+
+        cmdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = cmdInput.value.trim().toLowerCase();
+                if (!cmd) return;
+
+                // Echo command
+                const echo = document.createElement('div');
+                echo.innerHTML = `<span class="cmd-prompt">$</span> <span style="color: var(--text-bright);">${cmd}</span>`;
+                cmdHistory.appendChild(echo);
+
+                const response = commands[cmd];
+                if (response) {
+                    if (response.clear) {
+                        cmdHistory.innerHTML = '';
+                    } else {
+                        response.output.forEach((line, i) => {
+                            setTimeout(() => {
+                                const div = document.createElement('div');
+                                div.textContent = line.text;
+                                if (line.color) div.style.color = line.color;
+                                div.style.minHeight = '1.7em';
+                                cmdHistory.appendChild(div);
+                                cmdHistory.scrollTop = cmdHistory.scrollHeight;
+                            }, i * 50);
+                        });
+                    }
+                } else {
+                    const div = document.createElement('div');
+                    div.style.color = 'var(--amber)';
+                    div.textContent = `未知命令: ${cmd}。输入 help 查看可用命令。`;
+                    cmdHistory.appendChild(div);
+                }
+
+                cmdInput.value = '';
+                setTimeout(() => {
+                    cmdHistory.scrollTop = cmdHistory.scrollHeight;
+                }, 100);
+            }
+        });
+
+        // Focus input on click
+        document.getElementById('demoTerminal').addEventListener('click', () => {
+            cmdInput.focus();
+        });
+
+        // === Scroll Reveal ===
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+        // Auto-focus demo input when section is in view
+        const demoObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    setTimeout(() => cmdInput.focus(), 500);
+                }
+            });
+        }, { threshold: 0.3 });
+
+        demoObserver.observe(document.getElementById('demo'));
+    </script>
+</body>
+</html>
