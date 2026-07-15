@@ -1,0 +1,803 @@
+"""答案面板 - 流式展示 AI 回答，支持追问和自定义提问"""
+import threading
+from typing import Optional, List
+
+from PyQt6.QtWidgets import (
+    QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QGraphicsDropShadowEffect,
+    QApplication, QTextEdit, QFrame, QSizePolicy, QLineEdit
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QTimer, QPoint, QEvent
+from PyQt6.QtGui import QColor, QCursor, QKeyEvent, QMouseEvent
+
+from .styles import STYLE_PANEL, STYLE_INPUT, STYLE_CLOSE_BTN, STYLE_BODY, STYLE_TITLE_BAR, STYLE_CTRL_BTN
+from ..core.logger import get_logger
+from ..services.llm import LLMService
+from ..infra.history import HistoryStore
+
+logger = get_logger(__name__)
+
+
+# 这些控件类型会吞噬鼠标事件，不应触发窗口拖动
+_DRAG_BLOCK_WIDGETS = (QTextEdit, QLineEdit, QPushButton)
+
+
+class AnswerPanel(QFrame):
+    stream_chunk = pyqtSignal(str)
+    stream_done = pyqtSignal(str)
+
+    PANEL_W = 440
+    PANEL_H = 320
+    PANEL_W_LARGE = 600
+    PANEL_H_LARGE = 460
+    TITLE_BAR_H = 36
+    _all_panels: List["AnswerPanel"] = []
+
+    @classmethod
+    def close_all(cls):
+        for p in list(cls._all_panels):
+            try:
+                p._force_close()
+            except Exception:
+                pass
+        cls._all_panels.clear()
+
+    def __init__(self, selected_text: str, action: str, origin_rect: QRect, app: QApplication, custom_question: Optional[str] = None):
+        super().__init__()
+        AnswerPanel._all_panels.append(self)
+        self.selected_text = selected_text
+        self.action = action
+        self._custom_question = custom_question
+        self._origin = origin_rect
+        self._app = app
+        self._stream_buffer = ''
+        self._got_content = False
+        self._loading_shown = True
+        self._animations: List[QPropertyAnimation] = []
+        self._worker_thread: Optional[threading.Thread] = None
+        self._conversation = []
+        self._streaming = False
+        self._cursor_visible = True
+        self._cursor_timer = QTimer(self)
+        self._cursor_timer.setInterval(500)
+        self._cursor_timer.timeout.connect(self._on_cursor_tick)
+        self._collapsed = False
+        self._is_large = False
+        self._current_w = self.PANEL_W
+        self._current_h = self.PANEL_H
+        self._init_ui()
+        self.stream_chunk.connect(self._on_stream_chunk)
+        self.stream_done.connect(self._on_stream_done)
+
+        self._drag_offset: Optional[QPoint] = None
+
+    def _is_on_drag_blocker(self, local_pos: QPoint) -> bool:
+        """判断点击位置是否在会阻塞拖动的交互控件上"""
+        child = self.childAt(local_pos)
+        while child is not None and child is not self:
+            if isinstance(child, _DRAG_BLOCK_WIDGETS):
+                return True
+            child = child.parentWidget()
+        return False
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self._is_on_drag_blocker(event.position().toPoint()):
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._drag_offset is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：转发 _title_bar 和 _content 上的鼠标事件用于拖动。
+
+        当点击在容器空白区域（非按钮/文本框/文本编辑器）时，
+        _title_bar/_content 会收到鼠标事件，我们将其转化为窗口拖动。
+        """
+        if obj in (self._title_bar, self._content):
+            etype = event.type()
+            if etype == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+                return True
+            elif etype == QEvent.Type.MouseMove and self._drag_offset is not None:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self.move(event.globalPosition().toPoint() - self._drag_offset)
+                    event.accept()
+                    return True
+            elif etype == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                if self._drag_offset is not None:
+                    self._drag_offset = None
+                    event.accept()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key.Key_Escape:
+            self._force_close()
+        else:
+            super().keyPressEvent(event)
+
+    def _force_close(self):
+        try:
+            self._cursor_timer.stop()
+            self._stop_animations()
+            self.hide()
+            if self in AnswerPanel._all_panels:
+                AnswerPanel._all_panels.remove(self)
+            self.deleteLater()
+        except Exception:
+            pass
+
+    def _toggle_collapse(self):
+        """折叠/展开面板：折叠时只显示标题栏，展开恢复完整内容"""
+        self._collapsed = not self._collapsed
+        if self._collapsed:
+            self._content.hide()
+            self._min_btn.setText("+")
+            self._resize_btn.hide()
+            self.setFixedSize(self._current_w, self.TITLE_BAR_H + 20)
+        else:
+            self._content.show()
+            self._min_btn.setText("−")
+            self._resize_btn.show()
+            if self._is_large:
+                self.setFixedSize(self.PANEL_W_LARGE, self.PANEL_H_LARGE)
+            else:
+                self.setFixedSize(self.PANEL_W, self.PANEL_H)
+        self._reposition_in_screen()
+
+    def _toggle_size(self):
+        """在普通大小和大尺寸之间切换"""
+        self._is_large = not self._is_large
+        if self._is_large:
+            self._current_w = self.PANEL_W_LARGE
+            self._current_h = self.PANEL_H_LARGE
+            self._resize_btn.setText("◻")
+        else:
+            self._current_w = self.PANEL_W
+            self._current_h = self.PANEL_H
+            self._resize_btn.setText("□")
+        self.setFixedSize(self._current_w, self._current_h)
+        self._reposition_in_screen()
+
+    def _reposition_in_screen(self):
+        """确保窗口不超出屏幕边界"""
+        screen = self._app.primaryScreen().availableGeometry()
+        x = self.x()
+        y = self.y()
+        w = self.width()
+        h = self.height()
+        if x + w > screen.right():
+            x = screen.right() - w
+        if y + h > screen.bottom():
+            y = screen.bottom() - h
+        if x < screen.left():
+            x = screen.left() + 8
+        if y < screen.top():
+            y = screen.top() + 8
+        self.move(x, y)
+
+    def _stop_animations(self):
+        for a in self._animations:
+            try:
+                a.stop()
+            except Exception:
+                pass
+        self._animations.clear()
+
+    def _init_ui(self):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setObjectName("answerPanel")
+        self.setStyleSheet(STYLE_PANEL)
+        # 显示时不抢焦点，但允许子控件（输入框）被点击后激活
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        # 启用半透明背景（配合 QSS 中的 rgba 实现"假毛玻璃"）
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.resize(self.PANEL_W, self.PANEL_H)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 12)
+        layout.setSpacing(8)
+
+        # 胶囊标题栏（可拖动把手）
+        self._title_bar = QFrame(self)
+        self._title_bar.setObjectName("titleBar")
+        self._title_bar.setFixedHeight(36)
+        self._title_bar.setStyleSheet(STYLE_TITLE_BAR)
+        self._title_bar.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
+        self._title_bar.installEventFilter(self)
+        title_layout = QHBoxLayout(self._title_bar)
+        title_layout.setContentsMargins(14, 0, 6, 0)
+        title_layout.setSpacing(4)
+
+        if self._custom_question:
+            title_text = f"ReadMate · {self._custom_question[:20]}"
+        else:
+            title_text = f"ReadMate · {self.action}"
+        title = QLabel(title_text, self._title_bar)
+        title.setStyleSheet("color:#4dfff3; font-size:11px; font-weight:bold; background:transparent;")
+        title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        title_layout.addWidget(title)
+        title_layout.addStretch()
+
+        self._min_btn = QPushButton("−", self._title_bar)
+        self._min_btn.setFixedSize(28, 26)
+        self._min_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._min_btn.setStyleSheet(STYLE_CTRL_BTN)
+        self._min_btn.clicked.connect(self._toggle_collapse)
+        title_layout.addWidget(self._min_btn)
+
+        self._resize_btn = QPushButton("□", self._title_bar)
+        self._resize_btn.setFixedSize(28, 26)
+        self._resize_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._resize_btn.setStyleSheet(STYLE_CTRL_BTN)
+        self._resize_btn.clicked.connect(self._toggle_size)
+        title_layout.addWidget(self._resize_btn)
+
+        close_btn = QPushButton("×", self._title_bar)
+        close_btn.setFixedSize(30, 26)
+        close_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        close_btn.setStyleSheet(STYLE_CLOSE_BTN)
+        close_btn.clicked.connect(self._force_close)
+        title_layout.addWidget(close_btn)
+        layout.addWidget(self._title_bar)
+
+        # 内容区容器
+        self._content = QWidget(self)
+        self._content.installEventFilter(self)
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        quote_text = self.selected_text[:60] + ("…" if len(self.selected_text) > 60 else "")
+        self._quote = QLabel(quote_text, self._content)
+        self._quote.setWordWrap(True)
+        self._quote.setStyleSheet(
+            "color:#7a8198; font-size:11px; font-style:italic;"
+            "border-left:2px solid #4dfff3; padding-left:8px;"
+        )
+        self._quote.setMaximumHeight(32)
+        self._quote.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        content_layout.addWidget(self._quote)
+
+        self._body = QTextEdit(self._content)
+        self._body.setObjectName("answerBody")
+        self._body.setReadOnly(True)
+        self._body.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._body.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._body.setStyleSheet(STYLE_BODY)
+        self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        content_layout.addWidget(self._body, 1)
+
+        self._body.setHtml(
+            '<div style="color:#5a6178; font-style:italic; padding-top:8px;">'
+            '正在思考…'
+            '</div>'
+        )
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(6)
+        self._input = QLineEdit(self._content)
+        self._input.setObjectName("askInput")
+        self._input.setStyleSheet(STYLE_INPUT)
+        self._input.setPlaceholderText("追问或自定义提问…")
+        self._input.returnPressed.connect(self._on_submit_question)
+        self._input.mousePressEvent = self._on_input_click
+        input_row.addWidget(self._input, 1)
+
+        self._ask_btn = QPushButton("发送", self._content)
+        self._ask_btn.setObjectName("askBtn")
+        self._ask_btn.setStyleSheet(STYLE_INPUT)
+        self._ask_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._ask_btn.clicked.connect(self._on_submit_question)
+        input_row.addWidget(self._ask_btn)
+        content_layout.addLayout(input_row)
+
+        layout.addWidget(self._content, 1)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(40)
+        shadow.setColor(QColor(0, 0, 0, 180))
+        shadow.setOffset(0, 10)
+        self.setGraphicsEffect(shadow)
+
+    def _enable_blur_behind(self):
+        """Windows 10/11: 调用 DWM API 启用真毛玻璃（BlurBehind）。
+
+        失败时静默降级为 QSS 半透明背景（已通过 WA_TranslucentBackground + rgba 实现）。
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            # ACCENT_ENABLE_BLURBEHIND = 3（Win10）；ACCENT_ENABLE_ACRYLICBLURBEHIND = 4（Win11，需 22000+）
+            class ACCENTPOLICY(ctypes.Structure):
+                _fields_ = [
+                    ("nAccentState", ctypes.c_int),
+                    ("nFlags", ctypes.c_uint),
+                    ("nColor", ctypes.c_uint),
+                    ("nAnimationId", ctypes.c_uint),
+                ]
+
+            class WINCOMPATTRDATA(ctypes.Structure):
+                _fields_ = [
+                    ("nAttribute", ctypes.c_int),
+                    ("pData", ctypes.c_void_p),
+                    ("ulDataSize", ctypes.c_ulong),
+                ]
+
+            # 19 = WCA_ACCENT_POLICY
+            attr = 19
+            # 使用 AcrylicBlurBehind（4），失败则降级 BlurBehind（3）
+            for accent_state in (4, 3):
+                accent = ACCENTPOLICY(
+                    nAccentState=accent_state,
+                    nFlags=0,
+                    # ARGB：alpha=0xCC（约 80% 不透明），RGB=深蓝灰 #131826
+                    nColor=0xCC261813,
+                    nAnimationId=0,
+                )
+                data = WINCOMPATTRDATA(
+                    nAttribute=attr,
+                    pData=ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p),
+                    ulDataSize=ctypes.sizeof(accent),
+                )
+                hwnd = int(self.winId())
+                result = ctypes.windll.user32.SetWindowCompositionAttribute(
+                    hwnd, ctypes.byref(data)
+                )
+                if result:
+                    return
+        except Exception as e:
+            logger.debug(f"DWM 毛玻璃不可用，降级为半透明: {e}")
+
+    def _clamp_rect_to_screen(self, rect: QRect) -> QRect:
+        screen = self._app.primaryScreen().availableGeometry()
+        x = rect.x()
+        y = rect.y()
+        w = rect.width()
+        h = rect.height()
+        if x + w > screen.right():
+            x = screen.right() - w - 8
+        if y + h > screen.bottom():
+            y = screen.bottom() - h - 8
+        if x < screen.left():
+            x = screen.left() + 8
+        if y < screen.top():
+            y = screen.top() + 8
+        return QRect(x, y, w, h)
+
+    def start_expand(self):
+        """从浮动按钮位置平滑展开"""
+        screen = self._app.primaryScreen().availableGeometry()
+        
+        target_x = self._origin.center().x() - self.PANEL_W // 2
+        target_y = self._origin.bottom() + 6
+        target_rect = QRect(target_x, target_y, self.PANEL_W, self.PANEL_H)
+        target_rect = self._clamp_rect_to_screen(target_rect)
+        
+        start_w = min(max(self._origin.width(), 120), 200)
+        start_h = max(self._origin.height(), 40)
+        start_x = self._origin.center().x() - start_w // 2
+        start_y = self._origin.top()
+        start_rect = QRect(start_x, start_y, start_w, start_h)
+        start_rect = self._clamp_rect_to_screen(start_rect)
+        
+        self.setGeometry(start_rect)
+        self.setWindowOpacity(0.0)
+        # 不调用 activateWindow()，避免抢走原应用焦点
+        self.show()
+        self.raise_()
+        # show() 之后 hwnd 才稳定，此时启用 DWM 毛玻璃
+        self._enable_blur_behind()
+
+        self._worker_thread = threading.Thread(target=self._call_ai_stream, daemon=True)
+        self._worker_thread.start()
+        
+        geom_anim = QPropertyAnimation(self, b"geometry", self)
+        geom_anim.setDuration(280)
+        geom_anim.setStartValue(start_rect)
+        geom_anim.setEndValue(target_rect)
+        geom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animations.append(geom_anim)
+        
+        fade_anim = QPropertyAnimation(self, b"windowOpacity", self)
+        fade_anim.setDuration(220)
+        fade_anim.setStartValue(0.0)
+        fade_anim.setEndValue(1.0)
+        fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animations.append(fade_anim)
+        
+        geom_anim.start()
+        fade_anim.start()
+
+    def _call_ai_stream(self):
+        try:
+            from ..app import get_memory
+
+            mem = get_memory()
+            latest = mem.get_latest() if mem else None
+            recent = mem.get_recent(3) if mem else []
+
+            # 通过 services 层的 LLMService 调用 AI
+            llm = LLMService()
+
+            # 记录用户提问
+            if self._custom_question:
+                user_msg = f"[自定义提问] {self._custom_question}\n选中内容: {self.selected_text}"
+                stream_fn = llm.ask_custom_stream(
+                    selected_text=self.selected_text,
+                    custom_question=self._custom_question,
+                    screenshot=latest,
+                    recent_screenshots=recent,
+                )
+            else:
+                user_msg = f"[{self.action}] {self.selected_text}"
+                stream_fn = llm.ask_stream(
+                    selected_text=self.selected_text,
+                    action=self.action,
+                    screenshot=latest,
+                    recent_screenshots=recent,
+                )
+
+            self._conversation.append({"role": "user", "content": user_msg})
+
+            full_answer = ""
+            for chunk in stream_fn:
+                full_answer += chunk
+                self.stream_chunk.emit(chunk)
+
+            # 记录 AI 回答到对话历史
+            self._conversation.append({
+                "role": "assistant",
+                "content": full_answer
+            })
+
+            # 流式结束，通知保存历史记录
+            self.stream_done.emit(full_answer)
+
+        except Exception as e:
+            err = f'<span style="color:#ff6b6b">出错了: {e}</span>'
+            self.stream_chunk.emit(err)
+
+    def _call_followup_stream(self, question: str):
+        """追问或自定义提问"""
+        try:
+            from ..app import get_memory
+
+            mem = get_memory()
+            latest = mem.get_latest() if mem else None
+
+            # 记录追问
+            self._conversation.append({
+                "role": "user",
+                "content": question
+            })
+
+            # 通过 services 层的 LLMService 调用 AI
+            llm = LLMService()
+            full_answer = ""
+            for chunk in llm.ask_followup_stream(
+                selected_text=self.selected_text,
+                conversation_history=self._conversation[:-1],  # 不含当前追问
+                followup_question=question,
+                screenshot=latest,
+            ):
+                full_answer += chunk
+                self.stream_chunk.emit(chunk)
+
+            # 记录 AI 回答
+            self._conversation.append({
+                "role": "assistant",
+                "content": full_answer
+            })
+
+            self.stream_done.emit(full_answer)
+
+        except Exception as e:
+            err = f'<span style="color:#ff6b6b">出错了: {e}</span>'
+            self.stream_chunk.emit(err)
+
+    def _on_input_click(self, event):
+        """点击输入框时激活窗口，让输入框能获得键盘焦点"""
+        from PyQt6.QtGui import QMouseEvent
+        if isinstance(event, QMouseEvent):
+            # 激活窗口让输入框可以获得焦点
+            self.activateWindow()
+            self._input.setFocus()
+        # 调用原始事件处理
+        QLineEdit.mousePressEvent(self._input, event)
+
+    def _on_submit_question(self):
+        """用户在输入框提交追问/自定义提问"""
+        if self._streaming:
+            return
+        question = self._input.text().strip()
+        if not question:
+            return
+        self._input.clear()
+        # 在回答区追加追问内容
+        prev = self._stream_buffer
+        self._stream_buffer = prev + f"\n\n> 📝 {question}\n\n"
+        self._got_content = True
+        self._streaming = True
+        self._cursor_visible = True
+        self._cursor_timer.start()
+        self._render_body()
+        self._ask_btn.setEnabled(False)
+        self._ask_btn.setText("…")
+
+        self._worker_thread = threading.Thread(
+            target=self._call_followup_stream,
+            args=(question,),
+            daemon=True
+        )
+        self._worker_thread.start()
+
+    def _on_stream_chunk(self, chunk: str):
+        if not self._got_content:
+            self._got_content = True
+            self._stream_buffer = ''
+            self._loading_shown = False
+            # 启动光标闪烁
+            self._cursor_timer.start()
+        self._stream_buffer += chunk
+        self._render_body()
+
+    def _render_body(self):
+        """渲染当前 _stream_buffer，流式输出时追加闪烁光标"""
+        if self._streaming or self._cursor_timer.isActive():
+            cursor = '<span style="color:#4dfff3; font-weight:bold;">▌</span>' if self._cursor_visible else ''
+            html = self._text_to_html(self._stream_buffer + cursor)
+        else:
+            html = self._text_to_html(self._stream_buffer)
+        self._body.setHtml(html)
+        sb = self._body.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _on_cursor_tick(self):
+        """光标闪烁定时器回调"""
+        self._cursor_visible = not self._cursor_visible
+        self._render_body()
+
+    def _on_stream_done(self, full_answer: str):
+        """流式回答结束后，保存到历史记录并恢复输入状态"""
+        # 停止光标闪烁
+        self._cursor_timer.stop()
+        self._cursor_visible = False
+        # 渲染最终内容（无光标）
+        self._render_body()
+        # 恢复输入框
+        self._streaming = False
+        self._ask_btn.setEnabled(True)
+        self._ask_btn.setText("发送")
+        # 保存到历史记录（通过 infra 层的 HistoryStore）
+        try:
+            history = HistoryStore()
+            history.save_record(
+                selected_text=self.selected_text,
+                action=self.action,
+                answer=full_answer,
+            )
+        except Exception as e:
+            logger.error(f"保存历史记录失败: {e}")
+
+    @staticmethod
+    def _highlight_code(code: str, lang: str) -> str:
+        """使用 pygments 高亮代码块，返回 HTML（深色主题）。
+
+        Args:
+            code: 代码原文
+            lang: 语言标识（python/js/等），空则自动检测
+
+        Returns:
+            包裹在 <pre> 中的高亮 HTML
+        """
+        try:
+            from pygments import highlight
+            from pygments.lexers import get_lexer_by_name, guess_lexer, TextLexer
+            from pygments.formatters import HtmlFormatter
+
+            # 选择 lexer
+            lexer = None
+            if lang:
+                try:
+                    lexer = get_lexer_by_name(lang, stripall=False)
+                except Exception:
+                    lexer = None
+            if lexer is None:
+                try:
+                    lexer = guess_lexer(code)
+                except Exception:
+                    lexer = TextLexer()
+
+            # monokai 深色主题，与面板配色协调
+            formatter = HtmlFormatter(
+                style="monokai",
+                nowrap=False,
+                nobackground=True,
+                linespans="",
+                lineanchors="",
+            )
+            highlighted = highlight(code, lexer, formatter)
+            # pygments 输出 <div class="highlight"><pre>...</pre></div>
+            # 提取 <pre> 内的内容，套用我们的样式
+            import re
+            m = re.search(r"<pre[^>]*>(.*)</pre>", highlighted, re.DOTALL)
+            inner = m.group(1) if m else highlighted
+
+            return (
+                f'<pre style="background:rgba(0,0,0,0.45); '
+                f'padding:10px 12px; border-radius:6px; border-left:3px solid #4dfff3; '
+                f'font-family:Consolas,Monaco,monospace; font-size:12px; '
+                f'white-space:pre-wrap; margin:8px 0; line-height:1.5;">{inner}</pre>'
+            )
+        except Exception as e:
+            # 降级：无高亮的纯文本代码块
+            import html
+            escaped = html.escape(code)
+            return (
+                f'<pre style="background:rgba(0,0,0,0.45); color:#e8eaf2; '
+                f'padding:10px 12px; border-radius:6px; border-left:3px solid #4dfff3; '
+                f'font-family:Consolas,Monaco,monospace; font-size:12px; '
+                f'white-space:pre-wrap; margin:8px 0;">{escaped}</pre>'
+            )
+
+    @staticmethod
+    def _text_to_html(text: str) -> str:
+        """将 Markdown 文本转换为 QTextEdit 可渲染的 HTML（支持代码块/行内代码/粗体/斜体/标题/列表/链接）
+
+        代码块使用 pygments 进行语法高亮（深色主题 monokai）。
+        """
+        import html
+        import re
+
+        # 1. 提取代码块（```lang\n...```），用占位符保护，避免被后续转义破坏
+        code_blocks: List[str] = []
+
+        def _save_code_block(m):
+            lang = (m.group(1) or "").strip()
+            content = m.group(2)
+            highlighted = AnswerPanel._highlight_code(content, lang)
+            code_blocks.append(highlighted)
+            return f"\x00CODEBLOCK{len(code_blocks) - 1}\x00"
+
+        text = re.sub(r"```([a-zA-Z0-9_+-]*)\n(.*?)```", _save_code_block, text, flags=re.DOTALL)
+
+        # 2. 提取行内代码（`...`），用占位符保护
+        inline_codes: List[str] = []
+
+        def _save_inline_code(m):
+            content = html.escape(m.group(1))
+            inline_codes.append(
+                f'<code style="background:rgba(77,255,243,0.12); color:#4dfff3; '
+                f'padding:1px 5px; border-radius:4px; '
+                f'font-family:Consolas,Monaco,monospace; font-size:12px;">{content}</code>'
+            )
+            return f"\x01INLINE{len(inline_codes) - 1}\x01"
+
+        text = re.sub(r"`([^`\n]+)`", _save_inline_code, text)
+
+        # 3. HTML 转义剩余文本
+        text = html.escape(text)
+
+        # 4. 行级 Markdown 转换
+        lines = text.split("\n")
+        out: List[str] = []
+        in_ul = False
+        in_ol = False
+
+        def _close_lists():
+            nonlocal in_ul, in_ol
+            if in_ul:
+                out.append("</ul>")
+                in_ul = False
+            if in_ol:
+                out.append("</ol>")
+                in_ol = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # 空行
+            if not stripped:
+                _close_lists()
+                out.append("")
+                continue
+
+            # 标题（# / ## / ###）
+            m = re.match(r"^(#{1,3})\s+(.*)$", stripped)
+            if m:
+                _close_lists()
+                level = len(m.group(1))
+                content = m.group(2)
+                sizes = {1: "18px", 2: "16px", 3: "14px"}
+                margins = {1: "12px 0 6px", 2: "10px 0 4px", 3: "8px 0 4px"}
+                out.append(
+                    f'<p style="margin:{margins[level]}; color:#4dfff3; font-weight:700; '
+                    f'font-size:{sizes[level]};">{content}</p>'
+                )
+                continue
+
+            # 无序列表（- / * / • 开头）
+            m = re.match(r"^[-*•]\s+(.*)$", stripped)
+            if m:
+                if not in_ul:
+                    out.append('<ul style="margin:4px 0; padding-left:20px; color:#e8eaf2;">')
+                    in_ul = True
+                out.append(f'<li style="margin:2px 0;">{m.group(1)}</li>')
+                continue
+
+            # 有序列表（1. / 2. 开头）
+            m = re.match(r"^\d+\.\s+(.*)$", stripped)
+            if m:
+                if not in_ol:
+                    out.append('<ol style="margin:4px 0; padding-left:20px; color:#e8eaf2;">')
+                    in_ol = True
+                out.append(f'<li style="margin:2px 0;">{m.group(1)}</li>')
+                continue
+
+            # 引用块（> 开头）
+            m = re.match(r"^>\s?(.*)$", stripped)
+            if m:
+                _close_lists()
+                out.append(
+                    f'<p style="margin:4px 0; padding:4px 10px; '
+                    f'border-left:2px solid #4dfff3; color:#7a8198; '
+                    f'font-style:italic;">{m.group(1)}</p>'
+                )
+                continue
+
+            # 分隔线（--- 或 ***）
+            if re.match(r"^(-{3,}|\*{3,})$", stripped):
+                _close_lists()
+                out.append('<hr style="border:none; border-top:1px solid rgba(77,255,243,0.2); margin:8px 0;">')
+                continue
+
+            # 普通段落
+            _close_lists()
+            out.append(f'<p style="margin:4px 0; line-height:1.7; color:#e8eaf2;">{stripped}</p>')
+
+        _close_lists()
+        html_body = "\n".join(out)
+
+        # 5. 行内格式（粗体/斜体/链接）—— 在段落内应用
+        # 粗体 **text** 或 __text__（颜色更亮以突出强调）
+        html_body = re.sub(r"\*\*([^*]+)\*\*", r'<b style="color:#f0f2f8;">\1</b>', html_body)
+        html_body = re.sub(r"__([^_]+)__", r'<b style="color:#f0f2f8;">\1</b>', html_body)
+        # 斜体 *text* 或 _text_（颜色稍暗区分）
+        html_body = re.sub(r"(?<![*\w])\*([^*\n]+)\*(?!\*)", r'<i style="color:#c8ccdb;">\1</i>', html_body)
+        html_body = re.sub(r"(?<![_\w])_([^_\n]+)_(?!_)", r'<i style="color:#c8ccdb;">\1</i>', html_body)
+        # 链接 [text](url)
+        html_body = re.sub(
+            r'\[([^\]]+)\]\(([^)]+)\)',
+            r'<a href="\2" style="color:#4dfff3; text-decoration:none;">\1</a>',
+            html_body,
+        )
+
+        # 6. 还原代码块和行内代码占位符
+        for i, cb in enumerate(code_blocks):
+            html_body = html_body.replace(f"\x00CODEBLOCK{i}\x00", cb)
+        for i, ic in enumerate(inline_codes):
+            html_body = html_body.replace(f"\x01INLINE{i}\x01", ic)
+
+        return f'<div style="font-family:\'Microsoft YaHei UI\',\'Segoe UI\',sans-serif; font-size:13px;">{html_body}</div>'

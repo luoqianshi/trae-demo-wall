@@ -1,0 +1,692 @@
+/**
+ * 叮咚学 v2 - AI 抽象层
+ * 提供 OpenAI 兼容 Provider + 本地兜底 Provider
+ * 暴露到 window.AI
+ *
+ * 用法:
+ *   window.AI.loadConfig()         -> 读取配置
+ *   window.AI.saveConfig(cfg)      -> 保存配置
+ *   window.AI.hasRealAI()          -> 是否配置了真实 API
+ *   window.AI.chat(messages)       -> Promise<string>
+ *   window.AI.chatStream(m, cb)    -> 流式：onChunk/onDone/onError
+ *   window.AI.explainQuestion(q)   -> Promise<string>
+ *   window.AI.generateQuestions()  -> Promise<questions>
+ *   window.AI.generateStudyPlan()  -> Promise<string>
+ *   window.AI.respondMood(t, e)    -> Promise<string>
+ *   window.AI.summarizeWeek()      -> Promise<string>
+ *   window.AI.testConnection()     -> Promise<{ok,msg}>
+ *   window.AI.clearConfig()        -> 清空
+ *   window.AI.isParentMode()       -> 家长模式
+ */
+(function (window) {
+  'use strict';
+
+  var STORAGE_KEY = 'dingstudy_ai_config_v1';
+
+  var DEFAULT_CONFIG = {
+    enabled: false,
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: '',
+    model: 'deepseek-chat',
+    temperature: 0.5,
+    persona: 'gentle',     // gentle / strict / senior / magical / peer
+    parentMode: false
+  };
+
+  /** 5 套人设（含名称/图标/描述/system prompt） */
+  var PERSONAS = {
+    gentle: {
+      name: '温柔大姐姐',
+      icon: '🌸',
+      desc: '亲切耐心，多鼓励',
+      system:
+        '你是一位温柔的小学老师，名字叫叮咚姐姐。你回答问题亲切、耐心，' +
+        '多用"宝贝""没关系"等温暖的词，多给鼓励和表扬。回答问题不超过 300 字，' +
+        '语言简单有趣，适合 5-6 年级小学生理解。'
+    },
+    strict: {
+      name: '严格老师',
+      icon: '📏',
+      desc: '简洁直接，准确严谨',
+      system:
+        '你是一位严格的老师，回答问题简洁、直接、准确、严谨。' +
+        '不啰嗦，不废话，但要有耐心。先给结论，再给解释。' +
+        '回答不超过 200 字。如果学生答错，要明确指出错误并给出正确思路。'
+    },
+    senior: {
+      name: '学长学姐',
+      icon: '🎓',
+      desc: '像朋友一样，幽默风趣',
+      system:
+        '你是用户的学长/学姐，回答像朋友聊天一样。可以用一些网络用语、表情包，' +
+        '幽默风趣，但内容要准确。不要长篇大论，像朋友吐槽一样分享知识。' +
+        '回答不超过 250 字。'
+    },
+    magical: {
+      name: '魔法导师',
+      icon: '🪄',
+      desc: '霍格沃茨风格，沉浸式',
+      system:
+        '你是霍格沃茨魔法学校的导师，教授学生各种知识魔法。回答要沉浸式、有故事感，' +
+        '把每个知识点比作一种魔法。例如：背单词 = 咒语、数学公式 = 炼金术、' +
+        '古诗 = 古代预言。回答不超过 300 字，结尾加一句魔法术语。'
+    },
+    peer: {
+      name: '同龄朋友',
+      icon: '🐻',
+      desc: '像同学一样，平等活泼',
+      system:
+        '你和用户是同龄的小朋友，在一起讨论学习问题。回答要平等、活泼、有趣，' +
+        '像同桌互相讲解。可以用"我""咱们"这样的词，回答不超过 250 字。' +
+        '如果遇到不会的，要诚实地说"这个我也不太懂，咱们去问老师吧"。'
+    }
+  };
+
+  /** 8 学科讲解 prompt */
+  var SUBJECT_PROMPTS = {
+    math: '你正在教数学。讲解时：1) 分步骤；2) 用具体数字例子；3) 不直接给答案，要引导思考；4) 用小学生能懂的语言。',
+    chinese: '你正在教语文。讲解时：1) 分析字词含义；2) 解释典故来源；3) 介绍作者背景；4) 朗读古诗词。',
+    english: '你正在教英语。讲解时：1) 用中文解释英文；2) 举一两个例子；3) 和中文对比；4) 教孩子跟读。',
+    science: '你正在教科学。讲解时：1) 联系生活实际；2) 给小实验例子；3) 用比喻讲抽象概念；4) 鼓励孩子观察。',
+    politics: '你正在教道德与法治。讲解时：1) 联系生活；2) 讲小故事；3) 引导思考；4) 强调正确价值观。',
+    history: '你正在教历史。讲解时：1) 讲有趣的故事；2) 给时间线；3) 介绍人物特点；4) 联系今天。',
+    music: '你正在教音乐。讲解时：1) 用节拍和旋律；2) 推荐相似歌曲；3) 教简单的乐理；4) 鼓励多听。',
+    art: '你正在教美术。讲解时：1) 描述画面；2) 介绍艺术家；3) 教小技巧；4) 鼓励孩子动手画。'
+  };
+
+  /** 安全护栏 */
+  var SAFETY_GUIDE =
+    '\n\n【安全护栏】\n' +
+    '1. 拒绝回答：暴力、色情、毒品、自残、敏感政治等不当内容。\n' +
+    '2. 如果遇到不太懂的知识，要说"这个我也不太懂，问问老师或家长吧"。\n' +
+    '3. 单次回复不超过 500 字，简明扼要。\n' +
+    '4. 不替学生做作业：只讲解思路，不直接给完整答案。';
+
+  var config = null;
+
+  /* ============== 配置管理 ============== */
+
+  function loadConfig() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { config = JSON.parse(JSON.stringify(DEFAULT_CONFIG)); return config; }
+      var parsed = JSON.parse(raw);
+      config = {};
+      for (var k in DEFAULT_CONFIG) config[k] = (typeof parsed[k] === typeof DEFAULT_CONFIG[k]) ? parsed[k] : DEFAULT_CONFIG[k];
+      return config;
+    } catch (e) {
+      config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+      return config;
+    }
+  }
+
+  function saveConfig(cfg) {
+    cfg = cfg || config;
+    if (!cfg) cfg = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    var safe = {};
+    for (var k in DEFAULT_CONFIG) safe[k] = (typeof cfg[k] === typeof DEFAULT_CONFIG[k]) ? cfg[k] : DEFAULT_CONFIG[k];
+    config = safe;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(safe)); } catch (e) {}
+    return safe;
+  }
+
+  function clearConfig() {
+    config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    return config;
+  }
+
+  function hasRealAI() {
+    if (!config) loadConfig();
+    return !!(config.enabled && config.apiKey && !config.parentMode);
+  }
+
+  function isParentMode() {
+    if (!config) loadConfig();
+    return !!config.parentMode;
+  }
+
+  /* ============== 构造 system prompt ============== */
+
+  function buildSystemPrompt(opts) {
+    opts = opts || {};
+    var persona = (opts.persona || (config && config.persona) || 'gentle');
+    var subject = opts.subject || '';
+    var p = PERSONAS[persona] || PERSONAS.gentle;
+    var lines = [p.system];
+    if (subject && SUBJECT_PROMPTS[subject]) {
+      lines.push(SUBJECT_PROMPTS[subject]);
+    }
+    if (opts.extra) lines.push(opts.extra);
+    lines.push(SAFETY_GUIDE);
+    return lines.join('\n\n');
+  }
+
+  /* ============== OpenAI 兼容 Provider ============== */
+
+  function _endpoint() {
+    var base = (config.baseUrl || '').replace(/\/+$/, '');
+    return base + '/chat/completions';
+  }
+
+  function _timeoutPromise(ms) {
+    return new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error('请求超时（' + (ms / 1000) + ' 秒）')); }, ms);
+    });
+  }
+
+  /** 非流式 */
+  function callRealAPI(messages, opts) {
+    opts = opts || {};
+    if (!config || !config.apiKey) return Promise.reject(new Error('未配置 API Key'));
+    var body = {
+      model: config.model || 'deepseek-chat',
+      messages: messages,
+      temperature: typeof config.temperature === 'number' ? config.temperature : 0.5,
+      stream: false
+    };
+    var url = _endpoint();
+    var p = fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + config.apiKey
+      },
+      body: JSON.stringify(body)
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (t) {
+          var msg = 'HTTP ' + resp.status;
+          if (resp.status === 401 || resp.status === 403) msg += '：API Key 无效或无权限';
+          else if (resp.status === 404) msg += '：地址错误，请检查 Base URL';
+          else if (resp.status === 429) msg += '：请求太频繁，请稍后再试';
+          else msg += '：' + (t || '').substring(0, 200);
+          throw new Error(msg);
+        });
+      }
+      return resp.json();
+    }).then(function (data) {
+      var choice = data && data.choices && data.choices[0];
+      if (!choice) throw new Error('返回数据格式异常');
+      var content = choice.message && choice.message.content;
+      if (!content) throw new Error('AI 没有返回内容');
+      return content;
+    });
+    return Promise.race([p, _timeoutPromise(30000)]);
+  }
+
+  /** 流式（解析 SSE） */
+  function chatStream(messages, callbacks) {
+    callbacks = callbacks || {};
+    if (!config || !config.apiKey) {
+      var err = new Error('未配置 API Key');
+      if (callbacks.onError) callbacks.onError(err);
+      return Promise.reject(err);
+    }
+    var body = {
+      model: config.model || 'deepseek-chat',
+      messages: messages,
+      temperature: typeof config.temperature === 'number' ? config.temperature : 0.5,
+      stream: true
+    };
+    var url = _endpoint();
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + config.apiKey
+      },
+      body: JSON.stringify(body)
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (t) {
+          var msg = 'HTTP ' + resp.status;
+          if (resp.status === 401 || resp.status === 403) msg += '：API Key 无效或无权限';
+          else if (resp.status === 404) msg += '：地址错误，请检查 Base URL';
+          else if (resp.status === 429) msg += '：请求太频繁，请稍后再试';
+          else msg += '：' + (t || '').substring(0, 200);
+          throw new Error(msg);
+        });
+      }
+      if (!resp.body || !resp.body.getReader) {
+        // 浏览器不支持流式
+        return resp.json().then(function (data) {
+          var c = data && data.choices && data.choices[0];
+          var content = c && c.message && c.message.content;
+          if (content && callbacks.onChunk) callbacks.onChunk(content);
+          if (callbacks.onDone) callbacks.onDone();
+        });
+      }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder('utf-8');
+      var buffer = '';
+      function readNext() {
+        return reader.read().then(function (result) {
+          if (result.done) {
+            if (buffer.trim()) {
+              var lastLines = buffer.split('\n');
+              for (var li = 0; li < lastLines.length; li++) _parseLine(lastLines[li]);
+            }
+            if (callbacks.onDone) callbacks.onDone();
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (var i = 0; i < lines.length; i++) _parseLine(lines[i]);
+          return readNext();
+        });
+      }
+      function _parseLine(line) {
+        var t = (line || '').trim();
+        if (!t || !t.startsWith('data:')) return;
+        var data = t.slice(5).trim();
+        if (data === '[DONE]') {
+          if (callbacks.onDone) callbacks.onDone();
+          return;
+        }
+        try {
+          var json = JSON.parse(data);
+          var delta = json.choices && json.choices[0] && json.choices[0].delta;
+          if (delta && delta.content && callbacks.onChunk) callbacks.onChunk(delta.content);
+        } catch (e) { /* ignore */ }
+      }
+      return readNext();
+    }).catch(function (e) {
+      if (callbacks.onError) callbacks.onError(e);
+      throw e;
+    });
+  }
+
+  /* ============== 本地兜底 Provider ============== */
+
+  /** 安全检查：判断输入是否属于禁止话题 */
+  function _isUnsafe(t) {
+    if (!t) return false;
+    var bad = ['自杀','自残','毒品','色情','裸体','杀人','炸弹','恐怖袭击','邪教'];
+    var lower = String(t).toLowerCase();
+    for (var i = 0; i < bad.length; i++) if (lower.indexOf(bad[i]) >= 0) return true;
+    return false;
+  }
+
+  /** 数学计算 */
+  function _tryCalc(t) {
+    var m = t.match(/(-?\d+(?:\.\d+)?)\s*([\+\-\*\/×x÷%])\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    var a = parseFloat(m[1]);
+    var b = parseFloat(m[3]);
+    var op = m[2];
+    var sym = op;
+    if (op === 'x' || op === 'X') { op = '*'; sym = '×'; }
+    if (op === '÷') { op = '/'; sym = '÷'; }
+    var r;
+    if (op === '+') r = a + b;
+    else if (op === '-') r = a - b;
+    else if (op === '*') r = a * b;
+    else if (op === '/') {
+      if (b === 0) return a + ' 不能除以 0 哦';
+      r = a / b;
+    } else if (op === '%') r = a % b;
+    else return null;
+    var rs = (r === Math.floor(r)) ? String(r) : r.toFixed(4).replace(/\.?0+$/, '');
+    return a + ' ' + sym + ' ' + b + ' = ' + rs;
+  }
+
+  /** 心情识别 */
+  var MOOD_MAP = [
+    { keys: ['开心','高兴','快乐','兴奋','哈哈','嘻嘻','幸福'], reply: '听到你这么开心，叮咚也觉得很开心呢！继续做点有趣的事，让自己一直保持好心情吧！' },
+    { keys: ['难过','伤心','悲伤','哭','委屈','失望'], reply: '宝贝，难过是正常的。抱抱你。要不要和我说说发生了什么？也许说出来会好受一些。' },
+    { keys: ['生气','愤怒','讨厌','烦','气死'], reply: '生气啦？先深呼吸三次，1...2...3...。气坏了身体可不值得，要不要告诉我是什么事让你这么生气？' },
+    { keys: ['害怕','恐惧','担心','紧张','焦虑'], reply: '没事的，宝贝。你能告诉叮咚是什么让你担心吗？我们一起想办法。' },
+    { keys: ['累','疲惫','困','疲倦','没劲'], reply: '辛苦了！记得劳逸结合哦。休息一下再继续，会更有效率。' },
+    { keys: ['无聊','没事干'], reply: '无聊的时候可以做这些：1) 读一本有趣的书；2) 听一首喜欢的歌；3) 出门散散步；4) 来做几道题吧！' },
+    { keys: ['无聊','孤独','一个人'], reply: '叮咚一直陪着你呢！要不要聊聊天，或者做几道有趣的题？' }
+  ];
+  function _moodReply(t) {
+    for (var i = 0; i < MOOD_MAP.length; i++) {
+      var m = MOOD_MAP[i];
+      for (var j = 0; j < m.keys.length; j++) {
+        if (t.indexOf(m.keys[j]) >= 0) return m.reply;
+      }
+    }
+    return null;
+  }
+
+  /** 学科关键词 */
+  var SCIENCE_FACTS = {
+    '水的化学式': '水的化学式是 H₂O，2 个氢原子和 1 个氧原子组成。',
+    '光速': '光在真空中的速度约为 30 万公里/秒。',
+    '声音': '声音是由物体振动产生的，靠介质传播，真空中不能传声。',
+    '地球': '地球是太阳系八大行星之一，是唯一有生命的星球。',
+    '太阳系': '太阳系以太阳为中心，包括 8 大行星：水星、金星、地球、火星、木星、土星、天王星、海王星。',
+    '植物': '植物通过光合作用制造养分，需要阳光、水和空气。',
+    '动物': '动物分脊椎动物和无脊椎动物，会动、需要吃东西。',
+    '光合作用': '植物的叶子利用阳光、水和二氧化碳制造养分，并释放氧气。',
+    '心脏': '人的心脏在胸腔左侧偏下，是血液循环的动力泵。',
+    '重力': '物体由于地球的吸引而受到的力叫重力，方向竖直向下。',
+    '元素': '化学元素是组成物质的基本单位，目前已知 118 种。'
+  };
+  function _scienceReply(t) {
+    for (var k in SCIENCE_FACTS) {
+      if (t.indexOf(k) >= 0) return SCIENCE_FACTS[k];
+    }
+    if (/为什么|怎么回事|原理/.test(t) && /雨|风|雷|电|雪|水|火|光/.test(t)) {
+      return '这是一个有趣的问题！你可以观察生活或者做个小实验来验证，比如...（开启 AI 老师可以给你更详细的解释哦）';
+    }
+    return null;
+  }
+
+  /** 古诗查询 */
+  function _poemReply(t) {
+    var DD = window.DD;
+    if (!DD || !DD.ARTICLES) return null;
+    for (var i = 0; i < DD.ARTICLES.length; i++) {
+      var a = DD.ARTICLES[i];
+      if (t.indexOf(a.title) >= 0 || t.indexOf(a.author) >= 0) {
+        return '《' + a.title + '》' + a.author + '：\n' + a.text + '\n\n意思：' + a.translation;
+      }
+    }
+    return null;
+  }
+
+  /** 字词典查询 */
+  function _dictReply(t) {
+    var DD = window.DD;
+    if (!DD || !DD.DICT) return null;
+    // 提取可能的中文词
+    var m = t.match(/[\u4e00-\u9fa5]{2,8}/g);
+    if (!m) return null;
+    for (var i = 0; i < m.length; i++) {
+      var w = m[i];
+      for (var j = 0; j < DD.DICT.length; j++) {
+        var d = DD.DICT[j];
+        if (d.meaning === w || (d.meaning && d.meaning.indexOf(w) >= 0)) {
+          var out = d.meaning + ' [' + d.pinyin + '] 英：' + d.en + '\n例句：' + d.example;
+          if (d.near && d.near.length) out += '\n近义词：' + d.near.join('、');
+          if (d.ant && d.ant.length) out += '\n反义词：' + d.ant.join('、');
+          return out;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** 学科知识点 */
+  var KNOWLEDGE = {
+    '圆的面积': '圆的面积 = π × r²（π 取 3.14）。',
+    '圆的周长': '圆的周长 = 2 × π × r。',
+    '三角形面积': '三角形的面积 = 底 × 高 ÷ 2。',
+    '长方形面积': '长方形面积 = 长 × 宽。',
+    '加减乘除': '加（+）、减（-）、乘（×）、除（÷），是数学的四种基本运算。',
+    '九九乘法': '1×1=1, 1×2=2 ... 9×9=81，背熟对以后学数学很有帮助。',
+    '古诗': '古诗讲究押韵和意境，多读多背可以培养语感。',
+    '拼音': '汉语拼音有 23 个声母、24 个韵母、4 个声调。',
+    '英语': '学英语要多听多说，可以看英文动画、唱英文歌。'
+  };
+  function _knowledgeReply(t) {
+    for (var k in KNOWLEDGE) {
+      if (t.indexOf(k) >= 0) return k + '：' + KNOWLEDGE[k];
+    }
+    return null;
+  }
+
+  /** 本地入口：未配置真实 AI 时的兜底 */
+  function callLocalAI(text, ctx) {
+    ctx = ctx || {};
+    var t = (text || '').trim();
+    if (!t) return Promise.resolve('你想问什么呢？');
+
+    if (_isUnsafe(t)) {
+      return Promise.resolve('这个问题我没办法回答，你可以问问老师或者家长。');
+    }
+
+    // 1) 计算
+    var calc = _tryCalc(t);
+    if (calc) return Promise.resolve(calc);
+
+    // 2) 心情
+    var mood = _moodReply(t);
+    if (mood) return Promise.resolve(mood);
+
+    // 3) 学科
+    var sci = _scienceReply(t);
+    if (sci) return Promise.resolve(sci);
+
+    // 4) 知识
+    var k = _knowledgeReply(t);
+    if (k) return Promise.resolve(k);
+
+    // 5) 古诗
+    var poem = _poemReply(t);
+    if (poem) return Promise.resolve(poem);
+
+    // 6) 字典
+    var dict = _dictReply(t);
+    if (dict) return Promise.resolve(dict);
+
+    // 7) 寒暄
+    if (/你好|hi|hello|嗨|hey/i.test(t)) {
+      return Promise.resolve('你好！我是叮咚的 AI 老师。配置 API Key 后可以和我深度对话哦～也可以问我数学题、查字典、读古诗。');
+    }
+    if (/谢谢|thank/i.test(t)) {
+      return Promise.resolve('不客气！能帮到你我很开心～');
+    }
+    if (/你是谁|你叫什么/.test(t)) {
+      return Promise.resolve('我是叮咚的 AI 老师，会算数、查字典、读古诗、讲知识。配置 API Key 后可以更聪明地和你聊天。');
+    }
+    if (/怎么学|如何学|学习/.test(t)) {
+      return Promise.resolve('学习小建议：1) 每天做 5-10 道题；2) 整理错题本，定期复习；3) 多读课外书；4) 劳逸结合，效率第一。');
+    }
+    if (/成语|故事|古诗/.test(t)) {
+      return Promise.resolve('古诗推荐：' + '《静夜思》（李白）床前明月光，疑是地上霜。');
+    }
+    if (/奖励|金币|叮咚币/.test(t)) {
+      return Promise.resolve('答对题目可获得叮咚币和经验，连击还有额外奖励！');
+    }
+
+    // 8) 兜底
+    return Promise.resolve(
+      '这是个有趣的问题～配置 API Key 后我可以回答得更详细。' +
+      '你也可以试着问我：' +
+      '\n· 数学题（如 12×5）' +
+      '\n· 字词（如 "苹果怎么写"）' +
+      '\n· 古诗（如 "静夜思"）' +
+      '\n· 科学小知识（如 "水的化学式"）'
+    );
+  }
+
+  /* ============== 通用 chat 接口 ============== */
+
+  function chat(messages, opts) {
+    if (hasRealAI()) {
+      return callRealAPI(messages, opts).catch(function (e) {
+        console.warn('[AI] 真实 API 失败，降级本地：', e.message);
+        // 降级到本地
+        var userMsg = '';
+        if (Array.isArray(messages)) {
+          for (var i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') { userMsg = messages[i].content; break; }
+          }
+        }
+        return callLocalAI(userMsg, opts).then(function (localReply) {
+          return '（AI 暂不可用：' + e.message + '）\n' + localReply;
+        });
+      });
+    }
+    // 没配置：直接本地
+    var userMsg = '';
+    if (Array.isArray(messages)) {
+      for (var j = messages.length - 1; j >= 0; j--) {
+        if (messages[j].role === 'user') { userMsg = messages[j].content; break; }
+      }
+    }
+    return callLocalAI(userMsg, opts);
+  }
+
+  /* ============== 高级功能 ============== */
+
+  /** 题目讲解 */
+  function explainQuestion(q, opts) {
+    opts = opts || {};
+    var subject = opts.subject || (q && q.subject) || 'general';
+    var sys = buildSystemPrompt({ subject: subject });
+    var userText = '请讲解这道题：\n' +
+      '题目：' + (q.q || '') + '\n' +
+      '选项：' + (q.opts ? q.opts.map(function (o, i) { return (i + 1) + '. ' + o; }).join(' / ') : '（无）') + '\n' +
+      '正确答案：' + (q.opts && typeof q.a === 'number' ? q.opts[q.a] : '（无）') + '\n' +
+      (q.exp ? '已有提示：' + q.exp + '\n' : '') +
+      '\n请：1) 解释考查的知识点；2) 给出详细解题思路；3) 教孩子怎么想到答案。';
+    return chat([
+      { role: 'system', content: sys },
+      { role: 'user', content: userText }
+    ], opts);
+  }
+
+  /** AI 出题（JSON 格式） */
+  function generateQuestions(subject, difficulty, count) {
+    count = count || 5;
+    difficulty = difficulty || 'normal';
+    var sys = buildSystemPrompt({ subject: subject }) +
+      '\n你是一个出题老师，请输出严格 JSON 格式的题目数组。';
+    var userText = '请出 ' + count + ' 道 ' + subject + ' 学科的题目，难度 ' + difficulty + '，适合 5-6 年级小学生。\n' +
+      '输出 JSON 数组，每个元素结构：\n' +
+      '{ "q": "题目", "opts": ["A", "B", "C", "D"], "a": 正确答案索引(0-3), "exp": "解释", "diff": "' + difficulty + '", "subject": "' + subject + '" }\n' +
+      '只输出 JSON，不要其他文字。';
+    return chat([
+      { role: 'system', content: sys },
+      { role: 'user', content: userText }
+    ]).then(function (text) {
+      // 解析 JSON（兼容可能的代码块）
+      try {
+        var cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        var arr = JSON.parse(cleaned);
+        if (!Array.isArray(arr)) return [];
+        return arr.slice(0, count);
+      } catch (e) {
+        console.warn('[AI] 解析生成题目失败：', e);
+        return [];
+      }
+    });
+  }
+
+  /** 学习计划 */
+  function generateStudyPlan(state) {
+    state = state || {};
+    var sys = buildSystemPrompt({});
+    var userText = '请为下面的小学生生成一个简单的 7 天学习计划：\n' +
+      '年级：' + (state.grade || '五年级') + '\n' +
+      '当前等级：' + (state.level || 1) + '\n' +
+      '积分：' + (state.coin || 0) + '\n' +
+      '要求：每天 3-5 个学习任务，包含学科、预计时间、小目标。' +
+      '输出不超过 400 字。';
+    return chat([
+      { role: 'system', content: sys },
+      { role: 'user', content: userText }
+    ]);
+  }
+
+  /** 心情陪伴 */
+  function respondMood(text, emoji) {
+    var sys = buildSystemPrompt({}) +
+      '\n你是孩子的暖心朋友，记录并回应孩子的情绪。' +
+      '回复风格：温暖、简短（不超过 200 字）、不评判、给出小建议。';
+    var userText = '孩子刚才记下了心情：' + (emoji || '😊') + '\n' +
+      '写的内容是：' + (text || '（没有写）') +
+      '\n请用温暖的语气回应一下，可以问一个小问题。';
+    return chat([
+      { role: 'system', content: sys },
+      { role: 'user', content: userText }
+    ]);
+  }
+
+  /** 周报总结 */
+  function summarizeWeek(state) {
+    state = state || {};
+    var sys = buildSystemPrompt({});
+    var userText = '这是孩子本周的学习数据：\n' +
+      '答题数：' + (state.total || 0) + '\n' +
+      '正确数：' + (state.correct || 0) + '\n' +
+      '正确率：' + (state.ratio || 0) + '%\n' +
+      '各学科情况：' + JSON.stringify(state.bySub || {}) + '\n' +
+      '\n请用亲切的语言给出本周总结：1) 亮点 2) 待改进 3) 下周建议。' +
+      '不超过 300 字。';
+    return chat([
+      { role: 'system', content: sys },
+      { role: 'user', content: userText }
+    ]);
+  }
+
+  /** 测试连接 */
+  function testConnection() {
+    if (!config || !config.apiKey) {
+      return Promise.resolve({ ok: false, msg: '请先填写 API Key' });
+    }
+    var sys = buildSystemPrompt({});
+    var body = {
+      model: config.model || 'deepseek-chat',
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: '请用一句话回复"连接成功"' }
+      ],
+      temperature: 0.3,
+      stream: false,
+      max_tokens: 30
+    };
+    var url = _endpoint();
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + config.apiKey
+      },
+      body: JSON.stringify(body)
+    }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.text().then(function (t) {
+          var msg = 'HTTP ' + resp.status;
+          if (resp.status === 401 || resp.status === 403) msg += '：API Key 无效或无权限';
+          else if (resp.status === 404) msg += '：地址错误，请检查 Base URL';
+          else if (resp.status === 429) msg += '：请求太频繁';
+          else msg += '：' + (t || '').substring(0, 120);
+          return { ok: false, msg: msg };
+        });
+      }
+      return resp.json().then(function (data) {
+        var c = data && data.choices && data.choices[0];
+        if (!c) return { ok: false, msg: '返回数据格式异常' };
+        return { ok: true, msg: '连接成功！' + ((c.message && c.message.content) ? ' 模型返回：' + c.message.content.substring(0, 40) : '') };
+      });
+    }).catch(function (e) {
+      return { ok: false, msg: '网络错误：' + (e.message || '未知错误') + '（可能 CORS 跨域问题）' };
+    });
+  }
+
+  /* ============== 暴露 API ============== */
+
+  // 启动时加载
+  loadConfig();
+
+  window.AI = {
+    config: config,
+    PERSONAS: PERSONAS,
+    SUBJECT_PROMPTS: SUBJECT_PROMPTS,
+    DEFAULT_CONFIG: DEFAULT_CONFIG,
+    loadConfig: loadConfig,
+    saveConfig: saveConfig,
+    clearConfig: clearConfig,
+    hasRealAI: hasRealAI,
+    isParentMode: isParentMode,
+    buildSystemPrompt: buildSystemPrompt,
+    chat: chat,
+    chatStream: chatStream,
+    explainQuestion: explainQuestion,
+    generateQuestions: generateQuestions,
+    generateStudyPlan: generateStudyPlan,
+    respondMood: respondMood,
+    summarizeWeek: summarizeWeek,
+    testConnection: testConnection,
+    callLocalAI: callLocalAI,
+    callRealAPI: callRealAPI
+  };
+
+})(window);

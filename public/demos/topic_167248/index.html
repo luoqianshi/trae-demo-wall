@@ -1,0 +1,3107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>颜容 - AI中医面诊 · 智能皮肤分析</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        .animate-scale-in { animation: scaleIn 0.25s ease-out; }
+        .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+        .animate-spin { animation: spin 1s linear infinite; }
+        .animate-slide-up { animation: slideUp 0.4s ease-out; }
+        .transition-all { transition: all 0.3s ease; }
+        .transition-colors { transition: color 0.2s, background-color 0.2s, border-color 0.2s; }
+        .transition-transform { transition: transform 0.2s ease; }
+        .active\:scale-95:active { transform: scale(0.95); }
+        .active\:scale-90:active { transform: scale(0.9); }
+        button { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+        const { useState, useEffect, useContext, createContext, createElement: e } = React;
+
+        const skinIssuesData = [
+            { id: 'pimple', name: '痘痘', severity: 'mild', description: '面部存在少量痘痘', suggestion: '保持面部清洁' },
+            { id: 'blackhead', name: '黑头', severity: 'moderate', description: 'T区有明显黑头', suggestion: '定期使用清洁面膜' },
+            { id: 'dark-circle', name: '黑眼圈', severity: 'mild', description: '眼下有轻微暗沉', suggestion: '保证充足睡眠' },
+            { id: 'redness', name: '泛红', severity: 'mild', description: '面部有轻微泛红', suggestion: '使用温和护肤品' },
+            { id: 'oil', name: '出油', severity: 'severe', description: '油脂分泌旺盛', suggestion: '使用控油产品' },
+            { id: 'dull', name: '暗沉', severity: 'moderate', description: '肤色暗沉缺乏光泽', suggestion: '注意防晒' },
+        ];
+
+        const healthTipsData = [
+            { id: 'qi-blood', title: '气血提示', description: '眼下暗沉可能与气血不足有关', suggestion: '建议多食用红枣等食物' },
+            { id: 'spleen', title: '脾胃提示', description: '鼻翼泛红可能与脾胃功能有关', suggestion: '建议饮食规律' },
+        ];
+
+        const skincareRecommendationsData = [
+            { id: 'cleanser', name: '温和洁面', icon: '🧴', description: '选择氨基酸洁面产品，避免过度清洁' },
+            { id: 'moisturizer', name: '保湿补水', icon: '💧', description: '使用适合肤质的保湿乳液或面霜' },
+            { id: 'sunblock', name: '防晒防护', icon: '☀️', description: '每天使用防晒霜，防止紫外线伤害' },
+            { id: 'mask', name: '定期敷面膜', icon: '🎭', description: '每周使用2-3次面膜，深层滋养肌肤' },
+            { id: 'eye-cream', name: '眼霜护理', icon: '👁️', description: '使用眼霜呵护眼周肌肤' },
+            { id: 'serum', name: '精华液', icon: '✨', description: '根据肌肤需求选择针对性精华' },
+        ];
+
+        function compressImage(base64Str, maxWidth = 300, maxHeight = 300, quality = 0.6) {
+            return new Promise(function(resolve) {
+                const img = new Image();
+                img.src = base64Str;
+                img.onload = function() {
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                    if (height > maxHeight) {
+                        width = (width * maxHeight) / height;
+                        height = maxHeight;
+                    }
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.onerror = function() {
+                    resolve(base64Str);
+                };
+            });
+        }
+
+        function hashPassword(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            return crypto.subtle.digest('SHA-256', data).then(function(hash) {
+                return Array.from(new Uint8Array(hash)).map(function(b) {
+                    return b.toString(16).padStart(2, '0');
+                }).join('');
+            });
+        }
+
+        function analyzeSkinFromImage(imageData, userSkinType) {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+
+            let totalBrightness = 0;
+            let totalRedness = 0;
+            let darkPixelCount = 0;
+            let redPixelCount = 0;
+            let shinyPixelCount = 0;
+            let pixelCount = 0;
+
+            let lipPixelCount = 0;
+            let lipR = 0, lipG = 0, lipB = 0;
+            let lipSaturation = 0;
+            let lipBrightness = 0;
+
+            let leftEyePixelCount = 0;
+            let leftEyeBrightness = 0;
+            let leftEyeDarkPixels = 0;
+            let leftEyeContrast = 0;
+
+            let rightEyePixelCount = 0;
+            let rightEyeBrightness = 0;
+            let rightEyeDarkPixels = 0;
+            let rightEyeContrast = 0;
+
+            let facePixelCount = 0;
+            let faceR = 0, faceG = 0, faceB = 0;
+            let faceBrightness = 0;
+            let faceRedness = 0;
+            let faceYellowness = 0;
+
+            let yintangPixelCount = 0;
+            let yintangR = 0, yintangG = 0, yintangB = 0;
+            let yintangBrightness = 0;
+            let yintangDarkPixels = 0;
+
+            const faceCenterY = height * 0.65;
+            const faceWidth = width * 0.25;
+            const lipTop = faceCenterY - 15;
+            const lipBottom = faceCenterY + 10;
+
+            const leftEyeX = width * 0.38;
+            const rightEyeX = width * 0.62;
+            const eyeY = height * 0.42;
+            const eyeWidth = width * 0.08;
+            const eyeHeight = height * 0.06;
+
+            const faceCenterX = width / 2;
+            const faceAnalyzeTop = height * 0.3;
+            const faceAnalyzeBottom = height * 0.6;
+            const faceAnalyzeLeft = faceCenterX - width * 0.2;
+            const faceAnalyzeRight = faceCenterX + width * 0.2;
+
+            const yintangX = width / 2;
+            const yintangY = height * 0.33;
+            const yintangWidth = width * 0.1;
+            const yintangHeight = height * 0.06;
+
+            for (let y = 0; y < height; y += 4) {
+                for (let x = 0; x < width; x += 4) {
+                    const i = (y * width + x) * 4;
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const brightness = (r + g + b) / 3;
+
+                    totalBrightness += brightness;
+
+                    if (r > g * 1.15 && r > b * 1.1 && r > 120) {
+                        redPixelCount++;
+                        totalRedness += (r - Math.max(g, b)) / r;
+                    }
+
+                    if (brightness > 200 && r > 180 && g > 180 && b > 180) {
+                        shinyPixelCount++;
+                    }
+
+                    if (brightness < 80) {
+                        darkPixelCount++;
+                    }
+
+                    const centerX = width / 2;
+                    const distFromCenter = Math.abs(x - centerX);
+                    if (y >= lipTop && y <= lipBottom && distFromCenter < faceWidth) {
+                        const isRed = r > 120 && r > g * 1.1 && r > b * 1.1;
+                        const isPink = r > 150 && g > 100 && b > 100 && Math.abs(r - g) < 50 && Math.abs(r - b) < 50;
+                        const maxC = Math.max(r, g, b);
+                        const minC = Math.min(r, g, b);
+                        const sat = maxC === 0 ? 0 : (maxC - minC) / maxC;
+                        const bri = brightness / 255;
+                        if (isRed || isPink) {
+                            lipR += r;
+                            lipG += g;
+                            lipB += b;
+                            lipSaturation += sat;
+                            lipBrightness += bri;
+                            lipPixelCount++;
+                        }
+                    }
+
+                    if (Math.abs(x - leftEyeX) < eyeWidth && Math.abs(y - eyeY) < eyeHeight) {
+                        leftEyeBrightness += brightness;
+                        if (brightness < 60) leftEyeDarkPixels++;
+                        leftEyePixelCount++;
+                    }
+
+                    if (Math.abs(x - rightEyeX) < eyeWidth && Math.abs(y - eyeY) < eyeHeight) {
+                        rightEyeBrightness += brightness;
+                        if (brightness < 60) rightEyeDarkPixels++;
+                        rightEyePixelCount++;
+                    }
+
+                    if (y >= faceAnalyzeTop && y <= faceAnalyzeBottom && x >= faceAnalyzeLeft && x <= faceAnalyzeRight) {
+                        const isSkin = r > 80 && g > 60 && b > 50 && r > g && g > b * 0.85;
+                        if (isSkin && brightness > 50) {
+                            faceR += r;
+                            faceG += g;
+                            faceB += b;
+                            faceBrightness += brightness;
+                            if (r > g * 1.1 && r > b * 1.1) faceRedness++;
+                            if (r > 200 && g > 180 && b < 150) faceYellowness++;
+                            facePixelCount++;
+                        }
+                    }
+
+                    if (Math.abs(x - yintangX) < yintangWidth && Math.abs(y - yintangY) < yintangHeight) {
+                        const isSkin = r > 80 && g > 60 && b > 50 && r > g && g > b * 0.85;
+                        if (isSkin) {
+                            yintangR += r;
+                            yintangG += g;
+                            yintangB += b;
+                            yintangBrightness += brightness;
+                            if (brightness < 100) yintangDarkPixels++;
+                            yintangPixelCount++;
+                        }
+                    }
+
+                    pixelCount++;
+                }
+            }
+
+            let lipAnalysis = null;
+            if (lipPixelCount > 0) {
+                const avgLipR = lipR / lipPixelCount;
+                const avgLipG = lipG / lipPixelCount;
+                const avgLipB = lipB / lipPixelCount;
+                const avgLipSat = lipSaturation / lipPixelCount;
+                const avgLipBri = lipBrightness / lipPixelCount;
+
+                let lipCondition = 'healthy';
+                let lipDescription = '唇色红润';
+                let lipSuggestion = '唇色健康，气血充足';
+                let lipSeverity = 'mild';
+
+                if (avgLipR < 120 || avgLipSat < 0.15) {
+                    if (avgLipR < 100) {
+                        lipCondition = 'blood-deficiency';
+                        lipDescription = '唇色苍白或暗淡';
+                        lipSuggestion = '唇色偏淡可能提示气血不足，建议多吃红枣、枸杞等补血食物';
+                        lipSeverity = 'severe';
+                    } else {
+                        lipCondition = 'blood-deficiency-mild';
+                        lipDescription = '唇色偏淡';
+                        lipSuggestion = '唇色偏淡可能提示气血稍弱，建议注意营养均衡';
+                        lipSeverity = 'mild';
+                    }
+                } else if (avgLipR > 180 && avgLipBri > 0.75) {
+                    lipCondition = 'heat';
+                    lipDescription = '唇色偏红';
+                    lipSuggestion = '唇色偏红可能提示体内有热，建议清淡饮食，多喝水';
+                    lipSeverity = 'mild';
+                } else if (avgLipSat < 0.2 && avgLipBri > 0.6) {
+                    lipCondition = 'qi-deficiency';
+                    lipDescription = '唇色偏淡偏白';
+                    lipSuggestion = '唇色偏淡可能提示气虚，建议适当运动，保证充足睡眠';
+                    lipSeverity = 'mild';
+                }
+
+                lipAnalysis = {
+                    condition: lipCondition,
+                    description: lipDescription,
+                    suggestion: lipSuggestion,
+                    severity: lipSeverity,
+                    avgR: Math.round(avgLipR),
+                    avgG: Math.round(avgLipG),
+                    avgB: Math.round(avgLipB),
+                    saturation: Math.round(avgLipSat * 100),
+                    brightness: Math.round(avgLipBri * 100)
+                };
+            }
+
+            let eyeAnalysis = null;
+            if (leftEyePixelCount > 10 && rightEyePixelCount > 10) {
+                const avgLeftBrightness = leftEyeBrightness / leftEyePixelCount;
+                const avgRightBrightness = rightEyeBrightness / rightEyePixelCount;
+                const avgEyeBrightness = (avgLeftBrightness + avgRightBrightness) / 2;
+                const leftDarkRatio = leftEyeDarkPixels / leftEyePixelCount;
+                const rightDarkRatio = rightEyeDarkPixels / rightEyePixelCount;
+                const avgDarkRatio = (leftDarkRatio + rightDarkRatio) / 2;
+
+                let eyeCondition = 'bright';
+                let eyeDescription = '眼睛有神';
+                let eyeSuggestion = '眼神明亮，精神状态良好';
+                let eyeSeverity = 'mild';
+
+                if (avgEyeBrightness < 80 || avgDarkRatio > 0.4) {
+                    eyeCondition = 'tired';
+                    eyeDescription = '眼睛无神，有疲态';
+                    eyeSuggestion = '眼神暗淡可能提示疲劳或睡眠不足，建议保证充足睡眠，适当休息眼睛';
+                    eyeSeverity = 'moderate';
+                } else if (avgEyeBrightness < 100 || avgDarkRatio > 0.25) {
+                    eyeCondition = 'slightly-tired';
+                    eyeDescription = '眼睛略显疲惫';
+                    eyeSuggestion = '眼神稍显暗淡，建议注意用眼卫生，适当做眼保健操';
+                    eyeSeverity = 'mild';
+                }
+
+                eyeAnalysis = {
+                    condition: eyeCondition,
+                    description: eyeDescription,
+                    suggestion: eyeSuggestion,
+                    severity: eyeSeverity,
+                    avgBrightness: Math.round(avgEyeBrightness),
+                    darkRatio: Math.round(avgDarkRatio * 100)
+                };
+            }
+
+            let faceColorAnalysis = null;
+            if (facePixelCount > 50) {
+                const avgFaceR = faceR / facePixelCount;
+                const avgFaceG = faceG / facePixelCount;
+                const avgFaceB = faceB / facePixelCount;
+                const avgFaceBrightness = faceBrightness / facePixelCount;
+                const rednessRatio = faceRedness / facePixelCount;
+                const yellownessRatio = faceYellowness / facePixelCount;
+
+                let faceCondition = 'healthy';
+                let faceDescription = '面色红润有光泽';
+                let faceSuggestion = '面色健康，气血充足';
+                let faceSeverity = 'mild';
+
+                if (avgFaceBrightness > 180 && rednessRatio > 0.3) {
+                    faceCondition = 'flushed';
+                    faceDescription = '面色偏红';
+                    faceSuggestion = '面色偏红可能提示体内有热或肝火旺，建议清淡饮食，保持心情舒畅';
+                    faceSeverity = 'moderate';
+                } else if (avgFaceBrightness < 100) {
+                    faceCondition = 'pale';
+                    faceDescription = '面色苍白';
+                    faceSuggestion = '面色苍白可能提示气血不足，建议多吃补血食物，如红枣、桂圆、黑芝麻等';
+                    faceSeverity = 'severe';
+                } else if (avgFaceBrightness < 130 && rednessRatio < 0.1) {
+                    faceCondition = 'qi-deficiency';
+                    faceDescription = '面色偏白无华';
+                    faceSuggestion = '面色偏白可能提示气虚或血虚，建议注意营养均衡，适当运动';
+                    faceSeverity = 'moderate';
+                } else if (yellownessRatio > 0.1) {
+                    faceCondition = 'yellow';
+                    faceDescription = '面色偏黄';
+                    faceSuggestion = '面色偏黄可能提示脾虚或湿气重，建议健脾祛湿，饮食规律';
+                    faceSeverity = 'moderate';
+                }
+
+                faceColorAnalysis = {
+                    condition: faceCondition,
+                    description: faceDescription,
+                    suggestion: faceSuggestion,
+                    severity: faceSeverity,
+                    avgR: Math.round(avgFaceR),
+                    avgG: Math.round(avgFaceG),
+                    avgB: Math.round(avgFaceB),
+                    brightness: Math.round(avgFaceBrightness),
+                    rednessRatio: Math.round(rednessRatio * 100),
+                    yellownessRatio: Math.round(yellownessRatio * 100)
+                };
+            }
+
+            let yintangAnalysis = null;
+            if (yintangPixelCount > 20) {
+                const avgYintangBrightness = yintangBrightness / yintangPixelCount;
+                const avgYintangR = yintangR / yintangPixelCount;
+                const avgYintangG = yintangG / yintangPixelCount;
+                const avgYintangB = yintangB / yintangPixelCount;
+                const darkRatio = yintangDarkPixels / yintangPixelCount;
+
+                let yintangCondition = 'bright';
+                let yintangDescription = '印堂明亮';
+                let yintangSuggestion = '印堂光亮，气血顺畅，精神状态良好';
+                let yintangSeverity = 'mild';
+
+                if (darkRatio > 0.3 || avgYintangBrightness < 90) {
+                    yintangCondition = 'dark';
+                    yintangDescription = '印堂发暗';
+                    yintangSuggestion = '印堂发暗可能提示气血不畅或压力过大，建议放松心情，保证睡眠，适当运动';
+                    yintangSeverity = 'severe';
+                } else if (darkRatio > 0.15 || avgYintangBrightness < 110) {
+                    yintangCondition = 'slightly-dull';
+                    yintangDescription = '印堂稍暗';
+                    yintangSuggestion = '印堂稍显暗淡，建议注意休息，减轻压力，保持心情愉悦';
+                    yintangSeverity = 'moderate';
+                } else if (avgYintangR > avgYintangG * 1.1 && avgYintangR > 150) {
+                    yintangCondition = 'red';
+                    yintangDescription = '印堂发红';
+                    yintangSuggestion = '印堂发红可能提示心火较旺，建议清淡饮食，保持心情平和';
+                    yintangSeverity = 'moderate';
+                }
+
+                yintangAnalysis = {
+                    condition: yintangCondition,
+                    description: yintangDescription,
+                    suggestion: yintangSuggestion,
+                    severity: yintangSeverity,
+                    brightness: Math.round(avgYintangBrightness),
+                    darkRatio: Math.round(darkRatio * 100),
+                    avgR: Math.round(avgYintangR),
+                    avgG: Math.round(avgYintangG),
+                    avgB: Math.round(avgYintangB)
+                };
+            }
+
+            const avgBrightness = totalBrightness / pixelCount;
+            const rednessRatio = redPixelCount / pixelCount;
+            const shinyRatio = shinyPixelCount / pixelCount;
+            const darkRatio = darkPixelCount / pixelCount;
+
+            const issues = [];
+            let overallScore = 85;
+
+            if (userSkinType === 'oily' || shinyRatio > 0.05) {
+                const severity = shinyRatio > 0.12 ? 'severe' : shinyRatio > 0.07 ? 'moderate' : 'mild';
+                const descText = severity === 'severe' ? '油脂分泌旺盛' : severity === 'moderate' ? 'T区出油明显' : '有轻微出油';
+                const sugText = severity === 'severe' ? '建议使用控油护肤产品，注意清洁' : '建议使用清爽型护肤品';
+                issues.push({
+                    id: 'oil',
+                    name: '出油',
+                    severity: severity,
+                    description: '面部' + descText,
+                    suggestion: sugText
+                });
+                if (severity === 'severe') overallScore -= 10;
+                else if (severity === 'moderate') overallScore -= 5;
+            }
+
+            if (rednessRatio > 0.08) {
+                const severity = rednessRatio > 0.18 ? 'severe' : rednessRatio > 0.12 ? 'moderate' : 'mild';
+                const descText = severity === 'severe' ? '泛红明显' : severity === 'moderate' ? '有明显泛红' : '轻微泛红';
+                issues.push({
+                    id: 'redness',
+                    name: '泛红',
+                    severity: severity,
+                    description: '面部' + descText,
+                    suggestion: '建议使用温和舒缓的护肤品，避免刺激'
+                });
+                if (severity === 'severe') overallScore -= 8;
+                else if (severity === 'moderate') overallScore -= 4;
+            }
+
+            if (darkRatio > 0.06) {
+                const severity = darkRatio > 0.12 ? 'severe' : darkRatio > 0.09 ? 'moderate' : 'mild';
+                const descText = severity === 'severe' ? '暗沉明显' : '有暗沉';
+                issues.push({
+                    id: 'dark-circle',
+                    name: '黑眼圈/暗沉',
+                    severity: severity,
+                    description: '眼部/面部' + descText,
+                    suggestion: '建议保证充足睡眠，使用提亮产品'
+                });
+                if (severity === 'severe') overallScore -= 7;
+                else if (severity === 'moderate') overallScore -= 3;
+            }
+
+            if (avgBrightness < 130) {
+                const severity = avgBrightness < 100 ? 'moderate' : 'mild';
+                issues.push({
+                    id: 'dull',
+                    name: '肤色暗沉',
+                    severity: severity,
+                    description: '肤色整体偏暗，缺乏光泽',
+                    suggestion: '建议注意防晒，使用提亮肤色的产品'
+                });
+                overallScore -= 5;
+            }
+
+            if (userSkinType === 'oily' && shinyRatio > 0.08) {
+                const severity = shinyRatio > 0.15 ? 'moderate' : 'mild';
+                issues.push({
+                    id: 'blackhead',
+                    name: '黑头',
+                    severity: severity,
+                    description: 'T区可能存在黑头问题',
+                    suggestion: '建议定期使用清洁面膜，注意毛孔清洁'
+                });
+                overallScore -= 3;
+            }
+
+            if (rednessRatio > 0.05 && userSkinType === 'oily') {
+                const severity = rednessRatio > 0.1 ? 'moderate' : 'mild';
+                issues.push({
+                    id: 'pimple',
+                    name: '痘痘',
+                    severity: severity,
+                    description: '可能存在痘痘或痘印问题',
+                    suggestion: '建议保持面部清洁，使用祛痘产品'
+                });
+                overallScore -= 4;
+            }
+
+            overallScore = Math.max(60, Math.min(98, overallScore));
+
+            const skincareRecommendations = [];
+            if (shinyRatio > 0.08) {
+                skincareRecommendations.push(skincareRecommendationsData[0]);
+                skincareRecommendations.push(skincareRecommendationsData[1]);
+            }
+            if (darkRatio > 0.05) {
+                skincareRecommendations.push(skincareRecommendationsData[4]);
+            }
+            if (rednessRatio > 0.08) {
+                skincareRecommendations.push(skincareRecommendationsData[0]);
+            }
+            if (avgBrightness < 80) {
+                skincareRecommendations.push(skincareRecommendationsData[2]);
+                skincareRecommendations.push(skincareRecommendationsData[5]);
+            }
+            if (skincareRecommendations.length === 0) {
+                skincareRecommendations.push(skincareRecommendationsData[0]);
+                skincareRecommendations.push(skincareRecommendationsData[1]);
+                skincareRecommendations.push(skincareRecommendationsData[2]);
+            }
+
+            const healthTips = [];
+            if (darkRatio > 0.08) {
+                healthTips.push({
+                    id: 'sleep',
+                    title: '作息提示',
+                    description: '眼部暗沉可能与睡眠不足有关',
+                    suggestion: '建议每天保证7-8小时睡眠'
+                });
+            }
+            if (rednessRatio > 0.1) {
+                healthTips.push({
+                    id: 'diet',
+                    title: '饮食提示',
+                    description: '面部泛红可能与饮食刺激有关',
+                    suggestion: '建议减少辛辣刺激食物，饮食清淡'
+                });
+            }
+            if (shinyRatio > 0.1) {
+                healthTips.push({
+                    id: 'water',
+                    title: '补水提示',
+                    description: '出油多可能是水油失衡的表现',
+                    suggestion: '建议多喝水，注意皮肤补水'
+                });
+            }
+            if (healthTips.length === 0) {
+                healthTips.push(healthTipsData[0]);
+            }
+
+            return {
+                overallScore: Math.round(overallScore),
+                issues: issues.length > 0 ? issues : [skinIssuesData[3]],
+                healthTips: healthTips,
+                skincareRecommendations: skincareRecommendations.slice(0, 4),
+                lipAnalysis: lipAnalysis,
+                eyeAnalysis: eyeAnalysis,
+                faceColorAnalysis: faceColorAnalysis,
+                yintangAnalysis: yintangAnalysis,
+                analysisDetails: {
+                    brightness: Math.round(avgBrightness),
+                    redness: Math.round(rednessRatio * 1000) / 10,
+                    oiliness: Math.round(shinyRatio * 1000) / 10,
+                    darkAreas: Math.round(darkRatio * 1000) / 10
+                }
+            };
+        }
+
+        const AppContext = createContext();
+
+        function AppProvider({ children }) {
+            const [state, setState] = useState(function() {
+                const saved = localStorage.getItem('faceAnalysisApp');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    return {
+                        currentUser: parsed.currentUser || null,
+                        users: parsed.users || [],
+                        currentStyle: parsed.currentStyle || 'neutral',
+                        scanHistory: parsed.scanHistory || [],
+                        selectedRecordId: null,
+                        communityPosts: parsed.communityPosts || [],
+                        deepseekApiKey: parsed.deepseekApiKey || '',
+                        aiChatHistory: parsed.aiChatHistory || []
+                    };
+                }
+                return { currentUser: null, users: [], currentStyle: 'neutral', scanHistory: [], selectedRecordId: null, communityPosts: [], deepseekApiKey: '', aiChatHistory: [] };
+            });
+
+            useEffect(function() {
+                localStorage.setItem('faceAnalysisApp', JSON.stringify(state));
+            }, [state]);
+
+            const registerUser = async function(username, password, gender, skinType) {
+                if (!username || username.length < 3) {
+                    return { success: false, message: '用户名至少3个字符' };
+                }
+                if (!password || password.length < 6) {
+                    return { success: false, message: '密码至少6个字符' };
+                }
+                const exists = state.users.find(function(u) { return u.username === username; });
+                if (exists) {
+                    return { success: false, message: '用户名已存在' };
+                }
+                const hashedPassword = await hashPassword(password);
+                const newUser = {
+                    username: username,
+                    password: hashedPassword,
+                    gender: gender,
+                    skinType: skinType,
+                    createdAt: new Date().toISOString()
+                };
+                const newUsers = [...state.users, newUser];
+                setState(function(prev) {
+                    return {
+                        ...prev,
+                        users: newUsers,
+                        currentUser: newUser,
+                        currentStyle: gender === 'female' ? 'cute' : 'neutral'
+                    };
+                });
+                return { success: true, message: '注册成功' };
+            };
+
+            const loginUser = async function(username, password) {
+                if (!username || !password) {
+                    return { success: false, message: '请输入用户名和密码' };
+                }
+                const user = state.users.find(function(u) { return u.username === username; });
+                if (!user) {
+                    return { success: false, message: '用户不存在' };
+                }
+                const hashedPassword = await hashPassword(password);
+                if (user.password !== hashedPassword) {
+                    return { success: false, message: '密码错误' };
+                }
+                setState(function(prev) {
+                    return {
+                        ...prev,
+                        currentUser: user,
+                        currentStyle: user.gender === 'female' ? 'cute' : 'neutral'
+                    };
+                });
+                return { success: true, message: '登录成功' };
+            };
+
+            const logoutUser = function() {
+                setState(function(prev) {
+                    return { ...prev, currentUser: null };
+                });
+            };
+
+            const updateUserInfo = function(userInfo) {
+                setState(function(prev) {
+                    if (!prev.currentUser) return prev;
+                    const updatedUser = { ...prev.currentUser, ...userInfo };
+                    const updatedUsers = prev.users.map(function(u) {
+                        return u.username === updatedUser.username ? updatedUser : u;
+                    });
+                    return {
+                        ...prev,
+                        currentUser: updatedUser,
+                        users: updatedUsers,
+                        currentStyle: updatedUser.gender === 'female' ? 'cute' : prev.currentStyle
+                    };
+                });
+            };
+
+            const addScanRecord = function(record) {
+                setState(function(prev) {
+                    return { ...prev, scanHistory: [record, ...prev.scanHistory] };
+                });
+            };
+
+            const deleteScanRecord = function(recordId) {
+                setState(function(prev) {
+                    return { ...prev, scanHistory: prev.scanHistory.filter(function(r) { return r.id !== recordId; }) };
+                });
+            };
+
+            const clearScanHistory = function() {
+                setState(function(prev) {
+                    return { ...prev, scanHistory: [] };
+                });
+            };
+
+            const setSelectedRecord = function(recordId) {
+                setState(function(prev) {
+                    return { ...prev, selectedRecordId: recordId };
+                });
+            };
+
+            const setStyle = function(style) {
+                setState(function(prev) { return { ...prev, currentStyle: style }; });
+            };
+
+            const addCommunityPost = function(post) {
+                setState(function(prev) {
+                    return {
+                        ...prev,
+                        communityPosts: [post, ...prev.communityPosts]
+                    };
+                });
+            };
+
+            const likePost = function(postId) {
+                setState(function(prev) {
+                    const updatedPosts = prev.communityPosts.map(function(p) {
+                        if (p.id === postId) {
+                            const isLiked = p.likedBy.includes(prev.currentUser.username);
+                            return {
+                                ...p,
+                                likes: isLiked ? p.likes - 1 : p.likes + 1,
+                                likedBy: isLiked 
+                                    ? p.likedBy.filter(function(u) { return u !== prev.currentUser.username; })
+                                    : [...p.likedBy, prev.currentUser.username]
+                            };
+                        }
+                        return p;
+                    });
+                    return { ...prev, communityPosts: updatedPosts };
+                });
+            };
+
+            const addComment = function(postId, comment) {
+                setState(function(prev) {
+                    const updatedPosts = prev.communityPosts.map(function(p) {
+                        if (p.id === postId) {
+                            return {
+                                ...p,
+                                comments: [...p.comments, comment]
+                            };
+                        }
+                        return p;
+                    });
+                    return { ...prev, communityPosts: updatedPosts };
+                });
+            };
+
+            const deletePost = function(postId) {
+                setState(function(prev) {
+                    return {
+                        ...prev,
+                        communityPosts: prev.communityPosts.filter(function(p) { return p.id !== postId; })
+                    };
+                });
+            };
+
+            const setDeepseekApiKey = function(apiKey) {
+                setState(function(prev) {
+                    return { ...prev, deepseekApiKey: apiKey };
+                });
+            };
+
+            const addAiChatMessage = function(message) {
+                setState(function(prev) {
+                    return { ...prev, aiChatHistory: [...prev.aiChatHistory, message] };
+                });
+            };
+
+            const clearAiChatHistory = function() {
+                setState(function(prev) {
+                    return { ...prev, aiChatHistory: [] };
+                });
+            };
+
+            const callDeepseekAPI = async function(messages, options) {
+                const apiKey = state.deepseekApiKey;
+                if (!apiKey) {
+                    return { success: false, message: '请先在设置中配置智谱AI API Key' };
+                }
+
+                const opts = options || {};
+                const model = opts.model || 'glm-4-flash';
+                const temperature = opts.temperature !== undefined ? opts.temperature : 0.7;
+                const maxTokens = opts.maxTokens || 2000;
+
+                try {
+                    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + apiKey
+                        },
+                        body: JSON.stringify({
+                            model: model,
+                            messages: messages,
+                            temperature: temperature,
+                            max_tokens: maxTokens
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(function() { return {}; });
+                        let errorMsg = 'API调用失败';
+                        if (response.status === 401) {
+                            errorMsg = 'API Key无效，请检查您的智谱AI API Key';
+                        } else if (response.status === 404) {
+                            errorMsg = '模型不存在，请确认模型名称正确';
+                        } else if (response.status === 429) {
+                            errorMsg = '请求过于频繁，请稍后再试';
+                        } else if (errorData.error && errorData.error.message) {
+                            errorMsg = errorData.error.message;
+                        } else {
+                            errorMsg = errorMsg + '（状态码：' + response.status + '）';
+                        }
+                        return { success: false, message: errorMsg };
+                    }
+
+                    const data = await response.json();
+                    if (data.choices && data.choices[0] && data.choices[0].message) {
+                        return {
+                            success: true,
+                            content: data.choices[0].message.content,
+                            usage: data.usage
+                        };
+                    }
+                    return { success: false, message: '响应格式异常' };
+                } catch (error) {
+                    return { success: false, message: '网络错误：' + (error.message || '请求失败') };
+                }
+            };
+
+            return e(AppContext.Provider, { value: { 
+                state: state, 
+                registerUser: registerUser, 
+                loginUser: loginUser, 
+                logoutUser: logoutUser, 
+                updateUserInfo: updateUserInfo, 
+                addScanRecord: addScanRecord, 
+                deleteScanRecord: deleteScanRecord, 
+                clearScanHistory: clearScanHistory, 
+                setSelectedRecord: setSelectedRecord, 
+                setStyle: setStyle,
+                addCommunityPost: addCommunityPost,
+                likePost: likePost,
+                addComment: addComment,
+                deletePost: deletePost,
+                setDeepseekApiKey: setDeepseekApiKey,
+                callDeepseekAPI: callDeepseekAPI,
+                addAiChatMessage: addAiChatMessage,
+                clearAiChatHistory: clearAiChatHistory
+            } }, children);
+        }
+
+        function useApp() { return useContext(AppContext); }
+
+        function Login({ onNavigate, onComplete }) {
+            const { loginUser } = useApp();
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [isCute, setIsCute] = useState(false);
+
+            const handleLogin = async function() {
+                if (!username.trim()) {
+                    setError('请输入用户名');
+                    return;
+                }
+                if (!password.trim()) {
+                    setError('请输入密码');
+                    return;
+                }
+                const result = await loginUser(username.trim(), password);
+                if (result.success) {
+                    setError('');
+                    onComplete();
+                } else {
+                    setError(result.message);
+                }
+            };
+
+            const bgStyle = 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50';
+            const btnStyle = 'bg-gradient-to-r from-pink-400 to-purple-400';
+            const cardStyle = 'bg-white/80 rounded-2xl shadow-lg border-pink-100';
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' flex flex-col items-center justify-center p-6' },
+                e('div', { className: 'w-full max-w-md' },
+                    e('div', { className: 'text-center mb-8' },
+                        e('div', { className: 'w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center bg-pink-200' },
+                            e('span', { className: 'text-3xl' }, '✨')
+                        ),
+                        e('h1', { className: 'text-2xl font-bold text-pink-600' }, '颜容'),
+                        e('p', { className: 'text-gray-500 mt-2' }, '登录后体验完整功能')
+                    ),
+                    e('div', { className: cardStyle + ' p-6' },
+                        e('div', { className: 'space-y-4' },
+                            e('div', null,
+                                e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '用户名'),
+                                e('input', {
+                                    type: 'text',
+                                    value: username,
+                                    onChange: function(e) { setUsername(e.target.value); setError(''); },
+                                    placeholder: '请输入用户名',
+                                    className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                                })
+                            ),
+                            e('div', null,
+                                e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '密码'),
+                                e('input', {
+                                    type: 'password',
+                                    value: password,
+                                    onChange: function(e) { setPassword(e.target.value); setError(''); },
+                                    placeholder: '请输入密码',
+                                    onKeyPress: function(e) { if (e.key === 'Enter') handleLogin(); },
+                                    className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                                })
+                            ),
+                            error && e('p', { className: 'text-red-500 text-sm text-center' }, error),
+                            e('button', {
+                                onClick: handleLogin,
+                                className: 'w-full py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle
+                            }, '登 录'),
+                            e('div', { className: 'text-center' },
+                                e('button', {
+                                    onClick: function() { onNavigate('register'); },
+                                    className: 'text-pink-600 text-sm hover:underline'
+                                }, '没有账号？立即注册')
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        function Register({ onNavigate, onComplete }) {
+            const { registerUser } = useApp();
+            const [step, setStep] = useState(1);
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [confirmPassword, setConfirmPassword] = useState('');
+            const [gender, setGender] = useState('female');
+            const [skinType, setSkinType] = useState('combination');
+            const [error, setError] = useState('');
+
+            const bgStyle = gender === 'female' ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = gender === 'female' ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = gender === 'female' ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            const handleNext = async function() {
+                if (step === 1) {
+                    if (!username.trim()) {
+                        setError('请输入用户名');
+                        return;
+                    }
+                    if (username.trim().length < 3) {
+                        setError('用户名至少3个字符');
+                        return;
+                    }
+                    if (!password.trim()) {
+                        setError('请输入密码');
+                        return;
+                    }
+                    if (password.length < 6) {
+                        setError('密码至少6个字符');
+                        return;
+                    }
+                    if (password !== confirmPassword) {
+                        setError('两次输入的密码不一致');
+                        return;
+                    }
+                    setError('');
+                    setStep(2);
+                } else if (step === 2) {
+                    setStep(3);
+                } else {
+                    const result = await registerUser(username.trim(), password, gender, skinType);
+                    if (result.success) {
+                        setError('');
+                        onComplete();
+                    } else {
+                        setError(result.message);
+                        setStep(1);
+                    }
+                }
+            };
+
+            const handleBack = function() {
+                if (step > 1) {
+                    setStep(step - 1);
+                    setError('');
+                } else {
+                    onNavigate('login');
+                }
+            };
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' flex flex-col items-center justify-center p-6' },
+                e('div', { className: 'w-full max-w-md' },
+                    e('div', { className: 'text-center mb-8' },
+                        e('div', { className: 'w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center ' + (gender === 'female' ? 'bg-pink-200' : 'bg-gray-200') },
+                            e('span', { className: 'text-3xl' }, '✨')
+                        ),
+                        e('h1', { className: 'text-2xl font-bold ' + (gender === 'female' ? 'text-pink-600' : 'text-gray-700') }, '创建账号'),
+                        e('p', { className: 'text-gray-500 mt-2' }, step === 1 ? '填写账号信息' : step === 2 ? '选择您的性别' : '选择您的肤质')
+                    ),
+                    e('div', { className: cardStyle + ' p-6' },
+                        step === 1 && e('div', { className: 'space-y-4' },
+                            e('div', null,
+                                e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '用户名'),
+                                e('input', {
+                                    type: 'text',
+                                    value: username,
+                                    onChange: function(e) { setUsername(e.target.value); setError(''); },
+                                    placeholder: '请输入用户名（至少3个字符）',
+                                    className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                                })
+                            ),
+                            e('div', null,
+                                e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '密码'),
+                                e('input', {
+                                    type: 'password',
+                                    value: password,
+                                    onChange: function(e) { setPassword(e.target.value); setError(''); },
+                                    placeholder: '请输入密码（至少6位）',
+                                    className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                                })
+                            ),
+                            e('div', null,
+                                e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '确认密码'),
+                                e('input', {
+                                    type: 'password',
+                                    value: confirmPassword,
+                                    onChange: function(e) { setConfirmPassword(e.target.value); setError(''); },
+                                    placeholder: '请再次输入密码',
+                                    onKeyPress: function(e) { if (e.key === 'Enter') handleNext(); },
+                                    className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                                })
+                            ),
+                            error && e('p', { className: 'text-red-500 text-sm text-center' }, error)
+                        ),
+                        step === 2 && e('div', null,
+                            e('h2', { className: 'text-lg font-semibold text-gray-700 mb-4 text-center' }, '请选择您的性别'),
+                            e('div', { className: 'flex gap-4' },
+                                e('button', { onClick: function() { setGender('female'); }, className: 'flex-1 p-4 rounded-xl transition-all ' + (gender === 'female' ? btnStyle + ' text-white shadow-lg scale-105' : 'bg-gray-100') },
+                                    e('span', { className: 'text-4xl block mb-2' }, '👩'),
+                                    e('span', { className: 'font-medium' }, '女性')
+                                ),
+                                e('button', { onClick: function() { setGender('male'); }, className: 'flex-1 p-4 rounded-xl transition-all ' + (gender === 'male' ? btnStyle + ' text-white shadow-lg scale-105' : 'bg-gray-100') },
+                                    e('span', { className: 'text-4xl block mb-2' }, '👨'),
+                                    e('span', { className: 'font-medium' }, '男性')
+                                )
+                            )
+                        ),
+                        step === 3 && e('div', null,
+                            e('h2', { className: 'text-lg font-semibold text-gray-700 mb-4 text-center' }, '请选择您的肤质'),
+                            e('div', { className: 'space-y-3' },
+                                e('button', { onClick: function() { setSkinType('dry'); }, className: 'w-full p-4 rounded-xl transition-all flex items-center gap-3 ' + (skinType === 'dry' ? btnStyle + ' text-white shadow-lg' : 'bg-gray-100') },
+                                    e('span', { className: 'text-3xl' }, '☁️'),
+                                    e('span', { className: 'font-medium' }, '干性皮肤')
+                                ),
+                                e('button', { onClick: function() { setSkinType('oily'); }, className: 'w-full p-4 rounded-xl transition-all flex items-center gap-3 ' + (skinType === 'oily' ? btnStyle + ' text-white shadow-lg' : 'bg-gray-100') },
+                                    e('span', { className: 'text-3xl' }, '💧'),
+                                    e('span', { className: 'font-medium' }, '油性皮肤')
+                                ),
+                                e('button', { onClick: function() { setSkinType('combination'); }, className: 'w-full p-4 rounded-xl transition-all flex items-center gap-3 ' + (skinType === 'combination' ? btnStyle + ' text-white shadow-lg' : 'bg-gray-100') },
+                                    e('span', { className: 'text-3xl' }, '⚖️'),
+                                    e('span', { className: 'font-medium' }, '混合性皮肤')
+                                )
+                            )
+                        ),
+                        e('div', { className: 'mt-6 flex gap-3' },
+                            step > 1 && e('button', {
+                                onClick: handleBack,
+                                className: 'px-6 py-3 rounded-full bg-gray-200 text-gray-700 font-medium'
+                            }, '上一步'),
+                            e('button', {
+                                onClick: handleNext,
+                                className: 'flex-1 py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle
+                            }, step === 3 ? '完成注册' : '下一步')
+                        ),
+                        e('div', { className: 'flex justify-center gap-2 mt-4' },
+                            e('div', { className: 'w-2 h-2 rounded-full ' + (step === 1 ? 'bg-pink-400 scale-125' : 'bg-gray-300') }),
+                            e('div', { className: 'w-2 h-2 rounded-full ' + (step === 2 ? 'bg-pink-400 scale-125' : 'bg-gray-300') }),
+                            e('div', { className: 'w-2 h-2 rounded-full ' + (step === 3 ? 'bg-pink-400 scale-125' : 'bg-gray-300') })
+                        ),
+                        step === 1 && e('div', { className: 'text-center mt-4' },
+                            e('button', {
+                                onClick: function() { onNavigate('login'); },
+                                className: 'text-pink-600 text-sm hover:underline'
+                            }, '已有账号？去登录')
+                        )
+                    )
+                )
+            );
+        }
+
+        function AlertModal({ alert, onConfirm, onCancel }) {
+            if (!alert) return null;
+
+            const iconMap = {
+                light: '💡',
+                recognition: '⚠️',
+                error: '❌'
+            };
+
+            return e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' },
+                e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl' },
+                    e('div', { className: 'text-center mb-4' },
+                        e('span', { className: 'text-5xl' }, iconMap[alert.type] || '⚠️')
+                    ),
+                    e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, alert.title),
+                    e('p', { className: 'text-gray-600 text-sm text-center mb-6' }, alert.message),
+                    e('div', { className: 'space-y-3' },
+                        e('button', { onClick: onConfirm, className: 'w-full py-3 rounded-full text-white font-medium bg-gradient-to-r from-pink-400 to-purple-400' }, alert.confirmText || '确定'),
+                        e('button', { onClick: onCancel, className: 'w-full py-3 rounded-full bg-gray-100 text-gray-600 font-medium' }, alert.cancelText || '取消')
+                    )
+                )
+            );
+        }
+
+        function PhotoUpload({ onNavigate, onComplete }) {
+            const { state, addScanRecord } = useApp();
+            const [mode, setMode] = useState('select');
+            const [photo, setPhoto] = useState(null);
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [analyzeProgress, setAnalyzeProgress] = useState(0);
+            const [cameraError, setCameraError] = useState(null);
+            const [showAlert, setShowAlert] = useState(null);
+            const videoRef = React.useRef(null);
+            const canvasRef = React.useRef(null);
+            const streamRef = React.useRef(null);
+            const fileInputRef = React.useRef(null);
+            const cameraInputRef = React.useRef(null);
+
+            const isCute = state.currentStyle === 'cute';
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            React.useEffect(function() {
+                return function() {
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(function(track) { track.stop(); });
+                    }
+                };
+            }, []);
+
+            const startCamera = async function() {
+                setCameraError(null);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+                    });
+                    streamRef.current = stream;
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                    setMode('camera');
+                } catch (err) {
+                    setCameraError('无法访问相机，请检查权限设置');
+                    console.error('Camera error:', err);
+                }
+            };
+
+            const takePhoto = function() {
+                if (videoRef.current && canvasRef.current) {
+                    const video = videoRef.current;
+                    const canvas = canvasRef.current;
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0);
+                    const photoData = canvas.toDataURL('image/jpeg', 0.8);
+                    setPhoto(photoData);
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(function(track) { track.stop(); });
+                        streamRef.current = null;
+                    }
+                    setMode('preview');
+                }
+            };
+
+            const handleFileUpload = function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        setPhoto(event.target.result);
+                        setMode('preview');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleCameraFile = function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        setPhoto(event.target.result);
+                        setMode('preview');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const checkBrightness = function(imageData) {
+                const data = imageData.data;
+                let totalBrightness = 0;
+                let pixelCount = 0;
+                for (let i = 0; i < data.length; i += 16) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    totalBrightness += (r + g + b) / 3;
+                    pixelCount++;
+                }
+                return pixelCount > 0 ? totalBrightness / pixelCount : 0;
+            };
+
+            const hasEnoughFaceData = function(result) {
+                const hasLip = result.lipAnalysis !== null;
+                const hasEye = result.eyeAnalysis !== null;
+                const hasFace = result.faceColorAnalysis !== null;
+                const hasYintang = result.yintangAnalysis !== null;
+                let count = 0;
+                if (hasLip) count++;
+                if (hasEye) count++;
+                if (hasFace) count++;
+                if (hasYintang) count++;
+                return count >= 2;
+            };
+
+            const startAnalysis = function() {
+                if (!photo) return;
+                setIsAnalyzing(true);
+                setAnalyzeProgress(0);
+
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const maxSize = 400;
+                    let w = img.width;
+                    let h = img.height;
+                    if (w > h) {
+                        if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
+                    } else {
+                        if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+                    }
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const imageData = ctx.getImageData(0, 0, w, h);
+
+                    const brightness = checkBrightness(imageData);
+                    if (brightness < 60) {
+                        setIsAnalyzing(false);
+                        setShowAlert({
+                            type: 'light',
+                            title: '光线不足',
+                            message: '当前光线不足，建议调整环境光线后再尝试',
+                            confirmText: '重新拍摄',
+                            cancelText: '取消'
+                        });
+                        return;
+                    }
+
+                    let progress = 0;
+                    const progressInterval = setInterval(function() {
+                        progress += Math.random() * 15 + 5;
+                        if (progress > 90) {
+                            clearInterval(progressInterval);
+                            setAnalyzeProgress(90);
+                        } else {
+                            setAnalyzeProgress(progress);
+                        }
+                    }, 200);
+
+                    setTimeout(function() {
+                        clearInterval(progressInterval);
+                        setAnalyzeProgress(100);
+
+                        const userSkin = state.currentUser ? state.currentUser.skinType : 'combination';
+                        const result = analyzeSkinFromImage(imageData, userSkin);
+
+                        if (!hasEnoughFaceData(result)) {
+                            setIsAnalyzing(false);
+                            setShowAlert({
+                                type: 'recognition',
+                                title: '识别失败',
+                                message: '未能识别到清晰的面部，请调整拍摄角度后重新拍照',
+                                confirmText: '重新拍摄',
+                                cancelText: '取消'
+                            });
+                            return;
+                        }
+
+                        compressImage(photo).then(function(compressedPhoto) {
+                            addScanRecord({
+                                id: Date.now().toString(),
+                                date: new Date().toLocaleString('zh-CN'),
+                                photo: compressedPhoto,
+                                skinResult: { overallScore: result.overallScore, issues: result.issues },
+                                healthTips: result.healthTips,
+                                skincareRecommendations: result.skincareRecommendations,
+                                lipAnalysis: result.lipAnalysis,
+                                eyeAnalysis: result.eyeAnalysis,
+                                faceColorAnalysis: result.faceColorAnalysis,
+                                yintangAnalysis: result.yintangAnalysis,
+                                analysisDetails: result.analysisDetails,
+                            });
+
+                            setTimeout(function() {
+                                setIsAnalyzing(false);
+                                onComplete();
+                            }, 500);
+                        });
+                    }, 2500);
+                };
+                img.onerror = function() {
+                    setIsAnalyzing(false);
+                    setShowAlert({
+                        type: 'error',
+                        title: '图片加载失败',
+                        message: '无法加载图片，请重新选择照片',
+                        confirmText: '重新选择',
+                        cancelText: '取消'
+                    });
+                };
+                img.src = photo;
+            };
+
+            const retake = function() {
+                setPhoto(null);
+                setMode('select');
+                setAnalyzeProgress(0);
+                setShowAlert(null);
+            };
+
+            const handleAlertConfirm = function() {
+                if (showAlert && showAlert.type === 'error') {
+                    setShowAlert(null);
+                    setMode('select');
+                    setPhoto(null);
+                } else {
+                    setShowAlert(null);
+                    setMode('select');
+                    setPhoto(null);
+                }
+            };
+
+            const handleAlertCancel = function() {
+                setShowAlert(null);
+            };
+
+            const renderAlert = function() {
+                return e(AlertModal, {
+                    alert: showAlert,
+                    onConfirm: handleAlertConfirm,
+                    onCancel: handleAlertCancel
+                });
+            };
+
+            if (mode === 'select') {
+                return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4' },
+                    e('header', { className: 'flex items-center gap-4 mb-6' },
+                        e('button', { onClick: function() { onNavigate('home'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '←'),
+                        e('h1', { className: 'text-lg font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '上传照片')
+                    ),
+                    e('div', { className: 'text-center mb-6' },
+                        e('h2', { className: 'text-lg font-semibold text-gray-700 mb-2' }, '请上传您的面部照片'),
+                        e('p', { className: 'text-gray-500 text-sm' }, '请确保光线充足，面部清晰可见')
+                    ),
+                    e('div', { className: cardStyle + ' p-6 mb-4' },
+                        e('button', { onClick: startCamera, className: 'w-full flex items-center gap-4 p-4 mb-3 rounded-xl bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 transition-all' },
+                            e('div', { className: 'w-12 h-12 rounded-full flex items-center justify-center ' + (isCute ? 'bg-pink-200' : 'bg-gray-200') },
+                                e('span', { className: 'text-2xl' }, '📷')
+                            ),
+                            e('div', { className: 'text-left flex-1' },
+                                e('h3', { className: 'font-semibold text-gray-700' }, '拍照检测'),
+                                e('p', { className: 'text-sm text-gray-500' }, '使用相机拍摄照片')
+                            ),
+                            e('span', { className: 'text-gray-400' }, '›')
+                        ),
+                        cameraError && e('p', { className: 'text-red-500 text-sm text-center mb-3' }, cameraError)
+                    ),
+                    e('div', { className: cardStyle + ' p-6 mb-4' },
+                        e('button', { onClick: function() { if (fileInputRef.current) fileInputRef.current.click(); }, className: 'w-full flex items-center gap-4 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-all' },
+                            e('div', { className: 'w-12 h-12 rounded-full flex items-center justify-center ' + (isCute ? 'bg-purple-200' : 'bg-gray-200') },
+                                e('span', { className: 'text-2xl' }, '🖼️')
+                            ),
+                            e('div', { className: 'text-left flex-1' },
+                                e('h3', { className: 'font-semibold text-gray-700' }, '从相册选择'),
+                                e('p', { className: 'text-sm text-gray-500' }, '上传已有的照片')
+                            ),
+                            e('span', { className: 'text-gray-400' }, '›')
+                        )
+                    ),
+                    e('input', { ref: fileInputRef, type: 'file', accept: 'image/*', onChange: handleFileUpload, style: { display: 'none' } }),
+                    e('input', { ref: cameraInputRef, type: 'file', accept: 'image/*', capture: 'user', onChange: handleCameraFile, style: { display: 'none' } }),
+                    e('div', { className: cardStyle + ' p-4' },
+                        e('h3', { className: 'font-medium text-gray-700 mb-2' }, '📝 拍摄建议'),
+                        e('ul', { className: 'text-sm text-gray-600 space-y-1' },
+                            e('li', null, '• 请在光线充足的环境下拍摄'),
+                            e('li', null, '• 请确保面部完整出现在画面中'),
+                            e('li', null, '• 请素颜或淡妆效果更佳'),
+                            e('li', null, '• 请正面朝向镜头')
+                        )
+                    ),
+                    e('canvas', { ref: canvasRef, style: { display: 'none' } }),
+                    renderAlert()
+                );
+            }
+
+            if (mode === 'camera') {
+                const [countdown, setCountdown] = useState(0);
+
+                const closeCamera = function() {
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(function(track) { track.stop(); });
+                        streamRef.current = null;
+                    }
+                    setMode('select');
+                };
+
+                const handleTakePhoto = function() {
+                    setCountdown(3);
+                    let count = 3;
+                    const timer = setInterval(function() {
+                        count--;
+                        setCountdown(count);
+                        if (count <= 0) {
+                            clearInterval(timer);
+                            takePhoto();
+                            setCountdown(0);
+                        }
+                    }, 1000);
+                };
+
+                const guideTips = [
+                    '请将面部对准框内',
+                    '保持光线充足',
+                    '正面朝向镜头',
+                    '保持表情自然'
+                ];
+                const [tipIndex, setTipIndex] = useState(0);
+
+                useEffect(function() {
+                    const timer = setInterval(function() {
+                        setTipIndex(function(prev) { return (prev + 1) % guideTips.length; });
+                    }, 2500);
+                    return function() { clearInterval(timer); };
+                }, []);
+
+                return e('div', { className: 'min-h-screen bg-black p-4' },
+                    e('header', { className: 'flex items-center justify-between mb-4 relative z-10' },
+                        e('button', { onClick: closeCamera, className: 'p-2 rounded-full bg-white/20 text-white backdrop-blur-sm' }, '✕'),
+                        e('h1', { className: 'text-lg font-bold text-white' }, '拍照检测'),
+                        e('div', { className: 'w-10' })
+                    ),
+                    e('div', { className: 'relative rounded-2xl overflow-hidden mb-6 aspect-[3/4] bg-gray-900' },
+                        e('video', { ref: videoRef, autoPlay: true, playsInline: true, muted: true, className: 'w-full h-full object-cover' }),
+                        e('div', { className: 'absolute inset-0 flex items-center justify-center pointer-events-none' },
+                            e('div', { className: 'relative' },
+                                e('div', { className: 'w-64 h-80 border-2 border-white/60 rounded-full transition-all duration-300' + (countdown > 0 ? ' border-green-400 scale-105' : '') }),
+                                e('div', { className: 'absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-pink-400 rounded-tl-2xl' }),
+                                e('div', { className: 'absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-pink-400 rounded-tr-2xl' }),
+                                e('div', { className: 'absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-pink-400 rounded-bl-2xl' }),
+                                e('div', { className: 'absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-pink-400 rounded-br-2xl' })
+                            )
+                        ),
+                        countdown > 0 && e('div', { className: 'absolute inset-0 flex items-center justify-center bg-black/30' },
+                            e('span', { className: 'text-9xl font-bold text-white drop-shadow-lg' }, countdown)
+                        ),
+                        e('div', { className: 'absolute top-4 left-0 right-0 text-center px-4' },
+                            e('div', { className: 'inline-block px-4 py-2 bg-black/40 backdrop-blur-sm rounded-full' },
+                                e('p', { className: 'text-white text-sm font-medium' }, guideTips[tipIndex])
+                            )
+                        ),
+                        e('div', { className: 'absolute bottom-6 left-0 right-0 text-center' },
+                            e('p', { className: 'text-white/80 text-xs' }, '点击拍照按钮开始 3 秒倒计时')
+                        )
+                    ),
+                    e('div', { className: 'flex justify-center items-center gap-8' },
+                        e('button', { onClick: function() { if (cameraInputRef.current) cameraInputRef.current.click(); }, className: 'w-14 h-14 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/20' },
+                            e('span', { className: 'text-2xl' }, '🖼️')
+                        ),
+                        e('button', { onClick: handleTakePhoto, disabled: countdown > 0, className: 'w-20 h-20 rounded-full bg-white flex items-center justify-center shadow-lg active:scale-90 transition-transform disabled:opacity-50' },
+                            e('div', { className: 'w-16 h-16 rounded-full border-4 border-pink-400 bg-pink-100' })
+                        ),
+                        e('button', { className: 'w-14 h-14 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/20' },
+                            e('span', { className: 'text-2xl' }, '⚡')
+                        )
+                    ),
+                    renderAlert()
+                );
+            }
+
+            if (mode === 'preview') {
+                return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4' },
+                    e('header', { className: 'flex items-center gap-4 mb-6' },
+                        e('button', { onClick: retake, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '←'),
+                        e('h1', { className: 'text-lg font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '照片预览')
+                    ),
+                    e('div', { className: cardStyle + ' p-4 mb-6' },
+                        e('div', { className: 'aspect-[3/4] rounded-xl overflow-hidden bg-gray-100' },
+                            e('img', { src: photo, alt: '预览', className: 'w-full h-full object-cover' })
+                        )
+                    ),
+                    isAnalyzing ? (
+                        e('div', { className: cardStyle + ' p-6 text-center' },
+                            e('div', { className: 'mb-6' },
+                                e('div', { className: 'relative w-20 h-20 mx-auto mb-4' },
+                                    e('div', { className: 'absolute inset-0 rounded-full ' + (isCute ? 'bg-pink-100' : 'bg-gray-100') }),
+                                    e('div', { className: 'absolute inset-0 rounded-full border-4 border-transparent border-t-pink-400 animate-spin' }),
+                                    e('div', { className: 'absolute inset-0 flex items-center justify-center' },
+                                        e('span', { className: 'text-2xl' }, '🔬')
+                                    )
+                                ),
+                                e('h3', { className: 'text-lg font-semibold text-gray-700 mb-1' }, 'AI 智能分析中...'),
+                                e('p', { className: 'text-sm text-gray-500' }, '正在分析您的皮肤和面部特征')
+                            ),
+                            e('div', { className: 'w-full bg-gray-200 rounded-full h-3 mb-3 overflow-hidden' },
+                                e('div', { className: btnStyle + ' h-3 rounded-full transition-all duration-300 ease-out', style: { width: analyzeProgress + '%' } })
+                            ),
+                            e('div', { className: 'flex justify-between text-xs text-gray-500' },
+                                e('span', null, '皮肤检测'),
+                                e('span', null, '中医面诊'),
+                                e('span', null, '生成报告')
+                            ),
+                            e('p', { className: 'text-sm text-gray-500 mt-3 font-medium' }, Math.round(analyzeProgress) + '%')
+                        )
+                    ) : (
+                        e('div', { className: 'space-y-3' },
+                            e('button', { onClick: startAnalysis, className: 'w-full py-4 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '开始分析'),
+                            e('button', { onClick: retake, className: 'w-full py-3 rounded-full bg-white text-gray-700 border border-gray-200 font-medium' }, '重新选择')
+                        )
+                    ),
+                    renderAlert()
+                );
+            }
+
+            return null;
+        }
+
+        function Home({ onNavigate }) {
+            const { state } = useApp();
+            const isCute = state.currentStyle === 'cute';
+            const username = state.currentUser ? state.currentUser.username : '用户';
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            const goUpload = function() { onNavigate('upload'); };
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4 pb-24' },
+                e('header', { className: 'flex justify-between items-center mb-6' },
+                    e('div', { className: 'flex items-center gap-2' },
+                        e('div', { className: 'w-10 h-10 rounded-full flex items-center justify-center ' + (isCute ? 'bg-pink-200' : 'bg-gray-200') },
+                            e('span', { className: isCute ? 'text-pink-600' : 'text-gray-600' }, '✨')
+                        ),
+                        e('h1', { className: 'text-xl font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '颜容'),
+                    ),
+                    e('button', { onClick: function() { onNavigate('profile'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '⚙️')
+                ),
+                e('div', { className: 'text-center mb-6' },
+                    e('h2', { className: 'text-lg font-semibold text-gray-700' }, '您好，' + username),
+                    e('p', { className: 'text-gray-500 text-sm' }, '让我们来分析您的皮肤状况')
+                ),
+                e('div', { className: cardStyle + ' p-6 mb-6 text-center cursor-pointer', onClick: goUpload },
+                    e('div', { className: 'w-24 h-24 mx-auto mb-4 rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') },
+                        e('span', { className: 'text-5xl' }, '📸')
+                    ),
+                    e('h3', { className: 'text-lg font-semibold mb-2 ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '开始检测'),
+                    e('p', { className: 'text-gray-500 text-sm' }, '上传照片进行皮肤检测')
+                ),
+                e('div', { className: 'grid grid-cols-2 gap-4' },
+                    e('div', { className: cardStyle, onClick: function() { onNavigate('history'); } },
+                        e('div', { className: 'flex items-center gap-3 p-4' },
+                            e('div', { className: 'w-12 h-12 rounded-xl flex items-center justify-center ' + (isCute ? 'bg-purple-100' : 'bg-gray-100') }, e('span', null, '📋')),
+                            e('div', null,
+                                e('h4', { className: 'font-semibold text-gray-700' }, '历史记录'),
+                                e('p', { className: 'text-sm text-gray-500' }, state.scanHistory.length + ' 条记录')
+                            )
+                        )
+                    ),
+                    e('div', { className: cardStyle, onClick: function() { onNavigate('community'); } },
+                        e('div', { className: 'flex items-center gap-3 p-4' },
+                            e('div', { className: 'w-12 h-12 rounded-xl flex items-center justify-center ' + (isCute ? 'bg-pink-100' : 'bg-gray-100') }, e('span', null, '👥')),
+                            e('div', null,
+                                e('h4', { className: 'font-semibold text-gray-700' }, '社区分享'),
+                                e('p', { className: 'text-sm text-gray-500' }, state.communityPosts ? state.communityPosts.length + ' 条分享' : '0 条分享')
+                            )
+                        )
+                    ),
+                    e('div', { className: cardStyle + ' col-span-2', onClick: function() { onNavigate('aichat'); } },
+                        e('div', { className: 'flex items-center gap-3 p-4' },
+                            e('div', { className: 'w-12 h-12 rounded-xl flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, e('span', null, '🤖')),
+                            e('div', { className: 'flex-1' },
+                                e('h4', { className: 'font-semibold text-gray-700' }, 'AI助手'),
+                                e('p', { className: 'text-sm text-gray-500' }, '智能皮肤咨询 · 中医面诊解读')
+                            ),
+                            e('span', { className: 'text-gray-400' }, '›')
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mt-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-2' }, '💡 健康小贴士'),
+                    e('p', { className: 'text-gray-600 text-sm' }, '建议每天早晚各清洁一次面部，保持皮肤水油平衡。记得做好防晒哦！')
+                ),
+                e('div', { className: 'fixed bottom-4 left-1/2 -translate-x-1/2' },
+                    e('button', { onClick: goUpload, className: 'px-8 py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '开始检测')
+                )
+            );
+        }
+
+        function Result({ onNavigate }) {
+            const { state, deleteScanRecord, setSelectedRecord, addCommunityPost, callDeepseekAPI } = useApp();
+            const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+            const [showShareModal, setShowShareModal] = useState(false);
+            const [shareSuccess, setShareSuccess] = useState(false);
+            const [shareToCommunity, setShareToCommunity] = useState(false);
+            const [communityText, setCommunityText] = useState('');
+            const [showAIInterpretation, setShowAIInterpretation] = useState(false);
+            const [aiInterpretation, setAiInterpretation] = useState('');
+            const [aiLoading, setAiLoading] = useState(false);
+            const isCute = state.currentStyle === 'cute';
+
+            const currentRecord = state.selectedRecordId
+                ? state.scanHistory.find(function(r) { return r.id === state.selectedRecordId; })
+                : state.scanHistory[0];
+            const isHistoryView = !!state.selectedRecordId;
+
+            useEffect(function() {
+                if (!currentRecord) { onNavigate('home'); }
+            }, [currentRecord]);
+
+            if (!currentRecord) { return null; }
+
+            const handleShare = function() {
+                setShowShareModal(true);
+                setShareSuccess(false);
+                setShareToCommunity(false);
+                setCommunityText('');
+            };
+
+            const closeShareModal = function() {
+                setShowShareModal(false);
+                setShareSuccess(false);
+                setShareToCommunity(false);
+                setCommunityText('');
+            };
+
+            const copyShareLink = function() {
+                var shareText = '我在颜容完成了皮肤检测，评分 ' + currentRecord.skinResult.overallScore + ' 分！快来试试吧～';
+                var copied = false;
+                
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(shareText).then(function() {
+                            setShareSuccess(true);
+                            setTimeout(closeShareModal, 1500);
+                        }).catch(function() {
+                            fallbackCopy(shareText);
+                        });
+                        return;
+                    }
+                } catch (e) {}
+                
+                fallbackCopy(shareText);
+            };
+
+            function fallbackCopy(text) {
+                try {
+                    var textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    textarea.style.top = '0';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    var ok = document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    if (ok) {
+                        setShareSuccess(true);
+                        setTimeout(closeShareModal, 1500);
+                    } else {
+                        alert('请手动复制：\n\n' + text);
+                        closeShareModal();
+                    }
+                } catch (e) {
+                    alert('请手动复制：\n\n' + text);
+                    closeShareModal();
+                }
+            }
+
+            const handlePublishToCommunity = function() {
+                var post = {
+                    id: Date.now().toString(),
+                    author: state.currentUser ? state.currentUser.username : '匿名用户',
+                    authorGender: state.currentUser ? state.currentUser.gender : 'female',
+                    photo: currentRecord.photo,
+                    skinResult: currentRecord.skinResult,
+                    healthTips: currentRecord.healthTips || [],
+                    skincareRecommendations: currentRecord.skincareRecommendations || [],
+                    shareText: communityText.trim() || '分享了我的检测结果，快来围观！',
+                    createdAt: new Date().toLocaleString('zh-CN'),
+                    likes: 0,
+                    likedBy: [],
+                    comments: []
+                };
+                addCommunityPost(post);
+                closeShareModal();
+                onNavigate('community');
+            };
+
+            const generateAIInterpretation = async function() {
+                if (!state.deepseekApiKey) {
+                    setAiInterpretation('⚠️ 您还没有配置智谱AI API Key，请先在「个人中心 → AI助手设置」中配置API Key后再使用。');
+                    setShowAIInterpretation(true);
+                    return;
+                }
+
+                setShowAIInterpretation(true);
+                setAiInterpretation('');
+                setAiLoading(true);
+
+                const issuesText = (currentRecord.skinResult.issues || []).map(function(i) {
+                    return '- ' + i.name + '（' + getSeverityLabel(i.severity) + '）：' + i.suggestion;
+                }).join('\n');
+
+                const lipText = currentRecord.lipAnalysis 
+                    ? '唇色分析：' + currentRecord.lipAnalysis.description + '，' + currentRecord.lipAnalysis.suggestion
+                    : '唇色分析：未检测到';
+
+                const eyeText = currentRecord.eyeAnalysis
+                    ? '眼神分析：' + currentRecord.eyeAnalysis.description + '，' + currentRecord.eyeAnalysis.suggestion
+                    : '眼神分析：未检测到';
+
+                const faceText = currentRecord.faceColorAnalysis
+                    ? '面色分析：' + currentRecord.faceColorAnalysis.description + '，' + currentRecord.faceColorAnalysis.suggestion
+                    : '面色分析：未检测到';
+
+                const yintangText = currentRecord.yintangAnalysis
+                    ? '印堂分析：' + currentRecord.yintangAnalysis.description + '，' + currentRecord.yintangAnalysis.suggestion
+                    : '印堂分析：未检测到';
+
+                const prompt = '请作为一名专业的中医皮肤科顾问，根据以下面部检测结果，为用户提供一份详细、专业且温暖的解读报告：\n\n' +
+                    '【皮肤综合评分】' + currentRecord.skinResult.overallScore + '分\n\n' +
+                    '【皮肤问题】\n' + issuesText + '\n\n' +
+                    '【中医面诊】\n' + lipText + '\n' + eyeText + '\n' + faceText + '\n' + yintangText + '\n\n' +
+                    '请按照以下结构回复：\n' +
+                    '1. 整体评估（用一段话总结用户的皮肤和健康状态）\n' +
+                    '2. 中医解读（从气血、脏腑等角度分析面诊结果）\n' +
+                    '3. 护肤方案（给出具体的日常护肤建议）\n' +
+                    '4. 调理建议（饮食、作息、运动等方面的建议）\n\n' +
+                    '请用温暖、专业且易懂的语言，适当使用emoji，让用户感到被关心和理解。最后提醒用户本建议仅供参考，不能替代专业医疗诊断。';
+
+                const result = await callDeepseekAPI([
+                    { role: 'system', content: '你是一位专业、温暖的中医皮肤科顾问AI助手。' },
+                    { role: 'user', content: prompt }
+                ], { temperature: 0.7, maxTokens: 2000 });
+
+                setAiLoading(false);
+                if (result.success) {
+                    setAiInterpretation(result.content);
+                } else {
+                    setAiInterpretation('❌ ' + result.message);
+                }
+            };
+
+            const getSeverityStyle = function(severity) {
+                switch (severity) {
+                    case 'mild': return 'bg-green-100 text-green-700';
+                    case 'moderate': return 'bg-yellow-100 text-yellow-700';
+                    case 'severe': return 'bg-red-100 text-red-700';
+                    default: return 'bg-gray-100 text-gray-700';
+                }
+            };
+
+            const getSeverityLabel = function(severity) {
+                switch (severity) {
+                    case 'mild': return '轻微需要注意';
+                    case 'moderate': return '日常护理可改善';
+                    case 'severe': return '建议咨询专业人士';
+                    default: return '';
+                }
+            };
+
+            const getFaceShapeName = function(shape) {
+                switch (shape) {
+                    case 'oval': return '椭圆形';
+                    case 'round': return '圆形';
+                    case 'square': return '方形';
+                    case 'heart': return '心形';
+                    case 'long': return '长形';
+                    default: return '标准型';
+                }
+            };
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            const score = currentRecord.skinResult.overallScore;
+            const scoreDesc = score >= 85 ? '您的皮肤状态非常好！' : score >= 70 ? '皮肤状态良好，继续保持！' : '建议关注皮肤护理。';
+
+            const photoSection = currentRecord.photo ? e('div', { className: cardStyle + ' p-4 mb-6' },
+                e('div', { className: 'aspect-[3/4] rounded-xl overflow-hidden bg-gray-100 mb-4' },
+                    e('img', { src: currentRecord.photo, alt: '检测照片', className: 'w-full h-full object-cover' })
+                ),
+                currentRecord.faceShape ? e('div', { className: 'text-center' },
+                    e('span', { className: 'inline-block px-3 py-1 rounded-full text-sm ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') },
+                        '脸型：' + getFaceShapeName(currentRecord.faceShape)
+                    )
+                ) : null
+            ) : null;
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4 pb-24' },
+                e('header', { className: 'flex items-center gap-4 mb-6' },
+                    e('button', { onClick: function() { setSelectedRecord(null); onNavigate(isHistoryView ? 'history' : 'home'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '←'),
+                    e('h1', { className: 'text-lg font-bold flex-1 ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, isHistoryView ? '检测详情' : '检测结果'),
+                    isHistoryView && e('button', { onClick: function() { setShowDeleteConfirm(true); }, className: 'p-2 rounded-full bg-red-100 text-red-600' }, '🗑️')
+                ),
+                photoSection,
+                e('div', { className: cardStyle + ' p-6 mb-6 text-center' },
+                    e('div', { className: 'w-24 h-24 rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') + ' mx-auto mb-4' },
+                        e('div', { className: 'text-center' },
+                            e('div', { className: 'text-3xl font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, score),
+                            e('div', { className: 'text-xs text-gray-500' }, '分')
+                        )
+                    ),
+                    e('h3', { className: 'text-lg font-semibold text-gray-700 mb-1' }, '皮肤健康评分'),
+                    e('p', { className: 'text-gray-500 text-sm' }, scoreDesc)
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '🔍 皮肤问题分析'),
+                    e('div', { className: 'space-y-3' },
+                        (currentRecord.skinResult.issues || []).map(function(issue) {
+                            return e('div', { key: issue.id, className: 'flex items-start gap-3 p-3 bg-gray-50 rounded-xl' },
+                                e('div', { className: 'w-10 h-10 rounded-full flex items-center justify-center ' + (isCute ? 'bg-pink-100' : 'bg-gray-100') }, e('span', null, '🔬')),
+                                e('div', { className: 'flex-1' },
+                                    e('div', { className: 'flex items-center gap-2 mb-1' },
+                                        e('span', { className: 'font-medium text-gray-700' }, issue.name),
+                                        e('span', { className: 'text-xs px-2 py-1 rounded-full ' + getSeverityStyle(issue.severity) }, getSeverityLabel(issue.severity))
+                                    ),
+                                    e('p', { className: 'text-sm text-gray-600' }, issue.description),
+                                    e('p', { className: 'text-sm text-gray-500 mt-1' }, '建议：' + issue.suggestion)
+                                )
+                            );
+                        })
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '💋 唇色分析'),
+                    currentRecord.lipAnalysis ? (
+                        e('div', { className: 'p-4 bg-gradient-to-br from-red-50 to-pink-50 rounded-xl' },
+                            e('div', { className: 'flex items-center gap-3 mb-3' },
+                                e('div', { className: 'w-12 h-12 rounded-full border-2 border-red-200', style: { backgroundColor: 'rgb(' + currentRecord.lipAnalysis.avgR + ',' + currentRecord.lipAnalysis.avgG + ',' + currentRecord.lipAnalysis.avgB + ')' } }),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700' }, currentRecord.lipAnalysis.description),
+                                    e('p', { className: 'text-xs text-gray-500' }, '饱和度：' + currentRecord.lipAnalysis.saturation + '%  亮度：' + currentRecord.lipAnalysis.brightness + '%')
+                                )
+                            ),
+                            e('div', { className: 'flex items-start gap-2 p-3 bg-white/60 rounded-lg' },
+                                e('span', { className: 'text-xl' }, '🩺'),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700 text-sm' }, '中医气血分析'),
+                                    e('p', { className: 'text-sm text-gray-600 mt-1' }, currentRecord.lipAnalysis.suggestion),
+                                    e('p', { className: 'text-xs mt-2 font-medium ' + (currentRecord.lipAnalysis.severity === 'severe' ? 'text-red-500' : currentRecord.lipAnalysis.severity === 'moderate' ? 'text-yellow-600' : 'text-green-600') }, '⚠️ ' + getSeverityLabel(currentRecord.lipAnalysis.severity))
+                                )
+                            )
+                        )
+                    ) : (
+                        e('div', { className: 'p-4 bg-gray-50 rounded-xl text-center' },
+                            e('span', { className: 'text-3xl' }, '🤔'),
+                            e('p', { className: 'text-gray-500 text-sm mt-2' }, '未能检测到清晰的唇色'),
+                            e('p', { className: 'text-gray-400 text-xs mt-1' }, '建议上传正面、光线充足的人脸照片')
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '👀 眼神分析'),
+                    currentRecord.eyeAnalysis ? (
+                        e('div', { className: 'p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl' },
+                            e('div', { className: 'flex items-center gap-3 mb-3' },
+                                e('div', { className: 'w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center' }, e('span', { className: 'text-2xl' }, '👁️')),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700' }, currentRecord.eyeAnalysis.description),
+                                    e('p', { className: 'text-xs text-gray-500' }, '眼周亮度：' + currentRecord.eyeAnalysis.avgBrightness + '  暗沉比例：' + currentRecord.eyeAnalysis.darkRatio + '%')
+                                )
+                            ),
+                            e('div', { className: 'flex items-start gap-2 p-3 bg-white/60 rounded-lg' },
+                                e('span', { className: 'text-xl' }, '🩺'),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700 text-sm' }, '中医神采分析'),
+                                    e('p', { className: 'text-sm text-gray-600 mt-1' }, currentRecord.eyeAnalysis.suggestion),
+                                    e('p', { className: 'text-xs mt-2 font-medium ' + (currentRecord.eyeAnalysis.severity === 'severe' ? 'text-red-500' : currentRecord.eyeAnalysis.severity === 'moderate' ? 'text-yellow-600' : 'text-green-600') }, '⚠️ ' + getSeverityLabel(currentRecord.eyeAnalysis.severity))
+                                )
+                            )
+                        )
+                    ) : (
+                        e('div', { className: 'p-4 bg-gray-50 rounded-xl text-center' },
+                            e('span', { className: 'text-3xl' }, '🤔'),
+                            e('p', { className: 'text-gray-500 text-sm mt-2' }, '未能检测到清晰的眼部'),
+                            e('p', { className: 'text-gray-400 text-xs mt-1' }, '建议上传正面、光线充足的人脸照片')
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '🎨 面色分析'),
+                    currentRecord.faceColorAnalysis ? (
+                        e('div', { className: 'p-4 bg-gradient-to-br from-pink-50 to-rose-50 rounded-xl' },
+                            e('div', { className: 'flex items-center gap-3 mb-3' },
+                                e('div', { className: 'w-12 h-12 rounded-full border-2 border-pink-200', style: { backgroundColor: 'rgb(' + currentRecord.faceColorAnalysis.avgR + ',' + currentRecord.faceColorAnalysis.avgG + ',' + currentRecord.faceColorAnalysis.avgB + ')' } }),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700' }, currentRecord.faceColorAnalysis.description),
+                                    e('p', { className: 'text-xs text-gray-500' }, '亮度：' + currentRecord.faceColorAnalysis.brightness + '  泛红率：' + currentRecord.faceColorAnalysis.rednessRatio + '%')
+                                )
+                            ),
+                            e('div', { className: 'flex items-start gap-2 p-3 bg-white/60 rounded-lg' },
+                                e('span', { className: 'text-xl' }, '🩺'),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700 text-sm' }, '中医面色诊断'),
+                                    e('p', { className: 'text-sm text-gray-600 mt-1' }, currentRecord.faceColorAnalysis.suggestion),
+                                    e('p', { className: 'text-xs mt-2 font-medium ' + (currentRecord.faceColorAnalysis.severity === 'severe' ? 'text-red-500' : currentRecord.faceColorAnalysis.severity === 'moderate' ? 'text-yellow-600' : 'text-green-600') }, '⚠️ ' + getSeverityLabel(currentRecord.faceColorAnalysis.severity))
+                                )
+                            )
+                        )
+                    ) : (
+                        e('div', { className: 'p-4 bg-gray-50 rounded-xl text-center' },
+                            e('span', { className: 'text-3xl' }, '🤔'),
+                            e('p', { className: 'text-gray-500 text-sm mt-2' }, '未能检测到清晰的面色'),
+                            e('p', { className: 'text-gray-400 text-xs mt-1' }, '建议上传正面、光线充足的人脸照片')
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '⚡ 印堂分析'),
+                    currentRecord.yintangAnalysis ? (
+                        e('div', { className: 'p-4 bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl' },
+                            e('div', { className: 'flex items-center gap-3 mb-3' },
+                                e('div', { className: 'w-12 h-12 rounded-full border-2 border-yellow-200', style: { backgroundColor: 'rgb(' + currentRecord.yintangAnalysis.avgR + ',' + currentRecord.yintangAnalysis.avgG + ',' + currentRecord.yintangAnalysis.avgB + ')' } }),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700' }, currentRecord.yintangAnalysis.description),
+                                    e('p', { className: 'text-xs text-gray-500' }, '亮度：' + currentRecord.yintangAnalysis.brightness + '  暗沉比例：' + currentRecord.yintangAnalysis.darkRatio + '%')
+                                )
+                            ),
+                            e('div', { className: 'flex items-start gap-2 p-3 bg-white/60 rounded-lg' },
+                                e('span', { className: 'text-xl' }, '🩺'),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700 text-sm' }, '中医印堂诊断'),
+                                    e('p', { className: 'text-sm text-gray-600 mt-1' }, currentRecord.yintangAnalysis.suggestion),
+                                    e('p', { className: 'text-xs mt-2 font-medium ' + (currentRecord.yintangAnalysis.severity === 'severe' ? 'text-red-500' : currentRecord.yintangAnalysis.severity === 'moderate' ? 'text-yellow-600' : 'text-green-600') }, '⚠️ ' + getSeverityLabel(currentRecord.yintangAnalysis.severity))
+                                )
+                            )
+                        )
+                    ) : (
+                        e('div', { className: 'p-4 bg-gray-50 rounded-xl text-center' },
+                            e('span', { className: 'text-3xl' }, '🤔'),
+                            e('p', { className: 'text-gray-500 text-sm mt-2' }, '未能检测到清晰的印堂'),
+                            e('p', { className: 'text-gray-400 text-xs mt-1' }, '建议上传正面、光线充足的人脸照片')
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '⚠️ 健康提示'),
+                    e('div', { className: 'space-y-3' },
+                        (currentRecord.healthTips || []).map(function(tip) {
+                            return e('div', { key: tip.id, className: 'flex items-start gap-3 p-3 bg-gray-50 rounded-xl' },
+                                e('span', { className: 'text-2xl' }, '⚡'),
+                                e('div', null,
+                                    e('h4', { className: 'font-medium text-gray-700' }, tip.title),
+                                    e('p', { className: 'text-sm text-gray-600' }, tip.description),
+                                    e('p', { className: 'text-sm text-green-600 mt-1' }, '建议：' + tip.suggestion)
+                                )
+                            );
+                        })
+                    ),
+                    e('p', { className: 'text-xs text-gray-400 mt-3 text-center' }, '免责声明：以上提示仅供参考，不能替代专业医疗诊断')
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '📋 综合调理建议'),
+                    e('div', { className: 'space-y-3' },
+                        e('div', { className: 'flex items-start gap-3 p-3 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl' },
+                            e('span', { className: 'text-2xl' }, '🥗'),
+                            e('div', null,
+                                e('h4', { className: 'font-medium text-gray-700 text-sm' }, '饮食建议'),
+                                e('p', { className: 'text-sm text-gray-600 mt-1' }, '饮食宜清淡，多吃新鲜蔬果，少吃辛辣油腻食物。建议每日饮水 1500-2000ml。')
+                            )
+                        ),
+                        e('div', { className: 'flex items-start gap-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl' },
+                            e('span', { className: 'text-2xl' }, '😴'),
+                            e('div', null,
+                                e('h4', { className: 'font-medium text-gray-700 text-sm' }, '作息建议'),
+                                e('p', { className: 'text-sm text-gray-600 mt-1' }, '保证每天 7-8 小时睡眠，尽量在晚上 11 点前入睡，避免熬夜伤气血。')
+                            )
+                        ),
+                        e('div', { className: 'flex items-start gap-3 p-3 bg-gradient-to-r from-yellow-50 to-amber-50 rounded-xl' },
+                            e('span', { className: 'text-2xl' }, '🧘'),
+                            e('div', null,
+                                e('h4', { className: 'font-medium text-gray-700 text-sm' }, '运动建议'),
+                                e('p', { className: 'text-sm text-gray-600 mt-1' }, '每周进行 3-4 次有氧运动，每次 30 分钟，促进血液循环和新陈代谢。')
+                            )
+                        ),
+                        e('div', { className: 'flex items-start gap-3 p-3 bg-gradient-to-r from-pink-50 to-rose-50 rounded-xl' },
+                            e('span', { className: 'text-2xl' }, '😊'),
+                            e('div', null,
+                                e('h4', { className: 'font-medium text-gray-700 text-sm' }, '情绪建议'),
+                                e('p', { className: 'text-sm text-gray-600 mt-1' }, '保持心情舒畅，避免长期压力和焦虑，好情绪是最好的护肤品。')
+                            )
+                        )
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4' },
+                    e('h3', { className: 'font-medium text-gray-700 mb-3' }, '🧴 护肤建议'),
+                    e('div', { className: 'grid grid-cols-2 gap-3' },
+                        (currentRecord.skincareRecommendations || []).map(function(item) {
+                            return e('div', { key: item.id, className: 'bg-gradient-to-br from-pink-50 to-purple-50 rounded-xl p-3' },
+                                e('div', { className: 'flex items-center gap-2 mb-2' },
+                                    e('span', { className: 'text-xl' }, item.icon),
+                                    e('h4', { className: 'font-medium text-gray-700 text-sm' }, item.name)
+                                ),
+                                e('p', { className: 'text-xs text-gray-600' }, item.description)
+                            );
+                        })
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('button', { 
+                        onClick: generateAIInterpretation, 
+                        className: 'w-full flex items-center justify-center gap-3 p-4 rounded-xl ' + (isCute ? 'bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100' : 'bg-gray-50 hover:bg-gray-100') + ' transition-colors'
+                    },
+                        e('div', { className: 'w-10 h-10 rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, '🤖'),
+                        e('div', { className: 'flex-1 text-left' },
+                            e('h4', { className: 'font-medium text-gray-700' }, 'AI详细解读'),
+                            e('p', { className: 'text-xs text-gray-500' }, '由智谱AI提供专业的皮肤和中医面诊分析')
+                        ),
+                        e('span', { className: 'text-gray-400' }, '›')
+                    )
+                ),
+                e('div', { className: 'fixed bottom-4 left-4 right-4 flex gap-3' },
+                    e('button', { onClick: handleShare, className: 'flex-1 bg-white text-gray-700 border border-gray-200 rounded-full py-3 font-medium flex items-center justify-center gap-2' },
+                        e('span', null, '📤'),
+                        e('span', null, '分享')
+                    ),
+                    !isHistoryView && e('button', { onClick: function() { onNavigate('home'); }, className: 'flex-1 bg-white text-gray-700 border border-gray-200 rounded-full py-3 font-medium' }, '返回首页'),
+                    isHistoryView && e('button', { onClick: function() { setSelectedRecord(null); onNavigate('history'); }, className: 'flex-1 bg-white text-gray-700 border border-gray-200 rounded-full py-3 font-medium' }, '返回列表'),
+                    e('button', { onClick: function() { setSelectedRecord(null); onNavigate('upload'); }, className: 'flex-1 text-white rounded-full py-3 font-medium ' + btnStyle }, isHistoryView ? '重新检测' : '查看历史')
+                ),
+                showDeleteConfirm && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl' },
+                        e('div', { className: 'text-center mb-4' },
+                            e('span', { className: 'text-5xl' }, '🗑️')
+                        ),
+                        e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '确认删除'),
+                        e('p', { className: 'text-gray-600 text-sm text-center mb-6' }, '删除后将无法恢复，确定要删除这条检测记录吗？'),
+                        e('div', { className: 'flex gap-3' },
+                            e('button', { onClick: function() { setShowDeleteConfirm(false); }, className: 'flex-1 py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '取消'),
+                            e('button', { onClick: function() { deleteScanRecord(currentRecord.id); setShowDeleteConfirm(false); setSelectedRecord(null); onNavigate('history'); }, className: 'flex-1 py-3 rounded-full bg-red-500 text-white font-medium' }, '删除')
+                        )
+                    )
+                ),
+                showAIInterpretation && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4', onClick: function() { setShowAIInterpretation(false); } },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[85vh] overflow-y-auto animate-scale-in', onClick: function(e) { e.stopPropagation(); } },
+                        e('div', { className: 'flex items-center justify-between mb-4' },
+                            e('div', { className: 'flex items-center gap-3' },
+                                e('div', { className: 'w-10 h-10 rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, '🤖'),
+                                e('div', null,
+                                    e('h3', { className: 'text-lg font-bold text-gray-800' }, 'AI详细解读'),
+                                    e('p', { className: 'text-xs text-gray-500' }, '由智谱AI提供')
+                                )
+                            ),
+                            e('button', { onClick: function() { setShowAIInterpretation(false); }, className: 'text-gray-400 text-2xl leading-none' }, '×')
+                        ),
+                        aiLoading ? e('div', { className: 'text-center py-12' },
+                            e('div', { className: 'w-12 h-12 border-4 border-pink-200 border-t-pink-500 rounded-full animate-spin mx-auto mb-4' }),
+                            e('p', { className: 'text-gray-500' }, 'AI正在分析中，请稍候...')
+                        ) : e('div', { className: 'prose prose-sm max-w-none' },
+                            e('div', { className: 'text-gray-700 whitespace-pre-wrap leading-relaxed text-sm' }, aiInterpretation)
+                        ),
+                        !aiLoading && aiInterpretation && e('div', { className: 'mt-6 flex gap-3' },
+                            e('button', { 
+                                onClick: function() { setShowAIInterpretation(false); onNavigate('aichat'); }, 
+                                className: 'flex-1 py-2.5 rounded-full border ' + (isCute ? 'border-pink-200 text-pink-600' : 'border-gray-200 text-gray-600') + ' font-medium' 
+                            }, '💬 继续对话'),
+                            e('button', { 
+                                onClick: function() { setShowAIInterpretation(false); }, 
+                                className: 'flex-1 py-2.5 rounded-full text-white font-medium ' + btnStyle 
+                            }, '关闭')
+                        )
+                    )
+                ),
+                showShareModal && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4', onClick: closeShareModal },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in', onClick: function(e) { e.stopPropagation(); } },
+                        shareSuccess 
+                            ? e('div', { className: 'text-center' },
+                                e('div', { className: 'w-16 h-16 mx-auto mb-3 rounded-full bg-green-100 flex items-center justify-center' }, e('span', { className: 'text-3xl' }, '✓')),
+                                e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '分享成功'),
+                                e('p', { className: 'text-gray-600 text-sm text-center mb-6' }, '分享文案已复制到剪贴板'),
+                                e('button', { onClick: closeShareModal, className: 'w-full py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '完成')
+                            )
+                            : shareToCommunity
+                                ? e('div', null,
+                                    e('div', { className: 'text-center mb-4' },
+                                        e('div', { className: 'w-16 h-16 mx-auto mb-3 rounded-full bg-pink-100 flex items-center justify-center' }, e('span', { className: 'text-3xl' }, '👥')),
+                                        e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '分享到社区'),
+                                        e('p', { className: 'text-gray-600 text-sm text-center' }, '填写分享心得，发布到社区')
+                                    ),
+                                    e('div', { className: 'mb-4' },
+                                        e('textarea', {
+                                            value: communityText,
+                                            onChange: function(ev) { setCommunityText(ev.target.value); },
+                                            placeholder: '分享一下您的护肤心得或改善方案吧～',
+                                            className: 'w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-pink-300 resize-none',
+                                            rows: 3
+                                        })
+                                    ),
+                                    e('div', { className: 'flex gap-3' },
+                                        e('button', { onClick: function() { setShareToCommunity(false); }, className: 'flex-1 py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '返回'),
+                                        e('button', { onClick: handlePublishToCommunity, className: 'flex-1 py-3 rounded-full ' + btnStyle + ' text-white font-medium' }, '发布')
+                                    )
+                                )
+                                : e('div', null,
+                                    e('div', { className: 'text-center mb-6' },
+                                        e('div', { className: 'w-16 h-16 mx-auto mb-3 rounded-full bg-pink-100 flex items-center justify-center' }, e('span', { className: 'text-3xl' }, '📤')),
+                                        e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '分享检测结果'),
+                                        e('p', { className: 'text-gray-600 text-sm text-center' }, '评分 ' + currentRecord.skinResult.overallScore + ' 分')
+                                    ),
+                                    e('div', { className: 'space-y-3' },
+                                        e('button', {
+                                            onClick: function() { setShareToCommunity(true); },
+                                            className: 'w-full flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-pink-50 to-purple-50 transition-all'
+                                        },
+                                            e('span', { className: 'text-2xl' }, '👥'),
+                                            e('div', { className: 'flex-1 text-left' },
+                                                e('h4', { className: 'font-medium text-gray-700' }, '分享到社区'),
+                                                e('p', { className: 'text-xs text-gray-500' }, '发布到社区，和大家一起交流')
+                                            ),
+                                            e('span', { className: 'text-gray-400' }, '›')
+                                        ),
+                                        e('button', {
+                                            onClick: copyShareLink,
+                                            className: 'w-full flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 transition-all'
+                                        },
+                                            e('span', { className: 'text-2xl' }, '📋'),
+                                            e('div', { className: 'flex-1 text-left' },
+                                                e('h4', { className: 'font-medium text-gray-700' }, '复制分享文案'),
+                                                e('p', { className: 'text-xs text-gray-500' }, '复制文案，分享给好友')
+                                            ),
+                                            e('span', { className: 'text-gray-400' }, '›')
+                                        )
+                                    ),
+                                    e('button', { onClick: closeShareModal, className: 'w-full mt-4 py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '取消')
+                                )
+                    )
+                )
+            );
+        }
+
+        function History({ onNavigate }) {
+            const { state, setSelectedRecord, deleteScanRecord, clearScanHistory } = useApp();
+            const [showClearConfirm, setShowClearConfirm] = useState(false);
+            const [deleteId, setDeleteId] = useState(null);
+            const isCute = state.currentStyle === 'cute';
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+
+            const getScoreColor = function(score) { return score >= 85 ? 'text-green-500' : score >= 70 ? 'text-yellow-500' : 'text-red-500'; };
+
+            const handleViewDetail = function(recordId) {
+                setSelectedRecord(recordId);
+                onNavigate('result');
+            };
+
+            const handleDelete = function(recordId) {
+                deleteScanRecord(recordId);
+                setDeleteId(null);
+            };
+
+            const handleClearAll = function() {
+                clearScanHistory();
+                setShowClearConfirm(false);
+            };
+
+            const emptyState = e('div', { className: 'text-center py-12' },
+                e('div', { className: 'w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center ' + (isCute ? 'bg-pink-200' : 'bg-gray-200') }, e('span', { className: 'text-4xl' }, '📅')),
+                e('h3', { className: 'text-lg font-semibold text-gray-700 mb-2' }, '暂无检测记录'),
+                e('p', { className: 'text-gray-500 mb-4' }, '点击按钮开始第一次检测'),
+                e('button', { onClick: function() { onNavigate('upload'); }, className: 'px-6 py-2 text-white rounded-full ' + (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500') }, '开始检测')
+            );
+
+            const historyList = e('div', { className: 'space-y-3' },
+                state.scanHistory.map(function(record) {
+                    const avatarContent = record.photo
+                        ? e('img', { src: record.photo, alt: '照片', className: 'w-full h-full object-cover' })
+                        : e('div', { className: 'text-center' },
+                            e('div', { className: 'text-2xl font-bold ' + getScoreColor(record.skinResult.overallScore) }, record.skinResult.overallScore),
+                            e('div', { className: 'text-xs text-gray-500' }, '分')
+                        );
+                    return e('div', { key: record.id, className: cardStyle + ' overflow-hidden' },
+                        e('div', { className: 'flex items-center gap-4 p-4 active:bg-gray-50 transition-colors', onClick: function() { handleViewDetail(record.id); } },
+                            e('div', { className: 'w-16 h-16 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, avatarContent),
+                            e('div', { className: 'flex-1 min-w-0' },
+                                e('p', { className: 'text-sm text-gray-500' }, record.date),
+                                e('div', { className: 'flex items-center gap-2 mt-2' },
+                                    e('span', { className: 'text-lg font-bold ' + getScoreColor(record.skinResult.overallScore) }, record.skinResult.overallScore + '分'),
+                                    e('div', { className: 'flex gap-1 flex-wrap' },
+                                        record.skinResult.issues.slice(0, 2).map(function(issue) {
+                                            return e('span', { key: issue.id, className: 'text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full' }, issue.name);
+                                        })
+                                    )
+                                )
+                            ),
+                            e('span', { className: 'text-gray-400 text-xl' }, '›')
+                        ),
+                        e('div', { className: 'flex border-t border-gray-100' },
+                            e('button', { onClick: function(e) { e.stopPropagation(); setDeleteId(record.id); }, className: 'flex-1 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors' }, '删除')
+                        )
+                    );
+                })
+            );
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4 pb-24' },
+                e('header', { className: 'flex items-center gap-4 mb-6' },
+                    e('button', { onClick: function() { onNavigate('home'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '←'),
+                    e('h1', { className: 'text-lg font-bold flex-1 ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '历史记录'),
+                    state.scanHistory.length > 0 && e('button', { onClick: function() { setShowClearConfirm(true); }, className: 'text-sm text-red-500' }, '清空')
+                ),
+                state.scanHistory.length === 0 ? emptyState : historyList,
+                state.scanHistory.length > 0 && e('div', { className: 'fixed bottom-4 left-4 right-4' },
+                    e('button', { onClick: function() { onNavigate('upload'); }, className: 'w-full py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '＋ 新检测')
+                ),
+                showClearConfirm && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl' },
+                        e('div', { className: 'text-center mb-4' },
+                            e('span', { className: 'text-5xl' }, '⚠️')
+                        ),
+                        e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '清空全部记录'),
+                        e('p', { className: 'text-gray-600 text-sm text-center mb-6' }, '清空后所有检测记录将被删除且无法恢复，确定继续吗？'),
+                        e('div', { className: 'flex gap-3' },
+                            e('button', { onClick: function() { setShowClearConfirm(false); }, className: 'flex-1 py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '取消'),
+                            e('button', { onClick: handleClearAll, className: 'flex-1 py-3 rounded-full bg-red-500 text-white font-medium' }, '清空')
+                        )
+                    )
+                ),
+                deleteId && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl' },
+                        e('div', { className: 'text-center mb-4' },
+                            e('span', { className: 'text-5xl' }, '🗑️')
+                        ),
+                        e('h3', { className: 'text-lg font-bold text-gray-800 text-center mb-2' }, '删除记录'),
+                        e('p', { className: 'text-gray-600 text-sm text-center mb-6' }, '确定要删除这条检测记录吗？删除后无法恢复。'),
+                        e('div', { className: 'flex gap-3' },
+                            e('button', { onClick: function() { setDeleteId(null); }, className: 'flex-1 py-3 rounded-full bg-gray-100 text-gray-700 font-medium' }, '取消'),
+                            e('button', { onClick: function() { handleDelete(deleteId); }, className: 'flex-1 py-3 rounded-full bg-red-500 text-white font-medium' }, '删除')
+                        )
+                    )
+                )
+            );
+        }
+
+        function Community({ onNavigate }) {
+            const { state, addCommunityPost, likePost, addComment, deletePost } = useApp();
+            const [showPublishModal, setShowPublishModal] = useState(false);
+            const [selectedRecordId, setSelectedRecordId] = useState(null);
+            const [shareText, setShareText] = useState('');
+            const [commentText, setCommentText] = useState('');
+            const [activeCommentPostId, setActiveCommentPostId] = useState(null);
+            const isCute = state.currentStyle === 'cute';
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-50 via-purple-25 to-pink-25' : 'bg-gradient-to-br from-gray-50 via-slate-25 to-gray-50';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+
+            const handlePublish = function() {
+                if (!selectedRecordId) return;
+                const record = state.scanHistory.find(function(r) { return r.id === selectedRecordId; });
+                if (!record) return;
+                
+                const post = {
+                    id: Date.now().toString(),
+                    author: state.currentUser.username,
+                    authorGender: state.currentUser.gender,
+                    photo: record.photo,
+                    skinResult: record.skinResult,
+                    healthTips: record.healthTips,
+                    skincareRecommendations: record.skincareRecommendations,
+                    shareText: shareText.trim() || '分享了我的检测结果，快来围观！',
+                    createdAt: new Date().toLocaleString('zh-CN'),
+                    likes: 0,
+                    likedBy: [],
+                    comments: []
+                };
+                
+                addCommunityPost(post);
+                setShowPublishModal(false);
+                setSelectedRecordId(null);
+                setShareText('');
+            };
+
+            const handleLike = function(postId) {
+                likePost(postId);
+            };
+
+            const handleComment = function(postId) {
+                if (!commentText.trim()) return;
+                addComment(postId, {
+                    id: Date.now().toString(),
+                    author: state.currentUser.username,
+                    content: commentText.trim(),
+                    createdAt: new Date().toLocaleString('zh-CN')
+                });
+                setCommentText('');
+                setActiveCommentPostId(null);
+            };
+
+            const handleDeletePost = function(postId) {
+                deletePost(postId);
+            };
+
+            const getScoreColor = function(score) { 
+                return score >= 85 ? 'text-green-500' : score >= 70 ? 'text-yellow-500' : 'text-red-500'; 
+            };
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4 pb-20' },
+                e('div', { className: 'max-w-lg mx-auto' },
+                    e('div', { className: 'flex items-center justify-between mb-6' },
+                        e('h1', { className: 'text-xl font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '社区分享'),
+                        e('button', {
+                            onClick: function() { setShowPublishModal(true); },
+                            className: 'px-4 py-2 rounded-full text-white font-medium text-sm ' + btnStyle
+                        }, '发布分享')
+                    ),
+                    
+                    state.communityPosts.length === 0 && e('div', { className: cardStyle + ' p-8 text-center' },
+                        e('div', { className: 'w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center' },
+                            e('span', { className: 'text-3xl' }, '👥')
+                        ),
+                        e('p', { className: 'text-gray-500' }, '还没有人分享'),
+                        e('p', { className: 'text-gray-400 text-sm mt-2' }, '点击右上角「发布分享」成为第一个吧')
+                    ),
+                    
+                    state.communityPosts.map(function(post) {
+                        const isLiked = post.likedBy.includes(state.currentUser.username);
+                        const isMyPost = post.author === state.currentUser.username;
+                        return e('div', { key: post.id, className: cardStyle + ' p-4 mb-4 animate-fade-in' },
+                            e('div', { className: 'flex items-center justify-between mb-3' },
+                                e('div', { className: 'flex items-center gap-2' },
+                                    e('div', { className: 'w-10 h-10 rounded-full flex items-center justify-center ' + (post.authorGender === 'female' ? 'bg-pink-200' : 'bg-gray-200') },
+                                        e('span', { className: 'text-lg' }, post.authorGender === 'female' ? '👩' : '👨')
+                                    ),
+                                    e('div', null,
+                                        e('h4', { className: 'font-medium text-gray-700' }, post.author),
+                                        e('p', { className: 'text-xs text-gray-400' }, post.createdAt)
+                                    )
+                                ),
+                                isMyPost && e('button', {
+                                    onClick: function() { handleDeletePost(post.id); },
+                                    className: 'text-gray-400 hover:text-red-500 text-sm'
+                                }, '删除')
+                            ),
+                            
+                            e('div', { className: 'flex gap-3 mb-3' },
+                                e('img', { 
+                                    src: post.photo, 
+                                    className: 'w-20 h-20 rounded-xl object-cover border-2 border-pink-100',
+                                    alt: '检测结果'
+                                }),
+                                e('div', { className: 'flex-1' },
+                                    e('div', { className: 'flex items-center gap-2 mb-1' },
+                                        e('span', { className: 'text-lg font-bold ' + getScoreColor(post.skinResult.overallScore) }, post.skinResult.overallScore),
+                                        e('span', { className: 'text-sm text-gray-500' }, '分')
+                                    ),
+                                    e('p', { className: 'text-sm text-gray-600 line-clamp-2' }, post.shareText)
+                                )
+                            ),
+                            
+                            post.skinResult.issues.length > 0 && e('div', { className: 'mb-3' },
+                                e('p', { className: 'text-xs text-gray-500 mb-1' }, '检测到的问题：'),
+                                e('div', { className: 'flex gap-2 flex-wrap' },
+                                    post.skinResult.issues.slice(0, 3).map(function(issue) {
+                                        return e('span', { 
+                                            key: issue.id, 
+                                            className: 'px-2 py-1 rounded-full text-xs ' + 
+                                                (issue.severity === 'mild' ? 'bg-green-100 text-green-600' : 
+                                                 issue.severity === 'moderate' ? 'bg-yellow-100 text-yellow-600' : 
+                                                 'bg-red-100 text-red-600')
+                                        }, issue.name);
+                                    })
+                                )
+                            ),
+                            
+                            post.skincareRecommendations && post.skincareRecommendations.length > 0 && e('div', { className: 'mb-3' },
+                                e('p', { className: 'text-xs text-gray-500 mb-1' }, '护肤建议：'),
+                                e('div', { className: 'flex gap-2 flex-wrap' },
+                                    post.skincareRecommendations.slice(0, 3).map(function(item) {
+                                        return e('span', { key: item.id, className: 'px-2 py-1 rounded-full bg-purple-100 text-purple-600 text-xs' },
+                                            item.icon + ' ' + item.name
+                                        );
+                                    })
+                                )
+                            ),
+                            
+                            e('div', { className: 'flex items-center gap-4 pt-3 border-t border-gray-100' },
+                                e('button', {
+                                    onClick: function() { handleLike(post.id); },
+                                    className: 'flex items-center gap-1 ' + (isLiked ? 'text-pink-500' : 'text-gray-500')
+                                },
+                                    e('span', null, isLiked ? '❤️' : '🤍'),
+                                    e('span', { className: 'text-sm' }, post.likes)
+                                ),
+                                e('button', {
+                                    onClick: function() { setActiveCommentPostId(activeCommentPostId === post.id ? null : post.id); },
+                                    className: 'flex items-center gap-1 text-gray-500'
+                                },
+                                    e('span', null, '💬'),
+                                    e('span', { className: 'text-sm' }, post.comments.length)
+                                )
+                            ),
+                            
+                            activeCommentPostId === post.id && e('div', { className: 'mt-3 animate-slide-up' },
+                                e('div', { className: 'flex gap-2' },
+                                    e('input', {
+                                        type: 'text',
+                                        value: commentText,
+                                        onChange: function(e) { setCommentText(e.target.value); },
+                                        placeholder: '写评论...',
+                                        className: 'flex-1 px-3 py-2 rounded-full border border-gray-200 text-sm focus:outline-none focus:border-pink-300'
+                                    }),
+                                    e('button', {
+                                        onClick: function() { handleComment(post.id); },
+                                        className: 'px-4 py-2 rounded-full ' + btnStyle + ' text-white text-sm'
+                                    }, '发送')
+                                )
+                            ),
+                            
+                            post.comments.length > 0 && e('div', { className: 'mt-3 space-y-2' },
+                                post.comments.slice(0, 3).map(function(comment) {
+                                    return e('div', { key: comment.id, className: 'bg-gray-50 rounded-xl p-2' },
+                                        e('div', { className: 'flex items-center gap-2 mb-1' },
+                                            e('span', { className: 'text-xs font-medium text-gray-700' }, comment.author),
+                                            e('span', { className: 'text-xs text-gray-400' }, comment.createdAt)
+                                        ),
+                                        e('p', { className: 'text-sm text-gray-600' }, comment.content)
+                                    );
+                                })
+                            )
+                        );
+                    })
+                ),
+                
+                showPublishModal && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4' },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-scale-in' },
+                        e('h3', { className: 'text-lg font-bold text-gray-800 mb-4' }, '发布分享'),
+                        
+                        state.scanHistory.length === 0 && e('div', { className: 'text-center py-4' },
+                            e('p', { className: 'text-gray-500' }, '您还没有检测记录'),
+                            e('button', {
+                                onClick: function() { setShowPublishModal(false); onNavigate('upload'); },
+                                className: 'mt-3 px-4 py-2 rounded-full ' + btnStyle + ' text-white'
+                            }, '去检测')
+                        ),
+                        
+                        state.scanHistory.length > 0 && e('div', null,
+                            e('p', { className: 'text-sm text-gray-500 mb-3' }, '选择要分享的检测记录：'),
+                            e('div', { className: 'space-y-2 mb-4 max-h-40 overflow-y-auto' },
+                                state.scanHistory.map(function(record) {
+                                    const isSelected = selectedRecordId === record.id;
+                                    return e('div', {
+                                        key: record.id,
+                                        onClick: function() { setSelectedRecordId(record.id); },
+                                        className: 'flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all ' + 
+                                            (isSelected ? 'bg-pink-100 border-2 border-pink-300' : 'bg-gray-50 hover:bg-gray-100')
+                                    },
+                                        e('img', { src: record.photo, className: 'w-12 h-12 rounded-lg object-cover' }),
+                                        e('div', { className: 'flex-1' },
+                                            e('p', { className: 'text-sm font-medium text-gray-700' }, 
+                                                '评分 ' + record.skinResult.overallScore + ' 分'
+                                            ),
+                                            e('p', { className: 'text-xs text-gray-400' }, record.date)
+                                        )
+                                    );
+                                })
+                            ),
+                            
+                            selectedRecordId && e('div', { className: 'mb-4' },
+                                e('p', { className: 'text-sm text-gray-500 mb-2' }, '分享心得（选填）：'),
+                                e('textarea', {
+                                    value: shareText,
+                                    onChange: function(e) { setShareText(e.target.value); },
+                                    placeholder: '分享一下您的护肤心得或改善方案吧～',
+                                    className: 'w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-pink-300 resize-none',
+                                    rows: 3
+                                })
+                            ),
+                            
+                            e('div', { className: 'flex gap-3' },
+                                e('button', {
+                                    onClick: function() { setShowPublishModal(false); setSelectedRecordId(null); setShareText(''); },
+                                    className: 'flex-1 py-3 rounded-full bg-gray-100 text-gray-700 font-medium'
+                                }, '取消'),
+                                e('button', {
+                                    onClick: handlePublish,
+                                    disabled: !selectedRecordId,
+                                    className: 'flex-1 py-3 rounded-full text-white font-medium ' + 
+                                        (selectedRecordId ? btnStyle : 'bg-gray-300 cursor-not-allowed')
+                                }, '发布')
+                            )
+                        )
+                    )
+                ),
+                
+                e('div', { className: 'fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur border-t border-gray-100 p-3' },
+                    e('div', { className: 'max-w-lg mx-auto flex justify-around' },
+                        e('button', {
+                            onClick: function() { onNavigate('home'); },
+                            className: 'flex flex-col items-center gap-1 px-4 py-2 text-gray-500'
+                        },
+                            e('span', { className: 'text-xl' }, '🏠'),
+                            e('span', { className: 'text-xs' }, '首页')
+                        ),
+                        e('button', {
+                            onClick: function() { onNavigate('upload'); },
+                            className: 'flex flex-col items-center gap-1 px-4 py-2 text-gray-500'
+                        },
+                            e('span', { className: 'text-xl' }, '📷'),
+                            e('span', { className: 'text-xs' }, '检测')
+                        ),
+                        e('button', {
+                            className: 'flex flex-col items-center gap-1 px-4 py-2 ' + (isCute ? 'text-pink-500' : 'text-gray-700')
+                        },
+                            e('span', { className: 'text-xl' }, '👥'),
+                            e('span', { className: 'text-xs font-medium' }, '社区')
+                        ),
+                        e('button', {
+                            onClick: function() { onNavigate('history'); },
+                            className: 'flex flex-col items-center gap-1 px-4 py-2 text-gray-500'
+                        },
+                            e('span', { className: 'text-xl' }, '📋'),
+                            e('span', { className: 'text-xs' }, '记录')
+                        ),
+                        e('button', {
+                            onClick: function() { onNavigate('profile'); },
+                            className: 'flex flex-col items-center gap-1 px-4 py-2 text-gray-500'
+                        },
+                            e('span', { className: 'text-xl' }, '⚙️'),
+                            e('span', { className: 'text-xs' }, '设置')
+                        )
+                    )
+                )
+            );
+        }
+
+        function Profile({ onNavigate, onLogout }) {
+            const { state, setStyle, updateUserInfo, setDeepseekApiKey } = useApp();
+            const [showEditProfile, setShowEditProfile] = useState(false);
+            const [showChangePassword, setShowChangePassword] = useState(false);
+            const [showAbout, setShowAbout] = useState(false);
+            const [showHelp, setShowHelp] = useState(false);
+            const [showAISettings, setShowAISettings] = useState(false);
+            const [apiKeyInput, setApiKeyInput] = useState('');
+            const [apiKeySaved, setApiKeySaved] = useState(false);
+            const [editGender, setEditGender] = useState('female');
+            const [editSkinType, setEditSkinType] = useState('combination');
+            const [oldPassword, setOldPassword] = useState('');
+            const [newPassword, setNewPassword] = useState('');
+            const [confirmNewPassword, setConfirmNewPassword] = useState('');
+            const [passwordError, setPasswordError] = useState('');
+            const [saveSuccess, setSaveSuccess] = useState(false);
+            const isCute = state.currentStyle === 'cute';
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            const genderText = state.currentUser && state.currentUser.gender === 'male' ? '男性' : '女性';
+            const skinText = state.currentUser ? (state.currentUser.skinType === 'dry' ? '干性皮肤' : state.currentUser.skinType === 'oily' ? '油性皮肤' : '混合性皮肤') : '';
+            const username = state.currentUser ? state.currentUser.username : '用户昵称';
+
+            const handleLogout = function() {
+                if (confirm('确定要退出登录吗？')) {
+                    onLogout();
+                }
+            };
+
+            const openEditProfile = function() {
+                if (state.currentUser) {
+                    setEditGender(state.currentUser.gender);
+                    setEditSkinType(state.currentUser.skinType);
+                }
+                setSaveSuccess(false);
+                setShowEditProfile(true);
+            };
+
+            const handleSaveProfile = function() {
+                updateUserInfo({ gender: editGender, skinType: editSkinType });
+                setSaveSuccess(true);
+                setTimeout(function() {
+                    setShowEditProfile(false);
+                    setSaveSuccess(false);
+                }, 1000);
+            };
+
+            const handleChangePassword = function() {
+                setPasswordError('');
+                if (!oldPassword) {
+                    setPasswordError('请输入原密码');
+                    return;
+                }
+                if (state.currentUser && state.currentUser.password !== oldPassword) {
+                    setPasswordError('原密码不正确');
+                    return;
+                }
+                if (!newPassword) {
+                    setPasswordError('请输入新密码');
+                    return;
+                }
+                if (newPassword.length < 6) {
+                    setPasswordError('新密码至少6个字符');
+                    return;
+                }
+                if (newPassword !== confirmNewPassword) {
+                    setPasswordError('两次输入的新密码不一致');
+                    return;
+                }
+                updateUserInfo({ password: newPassword });
+                setSaveSuccess(true);
+                setTimeout(function() {
+                    setShowChangePassword(false);
+                    setSaveSuccess(false);
+                    setOldPassword('');
+                    setNewPassword('');
+                    setConfirmNewPassword('');
+                    setPasswordError('');
+                }, 1000);
+            };
+
+            const openAISettings = function() {
+                setApiKeyInput(state.deepseekApiKey || '');
+                setApiKeySaved(false);
+                setShowAISettings(true);
+            };
+
+            const handleSaveApiKey = function() {
+                setDeepseekApiKey(apiKeyInput.trim());
+                setApiKeySaved(true);
+                setTimeout(function() {
+                    setApiKeySaved(false);
+                    setShowAISettings(false);
+                }, 1000);
+            };
+
+            const menuItems = [
+                { icon: '🤖', label: 'AI助手设置', desc: '配置智谱AI API Key', onClick: openAISettings },
+                { icon: '👤', label: '个人资料', desc: '修改性别、肤质等信息', onClick: openEditProfile },
+                { icon: '🔐', label: '修改密码', desc: '修改登录密码', onClick: function() { setShowChangePassword(true); } },
+                { icon: '❓', label: '帮助中心', desc: '常见问题解答', onClick: function() { setShowHelp(true); } },
+                { icon: 'ℹ️', label: '关于我们', desc: '版本信息和介绍', onClick: function() { setShowAbout(true); } }
+            ];
+
+            const Modal = function(props) {
+                return e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4', onClick: props.onClose },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl max-h-[85vh] overflow-y-auto', onClick: function(e) { e.stopPropagation(); } },
+                        e('div', { className: 'flex items-center justify-between mb-4' },
+                            e('h3', { className: 'text-lg font-bold text-gray-800' }, props.title),
+                            e('button', { onClick: props.onClose, className: 'text-gray-400 text-2xl leading-none' }, '×')
+                        ),
+                        props.children
+                    )
+                );
+            };
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' p-4 pb-24' },
+                e('header', { className: 'flex items-center gap-4 mb-6' },
+                    e('button', { onClick: function() { onNavigate('home'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '←'),
+                    e('h1', { className: 'text-lg font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, '个人中心')
+                ),
+                e('div', { className: cardStyle + ' p-6 mb-6' },
+                    e('div', { className: 'flex items-center gap-4' },
+                        e('div', { className: 'w-16 h-16 rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, e('span', { className: 'text-3xl' }, '👤')),
+                        e('div', { className: 'flex-1' },
+                            e('h2', { className: 'font-semibold text-gray-700' }, username),
+                            e('p', { className: 'text-sm text-gray-500' }, genderText + ' · ' + skinText)
+                        ),
+                        e('button', { onClick: openEditProfile, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600') }, '✏️')
+                    )
+                ),
+                e('div', { className: cardStyle + ' p-4 mb-4' },
+                    e('div', { className: 'flex items-center justify-between' },
+                        e('div', { className: 'flex items-center gap-3' },
+                            e('div', { className: 'w-10 h-10 rounded-xl flex items-center justify-center ' + (isCute ? 'bg-pink-100' : 'bg-gray-100') }, e('span', null, '🎨')),
+                            e('div', null,
+                                e('h3', { className: 'font-medium text-gray-700' }, '界面风格'),
+                                e('p', { className: 'text-sm text-gray-500' }, isCute ? '可爱活泼风格' : '简约中性风格')
+                            )
+                        ),
+                        e('button', { onClick: function() { setStyle(isCute ? 'neutral' : 'cute'); }, className: 'px-4 py-2 rounded-full ' + (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white' : 'bg-gray-500 text-white') }, isCute ? '🌙' : '☀️')
+                    )
+                ),
+                e('div', { className: cardStyle + ' overflow-hidden mb-4' },
+                    menuItems.map(function(item, index) {
+                        const borderStyle = index < menuItems.length - 1 ? { borderBottom: '1px solid #f3f4f6' } : {};
+                        return e('button', { key: item.label, onClick: item.onClick, className: 'w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors', style: borderStyle },
+                            e('span', { className: 'text-2xl' }, item.icon),
+                            e('div', { className: 'flex-1 text-left' },
+                                e('h3', { className: 'font-medium text-gray-700' }, item.label),
+                                e('p', { className: 'text-sm text-gray-500' }, item.desc)
+                            ),
+                            e('span', { className: 'text-gray-400' }, '›')
+                        );
+                    })
+                ),
+                e('div', { className: 'fixed bottom-4 left-4 right-4' },
+                    e('button', { onClick: handleLogout, className: 'w-full flex items-center justify-center gap-2 py-3 bg-red-500 text-white rounded-full' }, '🚪 退出登录')
+                ),
+                showEditProfile && e(Modal, { title: '编辑资料', onClose: function() { setShowEditProfile(false); } },
+                    e('div', { className: 'space-y-4' },
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, '性别'),
+                            e('div', { className: 'flex gap-3' },
+                                e('button', { onClick: function() { setEditGender('female'); }, className: 'flex-1 p-3 rounded-xl transition-all ' + (editGender === 'female' ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-lg' : 'bg-gray-600 text-white') : 'bg-gray-100 text-gray-700') },
+                                    e('span', { className: 'text-2xl block mb-1' }, '👩'),
+                                    e('span', { className: 'text-sm font-medium' }, '女性')
+                                ),
+                                e('button', { onClick: function() { setEditGender('male'); }, className: 'flex-1 p-3 rounded-xl transition-all ' + (editGender === 'male' ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-lg' : 'bg-gray-600 text-white') : 'bg-gray-100 text-gray-700') },
+                                    e('span', { className: 'text-2xl block mb-1' }, '👨'),
+                                    e('span', { className: 'text-sm font-medium' }, '男性')
+                                )
+                            )
+                        ),
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, '肤质'),
+                            e('div', { className: 'space-y-2' },
+                                e('button', { onClick: function() { setEditSkinType('dry'); }, className: 'w-full p-3 rounded-xl flex items-center gap-3 transition-all ' + (editSkinType === 'dry' ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-lg' : 'bg-gray-600 text-white') : 'bg-gray-100 text-gray-700') },
+                                    e('span', { className: 'text-xl' }, '☁️'),
+                                    e('span', { className: 'text-sm font-medium' }, '干性皮肤')
+                                ),
+                                e('button', { onClick: function() { setEditSkinType('oily'); }, className: 'w-full p-3 rounded-xl flex items-center gap-3 transition-all ' + (editSkinType === 'oily' ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-lg' : 'bg-gray-600 text-white') : 'bg-gray-100 text-gray-700') },
+                                    e('span', { className: 'text-xl' }, '💧'),
+                                    e('span', { className: 'text-sm font-medium' }, '油性皮肤')
+                                ),
+                                e('button', { onClick: function() { setEditSkinType('combination'); }, className: 'w-full p-3 rounded-xl flex items-center gap-3 transition-all ' + (editSkinType === 'combination' ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow-lg' : 'bg-gray-600 text-white') : 'bg-gray-100 text-gray-700') },
+                                    e('span', { className: 'text-xl' }, '⚖️'),
+                                    e('span', { className: 'text-sm font-medium' }, '混合性皮肤')
+                                )
+                            )
+                        ),
+                        saveSuccess && e('div', { className: 'text-center text-green-600 font-medium' }, '✅ 保存成功！'),
+                        e('button', { onClick: handleSaveProfile, className: 'w-full py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '保存')
+                    )
+                ),
+                showChangePassword && e(Modal, { title: '修改密码', onClose: function() { setShowChangePassword(false); setOldPassword(''); setNewPassword(''); setConfirmNewPassword(''); setPasswordError(''); } },
+                    e('div', { className: 'space-y-4' },
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '原密码'),
+                            e('input', {
+                                type: 'password',
+                                value: oldPassword,
+                                onChange: function(e) { setOldPassword(e.target.value); setPasswordError(''); },
+                                placeholder: '请输入原密码',
+                                className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                            })
+                        ),
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '新密码'),
+                            e('input', {
+                                type: 'password',
+                                value: newPassword,
+                                onChange: function(e) { setNewPassword(e.target.value); setPasswordError(''); },
+                                placeholder: '请输入新密码（至少6位）',
+                                className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                            })
+                        ),
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, '确认新密码'),
+                            e('input', {
+                                type: 'password',
+                                value: confirmNewPassword,
+                                onChange: function(e) { setConfirmNewPassword(e.target.value); setPasswordError(''); },
+                                placeholder: '请再次输入新密码',
+                                className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                            })
+                        ),
+                        passwordError && e('p', { className: 'text-red-500 text-sm text-center' }, passwordError),
+                        saveSuccess && e('div', { className: 'text-center text-green-600 font-medium' }, '✅ 修改成功！'),
+                        e('button', { onClick: handleChangePassword, className: 'w-full py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '确认修改')
+                    )
+                ),
+                showAISettings && e(Modal, { title: 'AI助手设置', onClose: function() { setShowAISettings(false); setApiKeySaved(false); } },
+                    e('div', { className: 'space-y-4' },
+                        e('div', { className: 'p-3 ' + (isCute ? 'bg-pink-50' : 'bg-gray-50') + ' rounded-xl' },
+                            e('h4', { className: 'font-medium text-gray-700 mb-1' }, '🤖 智谱AI API'),
+                            e('p', { className: 'text-sm text-gray-600' }, '接入智谱AI，获得智能皮肤咨询和中医面诊解读服务。')
+                        ),
+                        e('div', null,
+                            e('label', { className: 'block text-sm font-medium text-gray-700 mb-1' }, 'API Key'),
+                            e('input', {
+                                type: 'password',
+                                value: apiKeyInput,
+                                onChange: function(e) { setApiKeyInput(e.target.value); setApiKeySaved(false); },
+                                placeholder: '请输入您的智谱AI API Key',
+                                className: 'w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200 outline-none transition-all'
+                            })
+                        ),
+                        e('div', { className: 'text-xs text-gray-500' },
+                            e('p', null, '💡 提示：您可以在 '),
+                            e('a', { href: 'https://open.bigmodel.cn/', target: '_blank', className: 'text-blue-500 underline' }, '智谱AI开放平台'),
+                            e('p', null, '注册并获取API Key。')
+                        ),
+                        apiKeySaved && e('div', { className: 'text-center text-green-600 font-medium' }, '✅ 保存成功！'),
+                        e('button', { onClick: handleSaveApiKey, className: 'w-full py-3 rounded-full text-white font-medium shadow-lg ' + btnStyle }, '保存')
+                    )
+                ),
+                showHelp && e(Modal, { title: '帮助中心', onClose: function() { setShowHelp(false); } },
+                    e('div', { className: 'space-y-4' },
+                        e('div', { className: 'p-3 bg-gray-50 rounded-xl' },
+                            e('h4', { className: 'font-medium text-gray-700 mb-1' }, '📸 如何获得更准确的检测结果？'),
+                            e('p', { className: 'text-sm text-gray-600' }, '请在光线充足的环境下拍摄，保持面部正对镜头，素颜或淡妆效果更佳。')
+                        ),
+                        e('div', { className: 'p-3 bg-gray-50 rounded-xl' },
+                            e('h4', { className: 'font-medium text-gray-700 mb-1' }, '🔍 检测结果准确吗？'),
+                            e('p', { className: 'text-sm text-gray-600' }, '本应用仅供参考，不能替代专业医疗诊断。如有疑问请咨询专业医生。')
+                        ),
+                        e('div', { className: 'p-3 bg-gray-50 rounded-xl' },
+                            e('h4', { className: 'font-medium text-gray-700 mb-1' }, '💾 我的数据安全吗？'),
+                            e('p', { className: 'text-sm text-gray-600' }, '所有数据仅保存在您的设备本地，不会上传到任何服务器。')
+                        )
+                    )
+                ),
+                showAbout && e(Modal, { title: '关于我们', onClose: function() { setShowAbout(false); } },
+                    e('div', { className: 'text-center space-y-4' },
+                        e('div', { className: 'w-20 h-20 mx-auto rounded-full flex items-center justify-center ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') },
+                            e('span', { className: 'text-4xl' }, '✨')
+                        ),
+                        e('div', null,
+                            e('h3', { className: 'text-xl font-bold text-gray-700' }, '颜容'),
+                            e('p', { className: 'text-sm text-gray-500 mt-1' }, 'AI 中医面诊 · 智能皮肤分析')
+                        ),
+                        e('div', { className: 'text-sm text-gray-600 space-y-2 pt-2' },
+                            e('p', null, '版本：1.0.0'),
+                            e('p', null, '一款基于图像识别的中医面诊与皮肤分析工具，让健康触手可及。'),
+                            e('p', { className: 'text-xs text-gray-400 pt-2' }, '免责声明：本应用仅供参考，不能替代专业医疗诊断。')
+                        )
+                    )
+                )
+            );
+        }
+
+        function AIChat({ onNavigate }) {
+            const { state, callDeepseekAPI, clearAiChatHistory } = useApp();
+            const [messages, setMessages] = useState(function() {
+                const history = state.aiChatHistory || [];
+                if (history.length === 0) {
+                    return [{
+                        id: Date.now().toString(),
+                        role: 'assistant',
+                        content: '您好！我是颜容AI助手 🤖\n\n我可以帮您：\n• 解答皮肤护理问题\n• 解读中医面诊结果\n• 提供健康养生建议\n• 分析肤质和护肤方案\n\n请问有什么可以帮助您的？'
+                    }];
+                }
+                return history;
+            });
+            const [inputText, setInputText] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [showClearConfirm, setShowClearConfirm] = useState(false);
+            const messagesEndRef = React.useRef(null);
+            const isCute = state.currentStyle === 'cute';
+
+            const bgStyle = isCute ? 'bg-gradient-to-br from-pink-100 via-purple-50 to-pink-50' : 'bg-gradient-to-br from-gray-50 via-slate-50 to-gray-100';
+            const btnStyle = isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400' : 'bg-gradient-to-r from-gray-500 to-slate-500';
+            const cardStyle = isCute ? 'bg-white/80 rounded-2xl shadow-lg border-pink-100' : 'bg-white/80 rounded-xl shadow-md border-gray-100';
+
+            useEffect(function() {
+                if (messagesEndRef.current) {
+                    messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, [messages]);
+
+            const sendMessage = async function() {
+                const text = inputText.trim();
+                if (!text || isLoading) return;
+
+                if (!state.deepseekApiKey) {
+                    const noKeyMsg = {
+                        id: Date.now().toString(),
+                        role: 'assistant',
+                        content: '⚠️ 您还没有配置智谱AI API Key，请先在「个人中心 → AI助手设置」中配置API Key后再使用。'
+                    };
+                    setMessages(function(prev) { return [...prev, noKeyMsg]; });
+                    return;
+                }
+
+                const userMsg = { id: Date.now().toString(), role: 'user', content: text };
+                setMessages(function(prev) { return [...prev, userMsg]; });
+                setInputText('');
+                setIsLoading(true);
+
+                const systemPrompt = '你是颜容AI助手，一款专注于中医面诊和皮肤健康分析的智能助手。请用友好、专业的语气回答用户的问题。你的专长包括：皮肤护理建议、中医面诊解读（唇色、眼神、面色、印堂）、健康养生建议、肤质分析等。回答要简洁实用，避免过长，适当使用emoji增加亲和力。如果用户询问医疗诊断相关问题，请提醒用户本应用仅供参考，不能替代专业医疗诊断。';
+                
+                const apiMessages = [{ role: 'system', content: systemPrompt }];
+                messages.slice(-10).forEach(function(m) {
+                    if (m.role === 'user' || m.role === 'assistant') {
+                        apiMessages.push({ role: m.role, content: m.content });
+                    }
+                });
+                apiMessages.push({ role: 'user', content: text });
+
+                const result = await callDeepseekAPI(apiMessages, { temperature: 0.8, maxTokens: 1500 });
+                
+                setIsLoading(false);
+                if (result.success) {
+                    const aiMsg = {
+                        id: (Date.now() + 1).toString(),
+                        role: 'assistant',
+                        content: result.content
+                    };
+                    setMessages(function(prev) { return [...prev, aiMsg]; });
+                } else {
+                    const errorMsg = {
+                        id: (Date.now() + 1).toString(),
+                        role: 'assistant',
+                        content: '❌ ' + result.message
+                    };
+                    setMessages(function(prev) { return [...prev, errorMsg]; });
+                }
+            };
+
+            const handleKeyPress = function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            };
+
+            const handleClearChat = function() {
+                setShowClearConfirm(false);
+                setMessages([{
+                    id: Date.now().toString(),
+                    role: 'assistant',
+                    content: '对话已清空。请问有什么可以帮助您的？ 🤖'
+                }]);
+                clearAiChatHistory();
+            };
+
+            const quickQuestions = [
+                '油性皮肤怎么护理？',
+                '气血不足怎么调理？',
+                '黑眼圈很重怎么办？',
+                '推荐一下日常护肤步骤'
+            ];
+
+            return e('div', { className: 'min-h-screen ' + bgStyle + ' flex flex-col' },
+                e('header', { className: 'flex items-center gap-4 p-4 ' + (isCute ? 'bg-pink-100/80' : 'bg-gray-100/80') + ' backdrop-blur-sm sticky top-0 z-10' },
+                    e('button', { onClick: function() { onNavigate('home'); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-200 text-pink-600' : 'bg-gray-200 text-gray-600') }, '←'),
+                    e('div', { className: 'flex-1' },
+                        e('h1', { className: 'text-lg font-bold ' + (isCute ? 'text-pink-600' : 'text-gray-700') }, 'AI助手'),
+                        e('p', { className: 'text-xs text-gray-500' }, state.deepseekApiKey ? '智谱AI 已连接' : '请先配置API Key')
+                    ),
+                    e('button', { onClick: function() { setShowClearConfirm(true); }, className: 'p-2 rounded-full ' + (isCute ? 'bg-pink-200 text-pink-600' : 'bg-gray-200 text-gray-600') }, '🗑️')
+                ),
+                e('div', { className: 'flex-1 overflow-y-auto p-4 pb-4' },
+                    messages.map(function(msg) {
+                        const isUser = msg.role === 'user';
+                        return e('div', { key: msg.id, className: 'flex ' + (isUser ? 'justify-end' : 'justify-start') + ' mb-4 animate-fade-in' },
+                            !isUser && e('div', { className: 'w-8 h-8 rounded-full flex items-center justify-center mr-2 flex-shrink-0 ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, '🤖'),
+                            e('div', { className: 'max-w-[80%] ' + (isUser ? 'order-first mr-2' : '') },
+                                e('div', { className: 'px-4 py-3 rounded-2xl ' + (isUser 
+                                    ? (isCute ? 'bg-gradient-to-r from-pink-400 to-purple-400 text-white' : 'bg-gray-600 text-white') + ' rounded-br-sm'
+                                    : (isCute ? 'bg-white text-gray-700 shadow-md border border-pink-100' : 'bg-white text-gray-700 shadow-md border border-gray-100') + ' rounded-bl-sm') 
+                                },
+                                    e('p', { className: 'text-sm whitespace-pre-wrap leading-relaxed' }, msg.content)
+                                )
+                            ),
+                            isUser && e('div', { className: 'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ' + (isCute ? 'bg-pink-100' : 'bg-gray-100') }, '👤')
+                        );
+                    }),
+                    isLoading && e('div', { className: 'flex justify-start mb-4' },
+                        e('div', { className: 'w-8 h-8 rounded-full flex items-center justify-center mr-2 ' + (isCute ? 'bg-gradient-to-br from-pink-200 to-purple-200' : 'bg-gray-200') }, '🤖'),
+                        e('div', { className: 'px-4 py-3 rounded-2xl rounded-bl-sm bg-white shadow-md ' + (isCute ? 'border border-pink-100' : 'border border-gray-100') },
+                            e('div', { className: 'flex gap-1' },
+                                e('span', { className: 'w-2 h-2 rounded-full bg-gray-400 animate-pulse' }),
+                                e('span', { className: 'w-2 h-2 rounded-full bg-gray-400 animate-pulse', style: { animationDelay: '0.2s' } }),
+                                e('span', { className: 'w-2 h-2 rounded-full bg-gray-400 animate-pulse', style: { animationDelay: '0.4s' } })
+                            )
+                        )
+                    ),
+                    e('div', { ref: messagesEndRef })
+                ),
+                messages.length <= 1 && e('div', { className: 'px-4 pb-2' },
+                    e('p', { className: 'text-xs text-gray-500 mb-2' }, '💡 试试这些问题：'),
+                    e('div', { className: 'flex flex-wrap gap-2' },
+                        quickQuestions.map(function(q) {
+                            return e('button', { 
+                                key: q, 
+                                onClick: function() { setInputText(q); },
+                                className: 'px-3 py-1.5 rounded-full text-xs ' + (isCute ? 'bg-pink-100 text-pink-600 hover:bg-pink-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200') + ' transition-colors'
+                            }, q);
+                        })
+                    )
+                ),
+                e('div', { className: 'p-4 ' + (isCute ? 'bg-pink-50/80' : 'bg-gray-50/80') + ' backdrop-blur-sm' },
+                    e('div', { className: 'flex items-end gap-2' },
+                        e('textarea', {
+                            value: inputText,
+                            onChange: function(e) { setInputText(e.target.value); },
+                            onKeyPress: handleKeyPress,
+                            placeholder: '输入您的问题...',
+                            rows: 1,
+                            className: 'flex-1 px-4 py-3 rounded-2xl border ' + (isCute ? 'border-pink-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-200' : 'border-gray-200 focus:border-gray-400 focus:ring-2 focus:ring-gray-200') + ' outline-none transition-all resize-none max-h-32'
+                        }),
+                        e('button', { 
+                            onClick: sendMessage,
+                            disabled: isLoading || !inputText.trim(),
+                            className: 'p-3 rounded-full text-white ' + btnStyle + ' disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95'
+                        }, '➤')
+                    )
+                ),
+                showClearConfirm && e('div', { className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4', onClick: function() { setShowClearConfirm(false); } },
+                    e('div', { className: 'bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl', onClick: function(e) { e.stopPropagation(); } },
+                        e('h3', { className: 'text-lg font-bold text-gray-800 mb-3' }, '确认清空'),
+                        e('p', { className: 'text-gray-600 mb-5' }, '确定要清空所有对话记录吗？此操作不可撤销。'),
+                        e('div', { className: 'flex gap-3' },
+                            e('button', { onClick: function() { setShowClearConfirm(false); }, className: 'flex-1 py-2.5 rounded-full border border-gray-200 text-gray-600' }, '取消'),
+                            e('button', { onClick: handleClearChat, className: 'flex-1 py-2.5 rounded-full bg-red-500 text-white' }, '清空')
+                        )
+                    )
+                )
+            );
+        }
+
+        function App() {
+            const [currentPage, setCurrentPage] = useState('login');
+            const [isTransitioning, setIsTransitioning] = useState(false);
+            const { state, logoutUser } = useApp();
+
+            useEffect(function() {
+                if (state.currentUser) {
+                    setCurrentPage('home');
+                } else {
+                    setCurrentPage('login');
+                }
+            }, [state.currentUser]);
+
+            const navigate = function(page) {
+                if (page === currentPage) return;
+                setIsTransitioning(true);
+                setTimeout(function() {
+                    setCurrentPage(page);
+                    window.scrollTo(0, 0);
+                    setIsTransitioning(false);
+                }, 200);
+            };
+
+            const handleLogout = function() {
+                logoutUser();
+                navigate('login');
+            };
+
+            const renderPage = function() {
+                switch (currentPage) {
+                    case 'login': return e(Login, { onNavigate: navigate, onComplete: function() { navigate('home'); } });
+                    case 'register': return e(Register, { onNavigate: navigate, onComplete: function() { navigate('home'); } });
+                    case 'home': return e(Home, { onNavigate: navigate });
+                    case 'upload': return e(PhotoUpload, { onNavigate: navigate, onComplete: function() { navigate('result'); } });
+                    case 'result': return e(Result, { onNavigate: navigate });
+                    case 'history': return e(History, { onNavigate: navigate });
+                    case 'community': return e(Community, { onNavigate: navigate });
+                    case 'profile': return e(Profile, { onNavigate: navigate, onLogout: handleLogout });
+                    case 'aichat': return e(AIChat, { onNavigate: navigate });
+                    default: return e(Login, { onNavigate: navigate, onComplete: function() { navigate('home'); } });
+                }
+            };
+
+            return e('div', { className: 'min-h-screen bg-gray-50' },
+                e('div', { 
+                    className: 'transition-all duration-200 ease-in-out ' + 
+                        (isTransitioning ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0')
+                },
+                    renderPage()
+                )
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(e(AppProvider, null, e(App)));
+    </script>
+</body>
+</html>

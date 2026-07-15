@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR 扫描</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+
+    .ar-page {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== 摄像头画面（模拟） ===== */
+    .ar-viewfinder {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(180deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);
+    }
+
+    /* 模拟实景纹理 */
+    .ar-viewfinder .scene-bg {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-size: cover;
+      background-position: center;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+    }
+    .ar-viewfinder .scene-bg.active { opacity: 1; }
+
+    /* 扫描网格 */
+    .ar-grid {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image:
+        linear-gradient(rgba(0,255,136,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,136,0.06) 1px, transparent 1px);
+      background-size: 30px 30px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* 扫描线 */
+    .ar-scanline {
+      position: absolute;
+      left: 10%; right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #00ff88, transparent);
+      box-shadow: 0 0 20px rgba(0,255,136,0.5);
+      z-index: 3;
+      animation: scanMove 3s ease-in-out infinite;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .ar-scanline.active { opacity: 1; }
+    @keyframes scanMove {
+      0% { top: 15%; }
+      50% { top: 75%; }
+      100% { top: 15%; }
+    }
+
+    /* 扫描框 */
+    .ar-finder {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 240px;
+      height: 240px;
+      z-index: 4;
+      pointer-events: none;
+    }
+    .ar-finder-corner {
+      position: absolute;
+      width: 24px; height: 24px;
+      border-color: rgba(0,255,136,0.8);
+      border-style: solid;
+    }
+    .ar-finder-corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 6px 0 0 0; }
+    .ar-finder-corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 6px 0 0; }
+    .ar-finder-corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 6px; }
+    .ar-finder-corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 6px 0; }
+
+    /* 扫描发现提示 */
+    .ar-hint {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(0,255,136,0.7);
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 5;
+      text-align: center;
+      text-shadow: 0 0 20px rgba(0,0,0,0.8);
+      background: rgba(0,0,0,0.5);
+      padding: 8px 20px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0,255,136,0.15);
+      pointer-events: none;
+    }
+
+    /* ===== 场景选择器 ===== */
+    .scene-selector {
+      display: flex;
+      gap: 10px;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.9);
+      overflow-x: auto;
+      flex-shrink: 0;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .scene-selector::-webkit-scrollbar { display: none; }
+    .scene-btn {
+      min-width: 72px;
+      padding: 8px 6px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      text-align: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .scene-btn.active {
+      background: rgba(0,255,136,0.12);
+      border-color: rgba(0,255,136,0.3);
+    }
+    .scene-btn:active { transform: scale(0.95); }
+    .scene-btn .sb-icon { width: 36px; height: 36px; margin: 0 auto 2px; overflow: hidden; border-radius: 50%; }
+    .scene-btn .sb-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .scene-btn .sb-name { font-size: 10px; color: rgba(255,255,255,0.6); }
+    .scene-btn.active .sb-name { color: #00ff88; }
+
+    /* ===== 结果显示 ===== */
+    .ar-result {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(20px);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s, visibility 0.5s;
+    }
+    .ar-result.show { visibility: visible; opacity: 1; pointer-events: auto; }
+
+    .ar-result-card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(0,255,136,0.2);
+      border-radius: 20px;
+      padding: 28px 24px;
+      max-width: 320px;
+      width: 100%;
+      text-align: center;
+      animation: cardReveal 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+      position: relative;
+      overflow: hidden;
+    }
+    @keyframes cardReveal {
+      0% { transform: scale(0.5) rotateY(90deg); opacity: 0; }
+      100% { transform: scale(1) rotateY(0); opacity: 1; }
+    }
+
+    /* 全息效果背景 */
+    .ar-result-card::before {
+      content: '';
+      position: absolute;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: conic-gradient(from 0deg, transparent, rgba(0,255,136,0.03), transparent, rgba(0,255,136,0.03), transparent);
+      animation: hologram 6s linear infinite;
+    }
+    @keyframes hologram {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .arc-icon {
+      position: relative;
+      z-index: 1;
+      font-size: 64px;
+      margin-bottom: 12px;
+      filter: drop-shadow(0 0 30px rgba(0,255,136,0.3));
+    }
+    .arc-type {
+      position: relative;
+      z-index: 1;
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      background: rgba(0,255,136,0.12);
+      color: #00ff88;
+      border: 1px solid rgba(0,255,136,0.2);
+    }
+    .arc-title {
+      position: relative;
+      z-index: 1;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .arc-desc {
+      position: relative;
+      z-index: 1;
+      color: rgba(255,255,255,0.6);
+      font-size: 13px;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    /* 密文区域 */
+    .arc-cipher {
+      position: relative;
+      z-index: 1;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(0,255,136,0.15);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 16px;
+      font-family: 'Courier New', monospace;
+    }
+    .arc-cipher .cipher-label {
+      color: #00ff88;
+      font-size: 10px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .arc-cipher .cipher-text {
+      color: #fff;
+      font-size: 16px;
+      letter-spacing: 4px;
+      word-break: break-all;
+      line-height: 1.5;
+    }
+    .arc-cipher .cipher-decode {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(0,255,136,0.1);
+      color: #00ff88;
+      font-size: 14px;
+      letter-spacing: 1px;
+      display: none;
+    }
+    .arc-cipher .cipher-decode.show { display: block; animation: fadeIn 0.5s; }
+
+    .arc-btn {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,255,136,0.3);
+      background: rgba(0,255,136,0.1);
+      color: #00ff88;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      margin-bottom: 8px;
+      transition: all 0.2s;
+    }
+    .arc-btn:active { transform: scale(0.97); }
+    .arc-btn.secondary {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* 扫描进度 */
+    .scan-progress {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s, visibility 0.3s;
+    }
+    .scan-progress.show { visibility: visible; opacity: 1; }
+    .scan-progress .sp-ring {
+      width: 60px; height: 60px;
+      border-radius: 50%;
+      border: 3px solid rgba(0,255,136,0.1);
+      border-top-color: #00ff88;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .scan-progress .sp-text {
+      color: #00ff88;
+      font-size: 13px;
+      font-weight: 600;
+      text-shadow: 0 0 20px rgba(0,0,0,0.8);
+    }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* 返回按钮 */
+    .ar-back {
+      position: absolute;
+      top: 16px; left: 16px;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(10px);
+    }
+
+    /* 匹配成功光效 */
+    .match-flash {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,255,136,0.15);
+      z-index: 8;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .match-flash.show { opacity: 1; }
+  </style>
+</head>
+<body class="detail-page-body">
+
+<div class="ar-page">
+  <button class="ar-back" onclick="goBack()">←</button>
+
+  <!-- 摄像头画面 -->
+  <div class="ar-viewfinder">
+    <!-- 场景背景 -->
+    <div class="scene-bg" id="scene-bg" style="background:linear-gradient(180deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%);"></div>
+
+    <div class="ar-grid"></div>
+    <div class="ar-scanline" id="scanline"></div>
+
+    <div class="ar-finder">
+      <div class="ar-finder-corner tl"></div>
+      <div class="ar-finder-corner tr"></div>
+      <div class="ar-finder-corner bl"></div>
+      <div class="ar-finder-corner br"></div>
+    </div>
+
+    <div class="scan-progress" id="scan-progress">
+      <div class="sp-ring"></div>
+      <div class="sp-text">正在扫描场景...</div>
+    </div>
+
+    <div class="match-flash" id="match-flash"></div>
+    <div class="ar-hint" id="ar-hint">选择下方场景，对准实景进行扫描</div>
+  </div>
+
+  <!-- 场景选择器 -->
+  <div class="scene-selector" id="scene-selector">
+    <!-- 动态生成 -->
+  </div>
+</div>
+
+<!-- 结果弹窗 -->
+<div class="ar-result" id="ar-result">
+  <div class="ar-result-card">
+    <div class="arc-icon" id="arc-icon"></div>
+    <div class="arc-type" id="arc-type">发现隐藏线索</div>
+    <div class="arc-title" id="arc-title">石刻密文</div>
+    <div class="arc-desc" id="arc-desc">在古城墙砖缝中发现了一组古代暗号</div>
+
+    <div class="arc-cipher">
+      <div class="cipher-label">加密信息</div>
+      <div class="cipher-text" id="cipher-text">--</div>
+      <div class="cipher-decode" id="cipher-decode">解读：<span id="decode-text"></span></div>
+    </div>
+
+    <button class="arc-btn" onclick="decodeCipher()"><i data-lucide="key"></i>尝试解读密文</button>
+    <button class="arc-btn secondary" onclick="collectClue()"><i data-lucide="package"></i>收入背包</button>
+  </div>
+</div>
+
+<script>
+// ===== AR 场景数据 =====
+const SCENES = [
+  {
+    id: 'museum',
+    icon: 'icons/icon_museum.jpg',
+    name: '博物馆',
+    bg: 'linear-gradient(180deg, #2d1b3d 0%, #1a0a2e 40%, #0d1b2a 100%)',
+    result: {
+      icon: 'icons/icon_museum.jpg',
+      type: '发现古籍线索',
+      title: '《诗经》暗码',
+      desc: '在古籍展柜的夹层中发现了一组用朱砂标注的页码，似乎是某种密码',
+      cipher: '诗·大雅·灵台 → 七·三·十二',
+      decode: '翻开《诗经·大雅·灵台》第七页第三行第十二个字："囿"→ 对应城墙暗门坐标 34.2628, 108.9450',
+      collectName: '古籍暗码'
+    }
+  },
+  {
+    id: 'wall',
+    icon: 'icons/icon_wall.jpg',
+    name: '古城墙',
+    bg: 'linear-gradient(180deg, #2d3a1b 0%, #1a2e0a 40%, #0d1b2a 100%)',
+    result: {
+      icon: 'icons/icon_wall.jpg',
+      type: '发现石刻密文',
+      title: '城砖暗记',
+      desc: '在永宁门段找到特定砖块进行AR扫描，发现了一组与普通铭文不同的标记，似乎是某种暗记',
+      cipher: 'M × N | 永·宁·安·康 → 甲·午·辰·戌',
+      decode: '对应天干地支方位：甲(东)午(南)辰(东南)戌(西北)→ 城墙东南角藏有宝箱坐标',
+      collectName: '城砖暗记拓片'
+    }
+  },
+  {
+    id: 'mall',
+    icon: 'icons/icon_mall.jpg',
+    name: '万象城',
+    bg: 'linear-gradient(180deg, #1b2d3a 0%, #0a1a2e 40%, #0d1b2a 100%)',
+    result: {
+      icon: 'icons/icon_mall.jpg',
+      type: '发现商业密码',
+      title: '橱窗密语',
+      desc: '商场中庭的装饰画中隐藏着摩斯密码，每幅画的灯光闪烁频率不同',
+      cipher: '··· --- ··· | -·-· ··- ·- ·-· ·· -·-· -·-·',
+      decode: 'SOS | CUARICC → 地下二层C区安全出口旁有隐藏兑换机',
+      collectName: '摩斯密码笔记'
+    }
+  },
+  {
+    id: 'tea',
+    icon: 'icons/icon_tea.jpg',
+    name: '喜茶',
+    bg: 'linear-gradient(180deg, #3a2d1b 0%, #2e1a0a 40%, #1b0d0a 100%)',
+    result: {
+      icon: 'icons/icon_tea.jpg',
+      type: '发现茶道隐语',
+      title: '杯底密文',
+      desc: '限量款杯底印有一串特殊字符，用紫外线灯照射才能看到完整信息',
+      cipher: '↑ 7 → ↓ 3 ↺ 90° → 紫·气·东·来',
+      decode: '杯盖顺时针旋转90度，杯底暗格开启：凭暗号"紫气东来"可免费兑换隐藏款饮品',
+      collectName: '茶道隐语'
+    }
+  },
+  {
+    id: 'park',
+    icon: 'icons/icon_park.jpg',
+    name: '莲湖公园',
+    bg: 'linear-gradient(180deg, #1b3a1b 0%, #0a2e0a 40%, #0d1b0d 100%)',
+    result: {
+      icon: 'icons/icon_park.jpg',
+      type: '发现自然密码',
+      title: '植物排列密语',
+      desc: '公园东南角的银杏树种植排列呈特定图案，从高空俯瞰是一个汉字',
+      cipher: '[][]   []\n[][][][][]\n[][]  [][]\n[][][][][]\n[][]   []',
+      decode: '树木排列缺位形成汉字"口"→ 口字形中心下方埋有宝箱，坐标 34.2588, 108.9380',
+      collectName: '植物密码图'
+    }
+  }
+];
+let currentScene = 0;
+let isScanning = false;
+let isDecoded = false;
+let _scanTimer = null;
+
+function init() {
+  renderScenes();
+  selectScene(0);
+}
+
+function renderScenes() {
+  const el = document.getElementById('scene-selector');
+  el.innerHTML = SCENES.map((s, i) => `
+    <button class="scene-btn ${i === 0 ? 'active' : ''}" onclick="selectScene(${i})">
+      <div class="sb-icon"><img src="${s.icon}"></div>
+      <div class="sb-name">${s.name}</div>
+    </button>
+  `).join('');
+}
+
+function selectScene(index) {
+  currentScene = index;
+  document.querySelectorAll('.scene-btn').forEach((b, i) => b.classList.toggle('active', i === index));
+
+  const scene = SCENES[index];
+  document.getElementById('scene-bg').style.background = scene.bg;
+
+  // 清除待处理的扫描超时，避免竞态条件
+  clearTimeout(_scanTimer);
+
+  // 自动开始扫描
+  startScan();
+}
+
+function startScan() {
+  if (isScanning) return;
+  isScanning = true;
+
+  document.getElementById('ar-hint').textContent = '正在扫描 ' + SCENES[currentScene].name + '...';
+  document.getElementById('scanline').classList.add('active');
+  document.getElementById('scan-progress').classList.add('show');
+  document.getElementById('ar-result').classList.remove('show');
+
+  // 模拟扫描过程
+  _scanTimer = setTimeout(() => {
+    // 匹配成功！
+    document.getElementById('scan-progress').classList.remove('show');
+    document.getElementById('match-flash').classList.add('show');
+    document.getElementById('ar-hint').textContent = '匹配成功！发现隐藏线索';
+
+    setTimeout(() => {
+      document.getElementById('match-flash').classList.remove('show');
+      showResult();
+      isScanning = false;
+    }, 500);
+  }, 2000);
+}
+
+function showResult() {
+  const scene = SCENES[currentScene];
+  const r = scene.result;
+  isDecoded = false;
+
+  document.getElementById('arc-icon').innerHTML = '<img src="' + r.icon + '" style="width:56px;height:56px;object-fit:cover;border-radius:14px;">';
+  document.getElementById('arc-type').textContent = r.type;
+  document.getElementById('arc-title').textContent = r.title;
+  document.getElementById('arc-desc').textContent = r.desc;
+  document.getElementById('cipher-text').textContent = r.cipher;
+  document.getElementById('cipher-decode').classList.remove('show');
+  document.getElementById('decode-text').textContent = '';
+
+  document.getElementById('ar-result').classList.add('show');
+  document.getElementById('scanline').classList.remove('active');
+}
+
+function decodeCipher() {
+  if (isDecoded) return;
+  isDecoded = true;
+
+  const scene = SCENES[currentScene];
+  document.getElementById('decode-text').textContent = scene.result.decode;
+  document.getElementById('cipher-decode').classList.add('show');
+}
+
+function collectClue() {
+  const scene = SCENES[currentScene];
+  alert('已收集「' + scene.result.collectName + '」到背包\n\n在背包中可查看完整解密信息');
+  document.getElementById('ar-result').classList.remove('show');
+  document.getElementById('ar-hint').textContent = '选择场景继续扫描，或点击返回地图';
+  document.getElementById('scanline').classList.remove('active');
+}
+
+function goBack() {
+  if (window.parent !== window) {
+    window.parent.postMessage({ action: 'navigate', page: 'map' }, '*');
+  }
+}
+
+init();
+</script>
+
+<script>lucide.createIcons();</script>
+
+</body>
+</html>

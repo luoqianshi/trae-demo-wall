@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三花猫打卡养成记 🐱</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/react-router-dom@6/umd/react-router-dom.production.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'cat-orange': { light: '#FFF8F0', DEFAULT: '#FFB366', dark: '#E5A35C' },
+            'cat-pink': '#FFB6C1',
+            'cat-green': '#88D498',
+          },
+          animation: {
+            'float': 'float 3s ease-in-out infinite',
+            'pulse-slow': 'pulse 2s ease-in-out infinite',
+            'bounce-gentle': 'bounce-gentle 1s ease-in-out infinite',
+          },
+          keyframes: {
+            float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-10px)' } },
+            'bounce-gentle': { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-5px)' } },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Comic Sans MS', 'PingFang SC', 'Microsoft YaHei', cursive, sans-serif;
+      background: linear-gradient(135deg, #FFF8F0 0%, #FFE8CC 100%);
+      min-height: 100vh;
+    }
+    @keyframes sparkle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes celebrate {
+      0% { transform: scale(1) rotate(0deg); }
+      25% { transform: scale(1.1) rotate(-5deg); }
+      50% { transform: scale(1.2) rotate(5deg); }
+      75% { transform: scale(1.1) rotate(-5deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    .animate-sparkle { animation: sparkle 1.5s ease-in-out infinite; }
+    .animate-slide-up { animation: slideUp 0.5s ease-out; }
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+    .animate-celebrate { animation: celebrate 0.6s ease-in-out; }
+    .progress-bar { height: 1rem; border-radius: 9999px; overflow: hidden; background-color: #e5e7eb; }
+    .progress-fill { height: 100%; border-radius: 9999px; transition: all 0.5s ease-out; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React
+    const { BrowserRouter, Routes, Route, NavLink, useNavigate } = ReactRouterDOM
+
+    // ==================== 数据类型和常量 ====================
+    const STORAGE_KEY = 'calico-cat-checkin-data'
+
+    const defaultUserData = {
+      id: 'user-1',
+      points: 100,
+      lastCheckIn: null,
+      totalCheckIns: 0,
+      consecutiveDays: 0,
+      checkInHistory: [],
+      catState: { hunger: 80, happiness: 80, level: 1, experience: 0, name: '小橘' },
+      achievements: [
+        { id: 'first-checkin', unlocked: false },
+        { id: 'checkin-7-days', unlocked: false },
+        { id: 'checkin-30-days', unlocked: false },
+        { id: 'checkin-100-days', unlocked: false },
+        { id: 'cat-level-5', unlocked: false },
+        { id: 'cat-level-10', unlocked: false },
+      ],
+      totalPurchases: 0,
+    }
+
+    const achievementsList = [
+      { id: 'first-checkin', title: '初次打卡', description: '完成第一次打卡', condition: (d) => d.totalCheckIns >= 1, reward: 20, icon: '🌟' },
+      { id: 'checkin-7-days', title: '坚持一周', description: '连续打卡7天', condition: (d) => d.consecutiveDays >= 7, reward: 50, icon: '🔥' },
+      { id: 'checkin-30-days', title: '月度达人', description: '连续打卡30天', condition: (d) => d.consecutiveDays >= 30, reward: 100, icon: '📅' },
+      { id: 'checkin-100-days', title: '百日坚持', description: '总打卡100天', condition: (d) => d.totalCheckIns >= 100, reward: 200, icon: '🏆' },
+      { id: 'cat-level-5', title: '成长之路', description: '猫咪达到5级', condition: (d) => d.catState.level >= 5, reward: 80, icon: '📈' },
+      { id: 'cat-level-10', title: '养猫高手', description: '猫咪达到10级', condition: (d) => d.catState.level >= 10, reward: 150, icon: '👑' },
+    ]
+
+    const shopItems = [
+      { id: 'food-1', name: '小鱼干', price: 15, type: 'food', effect: '恢复20点饱食度', icon: '🐟', effectValue: { hunger: 20 } },
+      { id: 'food-2', name: '猫粮', price: 20, type: 'food', effect: '恢复35点饱食度', icon: '🍚', effectValue: { hunger: 35 } },
+      { id: 'food-3', name: '三文鱼', price: 50, type: 'food', effect: '恢复60点饱食度，获得10经验', icon: '🍣', effectValue: { hunger: 60, experience: 10 } },
+      { id: 'food-4', name: '高级猫罐头', price: 80, type: 'food', effect: '完全恢复饱食度，获得20经验', icon: '🥫', effectValue: { hunger: 100, experience: 20 } },
+      { id: 'toy-1', name: '毛线球', price: 25, type: 'toy', effect: '增加30点快乐度', icon: '🧶', effectValue: { happiness: 30 } },
+      { id: 'toy-2', name: '逗猫棒', price: 40, type: 'toy', effect: '增加50点快乐度，获得10经验', icon: '🎏', effectValue: { happiness: 50, experience: 10 } },
+      { id: 'toy-3', name: '猫爬架', price: 100, type: 'toy', effect: '增加80点快乐度，获得30经验', icon: '🏰', effectValue: { happiness: 80, experience: 30 } },
+      { id: 'toy-4', name: '激光笔', price: 60, type: 'toy', effect: '增加60点快乐度，获得15经验', icon: '🔦', effectValue: { happiness: 60, experience: 15 } },
+    ]
+
+    // ==================== 工具函数 ====================
+    function loadData() {
+      try {
+        const data = localStorage.getItem(STORAGE_KEY)
+        if (data) {
+          const parsed = JSON.parse(data)
+          // 合并默认值，确保新字段存在
+          return { ...defaultUserData, ...parsed, catState: { ...defaultUserData.catState, ...parsed.catState } }
+        }
+      } catch (e) { console.error('加载数据失败:', e) }
+      return JSON.parse(JSON.stringify(defaultUserData))
+    }
+
+    function saveData(data) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)) }
+      catch (e) { console.error('保存数据失败:', e) }
+    }
+
+    function getRequiredExperience(level) { return level * 100 }
+
+    function checkLevelUp(catState) {
+      let { level, experience } = catState
+      let required = getRequiredExperience(level)
+      while (experience >= required) {
+        experience -= required
+        level += 1
+        required = getRequiredExperience(level)
+      }
+      return { ...catState, level, experience }
+    }
+
+    function checkAchievements(userData) {
+      const newUnlocked = []
+      userData.achievements.forEach((ua) => {
+        if (!ua.unlocked) {
+          const ach = achievementsList.find((a) => a.id === ua.id)
+          if (ach && ach.condition(userData)) {
+            ua.unlocked = true
+            ua.unlockedAt = new Date().toISOString()
+            newUnlocked.push(ach.id)
+          }
+        }
+      })
+      return newUnlocked
+    }
+
+    // ==================== 状态管理 ====================
+    let globalUserData = loadData()
+    let listeners = []
+
+    function notifyListeners() { listeners.forEach(fn => fn()) }
+    function subscribe(fn) { listeners.push(fn); return () => { listeners = listeners.filter(f => f !== fn) } }
+
+    function updateUserData(newData) {
+      globalUserData = newData
+      saveData(newData)
+      notifyListeners()
+    }
+
+    function doCheckIn() {
+      const today = new Date().toDateString()
+      if (globalUserData.lastCheckIn === today) return { success: false, message: '今天已经打卡了！' }
+
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const isConsecutive = globalUserData.lastCheckIn === yesterday.toDateString()
+      const newConsecutiveDays = isConsecutive ? globalUserData.consecutiveDays + 1 : 1
+      const consecutiveBonus = Math.min(newConsecutiveDays * 5, 50)
+      const pointsEarned = 10 + consecutiveBonus
+
+      const newUserData = {
+        ...globalUserData,
+        lastCheckIn: today,
+        totalCheckIns: globalUserData.totalCheckIns + 1,
+        consecutiveDays: newConsecutiveDays,
+        checkInHistory: [...globalUserData.checkInHistory, today],
+        points: globalUserData.points + pointsEarned,
+        catState: { ...globalUserData.catState, experience: globalUserData.catState.experience + 5 },
+      }
+      newUserData.catState = checkLevelUp(newUserData.catState)
+      const newUnlocked = checkAchievements(newUserData)
+      // 成就奖励
+      newUnlocked.forEach(id => {
+        const ach = achievementsList.find(a => a.id === id)
+        if (ach) newUserData.points += ach.reward
+      })
+
+      updateUserData(newUserData)
+      return { success: true, pointsEarned, newUnlocked }
+    }
+
+    function buyItem(itemId) {
+      const item = shopItems.find((i) => i.id === itemId)
+      if (!item || globalUserData.points < item.price) return { success: false }
+
+      let newCatState = { ...globalUserData.catState }
+      if (item.effectValue.hunger) newCatState.hunger = Math.min(100, newCatState.hunger + item.effectValue.hunger)
+      if (item.effectValue.happiness) newCatState.happiness = Math.min(100, newCatState.happiness + item.effectValue.happiness)
+      if (item.effectValue.experience) newCatState.experience += item.effectValue.experience
+      newCatState = checkLevelUp(newCatState)
+
+      const newUserData = {
+        ...globalUserData,
+        points: globalUserData.points - item.price,
+        catState: newCatState,
+        totalPurchases: (globalUserData.totalPurchases || 0) + 1,
+      }
+      const newUnlocked = checkAchievements(newUserData)
+      newUnlocked.forEach(id => {
+        const ach = achievementsList.find(a => a.id === id)
+        if (ach) newUserData.points += ach.reward
+      })
+
+      updateUserData(newUserData)
+      return { success: true, item, newUnlocked }
+    }
+
+    function resetData() {
+      localStorage.removeItem(STORAGE_KEY)
+      globalUserData = JSON.parse(JSON.stringify(defaultUserData))
+      notifyListeners()
+    }
+
+    // ==================== Hook ====================
+    function useUserData() {
+      const [, forceUpdate] = useState({})
+      useEffect(() => subscribe(() => forceUpdate({})), [])
+      return globalUserData
+    }
+
+    // ==================== 组件 ====================
+
+    // 导航栏
+    function Navigation() {
+      const navItems = [
+        { to: '/', icon: '🏠', label: '主页' },
+        { to: '/checkin', icon: '📅', label: '打卡' },
+        { to: '/shop', icon: '🛍️', label: '商城' },
+        { to: '/achievements', icon: '🏆', label: '成就' },
+      ]
+      return (
+        <nav className="bg-white shadow-lg sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-around items-center py-3">
+              {navItems.map(({ to, icon, label }) => (
+                <NavLink key={to} to={to} end={to === '/'}
+                  className={({ isActive }) =>
+                    `flex flex-col items-center px-4 py-2 rounded-lg transition-all duration-300 ${
+                      isActive ? 'bg-cat-orange text-white shadow-md transform scale-105' : 'text-gray-600 hover:text-cat-orange hover:bg-orange-50'
+                    }`
+                  }
+                >
+                  <span className="text-xl mb-1">{icon}</span>
+                  <span className="text-sm font-medium">{label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        </nav>
+      )
+    }
+
+    // 积分显示
+    function PointsDisplay({ points }) {
+      const [displayPoints, setDisplayPoints] = useState(points)
+      const [isAnimating, setIsAnimating] = useState(false)
+
+      useEffect(() => {
+        if (displayPoints !== points) {
+          setIsAnimating(true)
+          const duration = 500, steps = 20
+          const increment = (points - displayPoints) / steps
+          let current = displayPoints, step = 0
+          const timer = setInterval(() => {
+            step++
+            current += increment
+            setDisplayPoints(Math.round(current))
+            if (step >= steps) { clearInterval(timer); setDisplayPoints(points); setIsAnimating(false) }
+          }, duration / steps)
+          return () => clearInterval(timer)
+        }
+      }, [points])
+
+      return (
+        <div className="fixed top-20 right-4 z-40">
+          <div className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-white rounded-2xl shadow-lg px-4 py-2 flex items-center gap-2">
+            <span className="text-xl">💰</span>
+            <span className={`text-xl font-bold min-w-[60px] text-right ${isAnimating ? 'animate-pulse' : ''}`}>{displayPoints}</span>
+          </div>
+        </div>
+      )
+    }
+
+    // 猫咪展示
+    function CatDisplay({ catName, catLevel, isHappy }) {
+      const getCatEmoji = () => {
+        if (isHappy) return '😺'
+        if (catLevel >= 10) return '😸'
+        return '🐱'
+      }
+      const getCatColor = () => {
+        if (catLevel >= 10) return 'from-yellow-400 to-orange-400'
+        if (catLevel >= 5) return 'from-orange-300 to-orange-400'
+        return 'from-orange-200 to-orange-300'
+      }
+      return (
+        <div className="flex flex-col items-center mb-8">
+          <div className={`relative bg-gradient-to-br ${getCatColor()} rounded-full p-12 shadow-2xl animate-float`}>
+            <div className="text-8xl select-none">{getCatEmoji()}</div>
+            <div className="absolute -top-2 -right-2 bg-gradient-to-r from-yellow-400 to-yellow-500 text-white rounded-full w-14 h-14 flex items-center justify-center font-bold text-base shadow-lg border-4 border-white">
+              Lv.{catLevel}
+            </div>
+            {isHappy && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-3xl animate-ping">✨</div>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 text-center">
+            <h2 className="text-2xl font-bold text-gray-800 mb-1">{catName}</h2>
+            <p className="text-gray-500">三花猫</p>
+          </div>
+        </div>
+      )
+    }
+
+    // 打卡按钮
+    function CheckInButton({ hasCheckedInToday, onCheckIn }) {
+      const [isClicking, setIsClicking] = useState(false)
+      const handleClick = () => {
+        if (!hasCheckedInToday && !isClicking) {
+          setIsClicking(true)
+          onCheckIn()
+          setTimeout(() => setIsClicking(false), 1000)
+        }
+      }
+      if (hasCheckedInToday) {
+        return (
+          <button disabled className="bg-gray-300 text-gray-500 font-bold py-4 px-8 rounded-full shadow-md cursor-not-allowed flex items-center gap-3">
+            <span className="text-2xl">✅</span>
+            今日已打卡
+          </button>
+        )
+      }
+      return (
+        <button onClick={handleClick} disabled={isClicking}
+          className={`bg-gradient-to-r from-cat-orange to-cat-orange-dark text-white font-bold py-4 px-8 rounded-full shadow-lg transform transition-all duration-300 flex items-center gap-3 ${
+            isClicking ? 'scale-95 animate-celebrate' : 'hover:scale-105 hover:shadow-xl active:scale-95 animate-pulse-slow'
+          }`}>
+          <span className="text-2xl">✨</span>
+          <span className="text-lg">打卡</span>
+        </button>
+      )
+    }
+
+    // 猫咪状态
+    function CatStatus({ hunger, happiness, experience, level }) {
+      const experienceProgress = (experience / getRequiredExperience(level)) * 100
+      return (
+        <div className="bg-white rounded-2xl shadow-lg p-4 mb-6">
+          <div className="space-y-3">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🍽️</span>
+                  <span className="text-sm font-medium text-gray-700">饱食度</span>
+                </div>
+                <span className="text-sm font-bold text-orange-500">{hunger}%</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-gradient-to-r from-orange-400 to-orange-500" style={{ width: `${hunger}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">💕</span>
+                  <span className="text-sm font-medium text-gray-700">快乐度</span>
+                </div>
+                <span className="text-sm font-bold text-pink-500">{happiness}%</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-gradient-to-r from-pink-400 to-pink-500" style={{ width: `${happiness}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">⭐</span>
+                  <span className="text-sm font-medium text-gray-700">经验值 (下一级: {getRequiredExperience(level)})</span>
+                </div>
+                <span className="text-sm font-bold text-yellow-600">{experience}/{getRequiredExperience(level)}</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill bg-gradient-to-r from-yellow-400 to-yellow-500" style={{ width: `${experienceProgress}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // 成功动画
+    function SuccessAnimation({ pointsEarned, newAchievements }) {
+      const [sparkles, setSparkles] = useState([])
+      useEffect(() => {
+        const newSparkles = Array.from({ length: 12 }, (_, i) => ({
+          id: i,
+          x: Math.random() * 200 - 100,
+          y: Math.random() * 200 - 100,
+          emoji: ['✨', '⭐', '🌟', '💫'][Math.floor(Math.random() * 4)],
+        }))
+        setSparkles(newSparkles)
+      }, [])
+      return (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className="text-6xl animate-celebrate mb-8">🎉</div>
+          {sparkles.map((s) => (
+            <div key={s.id} className="absolute text-2xl animate-ping"
+              style={{ transform: `translate(${s.x}px, ${s.y}px)`, animationDelay: `${s.id * 100}ms` }}>
+              {s.emoji}
+            </div>
+          ))}
+          <div className="absolute top-1/3 text-3xl font-bold text-cat-orange animate-bounce">
+            +{pointsEarned} 积分!
+          </div>
+          {newAchievements && newAchievements.length > 0 && (
+            <div className="absolute bottom-1/3 bg-white rounded-2xl shadow-xl p-4 animate-slide-up">
+              <p className="text-lg font-bold text-purple-600 mb-1">🏆 解锁新成就！</p>
+              {newAchievements.map(id => {
+                const ach = achievementsList.find(a => a.id === id)
+                return <p key={id} className="text-sm text-gray-700">{ach.icon} {ach.title}</p>
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    // 主页
+    function Home() {
+      const userData = useUserData()
+      const [showSuccess, setShowSuccess] = useState(false)
+      const [successData, setSuccessData] = useState(null)
+      const navigate = useNavigate()
+
+      const handleCheckIn = () => {
+        const result = doCheckIn()
+        if (result.success) {
+          setSuccessData(result)
+          setShowSuccess(true)
+          setTimeout(() => { setShowSuccess(false); setSuccessData(null) }, 2500)
+        }
+      }
+
+      const hasCheckedInToday = userData.lastCheckIn === new Date().toDateString()
+
+      return (
+        <div className="animate-fade-in">
+          <PointsDisplay points={userData.points} />
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">三花猫打卡养成记</h1>
+            <p className="text-gray-600">每天打卡，养育你的专属三花猫！</p>
+          </div>
+          <CatDisplay catName={userData.catState.name} catLevel={userData.catState.level} isHappy={showSuccess} />
+          <div className="flex justify-center mb-8">
+            <CheckInButton hasCheckedInToday={hasCheckedInToday} onCheckIn={handleCheckIn} />
+          </div>
+          <CatStatus hunger={userData.catState.hunger} happiness={userData.catState.happiness} experience={userData.catState.experience} level={userData.catState.level} />
+          
+          {/* 快速操作 */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 text-center mb-6">
+            <h3 className="text-lg font-bold text-gray-800 mb-3">💡 快速操作</h3>
+            <p className="text-gray-600 mb-4">去商城购买食物和玩具，喂养你的三花猫，让它开心成长！</p>
+            <button onClick={() => navigate('/shop')} className="bg-gradient-to-r from-cat-orange to-cat-orange-dark text-white font-bold py-3 px-6 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-transform">
+              🛍️ 前往商城
+            </button>
+          </div>
+
+          {/* 打卡信息 */}
+          {!hasCheckedInToday && (
+            <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 text-center">
+              <p className="text-orange-800 font-medium">📅 今天还没打卡哦！点击上方按钮打卡获得积分～</p>
+            </div>
+          )}
+
+          {showSuccess && successData && <SuccessAnimation pointsEarned={successData.pointsEarned} newAchievements={successData.newUnlocked} />}
+        </div>
+      )
+    }
+
+    // 打卡页面
+    function CheckIn() {
+      const userData = useUserData()
+      const [currentMonth, setCurrentMonth] = useState(new Date())
+
+      const getDaysInMonth = (date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+      const getFirstDayOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1).getDay()
+      const isCheckedIn = (day) => {
+        const dateStr = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day).toDateString()
+        return userData.checkInHistory.includes(dateStr)
+      }
+      const isToday = (day) => {
+        const today = new Date()
+        return currentMonth.getMonth() === today.getMonth() && currentMonth.getFullYear() === today.getFullYear() && day === today.getDate()
+      }
+
+      const renderCalendar = () => {
+        const daysInMonth = getDaysInMonth(currentMonth)
+        const firstDay = getFirstDayOfMonth(currentMonth)
+        const days = []
+        for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="h-10" />)
+        for (let day = 1; day <= daysInMonth; day++) {
+          const checkedIn = isCheckedIn(day)
+          const today = isToday(day)
+          days.push(
+            <div key={day} className={`h-10 flex items-center justify-center rounded-lg transition-all duration-200 ${
+              today ? 'bg-cat-orange text-white font-bold shadow-md' : checkedIn ? 'bg-cat-green text-white shadow-sm' : 'hover:bg-gray-100'
+            }`}>
+              <div className="flex flex-col items-center">
+                <span className="text-sm">{day}</span>
+                {checkedIn && <span className="text-xs">✓</span>}
+              </div>
+            </div>
+          )
+        }
+        return days
+      }
+
+      const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
+
+      return (
+        <div className="animate-fade-in">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">打卡记录</h1>
+            <p className="text-gray-600">坚持打卡，养成好习惯！</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
+              <div className="text-3xl mb-2">📅</div>
+              <div className="text-3xl font-bold text-gray-800 mb-1">{userData.totalCheckIns}</div>
+              <div className="text-gray-600">总打卡天数</div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
+              <div className="text-3xl mb-2">🔥</div>
+              <div className="text-3xl font-bold text-gray-800 mb-1">{userData.consecutiveDays}</div>
+              <div className="text-gray-600">连续打卡</div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
+              <div className="text-3xl mb-2">🏆</div>
+              <div className="text-3xl font-bold text-gray-800 mb-1">{userData.achievements.filter(a => a.unlocked).length}</div>
+              <div className="text-gray-600">已解锁成就</div>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))} className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-xl">←</button>
+              <h2 className="text-xl font-bold text-gray-800">{currentMonth.getFullYear()}年 {monthNames[currentMonth.getMonth()]}</h2>
+              <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-xl">→</button>
+            </div>
+            <div className="grid grid-cols-7 gap-2 mb-2">
+              {['日', '一', '二', '三', '四', '五', '六'].map((day) => (
+                <div key={day} className="text-center text-sm font-medium text-gray-500 py-2">{day}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-2">{renderCalendar()}</div>
+            <div className="mt-4 flex items-center justify-center gap-6 text-sm text-gray-600">
+              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-cat-orange rounded"></div><span>今天</span></div>
+              <div className="flex items-center gap-2"><div className="w-4 h-4 bg-cat-green rounded"></div><span>已打卡</span></div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // 商城页面
+    function Shop() {
+      const userData = useUserData()
+      const [activeTab, setActiveTab] = useState('food')
+      const [purchaseResult, setPurchaseResult] = useState(null)
+      const filteredItems = shopItems.filter((item) => item.type === activeTab)
+
+      const handleBuy = (itemId) => {
+        const result = buyItem(itemId)
+        if (result.success) {
+          setPurchaseResult(result)
+          setTimeout(() => setPurchaseResult(null), 1500)
+        }
+      }
+
+      return (
+        <div className="animate-fade-in">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">积分商城</h1>
+            <p className="text-gray-600">用积分购买食物和玩具，照顾你的三花猫！</p>
+          </div>
+          <div className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-white rounded-2xl shadow-lg p-6 mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-yellow-100 mb-1">当前积分</p>
+                <p className="text-4xl font-bold">{userData.points}</p>
+              </div>
+              <span className="text-5xl">🛍️</span>
+            </div>
+          </div>
+          <div className="flex justify-center gap-4 mb-8">
+            <button onClick={() => setActiveTab('food')} className={`px-6 py-3 rounded-full font-bold transition-all duration-300 ${activeTab === 'food' ? 'bg-cat-orange text-white shadow-md transform scale-105' : 'bg-white text-gray-600 hover:bg-orange-50'}`}>🍚 食物</button>
+            <button onClick={() => setActiveTab('toy')} className={`px-6 py-3 rounded-full font-bold transition-all duration-300 ${activeTab === 'toy' ? 'bg-cat-orange text-white shadow-md transform scale-105' : 'bg-white text-gray-600 hover:bg-orange-50'}`}>🧶 玩具</button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredItems.map((item) => {
+              const affordable = userData.points >= item.price
+              const isPurchasing = purchaseResult && purchaseResult.item && purchaseResult.item.id === item.id
+              return (
+                <div key={item.id} className={`bg-white rounded-2xl shadow-lg p-6 transition-all duration-300 hover:shadow-xl hover:scale-105 ${isPurchasing ? 'animate-celebrate' : ''} ${!affordable ? 'opacity-60' : ''}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="text-5xl">{item.icon}</div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">{item.name}</h3>
+                      <p className="text-sm text-gray-600 mb-3">{item.effect}</p>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-2xl">💰</span>
+                          <span className="text-xl font-bold text-yellow-600">{item.price}</span>
+                        </div>
+                        <button onClick={() => handleBuy(item.id)} disabled={!affordable || isPurchasing}
+                          className={`px-4 py-2 rounded-full font-bold transition-all duration-300 ${affordable ? 'bg-cat-orange text-white hover:scale-105 active:scale-95' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                          {affordable ? '购买' : '积分不足'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {isPurchasing && (
+                    <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                      <div className="text-4xl animate-bounce">✨</div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {purchaseResult && purchaseResult.newUnlocked && purchaseResult.newUnlocked.length > 0 && (
+            <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-white rounded-2xl shadow-xl p-4 animate-slide-up z-50">
+              <p className="text-lg font-bold text-purple-600 mb-1">🏆 解锁新成就！</p>
+              {purchaseResult.newUnlocked.map(id => {
+                const ach = achievementsList.find(a => a.id === id)
+                return <p key={id} className="text-sm text-gray-700">{ach.icon} {ach.title} (+{ach.reward}积分)</p>
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    // 成就页面
+    function Achievements() {
+      const userData = useUserData()
+      const unlockedCount = userData.achievements.filter(a => a.unlocked).length
+
+      return (
+        <div className="animate-fade-in">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">成就系统</h1>
+            <p className="text-gray-600">完成各种目标，解锁成就，获得丰厚奖励！</p>
+          </div>
+          <div className="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-2xl shadow-lg p-6 mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-purple-100 mb-1">成就进度</p>
+                <p className="text-3xl font-bold">{unlockedCount} / {achievementsList.length}</p>
+              </div>
+              <span className="text-5xl">🏆</span>
+            </div>
+            <div className="mt-4">
+              <div className="progress-bar bg-purple-400">
+                <div className="progress-fill bg-white" style={{ width: `${(unlockedCount / achievementsList.length) * 100}%` }} />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4">
+            {achievementsList.map((achievement) => {
+              const userAch = userData.achievements.find((a) => a.id === achievement.id)
+              const isUnlocked = userAch && userAch.unlocked
+              return (
+                <div key={achievement.id} className={`bg-white rounded-2xl shadow-lg p-6 transition-all duration-300 hover:shadow-xl ${isUnlocked ? 'border-2 border-cat-green' : ''}`}>
+                  <div className="flex items-center gap-4">
+                    <div className={`text-5xl ${isUnlocked ? '' : 'opacity-40 grayscale'}`}>{achievement.icon}</div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-xl font-bold text-gray-800">{achievement.title}</h3>
+                        {isUnlocked ? <span className="text-cat-green text-xl">✓</span> : <span className="text-gray-400 text-xl">🔒</span>}
+                      </div>
+                      <p className="text-gray-600 mb-2">{achievement.description}</p>
+                      <div className="flex items-center gap-1">
+                        <span className="text-lg">💰</span>
+                        <span className="font-bold text-yellow-600">+{achievement.reward} 积分</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {isUnlocked ? <div className="text-cat-green font-bold">已完成</div> : <div className="text-gray-400 font-medium">未解锁</div>}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-8 bg-blue-50 rounded-2xl p-4 text-center">
+            <p className="text-blue-800">💡 继续努力打卡和照顾猫咪，解锁更多成就吧！</p>
+          </div>
+          <div className="mt-4 text-center">
+            <button onClick={() => { if (confirm('确定要重置所有数据吗？此操作不可撤销！')) resetData() }}
+              className="text-sm text-gray-400 hover:text-red-500 transition-colors">
+              🗑️ 重置所有数据
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // 主应用
+    function App() {
+      return (
+        <BrowserRouter>
+          <div className="min-h-screen flex flex-col">
+            <Navigation />
+            <main className="flex-1 container mx-auto px-4 py-8 max-w-4xl">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/checkin" element={<CheckIn />} />
+                <Route path="/shop" element={<Shop />} />
+                <Route path="/achievements" element={<Achievements />} />
+              </Routes>
+            </main>
+            <footer className="text-center py-4 text-sm text-gray-400">
+              <p>🐱 三花猫打卡养成记 · 用爱养育你的猫咪</p>
+            </footer>
+          </div>
+        </BrowserRouter>
+      )
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />)
+  </script>
+</body>
+</html>

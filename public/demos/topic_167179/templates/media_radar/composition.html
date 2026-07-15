@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --theme: #3b82f6;
+    --theme-glow: rgba(59,130,246,0.3);
+    --text: #ffffff;
+    --text-dim: rgba(255,255,255,0.6);
+    --text-faint: rgba(255,255,255,0.35);
+    --grid: rgba(55,65,81,0.3);
+    --grid-light: rgba(255,255,255,0.08);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1700px; overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'tnum' 1;
+  }
+  .scene {
+    width: 1080px; height: 1700px;
+    position: relative; overflow: hidden;
+    background: transparent;
+    padding: 110px 90px 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* === Header === */
+  .header {
+    position: relative;
+    width: 100%;
+    margin-bottom: 60px;
+  }
+  .header-accent {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--theme);
+    border-radius: 2px;
+    box-shadow: 0 0 20px var(--theme-glow);
+  }
+  .header-content {
+    margin-left: 24px;
+  }
+  .header-title {
+    font-size: 52px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 1px;
+    line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  .header-subtitle {
+    font-size: 28px;
+    font-weight: 400;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+  }
+
+  /* === Radar Chart === */
+  .chart-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+  }
+  .radar-svg {
+    width: 100%;
+    height: auto;
+    max-height: 900px;
+  }
+  .radar-grid {
+    stroke: var(--grid);
+    stroke-width: 1;
+    fill: none;
+    opacity: 0;
+  }
+  .radar-axis {
+    stroke: var(--grid-light);
+    stroke-width: 1;
+    opacity: 0;
+  }
+  .radar-label {
+    fill: var(--text-dim);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: 1px;
+    text-anchor: middle;
+    opacity: 0;
+  }
+  .radar-polygon {
+    fill-opacity: 0;
+    stroke-width: 2;
+    opacity: 0;
+    transition: none;
+  }
+  .radar-point {
+    fill: #ffffff;
+    stroke-width: 3;
+    opacity: 0;
+    transition: none;
+  }
+  .radar-value {
+    fill: var(--text);
+    font-size: 18px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    opacity: 0;
+  }
+
+  /* === Footer === */
+  .footer {
+    width: 100%;
+    margin-top: 50px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+  }
+  .legend {
+    display: flex;
+    gap: 48px;
+    align-items: center;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    opacity: 0;
+  }
+  .legend-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .legend-text {
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+  }
+  .footer-divider {
+    width: 400px;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--text-faint), transparent);
+    opacity: 0;
+  }
+  .footer-source {
+    font-size: 22px;
+    color: var(--text-faint);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    font-weight: 300;
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+  <div class="scene" id="scene">
+    <div class="header" id="header">
+      <div class="header-accent"></div>
+      <div class="header-content">
+        <div class="header-title" id="headerTitle">2026 全球主流媒体影响力评估</div>
+        <div class="header-subtitle" id="headerSubtitle">Media Influence Radar</div>
+      </div>
+    </div>
+
+    <div class="chart-container" id="chartContainer">
+      <svg class="radar-svg" viewBox="-400 -400 800 800" id="radarSvg"></svg>
+    </div>
+
+    <div class="footer" id="footer">
+      <div class="legend" id="legend"></div>
+      <div class="footer-divider"></div>
+      <div class="footer-source" id="footerSource">数据来源：Media Impact Index 2026</div>
+    </div>
+  </div>
+
+  <script>
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    const RADIUS = 300;
+    const LEVELS = 4;
+    const ANGLE_OFFSET = -Math.PI / 2;
+
+    let params = {
+      title: "2026 全球主流媒体影响力评估",
+      subtitle: "Media Influence Radar",
+      source: "数据来源：Media Impact Index 2026",
+      dimensions: ["时效性", "深度报道", "公信力", "传播力", "原创性", "社交热度"],
+      datasets: [
+        { name: "The New York Times", color: "#3b82f6", values: [85, 92, 90, 88, 78, 70] },
+        { name: "Reuters", color: "#f59e0b", values: [90, 80, 95, 85, 72, 65] },
+        { name: "Bloomberg", color: "#10b981", values: [82, 88, 85, 75, 80, 68] }
+      ]
+    };
+
+    function init() {
+      const P = window.__TEMPLATE_PARAMS || {};
+      if (P.title) params.title = P.title;
+      if (P.subtitle) params.subtitle = P.subtitle;
+      if (P.source) params.source = P.source;
+      if (P.dimensions) params.dimensions = P.dimensions;
+      if (P.datasets) params.datasets = P.datasets;
+
+      document.getElementById('headerTitle').textContent = params.title;
+      document.getElementById('headerSubtitle').textContent = params.subtitle;
+      document.getElementById('footerSource').textContent = params.source;
+
+      renderRadar();
+      renderLegend();
+    }
+
+    function renderRadar() {
+      const svg = document.getElementById('radarSvg');
+      svg.innerHTML = '';
+
+      const dims = params.dimensions;
+      const n = dims.length;
+      const angleStep = (Math.PI * 2) / n;
+
+      for (let level = LEVELS; level >= 1; level--) {
+        const r = (RADIUS / LEVELS) * level;
+        let path = '';
+        for (let i = 0; i < n; i++) {
+          const angle = ANGLE_OFFSET + i * angleStep;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+          path += (i === 0 ? 'M' : 'L') + x + ',' + y;
+        }
+        path += 'Z';
+        const poly = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        poly.setAttribute('d', path);
+        poly.setAttribute('class', 'radar-grid');
+        poly.setAttribute('data-level', level);
+        svg.appendChild(poly);
+      }
+
+      for (let i = 0; i < n; i++) {
+        const angle = ANGLE_OFFSET + i * angleStep;
+        const x = Math.cos(angle) * RADIUS;
+        const y = Math.sin(angle) * RADIUS;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', '0'); line.setAttribute('y1', '0');
+        line.setAttribute('x2', x); line.setAttribute('y2', y);
+        line.setAttribute('class', 'radar-axis');
+        line.setAttribute('data-axis', i);
+        svg.appendChild(line);
+
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        const labelR = RADIUS + 40;
+        label.setAttribute('x', Math.cos(angle) * labelR);
+        label.setAttribute('y', Math.sin(angle) * labelR);
+        label.setAttribute('class', 'radar-label');
+        label.setAttribute('data-label', i);
+        label.textContent = dims[i];
+        svg.appendChild(label);
+      }
+
+      params.datasets.forEach((ds, dsIdx) => {
+        let pointsPath = '';
+        for (let i = 0; i < n; i++) {
+          const angle = ANGLE_OFFSET + i * angleStep;
+          const r = (ds.values[i] / 100) * RADIUS;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+          pointsPath += (i === 0 ? 'M' : 'L') + x + ',' + y;
+        }
+        pointsPath += 'Z';
+
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        polygon.setAttribute('d', pointsPath);
+        polygon.setAttribute('class', 'radar-polygon');
+        polygon.setAttribute('data-dataset', dsIdx);
+        polygon.style.fill = ds.color;
+        polygon.style.stroke = ds.color;
+        svg.appendChild(polygon);
+
+        ds.values.forEach((val, i) => {
+          const angle = ANGLE_OFFSET + i * angleStep;
+          const r = (val / 100) * RADIUS;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+
+          const point = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          point.setAttribute('cx', x); point.setAttribute('cy', y);
+          point.setAttribute('r', 5);
+          point.setAttribute('class', 'radar-point');
+          point.setAttribute('data-dataset', dsIdx);
+          point.setAttribute('data-index', i);
+          point.style.stroke = ds.color;
+          svg.appendChild(point);
+
+          const value = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          const valueR = r + 22;
+          value.setAttribute('x', Math.cos(angle) * valueR);
+          value.setAttribute('y', Math.sin(angle) * valueR);
+          value.setAttribute('class', 'radar-value');
+          value.setAttribute('data-dataset', dsIdx);
+          value.setAttribute('data-index', i);
+          value.textContent = '0';
+          svg.appendChild(value);
+        });
+      });
+    }
+
+    function renderLegend() {
+      const legend = document.getElementById('legend');
+      legend.innerHTML = '';
+      params.datasets.forEach((ds, i) => {
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.setAttribute('data-legend', i);
+        item.innerHTML = `<div class="legend-color" style="background:${ds.color}"></div><div class="legend-text">${ds.name}</div>`;
+        legend.appendChild(item);
+      });
+    }
+
+    function updateAnimation(progress) {
+      const T = window.__THEME || {};
+      if (T.primary) {
+        document.documentElement.style.setProperty('--theme', T.primary);
+        document.documentElement.style.setProperty('--theme-glow', T.primaryGlow || 'rgba(59,130,246,0.3)');
+      }
+
+      const duration = window.__DURATION || 8;
+      const t = progress * duration;
+
+      const introEnd = 1.5;
+      const dataStart = 1.5;
+      const dataEnd = 5;
+      const legendStart = 5;
+      const legendEnd = 7;
+      const outroStart = 7;
+
+      const header = document.getElementById('header');
+      const scene = document.getElementById('scene');
+
+      if (t < introEnd) {
+        const p = t / introEnd;
+        const eased = easeOutCubic(p);
+
+        header.style.opacity = eased;
+        header.style.transform = `translateX(${-(1 - eased) * 60}px)`;
+
+        const gridP = Math.max(0, (t - 0.2) / (introEnd - 0.2));
+        document.querySelectorAll('.radar-grid').forEach((el, i) => {
+          const level = parseInt(el.getAttribute('data-level'));
+          const gridT = Math.max(0, Math.min(1, (gridP - (LEVELS - level) * 0.15) / 0.2));
+          el.style.opacity = easeOutCubic(gridT);
+        });
+
+        document.querySelectorAll('.radar-axis').forEach((el, i) => {
+          const axisT = Math.max(0, Math.min(1, (gridP - i * 0.08) / 0.25));
+          el.style.opacity = easeOutCubic(axisT);
+        });
+
+        document.querySelectorAll('.radar-label').forEach((el, i) => {
+          const labelT = Math.max(0, Math.min(1, (gridP - i * 0.08) / 0.3));
+          el.style.opacity = easeOutCubic(labelT);
+        });
+      }
+
+      if (t >= dataStart && t <= dataEnd) {
+        header.style.opacity = 1;
+        header.style.transform = 'translateX(0)';
+
+        const totalDataTime = dataEnd - dataStart;
+        const baseDelay = 0.3;
+
+        params.datasets.forEach((ds, dsIdx) => {
+          const dsStart = dataStart + dsIdx * baseDelay;
+          const dsEnd = dsStart + 1.2;
+
+          if (t < dsStart) {
+            document.querySelectorAll(`.radar-polygon[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = 0;
+            });
+            document.querySelectorAll(`.radar-point[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = 0;
+              el.style.transform = 'scale(0)';
+            });
+            document.querySelectorAll(`.radar-value[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = 0;
+            });
+          } else if (t <= dsEnd) {
+            const p = (t - dsStart) / (dsEnd - dsStart);
+            const eased = easeOutCubic(p);
+
+            document.querySelectorAll(`.radar-polygon[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = eased;
+              el.style.fillOpacity = 0.1 + eased * 0.08;
+            });
+
+            if (p > 0.7) {
+              const pointP = (p - 0.7) / 0.3;
+              const pointEased = easeOutCubic(pointP);
+              document.querySelectorAll(`.radar-point[data-dataset="${dsIdx}"]`).forEach(el => {
+                el.style.opacity = pointEased;
+                el.style.transform = `scale(${pointEased})`;
+              });
+              document.querySelectorAll(`.radar-value[data-dataset="${dsIdx}"]`).forEach((el, i) => {
+                el.style.opacity = pointEased;
+                const targetVal = ds.values[i];
+                const displayVal = Math.round(lerp(0, targetVal, pointEased));
+                el.textContent = displayVal;
+              });
+            }
+          } else {
+            document.querySelectorAll(`.radar-polygon[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = 1;
+              el.style.fillOpacity = 0.18;
+            });
+            document.querySelectorAll(`.radar-point[data-dataset="${dsIdx}"]`).forEach(el => {
+              el.style.opacity = 1;
+              el.style.transform = 'scale(1)';
+            });
+            document.querySelectorAll(`.radar-value[data-dataset="${dsIdx}"]`).forEach((el, i) => {
+              el.style.opacity = 1;
+              el.textContent = ds.values[i];
+            });
+          }
+        });
+      }
+
+      if (t > dataEnd) {
+        params.datasets.forEach((ds, dsIdx) => {
+          document.querySelectorAll(`.radar-polygon[data-dataset="${dsIdx}"]`).forEach(el => {
+            el.style.opacity = 1;
+            el.style.fillOpacity = 0.25;
+          });
+          document.querySelectorAll(`.radar-point[data-dataset="${dsIdx}"]`).forEach(el => {
+            el.style.opacity = 1;
+            el.style.transform = 'scale(1)';
+          });
+          document.querySelectorAll(`.radar-value[data-dataset="${dsIdx}"]`).forEach((el, i) => {
+            el.style.opacity = 1;
+            el.textContent = ds.values[i];
+          });
+        });
+      }
+
+      if (t >= legendStart && t <= legendEnd) {
+        const p = (t - legendStart) / (legendEnd - legendStart);
+
+        document.querySelectorAll('.legend-item').forEach((el, i) => {
+          const itemP = Math.max(0, Math.min(1, (p - i * 0.15) / 0.3));
+          el.style.opacity = easeOutCubic(itemP);
+          el.style.transform = `translateY(${-(1 - itemP) * 15}px)`;
+        });
+
+        document.querySelector('.footer-divider').style.opacity = Math.min(1, p * 2);
+        document.getElementById('footerSource').style.opacity = Math.min(1, (p - 0.3) / 0.7);
+
+        const breathe = Math.sin(t * 1.5) * 0.008 + 1;
+        scene.style.transform = `scale(${breathe})`;
+      }
+
+      if (t >= outroStart) {
+        const p = (t - outroStart) / (duration - outroStart);
+        const eased = 1 - easeInOutCubic(p);
+
+        header.style.opacity = eased;
+        document.getElementById('chartContainer').style.opacity = eased;
+        document.querySelectorAll('.legend-item').forEach(el => el.style.opacity = eased);
+        document.querySelector('.footer-divider').style.opacity = eased * 0.5;
+        document.getElementById('footerSource').style.opacity = eased;
+        scene.style.transform = `scale(${1 + Math.sin(t * 1.5) * 0.005})`;
+      }
+    }
+
+    init();
+    updateAnimation(window.__currentProgress || 0);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拾光构页</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            overflow: hidden;
+            color: #fff;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        }
+        #canvas-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        canvas { display: block; }
+        #video-container {
+            position: fixed; bottom: 20px; right: 20px;
+            width: 200px; height: 150px; z-index: 10; border-radius: 10px;
+            overflow: hidden; border: 1px solid rgba(0,255,200,0.25);
+            box-shadow: 0 0 20px rgba(0,255,200,0.08); background: rgba(0,0,0,0.5);
+            transition: opacity 0.3s;
+        }
+        #video-container.hidden { opacity: 0; pointer-events: none; }
+        #input-video {
+            width: 100%; height: 100%; object-fit: cover;
+            transform: scaleX(-1);
+            filter: grayscale(100%) contrast(1.2) brightness(0.85);
+        }
+
+        /* 模式切换 */
+        #mode-bar {
+            position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+            z-index: 30; display: none; gap: 0;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,255,200,0.2); border-radius: 20px; overflow: hidden;
+        }
+        .mode-btn {
+            padding: 8px 22px; font-size: 13px; border: none; background: transparent;
+            color: #888; cursor: pointer; font-family: inherit; transition: all 0.3s;
+        }
+        .mode-btn.active { background: rgba(0,255,200,0.2); color: #0ff; font-weight: 600; }
+
+        #status-bar {
+            position: fixed; top: 20px; left: 20px; z-index: 20;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,255,200,0.2); border-radius: 12px;
+            padding: 14px 18px; font-size: 13px; line-height: 1.8; min-width: 170px;
+        }
+        .status-label { color: #0ff; font-weight: 600; }
+        .gesture-open { color: #0ff; text-shadow: 0 0 10px #0ff; font-weight: bold; }
+        .gesture-fist { color: #f50; text-shadow: 0 0 10px #f50; font-weight: bold; }
+        .gesture-none { color: #888; }
+
+        /* 控制面板 */
+        #control-panel {
+            position: fixed; top: 20px; right: 20px; z-index: 20;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,255,200,0.2); border-radius: 12px;
+            padding: 14px 18px; font-size: 12px; width: 200px; display: none;
+        }
+        .control-title { color: #0ff; font-weight: 600; font-size: 13px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(0,255,200,0.15); }
+        .control-item { margin-bottom: 10px; }
+        .control-item:last-child { margin-bottom: 0; }
+        .control-item label { display: flex; justify-content: space-between; color: #aaa; margin-bottom: 4px; font-size: 11px; }
+        .control-item .val { color: #0ff; font-weight: 600; font-size: 11px; }
+        .control-item input[type="range"] { width: 100%; -webkit-appearance: none; height: 3px; background: rgba(0,255,200,0.15); border-radius: 2px; outline: none; }
+        .control-item input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #0ff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 6px rgba(0,255,200,0.5); }
+        .toggle-item { padding-top: 8px; border-top: 1px solid rgba(0,255,200,0.1); margin-top: 4px; }
+        .toggle-label { display: flex !important; align-items: center; gap: 8px; cursor: pointer; }
+        .toggle-label input[type="checkbox"] { width: 14px; height: 14px; accent-color: #0ff; }
+        .toggle-text { color: #ccc !important; }
+
+        /* 发布面板 */
+        #publish-panel {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 50; display: none; flex-direction: column; align-items: center;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(15px);
+            overflow-y: auto; padding: 80px 20px 40px;
+        }
+        #publish-panel h2 {
+            font-size: 2rem; color: #0ff; margin-bottom: 8px;
+            text-shadow: 0 0 20px rgba(0,255,200,0.3);
+        }
+        #publish-panel .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+        .img-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+            max-width: 750px; width: 100%; margin-bottom: 24px;
+        }
+        .img-card {
+            aspect-ratio: 4/3; border-radius: 10px; overflow: hidden;
+            border: 2px solid transparent; cursor: pointer; transition: all 0.3s;
+            position: relative; background: #111;
+        }
+        .img-card:hover { border-color: rgba(0,255,200,0.5); transform: translateY(-2px); }
+        .img-card.selected { border-color: #0ff; box-shadow: 0 0 20px rgba(0,255,200,0.3); }
+        .img-card canvas { width: 100%; height: 100%; display: block; }
+        .img-card .card-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            padding: 4px 8px; background: rgba(0,0,0,0.7); font-size: 11px; color: #ccc; text-align: center;
+        }
+        .text-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+            max-width: 750px; width: 100%; margin-bottom: 24px;
+        }
+        .text-card {
+            padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,255,200,0.15);
+            cursor: pointer; transition: all 0.3s; background: rgba(0,0,0,0.4);
+            font-size: 13px; color: #aaa; line-height: 1.6;
+        }
+        .text-card:hover { border-color: rgba(0,255,200,0.4); }
+        .text-card.selected { border-color: #0ff; color: #0ff; background: rgba(0,255,200,0.06); }
+        .upload-row { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
+        #upload-btn { padding: 8px 20px; border: 1px solid rgba(0,255,200,0.3); background: transparent; color: #0ff; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: inherit; }
+        #upload-btn:hover { background: rgba(0,255,200,0.1); }
+        #custom-text { padding: 10px 14px; border-radius: 6px; border: 1px solid rgba(0,255,200,0.2); background: rgba(0,0,0,0.5); color: #fff; font-size: 13px; width: 300px; font-family: inherit; outline: none; }
+        #custom-text:focus { border-color: #0ff; }
+        #publish-btn { padding: 12px 40px; border: 1px solid #0ff; background: rgba(0,255,200,0.1); color: #0ff; border-radius: 8px; cursor: pointer; font-size: 15px; font-family: inherit; transition: all 0.3s; }
+        #publish-btn:hover { background: rgba(0,255,200,0.2); box-shadow: 0 0 20px rgba(0,255,200,0.2); }
+        #preview-area { max-width: 750px; width: 100%; margin-top: 20px; display: none; text-align: center; }
+        #preview-area img { max-width: 400px; border-radius: 10px; border: 2px solid rgba(0,255,200,0.3); }
+        #preview-text { color: #0ff; font-size: 16px; margin-top: 12px; line-height: 1.8; max-width: 400px; margin-left: auto; margin-right: auto; }
+
+        /* 通知 */
+        #toast {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            z-index: 100; padding: 16px 32px; border-radius: 12px;
+            background: rgba(0,0,0,0.85); border: 1px solid #0ff;
+            color: #0ff; font-size: 16px; font-weight: 600;
+            opacity: 0; transition: opacity 0.5s; pointer-events: none;
+            text-align: center; box-shadow: 0 0 30px rgba(0,255,200,0.2);
+        }
+        #toast.show { opacity: 1; }
+
+        #start-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            gap: 24px; transition: opacity 0.5s;
+        }
+        #start-screen h1 { font-size: 3rem; background: linear-gradient(90deg, #0ff, #80f, #0ff); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shine 3s linear infinite; text-align: center; }
+        @keyframes shine { to { background-position: 200% center; } }
+        #start-btn { padding: 16px 48px; font-size: 1.2rem; border: 2px solid #0ff; background: transparent; color: #0ff; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-family: inherit; }
+        #start-btn:hover { background: rgba(0,255,200,0.1); box-shadow: 0 0 30px rgba(0,255,200,0.3); transform: translateY(-2px); }
+        .hint { color: #aaa; font-size: 1rem; max-width: 520px; text-align: center; line-height: 1.8; }
+        .hint strong { color: #0ff; }
+        .loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+        .loading.active { display: flex; }
+        .spinner { width: 50px; height: 50px; border: 3px solid rgba(0,255,200,0.2); border-top-color: #0ff; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 音乐控制 */
+        #music-indicator {
+            position: fixed; bottom: 20px; left: 20px; z-index: 20;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,255,200,0.2); border-radius: 12px;
+            padding: 8px 14px; font-size: 12px; display: none; gap: 8px; align-items: center;
+        }
+        .music-dot { width: 8px; height: 8px; border-radius: 50%; animation: musicPulse 1s ease-in-out infinite; }
+        @keyframes musicPulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+        #music-name { color: #0ff; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <div id="start-screen">
+        <h1>拾光构页</h1>
+        <p class="hint">
+            通过摄像头识别你的手型，体验虚空中的电子追逐效果。<br>
+            <strong>张开手掌</strong> &rarr; 太阳风吹拂，图片随风飘荡<br>
+            <strong>握紧拳头</strong> &rarr; 漩涡汇聚，聚焦图片故事
+        </p>
+        <button id="start-btn">开启体验</button>
+    </div>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>正在加载MediaPipe模型与初始化摄像头...</p>
+    </div>
+    <div id="canvas-container"><canvas id="main-canvas"></canvas></div>
+    <div id="video-container"><video id="input-video" autoplay playsinline muted></video></div>
+
+    <div id="mode-bar">
+        <button class="mode-btn active" data-mode="roam">漫游</button>
+        <button class="mode-btn" data-mode="publish">发布</button>
+    </div>
+
+    <div id="status-bar">
+        <div>状态: <span id="status-text" class="status-label">等待启动</span></div>
+        <div>手势: <span id="gesture-text" class="gesture-none">-</span></div>
+        <div>风强: <span id="wind-text" class="status-label">-</span></div>
+        <div>粒子数: <span id="particle-count" class="status-label">0</span></div>
+        <div class="toggle-item" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,255,200,0.15);">
+            <label class="toggle-label" style="cursor:pointer;">
+                <input type="checkbox" id="toggle-control-panel" style="width:14px;height:14px;accent-color:#0ff;">
+                <span class="toggle-text" style="color:#ccc;font-size:11px;">效果面板</span>
+            </label>
+        </div>
+    </div>
+
+    <div id="control-panel" style="display:none;">
+        <div class="control-title">效果控制</div>
+        <div class="control-item"><label>粒子数量 <span class="val" id="particle-val">300</span></label><input type="range" id="particle-slider" min="80" max="700" value="300"></div>
+        <div class="control-item"><label>尾迹长度 <span class="val" id="trail-val">12</span></label><input type="range" id="trail-slider" min="3" max="35" value="12"></div>
+        <div class="control-item"><label>移动速度 <span class="val" id="speed-val">100%</span></label><input type="range" id="speed-slider" min="30" max="250" value="100"></div>
+        <div class="control-item"><label>手势残影 <span class="val" id="ghost-val">6</span></label><input type="range" id="ghost-slider" min="0" max="20" value="6"></div>
+        <div class="control-item toggle-item"><label class="toggle-label"><input type="checkbox" id="show-video"><span class="toggle-text">显示摄像头</span></label></div>
+    </div>
+
+    <div id="music-indicator">
+        <div class="music-dot" id="music-dot" style="background:#0ff;"></div>
+        <span id="music-name">氛围音</span>
+    </div>
+
+    <div id="toast"></div>
+
+    <div id="publish-panel">
+        <h2>发布模式</h2>
+        <p class="subtitle">选择一张图片，搭配一段文字，创作你的故事</p>
+        <div class="img-grid" id="img-grid"></div>
+        <div class="upload-row">
+            <button id="upload-btn">上传自定义图片</button>
+            <input type="file" id="upload-input" accept="image/*" style="display:none">
+            <input type="text" id="custom-text" placeholder="或输入自定义文案...">
+        </div>
+        <div class="text-grid" id="text-grid"></div>
+        <div style="display:flex;gap:12px;margin-bottom:16px;">
+            <button id="publish-btn">发布</button>
+            <button id="cancel-btn" style="padding:12px 40px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#888;border-radius:8px;cursor:pointer;font-size:15px;font-family:inherit;transition:all 0.3s;">取消</button>
+        </div>
+        <div id="preview-area">
+            <img id="preview-img" src="" alt="预览">
+            <p id="preview-text"></p>
+        </div>
+    </div>
+
+    <script>
+        // ===================== DOM =====================
+        const canvas = document.getElementById('main-canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('input-video');
+        const videoContainer = document.getElementById('video-container');
+        const startScreen = document.getElementById('start-screen');
+        const loadingScreen = document.getElementById('loading');
+        const startBtn = document.getElementById('start-btn');
+        const controlPanel = document.getElementById('control-panel');
+        const modeBar = document.getElementById('mode-bar');
+        const publishPanel = document.getElementById('publish-panel');
+        const toast = document.getElementById('toast');
+        const musicIndicator = document.getElementById('music-indicator');
+        const musicName = document.getElementById('music-name');
+        const musicDot = document.getElementById('music-dot');
+        const statusText = document.getElementById('status-text');
+        const gestureText = document.getElementById('gesture-text');
+        const windText = document.getElementById('wind-text');
+        const particleCountText = document.getElementById('particle-count');
+        const particleSlider = document.getElementById('particle-slider');
+        const trailSlider = document.getElementById('trail-slider');
+        const speedSlider = document.getElementById('speed-slider');
+        const ghostSlider = document.getElementById('ghost-slider');
+        const showVideoCheck = document.getElementById('show-video');
+        const particleVal = document.getElementById('particle-val');
+        const trailVal = document.getElementById('trail-val');
+        const speedVal = document.getElementById('speed-val');
+        const ghostVal = document.getElementById('ghost-val');
+
+        // ===================== 全局状态 =====================
+        let width, height, particles = [], currentMode = 'open', handPosition = null, handDetected = false;
+        let handVelocityX = 0, handVelocityY = 0;
+        let baseWindX = 0.3, baseWindY = 0.1, gustX = 0, gustY = 0, windAngle = 0;
+        let vortexX = 0, vortexY = 0, vortexStrength = 1, vortexRotation = 0;
+        let lastGesture = '', gestureSmoothCount = 0, animationId = null, frameId = null, hands = null;
+        let time = 0, forceMultiplier = 1.0, ghostTrails = [];
+        let appMode = 'roam'; // 'roam' | 'publish'
+        let mediaPipeReady = false;
+        let toastTimer = null;
+        const nebulae = [];
+
+        // ===================== 图片库 =====================
+        const imageLibrary = [];
+        const textLibrary = [];
+        let selectedImageIdx = -1;
+        let selectedTextIdx = -1;
+        let customImage = null;
+
+        function generateImage(canvas, theme) {
+            const w = canvas.width, h = canvas.height;
+            const ctx2 = canvas.getContext('2d');
+            const t = theme;
+            // 根据主题绘制不同场景
+            const bgGrad = ctx2.createLinearGradient(0, 0, 0, h);
+            bgGrad.addColorStop(0, t.sky[0]); bgGrad.addColorStop(0.5, t.sky[1]); bgGrad.addColorStop(1, t.sky[2]);
+            ctx2.fillStyle = bgGrad; ctx2.fillRect(0, 0, w, h);
+            // 地面
+            ctx2.fillStyle = t.ground;
+            ctx2.beginPath(); ctx2.moveTo(0, h * 0.75); ctx2.quadraticCurveTo(w / 2, h * 0.7, w, h * 0.8); ctx2.lineTo(w, h); ctx2.lineTo(0, h); ctx2.fill();
+            // 太阳/月亮
+            ctx2.beginPath(); ctx2.arc(w * 0.75, h * 0.25, 30, 0, Math.PI * 2);
+            ctx2.fillStyle = t.sun; ctx2.fill();
+            // 元素
+            if (t.elements) {
+                for (const el of t.elements) {
+                    ctx2.fillStyle = el.color + Math.floor(el.alpha * 255).toString(16).padStart(2, '0');
+                    if (el.shape === 'circle') {
+                        ctx2.beginPath(); ctx2.arc(el.x, el.y, el.r, 0, Math.PI * 2); ctx2.fill();
+                    } else if (el.shape === 'rect') {
+                        ctx2.fillRect(el.x, el.y, el.w, el.h);
+                    } else if (el.shape === 'triangle') {
+                        ctx2.beginPath(); ctx2.moveTo(el.x, el.y - el.r); ctx2.lineTo(el.x - el.r, el.y + el.r); ctx2.lineTo(el.x + el.r, el.y + el.r); ctx2.fill();
+                    }
+                }
+            }
+            // 文字
+            ctx2.fillStyle = 'rgba(255,255,255,0.6)'; ctx2.font = 'bold 11px "Microsoft YaHei"'; ctx2.textAlign = 'center';
+            ctx2.fillText(t.label, w / 2, h - 10);
+            return canvas;
+        }
+
+        function initImageLibrary() {
+            const themes = [{
+                id: 0, label: '春日樱花', mood: 'calm', region: '东京·上野', season: '春', time: '清晨',
+                sky: ['#fce4ec', '#f8bbd0', '#e8eaf6'], ground: '#c8e6c9',
+                sun: '#ffcc80', caption: '春风拂过上野的樱花隧道，花瓣如雪般飘落，每一片都是春天写给大地的情书。',
+                elements: [
+                    { shape: 'circle', x: 60, y: 80, r: 8, color: '#f8bbd0', alpha: 0.8 },
+                    { shape: 'circle', x: 90, y: 60, r: 6, color: '#f48fb1', alpha: 0.7 },
+                    { shape: 'circle', x: 120, y: 100, r: 7, color: '#f8bbd0', alpha: 0.6 },
+                    { shape: 'circle', x: 40, y: 110, r: 5, color: '#fce4ec', alpha: 0.7 },
+                    { shape: 'rect', x: 70, y: h => h * 0.7, w: 6, h: 30, color: '#795548', alpha: 0.8 }
+                ]
+            }, {
+                id: 1, label: '夏日海滩', mood: 'energetic', region: '三亚·亚龙湾', season: '夏', time: '午后',
+                sky: ['#4fc3f7', '#29b6f6', '#0288d1'], ground: '#fff9c4',
+                sun: '#ffeb3b', caption: '亚龙湾的午后阳光洒在浪尖上，金色的沙滩与碧蓝的海水交织成夏日的狂欢。',
+                elements: [
+                    { shape: 'circle', x: 50, y: 90, r: 4, color: '#fff', alpha: 0.6 },
+                    { shape: 'circle', x: 100, y: 80, r: 3, color: '#fff', alpha: 0.5 },
+                    { shape: 'triangle', x: 150, y: 70, r: 10, color: '#fff', alpha: 0.4 }
+                ]
+            }, {
+                id: 2, label: '秋日枫叶', mood: 'melancholic', region: '京都·岚山', season: '秋', time: '黄昏',
+                sky: ['#ffccbc', '#ff8a65', '#bf360c'], ground: '#5d4037',
+                sun: '#ff5722', caption: '岚山的枫叶染红了整个黄昏，落叶在风中旋转，诉说着秋日的离愁别绪。',
+                elements: [
+                    { shape: 'circle', x: 70, y: 60, r: 10, color: '#d32f2f', alpha: 0.7 },
+                    { shape: 'circle', x: 110, y: 50, r: 8, color: '#f44336', alpha: 0.6 },
+                    { shape: 'circle', x: 45, y: 85, r: 7, color: '#e53935', alpha: 0.5 },
+                    { shape: 'circle', x: 95, y: 95, r: 6, color: '#ff7043', alpha: 0.6 }
+                ]
+            }, {
+                id: 3, label: '冬日雪景', mood: 'mysterious', region: '北海道·小樽', season: '冬', time: '夜晚',
+                sky: ['#37474f', '#263238', '#1a237e'], ground: '#eceff1',
+                sun: '#e0e0e0', caption: '小樽的雪夜安静而深邃，运河边的煤气灯映在雪地上，仿佛时间也在此凝固。',
+                elements: [
+                    { shape: 'circle', x: 60, y: 50, r: 3, color: '#fff', alpha: 0.8 },
+                    { shape: 'circle', x: 90, y: 40, r: 2, color: '#fff', alpha: 0.7 },
+                    { shape: 'circle', x: 120, y: 55, r: 3, color: '#fff', alpha: 0.6 },
+                    { shape: 'circle', x: 45, y: 70, r: 2, color: '#fff', alpha: 0.7 },
+                    { shape: 'circle', x: 140, y: 45, r: 2.5, color: '#fff', alpha: 0.5 },
+                    { shape: 'rect', x: 100, y: h => h * 0.65, w: 8, h: 25, color: '#ffe082', alpha: 0.6 }
+                ]
+            }, {
+                id: 4, label: '城市夜景', mood: 'mysterious', region: '上海·外滩', season: '秋', time: '深夜',
+                sky: ['#1a237e', '#0d1b2a', '#000'], ground: '#37474f',
+                sun: '#fff59d', caption: '外滩的霓虹倒映在黄浦江上，城市的脉搏在夜色中跳动，每一盏灯都是一个故事。',
+                elements: [
+                    { shape: 'rect', x: 50, y: h => h * 0.5, w: 10, h: 40, color: '#ffeb3b', alpha: 0.5 },
+                    { shape: 'rect', x: 80, y: h => h * 0.45, w: 8, h: 50, color: '#4fc3f7', alpha: 0.4 },
+                    { shape: 'rect', x: 110, y: h => h * 0.55, w: 12, h: 35, color: '#ff8a65', alpha: 0.5 },
+                    { shape: 'rect', x: 140, y: h => h * 0.4, w: 7, h: 55, color: '#81c784', alpha: 0.4 }
+                ]
+            }, {
+                id: 5, label: '山间晨雾', mood: 'calm', region: '黄山·始信峰', season: '春', time: '清晨',
+                sky: ['#e8eaf6', '#bbdefb', '#90caf9'], ground: '#81c784',
+                sun: '#fff9c4', caption: '黄山的晨雾缭绕在奇松怪石之间，云海翻涌如仙境，山风轻抚唤醒沉睡的万物。',
+                elements: [
+                    { shape: 'triangle', x: 80, y: 50, r: 20, color: '#66bb6a', alpha: 0.5 },
+                    { shape: 'triangle', x: 130, y: 60, r: 15, color: '#81c784', alpha: 0.4 },
+                    { shape: 'circle', x: 60, y: 40, r: 15, color: '#fff', alpha: 0.2 },
+                    { shape: 'circle', x: 100, y: 35, r: 12, color: '#fff', alpha: 0.15 }
+                ]
+            }, {
+                id: 6, label: '雨巷江南', mood: 'melancholic', region: '苏州·平江路', season: '春', time: '午后',
+                sky: ['#cfd8dc', '#b0bec5', '#78909c'], ground: '#8d6e63',
+                sun: '#eceff1', caption: '江南的细雨落在青石板路上，小桥流水人家，油纸伞下藏着说不尽的故事。',
+                elements: [
+                    { shape: 'rect', x: 60, y: h => h * 0.6, w: 5, h: 30, color: '#8d6e63', alpha: 0.7 },
+                    { shape: 'circle', x: 70, y: 50, r: 2, color: '#90caf9', alpha: 0.5 },
+                    { shape: 'circle', x: 100, y: 45, r: 2, color: '#90caf9', alpha: 0.4 },
+                    { shape: 'circle', x: 130, y: 55, r: 3, color: '#90caf9', alpha: 0.5 },
+                    { shape: 'circle', x: 50, y: 60, r: 2, color: '#90caf9', alpha: 0.4 }
+                ]
+            }, {
+                id: 7, label: '落日原野', mood: 'energetic', region: '内蒙古·呼伦贝尔', season: '夏', time: '黄昏',
+                sky: ['#ff8a65', '#ff5722', '#bf360c'], ground: '#8bc34a',
+                sun: '#ffd54f', caption: '呼伦贝尔的落日把草原染成金色，风吹草低见牛羊，天地间只剩下自由的气息。',
+                elements: [
+                    { shape: 'circle', x: 50, y: 80, r: 3, color: '#fff', alpha: 0.3 },
+                    { shape: 'circle', x: 100, y: 85, r: 4, color: '#fff', alpha: 0.25 },
+                    { shape: 'circle', x: 140, y: 78, r: 3, color: '#fff', alpha: 0.3 }
+                ]
+            }];
+
+            for (let i = 0; i < themes.length; i++) {
+                const t = themes[i];
+                const cvs = document.createElement('canvas');
+                cvs.width = 400; cvs.height = 300;
+                // Fix elements with function-based y
+                const fixedElements = (t.elements || []).map(el => {
+                    const e = { ...el };
+                    if (typeof e.y === 'function') e.y = e.y(cvs.height);
+                    if (typeof e.h === 'function') e.h = e.h(cvs.height);
+                    return e;
+                });
+                const tFixed = { ...t, elements: fixedElements };
+                generateImage(cvs, tFixed);
+                imageLibrary.push({ id: t.id, label: t.label, caption: t.caption, mood: t.mood, region: t.region, season: t.season, time: t.time, canvas: cvs });
+                textLibrary.push({ id: t.id, text: t.caption, mood: t.mood });
+            }
+        }
+
+        // ===================== 音乐系统（外部高品质WAV文件） =====================
+        let musicActive = false;
+        let currentMusicMood = '';
+        let musicAudio = null;
+        let musicFadeOutTimer = null;
+
+        const moodMusicFiles = {
+            calm: { file: 'music/canon_calm.wav', name: '卡农 · 经典', color: '#0ff' },
+            energetic: { file: 'music/energetic.wav', name: '跃动 · 阳光', color: '#ffeb3b' },
+            melancholic: { file: 'music/melancholic.wav', name: '思念 · 细雨', color: '#90caf9' },
+            mysterious: { file: 'music/mysterious.wav', name: '深邃 · 星空', color: '#ce93d8' }
+        };
+
+        function initAudio() {
+            // Audio element created on demand
+        }
+
+        function stopMusic() {
+            if (musicFadeOutTimer) { clearTimeout(musicFadeOutTimer); musicFadeOutTimer = null; }
+            if (musicAudio) {
+                musicAudio.pause();
+                musicAudio.currentTime = 0;
+                musicAudio = null;
+            }
+            musicActive = false;
+            musicIndicator.style.display = 'none';
+        }
+
+        function playMusic(mood) {
+            stopMusic();
+            if (!mood || !moodMusicFiles[mood]) return;
+            currentMusicMood = mood;
+            const m = moodMusicFiles[mood];
+            musicAudio = new Audio(m.file);
+            musicAudio.loop = true;
+            musicAudio.volume = 0.5;
+            musicAudio.play().catch(e => { console.log('Music play blocked:', e); });
+            musicActive = true;
+            musicIndicator.style.display = 'flex';
+            musicName.textContent = m.name;
+            musicDot.style.background = m.color;
+        }
+
+        function setMusicVolume(vol) {
+            if (musicAudio) {
+                musicAudio.volume = Math.max(0, Math.min(1, vol));
+            }
+        }
+
+        // ===================== Toast =====================
+        function showToast(msg, duration = 2000) {
+            if (toastTimer) clearTimeout(toastTimer);
+            toast.textContent = msg;
+            toast.classList.add('show');
+            toastTimer = setTimeout(() => { toast.classList.remove('show'); }, duration);
+        }
+
+        // ===================== Canvas 设置 =====================
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            vortexX = width / 2; vortexY = height / 2;
+            initNebulae();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function initNebulae() {
+            nebulae.length = 0;
+            for (let i = 0; i < 5; i++) {
+                nebulae.push({ x: Math.random() * width, y: Math.random() * height, radius: 100 + Math.random() * 200, hue: 180 + Math.random() * 60, alpha: 0.02 + Math.random() * 0.03 });
+            }
+        }
+
+        function noise(x, y) {
+            const X = Math.floor(x), Y = Math.floor(y), fx = x - X, fy = y - Y;
+            const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+            const a = Math.sin(X * 12.9898 + Y * 78.233) * 43758.5453;
+            const b = Math.sin((X + 1) * 12.9898 + Y * 78.233) * 43758.5453;
+            const c = Math.sin(X * 12.9898 + (Y + 1) * 78.233) * 43758.5453;
+            const d = Math.sin((X + 1) * 12.9898 + (Y + 1) * 78.233) * 43758.5453;
+            return (a - Math.floor(a)) + (b - Math.floor(b) - (a - Math.floor(a))) * ux + (c - Math.floor(c) - (a - Math.floor(a))) * uy + (a - Math.floor(a) - (b - Math.floor(b)) - (c - Math.floor(c)) + (d - Math.floor(d))) * ux * uy;
+        }
+
+        // ===================== 粒子类 =====================
+        class Particle {
+            constructor(mode, w, h) { this.reset(mode, w, h); }
+            reset(mode, w, h) {
+                this.life = 0; this.maxLife = Math.random() * 150 + 100;
+                this.size = Math.random() * 3 + 0.5; this.mass = 0.5 + Math.random() * 1.5;
+                this.history = []; this.brightness = 0; this.flash = 0;
+                if (mode === 'open') this.initSolarWind(w, h);
+                else this.initVortex(w, h);
+            }
+            initSolarWind(w, h) {
+                if (Math.random() < 0.8) {
+                    const side = Math.floor(Math.random() * 4), margin = 30;
+                    switch (side) { case 0: this.x = Math.random() * w; this.y = -margin; break; case 1: this.x = w + margin; this.y = Math.random() * h; break; case 2: this.x = Math.random() * w; this.y = h + margin; break; case 3: this.x = -margin; this.y = Math.random() * h; break; }
+                } else { this.x = Math.random() * w; this.y = Math.random() * h; }
+                const ba = Math.atan2(baseWindY, baseWindX), bs = 0.5;
+                this.vx = Math.cos(ba) * bs + (Math.random() - 0.5) * 2;
+                this.vy = Math.sin(ba) * bs + (Math.random() - 0.5) * 2;
+                this.colorBase = 160 + Math.random() * 80;
+                this.color = `hsla(${this.colorBase}, 100%, 65%,`;
+            }
+            initVortex(w, h) {
+                const angle = Math.random() * Math.PI * 2, dist = Math.max(w, h) * (0.4 + Math.random() * 0.5);
+                this.x = vortexX + Math.cos(angle) * dist; this.y = vortexY + Math.sin(angle) * dist;
+                this.vx = (Math.random() - 0.5) * 2; this.vy = (Math.random() - 0.5) * 2;
+                this.colorBase = Math.random() < 0.7 ? 10 + Math.random() * 40 : 280 + Math.random() * 40;
+                this.color = `hsla(${this.colorBase}, 100%, ${55 + Math.random() * 15}%,`;
+            }
+            update(w, h) {
+                this.life++;
+                this.history.push({ x: this.x, y: this.y });
+                const mh = parseInt(trailSlider.value);
+                if (this.history.length > mh) this.history.shift();
+                if (currentMode === 'open') this.updateSolarWind(w, h);
+                else this.updateVortex(w, h);
+            }
+            updateSolarWind(w, h) {
+                const nx = this.x * 0.005, ny = this.y * 0.005 + time * 0.3;
+                const turbX = (noise(nx, ny) - 0.5) * 2, turbY = (noise(nx + 100, ny + 100) - 0.5) * 2;
+                const wi = 0.012 / this.mass * forceMultiplier;
+                this.vx += (baseWindX + gustX) * wi; this.vy += (baseWindY + gustY) * wi;
+                this.vx += turbX * 0.08 * forceMultiplier; this.vy += turbY * 0.08 * forceMultiplier;
+                this.vx *= 0.995; this.vy *= 0.995;
+                this.x += this.vx; this.y += this.vy;
+                const margin = 50;
+                if (this.x < -margin || this.x > w + margin || this.y < -margin || this.y > h + margin) this.reset(currentMode, w, h);
+            }
+            updateVortex(w, h) {
+                const dx = vortexX - this.x, dy = vortexY - this.y, dist = Math.hypot(dx, dy);
+                if (dist > 5) {
+                    const as = Math.min(6 * vortexStrength, 400 / (dist + 5)) * forceMultiplier;
+                    this.vx += (dx / dist) * as; this.vy += (dy / dist) * as;
+                    const lf = 1 + Math.sin(dist * 0.02) * 0.3;
+                    const rs = Math.min(5 * vortexStrength, dist * 0.012 + 0.8) * lf * forceMultiplier;
+                    this.vx += (-dy / dist) * rs; this.vy += (dx / dist) * rs;
+                }
+                this.vx *= 0.955; this.vy *= 0.955;
+                this.x += this.vx; this.y += this.vy;
+                this.brightness = Math.max(0, 1 - dist / 250);
+                if (dist < 15) { this.flash = 1; this.brightness = 2; }
+                if (this.flash > 0) { this.flash -= 0.1; if (this.flash <= 0) { this.reset(currentMode, w, h); return; } }
+                if (dist > Math.max(w, h) * 0.9 || this.life >= this.maxLife) this.reset(currentMode, w, h);
+            }
+            draw(context) {
+                const alpha = Math.max(0, 1 - this.life / this.maxLife);
+                const la = alpha * 0.9 + 0.1, fb = this.flash > 0 ? this.flash * 2 : 0;
+                if (this.history.length > 2) {
+                    context.beginPath(); context.moveTo(this.history[0].x, this.history[0].y);
+                    for (let i = 1; i < this.history.length - 1; i++) {
+                        const xc = (this.history[i].x + this.history[i + 1].x) / 2, yc = (this.history[i].y + this.history[i + 1].y) / 2;
+                        context.quadraticCurveTo(this.history[i].x, this.history[i].y, xc, yc);
+                    }
+                    context.strokeStyle = this.color + (la * 0.2 * (1 + fb)) + ')'; context.lineWidth = this.size * 0.5; context.stroke();
+                }
+                const cs = this.size * (0.8 + this.brightness * 0.4 + fb);
+                context.beginPath(); context.arc(this.x, this.y, Math.max(0.5, cs * la), 0, Math.PI * 2);
+                const b = 65 + this.brightness * 80 + fb * 100;
+                context.fillStyle = `hsla(${this.colorBase}, 100%, ${Math.min(100, b)}%, ${Math.min(1, la + fb)})`; context.fill();
+                const gs = cs * la * (4 + this.brightness * 3);
+                if (gs > 2) {
+                    context.beginPath(); context.arc(this.x, this.y, gs, 0, Math.PI * 2);
+                    const glow = context.createRadialGradient(this.x, this.y, 0, this.x, this.y, gs);
+                    const ga = la * (0.4 + this.brightness * 0.3 + fb * 0.5);
+                    glow.addColorStop(0, `hsla(${this.colorBase}, 100%, ${Math.min(100, b + 20)}%, ${ga})`);
+                    glow.addColorStop(0.4, `hsla(${this.colorBase}, 100%, 60%, ${ga * 0.3})`);
+                    glow.addColorStop(1, `hsla(${this.colorBase}, 100%, 50%, 0)`);
+                    context.fillStyle = glow; context.fill();
+                }
+            }
+        }
+
+        // ===================== 浮动图片卡片系统（随机旋转轴，3D立体翻滚） =====================
+        const floatingCards = [];
+        const MAX_CARDS = 8;
+
+        function initFloatingCards() {
+            floatingCards.length = 0;
+            const margin = 100;
+            for (let i = 0; i < MAX_CARDS; i++) {
+                const imgIdx = i % imageLibrary.length;
+                floatingCards.push({
+                    x: margin + (i / (MAX_CARDS - 1)) * (width - margin * 2),
+                    y: margin + (i % 3 + 1) * (height - margin * 2) / 4 + (Math.random() - 0.5) * 60,
+                    scaleX: 1,
+                    scaleY: 1,
+                    tumblePhase: Math.random() * Math.PI * 2,
+                    tumbleSpeed: 0.01 + Math.random() * 0.03,
+                    // 随机旋转轴角度：0=绕垂直轴(竖线), π/2=绕水平轴(横线), 中间=斜线
+                    axisAngle: (Math.random() * Math.PI),
+                    brightness: 0.3 + Math.random() * 0.3,
+                    imgIdx: imgIdx
+                });
+            }
+        }
+
+        function updateFloatingCards() {
+            const windMag = Math.hypot(baseWindX + gustX, baseWindY + gustY);
+            for (const card of floatingCards) {
+                // 计算局部风强（距离手掌越近越强）
+                let localWind = windMag + 0.5;
+                if (handDetected && handPosition) {
+                    const dist = Math.hypot(card.x - handPosition.x, card.y - handPosition.y);
+                    const influence = Math.max(0, 1 - dist / 350);
+                    localWind = windMag + influence * 4;
+                }
+
+                // 检测附近粒子：粒子经过时触发翻滚
+                let particleBoost = 0;
+                for (let i = 0; i < particles.length; i += 5) {
+                    const p = particles[i];
+                    const d = Math.hypot(card.x - p.x, card.y - p.y);
+                    if (d < 40) {
+                        particleBoost += (1 - d / 40) * 0.08;
+                    }
+                }
+                localWind += particleBoost * 2;
+
+                if (currentMode === 'open') {
+                    // 随机翻滚速度：基础 + 风力 + 粒子经过
+                    card.tumbleSpeed += (localWind * 0.05 - card.tumbleSpeed) * 0.12;
+                    card.tumbleSpeed = Math.max(0.01, Math.min(0.25, card.tumbleSpeed));
+                    card.tumblePhase += card.tumbleSpeed;
+                    const flip = Math.sin(card.tumblePhase);
+                    // 正面越正越亮，侧面越窄越暗
+                    card.scaleX = 0.06 + Math.abs(flip) * 0.94;
+                    card.scaleY = 1 - Math.abs(flip) * 0.35;
+                    card.brightness = 0.15 + Math.abs(flip) * 0.55 + particleBoost;
+                } else {
+                    // 拳头模式：微弱呼吸
+                    card.tumbleSpeed *= 0.9;
+                    card.tumblePhase += card.tumbleSpeed * 0.5 + 0.008;
+                    card.scaleX += (0.35 - card.scaleX) * 0.08;
+                    card.scaleY += (0.75 - card.scaleY) * 0.08;
+                    card.brightness += (0.12 - card.brightness) * 0.08;
+                }
+            }
+        }
+
+        function drawFloatingCards() {
+            for (const card of floatingCards) {
+                ctx.save();
+                ctx.globalAlpha = 0.35 + card.brightness * 0.45;
+                ctx.translate(card.x, card.y);
+                // 绕随机轴旋转：rotate(axis) → scale(1, cos) → rotate(-axis)
+                ctx.rotate(card.axisAngle);
+                ctx.scale(card.scaleX, card.scaleY);
+                ctx.rotate(-card.axisAngle);
+                const s = 18;
+                if (card.scaleX > 0.25) {
+                    ctx.strokeStyle = currentMode === 'open' ? 'rgba(0,255,200,0.3)' : 'rgba(255,100,50,0.25)';
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(-s * 0.67, -s * 0.5, s * 1.34, s);
+                }
+                ctx.drawImage(imageLibrary[card.imgIdx].canvas, -s * 0.67, -s * 0.5, s * 1.34, s);
+                ctx.restore();
+            }
+        }
+
+        // ===================== 聚焦图片系统 =====================
+        let focusedCardIdx = -1;
+        let focusAlpha = 0;
+        let focusRotation = 0;
+        let focusScale = 0;
+        let focusLocked = false;
+        // 位置动画：从原位置飞到中心
+        let focusStartX = 0, focusStartY = 0;
+        let focusCurX = 0, focusCurY = 0;
+        let focusAnimProgress = 0; // 0=起始位置, 1=中心位置
+
+        function findNearestCard() {
+            if (!handPosition) return -1;
+            let minDist = Infinity, idx = -1;
+            for (let i = 0; i < floatingCards.length; i++) {
+                const d = Math.hypot(floatingCards[i].x - handPosition.x, floatingCards[i].y - handPosition.y);
+                if (d < minDist) { minDist = d; idx = i; }
+            }
+            return idx;
+        }
+
+        function updateFocus() {
+            if (currentMode === 'fist' && handDetected) {
+                if (!focusLocked) {
+                    const nearest = findNearestCard();
+                    if (nearest >= 0) {
+                        focusedCardIdx = nearest;
+                        focusLocked = true;
+                        // 记录图片原始位置（从浮动卡片位置出发）
+                        focusStartX = floatingCards[nearest].x;
+                        focusStartY = floatingCards[nearest].y;
+                        focusCurX = focusStartX;
+                        focusCurY = focusStartY;
+                        focusAnimProgress = 0;
+                        focusScale = 0.05; // 从很小开始
+                        focusAlpha = 0;
+                        const mood = imageLibrary[floatingCards[nearest].imgIdx].mood;
+                        playMusic(mood);
+                    }
+                }
+                if (focusedCardIdx >= 0) {
+                    // 位置动画：从原位置平滑飞到中心
+                    focusAnimProgress = Math.min(1, focusAnimProgress + 0.025);
+                    // 使用 ease-out 缓动
+                    const t = 1 - Math.pow(1 - focusAnimProgress, 3);
+                    const targetX = width / 2;
+                    const targetY = height / 2 - 60;
+                    focusCurX = focusStartX + (targetX - focusStartX) * t;
+                    focusCurY = focusStartY + (targetY - focusStartY) * t;
+                    // 到达中心后开始放大
+                    if (focusAnimProgress > 0.6) {
+                        focusScale = Math.min(1, focusScale + 0.04);
+                    }
+                    focusAlpha = Math.min(1, focusAlpha + 0.04);
+                    // 拳头移动时才缓慢旋转
+                    const speed = Math.hypot(handVelocityX, handVelocityY);
+                    if (speed > 0.3) {
+                        if (handVelocityX > 0.3 || handVelocityY < -0.3) {
+                            focusRotation += speed * 0.015;
+                        } else if (handVelocityX < -0.3 || handVelocityY > 0.3) {
+                            focusRotation -= speed * 0.015;
+                        }
+                    }
+                }
+            } else {
+                focusLocked = false;
+                focusedCardIdx = -1;
+                focusAlpha = Math.max(0, focusAlpha - 0.05);
+                focusScale = Math.max(0, focusScale - 0.05);
+                focusAnimProgress = 0;
+                if (focusAlpha <= 0.01) {
+                    setMusicVolume(0.03);
+                }
+            }
+        }
+
+        function drawFocusedCard() {
+            if (focusAlpha <= 0.01 || focusedCardIdx < 0) return;
+            const card = floatingCards[focusedCardIdx];
+            const img = imageLibrary[card.imgIdx];
+            const cx = focusCurX, cy = focusCurY;
+            const baseW = 320, baseH = 240;
+            const breathing = 1 + Math.sin(time * 1.5) * 0.03;
+            const s = focusScale * breathing;
+
+            // 背景遮罩
+            ctx.fillStyle = `rgba(0,0,0,${focusAlpha * 0.5})`;
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.save();
+            ctx.globalAlpha = focusAlpha;
+            ctx.translate(cx, cy);
+            ctx.rotate(focusRotation * s);
+
+            // 发光边框
+            ctx.shadowBlur = 30; ctx.shadowColor = 'rgba(255,100,50,0.6)';
+            ctx.strokeStyle = 'rgba(255,100,50,0.8)'; ctx.lineWidth = 2;
+            ctx.strokeRect(-baseW / 2 * s, -baseH / 2 * s, baseW * s, baseH * s);
+
+            // 图片
+            ctx.drawImage(img.canvas, -baseW / 2 * s, -baseH / 2 * s, baseW * s, baseH * s);
+
+            ctx.restore();
+
+            // 文案（到达中心后显示）
+            if (focusScale > 0.5) {
+                ctx.save();
+                ctx.globalAlpha = focusAlpha * (focusScale - 0.5) * 2;
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 18px "Microsoft YaHei"';
+                ctx.textAlign = 'center';
+                ctx.fillText(img.label, cx, cy + baseH / 2 * s + 30);
+                ctx.font = '14px "Microsoft YaHei"';
+                ctx.fillStyle = '#ccc';
+                const caption = img.caption;
+                const maxW = 360;
+                const words = caption.split('');
+                let line = '', yOff = cy + baseH / 2 * s + 60;
+                for (const ch of words) {
+                    const testLine = line + ch;
+                    if (ctx.measureText(testLine).width > maxW) {
+                        ctx.fillText(line, cx, yOff);
+                        yOff += 22; line = ch;
+                    } else { line = testLine; }
+                }
+                if (line) ctx.fillText(line, cx, yOff);
+                // 地区/时间标签
+                ctx.font = '12px "Microsoft YaHei"';
+                ctx.fillStyle = 'rgba(255,100,50,0.8)';
+                ctx.fillText(`${img.region} · ${img.season} · ${img.time}`, cx, yOff + 28);
+                ctx.restore();
+            }
+        }
+
+        // ===================== 背景 =====================
+        const stars = [];
+        for (let i = 0; i < 300; i++) {
+            stars.push({ x: Math.random() * width, y: Math.random() * height, size: Math.random() * 1.5, baseAlpha: Math.random() * 0.3 + 0.05, twinkle: Math.random() * Math.PI * 2, speed: Math.random() * 0.015 + 0.005, depth: Math.random() });
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = 'rgba(2, 4, 10, 0.06)'; ctx.fillRect(0, 0, width, height);
+            for (const neb of nebulae) {
+                const grad = ctx.createRadialGradient(neb.x, neb.y, 0, neb.x, neb.y, neb.radius);
+                grad.addColorStop(0, `hsla(${neb.hue}, 60%, 20%, ${neb.alpha})`);
+                grad.addColorStop(0.5, `hsla(${neb.hue}, 50%, 10%, ${neb.alpha * 0.5})`);
+                grad.addColorStop(1, 'hsla(220, 50%, 5%, 0)');
+                ctx.fillStyle = grad; ctx.fillRect(neb.x - neb.radius, neb.y - neb.radius, neb.radius * 2, neb.radius * 2);
+            }
+            for (const star of stars) {
+                star.twinkle += star.speed;
+                const ta = star.baseAlpha * (0.5 + 0.5 * Math.sin(star.twinkle));
+                star.x += (baseWindX + gustX) * 0.008 * star.depth;
+                star.y += (baseWindY + gustY) * 0.008 * star.depth;
+                if (star.x < 0) star.x += width; if (star.x > width) star.x -= width;
+                if (star.y < 0) star.y += height; if (star.y > height) star.y -= height;
+                ctx.beginPath(); ctx.arc(star.x, star.y, star.size * (0.5 + star.depth * 0.5), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${180 + star.depth * 40}, ${200 + star.depth * 30}, 255, ${ta})`; ctx.fill();
+            }
+        }
+
+        // ===================== 连线 =====================
+        function drawConnections() {
+            const maxDist = currentMode === 'open' ? 90 : 70;
+            const limit = Math.min(particles.length, 350);
+            const cc = currentMode === 'open' ? [0, 255, 200] : [255, 100, 50];
+            for (let i = 0; i < limit; i++) {
+                for (let j = i + 1; j < limit; j++) {
+                    const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y, dist = Math.hypot(dx, dy);
+                    if (dist < maxDist) {
+                        const a = (1 - dist / maxDist) * 0.18;
+                        ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(${cc[0]}, ${cc[1]}, ${cc[2]}, ${a})`; ctx.lineWidth = 0.5; ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // ===================== 手势图标 =====================
+        function drawHandIcon(x, y, size, alpha) {
+            ctx.save(); ctx.translate(x, y); ctx.globalAlpha = alpha;
+            ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(0,255,200,0.4)';
+            ctx.beginPath(); ctx.ellipse(0, 2, size * 0.5, size * 0.55, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,255,200,0.15)'; ctx.fill();
+            ctx.strokeStyle = 'rgba(0,255,200,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+            const fx = [-size * 0.32, -size * 0.15, 0, size * 0.15, size * 0.32];
+            const fl = [size * 0.45, size * 0.65, size * 0.7, size * 0.6, size * 0.45];
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath(); ctx.ellipse(fx[i], -fl[i] * 0.6, size * 0.1, fl[i] * 0.5, 0, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0,255,200,0.12)'; ctx.fill();
+                ctx.strokeStyle = 'rgba(0,255,200,0.35)'; ctx.lineWidth = 0.5; ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawFistIcon(x, y, size, alpha) {
+            ctx.save(); ctx.translate(x, y); ctx.globalAlpha = alpha;
+            ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(255,100,50,0.4)';
+            ctx.beginPath(); ctx.arc(0, 0, size * 1.3, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,100,50,0.25)'; ctx.lineWidth = 1; ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,100,50,0.55)'; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,100,50,0.15)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,100,50,0.4)'; ctx.lineWidth = 1; ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size * 0.2, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,160,80,0.7)'; ctx.fill();
+            const cl = size * 0.35;
+            ctx.beginPath(); ctx.moveTo(-cl, 0); ctx.lineTo(cl, 0); ctx.moveTo(0, -cl); ctx.lineTo(0, cl);
+            ctx.strokeStyle = 'rgba(255,100,50,0.3)'; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.restore();
+        }
+
+        function updateGhosts() {
+            if (handDetected && handPosition) ghostTrails.push({ x: handPosition.x, y: handPosition.y, mode: currentMode });
+            const maxG = parseInt(ghostSlider.value);
+            while (ghostTrails.length > maxG) ghostTrails.shift();
+        }
+        function drawGhosts() {
+            for (let i = 0; i < ghostTrails.length; i++) {
+                const g = ghostTrails[i], a = (i / Math.max(1, ghostTrails.length)) * 0.18, s = 10 + (i / Math.max(1, ghostTrails.length)) * 6;
+                if (g.mode === 'open') drawHandIcon(g.x, g.y, s, a); else drawFistIcon(g.x, g.y, s, a);
+            }
+        }
+
+        // ===================== 风向罗盘 =====================
+        function drawWindCompass() {
+            if (currentMode !== 'fist' && Math.hypot(baseWindX + gustX, baseWindY + gustY) < 0.5) return;
+            const cx = width - 80, cy = height - 80;
+            ctx.beginPath(); ctx.arc(cx, cy, 45, 0, Math.PI * 2);
+            ctx.strokeStyle = currentMode === 'open' ? 'rgba(0,255,200,0.12)' : 'rgba(255,100,50,0.12)'; ctx.lineWidth = 1; ctx.stroke();
+            if (currentMode === 'open') {
+                const wm = Math.hypot(baseWindX + gustX, baseWindY + gustY), wd = Math.atan2(baseWindY + gustY, baseWindX + gustX);
+                const al = Math.min(40, wm * 7), ex = cx + Math.cos(wd) * al, ey = cy + Math.sin(wd) * al;
+                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey);
+                ctx.strokeStyle = `rgba(0,255,200,${0.25 + Math.min(0.6, wm * 0.08)})`; ctx.lineWidth = 2; ctx.stroke();
+                const hl = 8;
+                ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - hl * Math.cos(wd - 0.5), ey - hl * Math.sin(wd - 0.5));
+                ctx.moveTo(ex, ey); ctx.lineTo(ex - hl * Math.cos(wd + 0.5), ey - hl * Math.sin(wd + 0.5));
+                ctx.strokeStyle = `rgba(0,255,200,${0.25 + Math.min(0.6, wm * 0.08)})`; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = 'rgba(0,255,200,0.35)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('太阳风', cx, cy + 66);
+            } else {
+                const intensity = Math.min(1, vortexStrength * 0.3);
+                ctx.beginPath(); ctx.arc(cx, cy, 18 + intensity * 22, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255,100,50,${0.15 + intensity * 0.25})`; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = `rgba(255,100,50,${0.25 + intensity * 0.35})`; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('漩涡强度', cx, cy + 66);
+            }
+        }
+
+        function drawVortexEffect() {
+            if (currentMode !== 'fist') return;
+            vortexRotation += 0.03 * vortexStrength;
+            for (let l = 0; l < 4; l++) {
+                const br = 25 + l * 20, r = br + Math.sin(time * 2 + l) * 5, rd = l % 2 === 0 ? 1 : -1;
+                const rot = vortexRotation * (0.6 + l * 0.2) * rd;
+                ctx.beginPath(); ctx.arc(vortexX, vortexY, r, rot, rot + Math.PI * 1.2);
+                ctx.strokeStyle = `rgba(255,${60 + l * 50},${20 + l * 20},${(0.18 - l * 0.03) * Math.min(1, vortexStrength * 0.3)})`;
+                ctx.lineWidth = 2 + l * 0.5; ctx.stroke();
+            }
+            const dg = ctx.createRadialGradient(vortexX, vortexY, 0, vortexX, vortexY, 30);
+            dg.addColorStop(0, `rgba(255,240,180,${0.6 * Math.min(1, vortexStrength * 0.3)})`);
+            dg.addColorStop(0.3, `rgba(255,120,40,${0.3 * Math.min(1, vortexStrength * 0.3)})`);
+            dg.addColorStop(1, 'rgba(255,50,0,0)');
+            ctx.beginPath(); ctx.arc(vortexX, vortexY, 30, 0, Math.PI * 2); ctx.fillStyle = dg; ctx.fill();
+            const pulse = 6 + Math.sin(time * 4) * 3 + vortexStrength * 2;
+            ctx.beginPath(); ctx.arc(vortexX, vortexY, Math.max(2, pulse), 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,230,180,${0.7 + Math.sin(time * 6) * 0.3})`; ctx.fill();
+            if (Math.random() < 0.02 * vortexStrength) {
+                ctx.beginPath(); ctx.arc(vortexX, vortexY, 40 + Math.random() * 20, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255,200,100,${0.3 + Math.random() * 0.2})`; ctx.lineWidth = 1; ctx.stroke();
+            }
+        }
+
+        function drawSolarWindEffect() {
+            if (currentMode !== 'open') return;
+            const wm = Math.hypot(baseWindX + gustX, baseWindY + gustY);
+            if (wm < 1 || !handPosition) return;
+            const wd = Math.atan2(baseWindY + gustY, baseWindX + gustX);
+            const sc = Math.min(4, Math.floor(wm));
+            for (let i = 0; i < sc; i++) {
+                const off = (i - sc / 2) * 28;
+                const sx = handPosition.x + Math.cos(wd + Math.PI / 2) * off, sy = handPosition.y + Math.sin(wd + Math.PI / 2) * off;
+                ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + Math.cos(wd) * (25 + wm * 4), sy + Math.sin(wd) * (25 + wm * 4));
+                ctx.strokeStyle = `rgba(0,255,200,${0.08 + wm * 0.015})`; ctx.lineWidth = 1; ctx.stroke();
+            }
+        }
+
+        // ===================== 主循环 =====================
+        function animate() {
+            if (appMode === 'publish') { animationId = requestAnimationFrame(animate); return; }
+            time += 0.016;
+            windAngle += 0.002;
+            baseWindX = Math.cos(windAngle) * 0.4 + Math.sin(time * 0.1) * 0.2;
+            baseWindY = Math.sin(windAngle * 0.7) * 0.3 + Math.cos(time * 0.15) * 0.15;
+            gustX *= 0.94; gustY *= 0.94;
+            vortexStrength *= 0.97; if (vortexStrength < 1) vortexStrength = 1;
+            forceMultiplier = parseInt(speedSlider.value) / 100;
+
+            drawBackground();
+            updateGhosts();
+            updateFloatingCards();
+            updateFocus();
+
+            const targetCount = parseInt(particleSlider.value);
+            while (particles.length < targetCount) particles.push(new Particle(currentMode, width, height));
+            if (particles.length > targetCount + 50) particles.splice(0, particles.length - targetCount);
+            if (Math.random() < 0.03) { const idx = Math.floor(Math.random() * particles.length); particles[idx].reset(currentMode, width, height); }
+
+            for (let i = particles.length - 1; i >= 0; i--) { particles[i].update(width, height); particles[i].draw(ctx); }
+
+            drawConnections();
+            drawFloatingCards();
+            drawFocusedCard();
+            drawGhosts();
+            drawVortexEffect();
+            drawSolarWindEffect();
+            drawWindCompass();
+
+            if (handDetected && handPosition) {
+                if (currentMode === 'open') { const p = 8 + Math.sin(time * 3) * 3; drawHandIcon(handPosition.x, handPosition.y, p * 0.6, 0.6); }
+                else { const p = 10 + Math.sin(time * 3) * 3; drawFistIcon(handPosition.x, handPosition.y, p * 0.5, 0.7); }
+            }
+
+            particleCountText.textContent = particles.length;
+            const wm = Math.hypot(baseWindX + gustX, baseWindY + gustY).toFixed(1);
+            windText.textContent = currentMode === 'open' ? `${wm}` : `${vortexStrength.toFixed(1)}`;
+
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // ===================== 手势检测 =====================
+        function detectGesture(landmarks) {
+            const wrist = landmarks[0];
+            const tips = [8, 12, 16, 20], bases = [5, 9, 13, 17];
+            let ec = 0;
+            for (let i = 0; i < tips.length; i++) {
+                const td = Math.hypot(landmarks[tips[i]].x - wrist.x, landmarks[tips[i]].y - wrist.y);
+                const bd = Math.hypot(landmarks[bases[i]].x - wrist.x, landmarks[bases[i]].y - wrist.y);
+                if (td > bd * 1.15) ec++;
+            }
+            const ttd = Math.hypot(landmarks[4].x - wrist.x, landmarks[4].y - wrist.y);
+            const tbd = Math.hypot(landmarks[2].x - wrist.x, landmarks[2].y - wrist.y);
+            if (ttd > tbd * 1.15) ec++;
+            return ec >= 3 ? 'open' : 'fist';
+        }
+
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                handDetected = true;
+                let cx = 0, cy = 0;
+                for (const idx of [0, 5, 9, 13, 17]) { cx += landmarks[idx].x; cy += landmarks[idx].y; }
+                cx /= 5; cy /= 5;
+                const newX = (1 - cx) * width, newY = cy * height;
+                if (handPosition) { handVelocityX = newX - handPosition.x; handVelocityY = newY - handPosition.y; }
+                handPosition = { x: newX, y: newY };
+                const speed = Math.hypot(handVelocityX, handVelocityY);
+                if (speed > 2 && currentMode === 'open') { gustX += handVelocityX * 0.35; gustY += handVelocityY * 0.35; }
+                if (currentMode === 'fist') { vortexX += (newX - vortexX) * 0.1; vortexY += (newY - vortexY) * 0.1; vortexStrength += speed * 0.05; if (vortexStrength > 8) vortexStrength = 8; }
+                const gesture = detectGesture(landmarks);
+                if (gesture === lastGesture) { gestureSmoothCount++; } else { gestureSmoothCount = 0; lastGesture = gesture; }
+                if (gestureSmoothCount >= 3) currentMode = gesture;
+                gestureText.textContent = currentMode === 'open' ? '手掌伸展' : '握拳';
+                gestureText.className = currentMode === 'open' ? 'gesture-open' : 'gesture-fist';
+                statusText.textContent = '检测中';
+            } else {
+                handDetected = false; handPosition = null;
+                gestureText.textContent = '-'; gestureText.className = 'gesture-none';
+                statusText.textContent = '未检测到手';
+            }
+        }
+
+        // ===================== MediaPipe =====================
+        async function initMediaPipe() {
+            return new Promise((resolve, reject) => {
+                try {
+                    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+                    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                    hands.onResults(onResults);
+                    resolve();
+                } catch (err) { reject(err); }
+            });
+        }
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+                video.srcObject = stream;
+                await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadeddata = r; });
+                async function processFrame() {
+                    if (video.readyState >= 2 && hands) {
+                        try { await hands.send({ image: video }); } catch (e) {}
+                    }
+                    frameId = requestAnimationFrame(processFrame);
+                }
+                processFrame();
+                mediaPipeReady = true;
+                initAudio();
+                initFloatingCards();
+                showToast('手势识别已就绪，开始体验吧！', 2500);
+                statusText.textContent = '运行中';
+                loadingScreen.classList.remove('active');
+                startScreen.style.opacity = '0';
+                setTimeout(() => { startScreen.style.display = 'none'; }, 500);
+                modeBar.style.display = 'flex';
+                animate();
+            } catch (err) {
+                statusText.textContent = '摄像头错误';
+                loadingScreen.classList.remove('active');
+                alert('无法访问摄像头，请确保已授予摄像头权限。');
+            }
+        }
+
+        // ===================== 发布模式 =====================
+        function buildPublishUI() {
+            const imgGrid = document.getElementById('img-grid');
+            const textGrid = document.getElementById('text-grid');
+            imgGrid.innerHTML = ''; textGrid.innerHTML = '';
+            for (let i = 0; i < imageLibrary.length; i++) {
+                const card = document.createElement('div');
+                card.className = 'img-card'; card.dataset.idx = i;
+                const cvs = imageLibrary[i].canvas;
+                const thumb = document.createElement('canvas'); thumb.width = 200; thumb.height = 150;
+                thumb.getContext('2d').drawImage(cvs, 0, 0, thumb.width, thumb.height);
+                card.appendChild(thumb);
+                const label = document.createElement('div'); label.className = 'card-label'; label.textContent = imageLibrary[i].label;
+                card.appendChild(label);
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.img-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                    selectedImageIdx = i;
+                });
+                imgGrid.appendChild(card);
+            }
+            for (let i = 0; i < textLibrary.length; i++) {
+                const card = document.createElement('div');
+                card.className = 'text-card'; card.dataset.idx = i;
+                card.textContent = textLibrary[i].text;
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.text-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                    selectedTextIdx = i;
+                });
+                textGrid.appendChild(card);
+            }
+        }
+
+        function switchMode(mode) {
+            appMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            if (mode === 'publish') {
+                publishPanel.style.display = 'flex';
+                controlPanel.style.display = 'none';
+                document.getElementById('status-bar').style.display = 'none';
+                musicIndicator.style.display = 'none';
+                stopMusic();
+                buildPublishUI();
+            } else {
+                publishPanel.style.display = 'none';
+                document.getElementById('status-bar').style.display = 'block';
+                if (musicActive) musicIndicator.style.display = 'flex';
+                if (focusedCardIdx >= 0) {
+                    playMusic(imageLibrary[floatingCards[focusedCardIdx].imgIdx].mood);
+                }
+            }
+        }
+
+        // ===================== 事件绑定 =====================
+        startBtn.addEventListener('click', async () => {
+            loadingScreen.classList.add('active');
+            try {
+                initImageLibrary();
+                await initMediaPipe();
+                await startCamera();
+            } catch (err) {
+                console.error('初始化失败:', err);
+                loadingScreen.classList.remove('active');
+                alert('初始化失败，请检查网络连接。');
+            }
+        });
+
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+        });
+
+        particleSlider.addEventListener('input', () => { particleVal.textContent = particleSlider.value; });
+        trailSlider.addEventListener('input', () => { trailVal.textContent = trailSlider.value; });
+        speedSlider.addEventListener('input', () => { speedVal.textContent = speedSlider.value + '%'; });
+        ghostSlider.addEventListener('input', () => { ghostVal.textContent = ghostSlider.value; });
+        showVideoCheck.addEventListener('change', () => { videoContainer.classList.toggle('hidden', !showVideoCheck.checked); });
+        document.getElementById('toggle-control-panel').addEventListener('change', () => {
+            controlPanel.style.display = document.getElementById('toggle-control-panel').checked ? 'block' : 'none';
+        });
+
+        document.getElementById('upload-btn').addEventListener('click', () => { document.getElementById('upload-input').click(); });
+        document.getElementById('upload-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                customImage = ev.target.result;
+                selectedImageIdx = -1;
+                document.querySelectorAll('.img-card').forEach(c => c.classList.remove('selected'));
+                const preview = document.getElementById('preview-area');
+                preview.style.display = 'block';
+                document.getElementById('preview-img').src = customImage;
+                document.getElementById('preview-text').textContent = selectedTextIdx >= 0 ? textLibrary[selectedTextIdx].text : document.getElementById('custom-text').value || '';
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('custom-text').addEventListener('input', () => {
+            selectedTextIdx = -1;
+            document.querySelectorAll('.text-card').forEach(c => c.classList.remove('selected'));
+        });
+
+        document.getElementById('publish-btn').addEventListener('click', () => {
+            let imgSrc = customImage;
+            if (!imgSrc && selectedImageIdx >= 0) {
+                imgSrc = imageLibrary[selectedImageIdx].canvas.toDataURL();
+            }
+            if (!imgSrc) { showToast('请先选择或上传一张图片'); return; }
+            let text = document.getElementById('custom-text').value;
+            if (!text && selectedTextIdx >= 0) {
+                text = textLibrary[selectedTextIdx].text;
+            }
+            const preview = document.getElementById('preview-area');
+            preview.style.display = 'block';
+            document.getElementById('preview-img').src = imgSrc;
+            document.getElementById('preview-text').textContent = text || '未填写文案';
+            showToast('发布成功！');
+            setTimeout(() => { switchMode('roam'); }, 1500);
+        });
+        document.getElementById('cancel-btn').addEventListener('click', () => {
+            switchMode('roam');
+        });
+    </script>
+</body>
+</html>

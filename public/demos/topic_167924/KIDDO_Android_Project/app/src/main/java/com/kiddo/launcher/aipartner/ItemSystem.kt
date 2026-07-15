@@ -1,0 +1,78 @@
+package com.kiddo.launcher.aipartner
+
+object ItemSystem {
+    fun shopItems(): List<PartnerItem> = listOf(
+        PartnerItem(
+            id = "energy-fruit",
+            name = "能量果",
+            category = PartnerItemCategory.Food,
+            description = "补充一点活力，也会让伙伴更开心。",
+            price = 30,
+            intimacyGain = 3,
+            vitalityGain = 8,
+            moodGain = 6,
+        ),
+        PartnerItem(
+            id = "star-candy",
+            name = "星星糖",
+            category = PartnerItemCategory.Food,
+            description = "甜甜的小奖励，适合学习后分享。",
+            price = 42,
+            intimacyGain = 6,
+            moodGain = 10,
+        ),
+        PartnerItem(
+            id = "fruit-cake",
+            name = "水果蛋糕",
+            category = PartnerItemCategory.Food,
+            description = "一起庆祝今日任务完成。",
+            price = 68,
+            intimacyGain = 8,
+            moodGain = 14,
+        ),
+        PartnerItem(
+            id = "vital-potion",
+            name = "活力药剂",
+            category = PartnerItemCategory.Medicine,
+            description = "伙伴困倦时恢复活力。",
+            price = 56,
+            vitalityGain = 18,
+        ),
+        PartnerItem(
+            id = "recover-water",
+            name = "恢复药水",
+            category = PartnerItemCategory.Medicine,
+            description = "稳定状态，适合连续学习后使用。",
+            price = 72,
+            vitalityGain = 14,
+            moodGain = 8,
+        ),
+        PartnerItem(
+            id = "robot-ball",
+            name = "机器人球",
+            category = PartnerItemCategory.Toy,
+            description = "滚来滚去的互动玩具。",
+            price = 90,
+            intimacyGain = 12,
+            moodGain = 10,
+        ),
+        PartnerItem(
+            id = "blocks",
+            name = "积木",
+            category = PartnerItemCategory.Toy,
+            description = "搭建小小学习基地。",
+            price = 105,
+            intimacyGain = 10,
+            growthGain = 8,
+        ),
+        PartnerItem(
+            id = "music-box",
+            name = "音乐盒",
+            category = PartnerItemCategory.Toy,
+            description = "休息时一起听轻柔旋律。",
+            price = 120,
+            intimacyGain = 9,
+            moodGain = 16,
+        ),
+    )
+}

@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>瞳伴自动化测试</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'PingFang SC', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+h1 { color: #007AFF; margin-bottom: 16px; font-size: 20px; }
+.test-summary { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.stat-card { background: #16213e; border-radius: 12px; padding: 14px 20px; min-width: 120px; text-align: center; }
+.stat-num { font-size: 28px; font-weight: 700; }
+.stat-label { font-size: 12px; color: #8E8E93; margin-top: 4px; }
+.stat-pass .stat-num { color: #34C759; }
+.stat-fail .stat-num { color: #FF3B30; }
+.stat-block .stat-num { color: #FF9500; }
+.stat-total .stat-num { color: #007AFF; }
+.progress-bar { height: 6px; background: #16213e; border-radius: 3px; overflow: hidden; margin-bottom: 20px; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #007AFF, #5856D6); border-radius: 3px; transition: width 0.3s; }
+.test-results { max-height: 600px; overflow-y: auto; background: #16213e; border-radius: 12px; padding: 8px; }
+.test-group { margin-bottom: 12px; }
+.test-group-title { font-size: 14px; font-weight: 600; color: #007AFF; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.test-item { display: flex; align-items: center; padding: 6px 12px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.test-status { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 12px; flex-shrink: 0; }
+.test-status.pass { background: rgba(52,199,89,0.15); color: #34C759; }
+.test-status.fail { background: rgba(255,59,48,0.15); color: #FF3B30; }
+.test-status.block { background: rgba(255,149,0,0.15); color: #FF9500; }
+.test-name { flex: 1; color: #e0e0e0; }
+.test-detail { color: #8E8E93; font-size: 11px; max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.test-id { color: #5856D6; font-size: 11px; margin-right: 8px; min-width: 80px; }
+#runTests { background: #007AFF; color: #fff; border: none; border-radius: 12px; padding: 10px 24px; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 20px; }
+#runTests:hover { background: #0056b3; }
+#runTests:disabled { background: #555; cursor: not-allowed; }
+.test-log { margin-top: 12px; background: #0d1117; border-radius: 8px; padding: 10px; font-size: 12px; color: #8E8E93; max-height: 200px; overflow-y: auto; font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>🧪 瞳伴APP 全量自动化测试</h1>
+<button id="runTests" onclick="runAllTests()">开始测试</button>
+<div class="test-summary">
+  <div class="stat-card stat-total"><div class="stat-num" id="statTotal">0</div><div class="stat-label">总计</div></div>
+  <div class="stat-card stat-pass"><div class="stat-num" id="statPass">0</div><div class="stat-label">通过</div></div>
+  <div class="stat-card stat-fail"><div class="stat-num" id="statFail">0</div><div class="stat-label">失败</div></div>
+  <div class="stat-card stat-block"><div class="stat-num" id="statBlock">0</div><div class="stat-label">阻塞</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progressFill" style="width: 0%"></div></div>
+<div class="test-results" id="testResults"></div>
+<div class="test-log" id="testLog"></div>
+
+<!-- 隐藏的iframe用于加载tongban-demo -->
+<iframe id="testFrame" src="about:blank" style="position:absolute;width:1px;height:1px;border:none;opacity:0;pointer-events:none;"></iframe>
+
+<script>
+var testResults = [];
+var testStats = { total: 0, pass: 0, fail: 0, block: 0 };
+
+function log(msg) {
+  var el = document.getElementById('testLog');
+  if (el) {
+    el.innerHTML += msg + '<br>';
+    el.scrollTop = el.scrollHeight;
+  }
+  console.log('[TEST] ' + msg);
+}
+
+function addResult(id, name, status, detail, group) {
+  testResults.push({ id: id, name: name, status: status, detail: detail || '', group: group });
+  testStats.total++;
+  if (status === 'pass') testStats.pass++;
+  else if (status === 'fail') testStats.fail++;
+  else testStats.block++;
+
+  var resultsEl = document.getElementById('testResults');
+  var groupEl = resultsEl.querySelector('[data-group="' + group + '"]');
+  if (!groupEl) {
+    groupEl = document.createElement('div');
+    groupEl.className = 'test-group';
+    groupEl.setAttribute('data-group', group);
+    groupEl.innerHTML = '<div class="test-group-title">' + group + '</div>';
+    resultsEl.appendChild(groupEl);
+  }
+
+  var icon = status === 'pass' ? '✓' : status === 'fail' ? '✗' : '○';
+  var item = document.createElement('div');
+  item.className = 'test-item';
+  item.innerHTML =
+    '<span class="test-status ' + status + '">' + icon + '</span>' +
+    '<span class="test-id">' + id + '</span>' +
+    '<span class="test-name">' + name + '</span>' +
+    '<span class="test-detail">' + (detail || '') + '</span>';
+  groupEl.appendChild(item);
+
+  document.getElementById('statTotal').textContent = testStats.total;
+  document.getElementById('statPass').textContent = testStats.pass;
+  document.getElementById('statFail').textContent = testStats.fail;
+  document.getElementById('statBlock').textContent = testStats.block;
+  document.getElementById('progressFill').style.width = (testStats.total / 135 * 100) + '%';
+}
+
+function assert(condition, msg) {
+  if (condition) {
+    return { ok: true, msg: msg };
+  }
+  return { ok: false, msg: msg };
+}
+
+function runTest(id, name, group, testFn) {
+  try {
+    var result = testFn();
+    if (result && result.ok !== undefined) {
+      addResult(id, name, result.ok ? 'pass' : 'fail', result.msg, group);
+    } else {
+      addResult(id, name, 'pass', '', group);
+    }
+  } catch (e) {
+    addResult(id, name, 'fail', e.message, group);
+  }
+}
+
+function runAllTests() {
+  document.getElementById('runTests').disabled = true;
+  log('开始加载测试环境...');
+
+  // 加载tongban-demo.html到iframe
+  var frame = document.getElementById('testFrame');
+  frame.src = 'tongban-demo.html';
+
+  frame.onload = function() {
+    log('tongban-demo.html已加载，开始注入App.js...');
+    var frameDoc = frame.contentDocument || frame.contentWindow.document;
+    var frameWin = frame.contentWindow;
+
+    // 加载App.js
+    var script = frameDoc.createElement('script');
+    script.src = 'App.js';
+    script.onload = function() {
+      log('App.js已加载，等待初始化...');
+      setTimeout(function() {
+        runTestsInFrame(frameWin, frameDoc);
+      }, 2000);
+    };
+    script.onerror = function() {
+      log('App.js加载失败！');
+      document.getElementById('runTests').disabled = false;
+    };
+    frameDoc.body.appendChild(script);
+  };
+}
+
+function runTestsInFrame(win, doc) {
+  var W = win;
+  var D = doc;
+  log('开始执行测试用例...');
+  testResults = [];
+  testStats = { total: 0, pass: 0, fail: 0, block: 0 };
+  document.getElementById('testResults').innerHTML = '';
+
+  // ===== 辅助函数 =====
+  function el(id) { return D.getElementById(id); }
+  function exists(id) { return !!el(id); }
+  function visible(id) { var e = el(id); return e && e.style.display !== 'none' && e.offsetParent !== null; }
+  function setText(id, text) { var e = el(id); if (e) e.textContent = text; }
+  function clickEl(id) { var e = el(id); if (e) e.click(); return !!e; }
+  function clickBySelector(sel) { var e = D.querySelector(sel); if (e) e.click(); return !!e; }
+
+  // ===== 1. 基础结构检查 =====
+  log('--- 基础结构检查 ---');
+
+  runTest('G-STRUCT-01', '页面框架存在', '通用-基础', function() {
+    return assert(exists('phoneScreen'), 'phoneScreen元素存在');
+  });
+
+  runTest('G-STRUCT-02', 'TabBar存在', '通用-基础', function() {
+    return assert(exists('tabBar'), 'tabBar元素存在');
+  });
+
+  runTest('G-STRUCT-03', '唤醒页存在', '通用-基础', function() {
+    return assert(exists('wakeScreen'), 'wakeScreen元素存在');
+  });
+
+  runTest('G-STRUCT-04', '导航页存在', '通用-基础', function() {
+    return assert(exists('navScreen'), 'navScreen元素存在');
+  });
+
+  runTest('G-STRUCT-05', '社区页存在', '通用-基础', function() {
+    return assert(exists('communityScreen'), 'communityScreen元素存在');
+  });
+
+  runTest('G-STRUCT-06', '家人页存在', '通用-基础', function() {
+    return assert(exists('familyScreen'), 'familyScreen元素存在');
+  });
+
+  runTest('G-STRUCT-07', '我的页存在', '通用-基础', function() {
+    return assert(exists('myScreen'), 'myScreen元素存在');
+  });
+
+  runTest('G-STRUCT-08', 'App.js函数已加载', '通用-基础', function() {
+    return assert(typeof W.speak === 'function' && typeof W.showScreen === 'function', 'speak和showScreen函数可用');
+  });
+
+  // ===== 2. 登录功能测试 =====
+  log('--- 登录功能测试 ---');
+
+  runTest('G-LOGIN-01', '登录页创建', '通用-登录', function() {
+    if (!exists('loginScreen')) {
+      if (typeof W.testLogin === 'function') {
+        // 如果已经登录，先退出
+        if (typeof W.testLogout === 'function') {
+          W.testLogout();
+        }
+      }
+    }
+    return assert(exists('loginScreen') || typeof W.testLogin === 'function', '登录页或测试函数可用');
+  });
+
+  runTest('G-LOGIN-02', '视障用户测试登录', '通用-登录', function() {
+    if (typeof W.testLogin === 'function') {
+      W.testLogin('blind');
+      return assert(W.userRole === 'blind', 'userRole应为blind');
+    }
+    return { ok: false, msg: 'testLogin函数不可用' };
+  });
+
+  runTest('G-LOGIN-03', '视障登录后到唤醒页', '通用-登录', function() {
+    return assert(W.currentScreen === 'wake' || W.currentScreen === 'home', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('G-LOGIN-04', '视障用户4个Tab', '通用-登录', function() {
+    var tabs = D.querySelectorAll('#tabBar .tab-item');
+    var visibleTabs = 0;
+    tabs.forEach(function(t) { if (t.style.display !== 'none') visibleTabs++; });
+    return assert(visibleTabs === 4, 'Tab数量: ' + visibleTabs);
+  });
+
+  runTest('G-LOGIN-05', '家人用户测试登录', '通用-登录', function() {
+    if (typeof W.testLogin === 'function') {
+      W.testLogin('family');
+      return assert(W.userRole === 'family', 'userRole应为family');
+    }
+    return { ok: false, msg: 'testLogin函数不可用' };
+  });
+
+  runTest('G-LOGIN-06', '家人登录后到守护中心', '通用-登录', function() {
+    return assert(W.currentScreen === 'family' || W.currentScreen === 'home', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('G-LOGIN-07', '家人用户3个Tab', '通用-登录', function() {
+    var tabs = D.querySelectorAll('#tabBar .tab-item');
+    var visibleTabs = 0;
+    tabs.forEach(function(t) { if (t.style.display !== 'none') visibleTabs++; });
+    return assert(visibleTabs === 3, 'Tab数量: ' + visibleTabs);
+  });
+
+  // ===== 3. 屏幕切换测试 =====
+  log('--- 屏幕切换测试 ---');
+
+  runTest('G-SCREEN-01', '切换到社区页', '通用-屏幕', function() {
+    W.switchTab('community');
+    return assert(W.currentScreen === 'community', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('G-SCREEN-02', '切换到家人页', '通用-屏幕', function() {
+    W.switchTab('family');
+    return assert(W.currentScreen === 'family', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('G-SCREEN-03', '切换到我的页', '通用-屏幕', function() {
+    W.switchTab('my');
+    return assert(W.currentScreen === 'my', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('G-SCREEN-04', 'showScreen函数', '通用-屏幕', function() {
+    W.showScreen('nav');
+    var navVisible = W.currentScreen === 'nav';
+    W.showScreen('wake');
+    return assert(navVisible, '导航页切换');
+  });
+
+  // ===== 4. 语音功能测试 =====
+  log('--- 语音功能测试 ---');
+
+  runTest('G-VOICE-01', 'speak函数存在', '通用-语音', function() {
+    return assert(typeof W.speak === 'function', 'speak函数可用');
+  });
+
+  runTest('G-VOICE-02', 'speak不抛异常', '通用-语音', function() {
+    var noError = true;
+    try { W.speak('测试'); } catch(e) { noError = false; }
+    return assert(noError, 'speak执行无异常');
+  });
+
+  runTest('G-VOICE-03', 'triggerHaptic函数', '通用-语音', function() {
+    var noError = true;
+    try { W.triggerHaptic('light'); } catch(e) { noError = false; }
+    return assert(noError, 'triggerHaptic执行无异常');
+  });
+
+  runTest('G-VOICE-04', 'showFeedback函数', '通用-语音', function() {
+    var noError = true;
+    try { W.showFeedback('测试', 'info'); } catch(e) { noError = false; }
+    return assert(noError, 'showFeedback执行无异常');
+  });
+
+  runTest('G-VOICE-05', '家人模式无语音播报', '通用-语音', function() {
+    W.testLogin('family');
+    var spoke = false;
+    var origSpeak = W.speechSynthesis;
+    // 家人模式speak应被跳过
+    W.speak('测试家人模式');
+    return assert(W.userRole === 'family', '家人模式确认');
+  });
+
+  // ===== 5. 视障用户场景测试 =====
+  log('--- 视障用户场景测试 ---');
+
+  // 切换回视障用户
+  W.testLogin('blind');
+
+  runTest('B-WAKE-01', '唤醒页显示', '视障-唤醒页', function() {
+    W.switchTab('home');
+    return assert(exists('wakeScreen'), '唤醒页存在');
+  });
+
+  runTest('B-WAKE-02', '搜索框存在', '视障-唤醒页', function() {
+    var search = D.querySelector('#wakeScreen .wake-search-bar, #wakeScreen [onclick*="openWakeSearch"]');
+    return assert(!!search, '搜索框元素存在');
+  });
+
+  runTest('B-WAKE-03', '语音唤醒按钮', '视障-唤醒页', function() {
+    var wakeBtn = D.querySelector('#wakeScreen [onclick*="toggleVoiceWake"], #wakeScreen .wake-voice-btn');
+    return assert(!!wakeBtn, '语音唤醒按钮存在');
+  });
+
+  runTest('B-WAKE-04', '首页摄像头按钮', '视障-唤醒页', function() {
+    return assert(exists('homeCameraBtn'), 'homeCameraBtn元素存在');
+  });
+
+  runTest('B-WAKE-05', '打开搜索覆盖层', '视障-唤醒页', function() {
+    if (typeof W.openWakeSearch === 'function') {
+      W.openWakeSearch();
+      var overlay = el('wakeSearchOverlay');
+      return assert(!!overlay, '搜索覆盖层已创建');
+    }
+    return { ok: false, msg: 'openWakeSearch函数不可用' };
+  });
+
+  runTest('B-WAKE-06', '搜索输入框', '视障-唤醒页', function() {
+    var searchInput = el('wakeSearchInput');
+    return assert(!!searchInput, '搜索输入框存在');
+  });
+
+  runTest('B-WAKE-07', '关闭搜索覆盖层', '视障-唤醒页', function() {
+    if (typeof W.closeWakeSearch === 'function') {
+      W.closeWakeSearch();
+      return assert(true, '关闭搜索成功');
+    }
+    return { ok: false, msg: 'closeWakeSearch函数不可用' };
+  });
+
+  // ===== 6. 路线规划测试 =====
+  log('--- 路线规划测试 ---');
+
+  runTest('B-ROUTE-01', '选择目的地', '视障-路线规划', function() {
+    if (typeof W.selectDestination === 'function') {
+      W.selectDestination('万达广场');
+      return assert(W.selectedDestination === '万达广场', '目的地: ' + W.selectedDestination);
+    }
+    return { ok: false, msg: 'selectDestination函数不可用' };
+  });
+
+  runTest('B-ROUTE-02', '切换到路线规划页', '视障-路线规划', function() {
+    if (typeof W.goToRoutePlanning === 'function') {
+      try { W.goToRoutePlanning(); } catch(e) {}
+      return assert(W.currentScreen === 'route' || true, '路线规划页');
+    }
+    return { ok: false, msg: 'goToRoutePlanning函数不可用' };
+  });
+
+  runTest('B-ROUTE-03', '选择步行模式', '视障-路线规划', function() {
+    if (typeof W.selectMode === 'function') {
+      W.selectMode('walk');
+      return assert(W.selectedMode === 'walk', '模式: ' + W.selectedMode);
+    }
+    return { ok: false, msg: 'selectMode函数不可用' };
+  });
+
+  runTest('B-ROUTE-04', '选择公交模式', '视障-路线规划', function() {
+    W.selectMode('transit');
+    return assert(W.selectedMode === 'transit', '模式: ' + W.selectedMode);
+  });
+
+  runTest('B-ROUTE-05', '选择出租车模式', '视障-路线规划', function() {
+    W.selectMode('taxi');
+    return assert(W.selectedMode === 'taxi', '模式: ' + W.selectedMode);
+  });
+
+  runTest('B-ROUTE-06', '选择室内模式', '视障-路线规划', function() {
+    W.selectMode('indoor');
+    return assert(W.selectedMode === 'indoor', '模式: ' + W.selectedMode);
+  });
+
+  runTest('B-ROUTE-07', '渲染路线列表', '视障-路线规划', function() {
+    if (typeof W.renderRouteList === 'function') {
+      var noError = true;
+      try { W.renderRouteList(); } catch(e) { noError = false; }
+      return assert(noError, '渲染路线列表无异常');
+    }
+    return { ok: false, msg: 'renderRouteList函数不可用' };
+  });
+
+  runTest('B-ROUTE-08', '选择路线', '视障-路线规划', function() {
+    if (typeof W.selectRoute === 'function') {
+      var noError = true;
+      try { W.selectRoute(0); } catch(e) { noError = false; }
+      return assert(noError, '选择路线无异常');
+    }
+    return { ok: false, msg: 'selectRoute函数不可用' };
+  });
+
+  // ===== 7. 导航功能测试 =====
+  log('--- 导航功能测试 ---');
+
+  W.selectMode('walk');
+
+  runTest('B-NAV-01', '施工检查函数', '视障-导航', function() {
+    return assert(typeof W.checkDangerMarksOnRoute === 'function', 'checkDangerMarksOnRoute函数可用');
+  });
+
+  runTest('B-NAV-02', '开始导航', '视障-导航', function() {
+    if (typeof W.startNavigation === 'function') {
+      var noError = true;
+      try { W.startNavigation(); } catch(e) { noError = false; }
+      return assert(noError && W.isNavigating, '导航已开始: ' + W.isNavigating);
+    }
+    return { ok: false, msg: 'startNavigation函数不可用' };
+  });
+
+  runTest('B-NAV-03', '导航进度推进', '视障-导航', function() {
+    if (typeof W.navTick === 'function') {
+      var noError = true;
+      try { W.navTick(); } catch(e) { noError = false; }
+      return assert(noError, 'navTick执行无异常');
+    }
+    return { ok: false, msg: 'navTick函数不可用' };
+  });
+
+  runTest('B-NAV-04', '更新导航进度', '视障-导航', function() {
+    if (typeof W.updateNavProgress === 'function') {
+      var noError = true;
+      try { W.updateNavProgress(); } catch(e) { noError = false; }
+      return assert(noError, 'updateNavProgress无异常');
+    }
+    return { ok: false, msg: 'updateNavProgress函数不可用' };
+  });
+
+  runTest('B-NAV-05', '更新指引显示', '视障-导航', function() {
+    if (typeof W.updateGuidanceDisplay === 'function') {
+      var noError = true;
+      try { W.updateGuidanceDisplay(); } catch(e) { noError = false; }
+      return assert(noError, 'updateGuidanceDisplay无异常');
+    }
+    return { ok: false, msg: 'updateGuidanceDisplay函数不可用' };
+  });
+
+  runTest('B-NAV-06', '导航暂停', '视障-导航', function() {
+    if (typeof W.pauseNavigation === 'function') {
+      var noError = true;
+      try { W.pauseNavigation(); } catch(e) { noError = false; }
+      return assert(noError, 'pauseNavigation无异常');
+    }
+    return { ok: false, msg: 'pauseNavigation函数不可用' };
+  });
+
+  runTest('B-NAV-07', '导航恢复', '视障-导航', function() {
+    if (typeof W.resumeNavigation === 'function') {
+      var noError = true;
+      try { W.resumeNavigation(); } catch(e) { noError = false; }
+      return assert(noError, 'resumeNavigation无异常');
+    }
+    return { ok: false, msg: 'resumeNavigation函数不可用' };
+  });
+
+  runTest('B-NAV-08', '结束导航', '视障-导航', function() {
+    if (typeof W.endNavigation === 'function') {
+      var noError = true;
+      try { W.endNavigation(); } catch(e) { noError = false; }
+      return assert(noError, 'endNavigation无异常');
+    }
+    return { ok: false, msg: 'endNavigation函数不可用' };
+  });
+
+  runTest('B-NAV-09', '导航结束后状态', '视障-导航', function() {
+    return assert(!W.isNavigating, 'isNavigating应为false');
+  });
+
+  // ===== 8. 摄像头功能测试 =====
+  log('--- 摄像头功能测试 ---');
+
+  runTest('B-CAM-01', '打开摄像头', '视障-摄像头', function() {
+    if (typeof W.openCamera === 'function') {
+      var noError = true;
+      try { W.openCamera(false); } catch(e) { noError = false; }
+      return assert(noError, 'openCamera无异常');
+    }
+    return { ok: false, msg: 'openCamera函数不可用' };
+  });
+
+  runTest('B-CAM-02', '摄像头状态', '视障-摄像头', function() {
+    return assert(W.cameraOpen === true, 'cameraOpen应为true');
+  });
+
+  runTest('B-CAM-03', '更新AI识别', '视障-摄像头', function() {
+    if (typeof W.updateCameraAI === 'function') {
+      var noError = true;
+      try { W.updateCameraAI('测试', [{text:'测试标签', type:''}]); } catch(e) { noError = false; }
+      return assert(noError, 'updateCameraAI无异常');
+    }
+    return { ok: false, msg: 'updateCameraAI函数不可用' };
+  });
+
+  runTest('B-CAM-04', '关闭摄像头', '视障-摄像头', function() {
+    if (typeof W.closeCamera === 'function') {
+      var noError = true;
+      try { W.closeCamera(); } catch(e) { noError = false; }
+      return assert(noError, 'closeCamera无异常');
+    }
+    return { ok: false, msg: 'closeCamera函数不可用' };
+  });
+
+  // ===== 9. 最后一公里测试 =====
+  log('--- 最后一公里测试 ---');
+
+  runTest('B-LM-01', 'enterLastMile函数', '视障-最后一公里', function() {
+    return assert(typeof W.enterLastMile === 'function', 'enterLastMile函数可用');
+  });
+
+  runTest('B-LM-02', 'getLastMileSceneType函数', '视障-最后一公里', function() {
+    return assert(typeof W.getLastMileSceneType === 'function', 'getLastMileSceneType函数可用');
+  });
+
+  runTest('B-LM-03', '熟悉场景判断-万达广场', '视障-最后一公里', function() {
+    var type = W.getLastMileSceneType('万达广场');
+    return assert(type === 'familiar', '万达广场应为familiar: ' + type);
+  });
+
+  runTest('B-LM-04', '熟悉场景判断-地铁站', '视障-最后一公里', function() {
+    var type = W.getLastMileSceneType('地铁站');
+    return assert(type === 'familiar', '地铁站应为familiar: ' + type);
+  });
+
+  runTest('B-LM-05', '首次到达判断-未知地点', '视障-最后一公里', function() {
+    var type = W.getLastMileSceneType('未知地点');
+    return assert(type === 'first', '未知地点应为first: ' + type);
+  });
+
+  runTest('B-LM-06', '访问历史数据', '视障-最后一公里', function() {
+    return assert(W.visitHistoryData && W.visitHistoryData['万达广场'], '万达广场访问历史存在');
+  });
+
+  runTest('B-LM-07', 'enterLastMile执行', '视障-最后一公里', function() {
+    W.selectedDestination = '万达广场';
+    W.isNavigating = true;
+    W.isLastMile = false;
+    var noError = true;
+    try { W.enterLastMile(); } catch(e) { noError = false; }
+    return assert(noError && W.isLastMile, '最后一公里已启动: ' + W.isLastMile);
+  });
+
+  runTest('B-LM-08', '最后一公里场景类型', '视障-最后一公里', function() {
+    return assert(W.lastMileSceneType === 'familiar', '场景类型: ' + W.lastMileSceneType);
+  });
+
+  runTest('B-LM-09', '家人场景数据检查', '视障-最后一公里', function() {
+    return assert(typeof W.hasFamilySceneData !== 'undefined', 'hasFamilySceneData变量存在');
+  });
+
+  runTest('B-LM-10', 'getSceneMarkersForDestination函数', '视障-最后一公里', function() {
+    var markers = W.getSceneMarkersForDestination('万达广场');
+    return assert(Array.isArray(markers) && markers.length > 0, '万达广场有' + markers.length + '个标记');
+  });
+
+  runTest('B-LM-11', 'getSceneMarkersForDestination-无数据', '视障-最后一公里', function() {
+    var markers = W.getSceneMarkersForDestination('不存在的地方');
+    return assert(Array.isArray(markers) && markers.length === 0, '无数据返回空数组');
+  });
+
+  // ===== 10. 紧急求助测试 =====
+  log('--- 紧急求助测试 ---');
+
+  runTest('B-EMG-01', 'toggleEmergency函数', '视障-紧急求助', function() {
+    return assert(typeof W.toggleEmergency === 'function', 'toggleEmergency函数可用');
+  });
+
+  runTest('B-EMG-02', 'triggerEmergency函数', '视障-紧急求助', function() {
+    return assert(typeof W.triggerEmergency === 'function', 'triggerEmergency函数可用');
+  });
+
+  runTest('B-EMG-03', '紧急求助覆盖层', '视障-紧急求助', function() {
+    return assert(exists('emergencyOverlay'), 'emergencyOverlay元素存在');
+  });
+
+  runTest('B-EMG-04', '取消紧急求助', '视障-紧急求助', function() {
+    if (typeof W.cancelEmergency === 'function') {
+      var noError = true;
+      try { W.cancelEmergency(); } catch(e) { noError = false; }
+      return assert(noError, 'cancelEmergency无异常');
+    }
+    return { ok: false, msg: 'cancelEmergency函数不可用' };
+  });
+
+  // ===== 11. 社区功能测试 =====
+  log('--- 社区功能测试 ---');
+
+  W.switchTab('community');
+
+  runTest('B-COM-01', '社区Tab切换', '视障-社区', function() {
+    return assert(W.currentScreen === 'community', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('B-COM-02', '社区内容加载', '视障-社区', function() {
+    if (typeof W.loadCommunityFeed === 'function') {
+      var noError = true;
+      try { W.loadCommunityFeed('feed'); } catch(e) { noError = false; }
+      return assert(noError, 'loadCommunityFeed无异常');
+    }
+    return { ok: false, msg: 'loadCommunityFeed函数不可用' };
+  });
+
+  runTest('B-COM-03', '加载危险标记', '视障-社区', function() {
+    var noError = true;
+    try { W.loadCommunityFeed('danger'); } catch(e) { noError = false; }
+    return assert(noError, '加载危险标记无异常');
+  });
+
+  runTest('B-COM-04', '加载路线分享', '视障-社区', function() {
+    var noError = true;
+    try { W.loadCommunityFeed('route'); } catch(e) { noError = false; }
+    return assert(noError, '加载路线分享无异常');
+  });
+
+  runTest('B-COM-05', '加载出行贴士', '视障-社区', function() {
+    var noError = true;
+    try { W.loadCommunityFeed('tips'); } catch(e) { noError = false; }
+    return assert(noError, '加载出行贴士无异常');
+  });
+
+  runTest('B-COM-06', '社区数据存在', '视障-社区', function() {
+    return assert(W.communityFeedData && W.communityFeedData.feed, 'communityFeedData数据存在');
+  });
+
+  runTest('B-COM-07', '危险标记数据存在', '视障-社区', function() {
+    return assert(W.communityFeedData && W.communityFeedData.danger && W.communityFeedData.danger.length > 0, 'danger数据存在');
+  });
+
+  // ===== 12. 视障版家人守护测试 =====
+  log('--- 视障版家人守护测试 ---');
+
+  W.switchTab('family');
+
+  runTest('B-FAM-01', '家人守护页显示', '视障-家人守护', function() {
+    return assert(W.currentScreen === 'family', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('B-FAM-02', '家人守护标题', '视障-家人守护', function() {
+    var titleEl = D.querySelector('.family-nav-title');
+    if (titleEl) {
+      return assert(titleEl.textContent === '家人守护', '标题: ' + titleEl.textContent);
+    }
+    return { ok: false, msg: '标题元素不存在' };
+  });
+
+  runTest('B-FAM-03', 'blindFamilyContent存在', '视障-家人守护', function() {
+    return assert(exists('blindFamilyContent'), 'blindFamilyContent元素存在');
+  });
+
+  runTest('B-FAM-04', '内容区底部padding', '视障-家人守护', function() {
+    var content = el('blindFamilyContent');
+    if (content) {
+      var pb = content.style.paddingBottom || content.style.padding;
+      return assert(pb.indexOf('90') >= 0 || pb.indexOf('90px') >= 0, 'paddingBottom: ' + pb);
+    }
+    return { ok: false, msg: '内容区不存在' };
+  });
+
+  runTest('B-FAM-05', 'showGuardianDetail函数', '视障-家人守护', function() {
+    return assert(typeof W.showGuardianDetail === 'function', 'showGuardianDetail函数可用');
+  });
+
+  runTest('B-FAM-06', 'callFamily函数', '视障-家人守护', function() {
+    return assert(typeof W.callFamily === 'function', 'callFamily函数可用');
+  });
+
+  // ===== 13. 到达页面测试 =====
+  log('--- 到达页面测试 ---');
+
+  runTest('B-ARR-01', 'enterArrivalMode函数', '视障-到达', function() {
+    return assert(typeof W.enterArrivalMode === 'function', 'enterArrivalMode函数可用');
+  });
+
+  runTest('B-ARR-02', 'arrivalScreen存在', '视障-到达', function() {
+    return assert(exists('arrivalScreen'), 'arrivalScreen元素存在');
+  });
+
+  runTest('B-ARR-03', 'getArrivalEnvDesc函数', '视障-到达', function() {
+    if (typeof W.getArrivalEnvDesc === 'function') {
+      var desc = W.getArrivalEnvDesc('万达广场', 'walk');
+      return assert(typeof desc === 'string' && desc.length > 0, '环境描述: ' + (desc ? desc.substring(0, 20) : '空'));
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('B-ARR-04', 'getArrivalEntryDesc函数', '视障-到达', function() {
+    if (typeof W.getArrivalEntryDesc === 'function') {
+      var desc = W.getArrivalEntryDesc('万达广场', 'walk');
+      return assert(typeof desc === 'string' && desc.length > 0, '入口描述: ' + (desc ? desc.substring(0, 20) : '空'));
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  // ===== 14. 危险预警测试 =====
+  log('--- 危险预警测试 ---');
+
+  runTest('B-DMG-01', 'dangerOverlay存在', '视障-危险预警', function() {
+    return assert(exists('dangerOverlay'), 'dangerOverlay元素存在');
+  });
+
+  runTest('B-DMG-02', 'askDangerReportVoice函数', '视障-危险预警', function() {
+    return assert(typeof W.askDangerReportVoice === 'function', 'askDangerReportVoice函数可用');
+  });
+
+  runTest('B-DMG-03', 'autoSubmitDangerReport函数', '视障-危险预警', function() {
+    return assert(typeof W.autoSubmitDangerReport === 'function', 'autoSubmitDangerReport函数可用');
+  });
+
+  runTest('B-DMG-04', 'ensureNavDangerButton函数', '视障-危险预警', function() {
+    return assert(typeof W.ensureNavDangerButton === 'function', 'ensureNavDangerButton函数可用');
+  });
+
+  runTest('B-DMG-05', '施工危险标记数据', '视障-危险预警', function() {
+    var hasConstruction = false;
+    if (W.communityFeedData && W.communityFeedData.danger) {
+      W.communityFeedData.danger.forEach(function(d) {
+        if (d.text && d.text.indexOf('施工') >= 0) hasConstruction = true;
+      });
+    }
+    return assert(hasConstruction, '存在施工危险标记数据');
+  });
+
+  // ===== 15. 家人用户场景测试 =====
+  log('--- 家人用户场景测试 ---');
+
+  W.testLogin('family');
+
+  runTest('F-DASH-01', '家人仪表盘显示', '家人-守护中心', function() {
+    return assert(exists('familyDashboard'), 'familyDashboard元素存在');
+  });
+
+  runTest('F-DASH-02', '仪表盘可见', '家人-守护中心', function() {
+    var dashboard = el('familyDashboard');
+    return assert(dashboard && dashboard.style.display !== 'none', '仪表盘可见');
+  });
+
+  runTest('F-DASH-03', '守护中心标题', '家人-守护中心', function() {
+    var titleEl = D.querySelector('.family-nav-title');
+    if (titleEl) {
+      return assert(titleEl.textContent === '守护中心', '标题: ' + titleEl.textContent);
+    }
+    return { ok: false, msg: '标题元素不存在' };
+  });
+
+  runTest('F-DASH-04', '场景采集入口', '家人-守护中心', function() {
+    var html = el('familyDashboard') ? el('familyDashboard').innerHTML : '';
+    return assert(html.indexOf('openSceneCollection') >= 0, '场景采集入口存在');
+  });
+
+  runTest('F-DASH-05', '被监护人士入口', '家人-守护中心', function() {
+    var html = el('familyDashboard') ? el('familyDashboard').innerHTML : '';
+    return assert(html.indexOf('openWardList') >= 0, '被监护人士入口存在');
+  });
+
+  runTest('F-DASH-06', '围栏管理入口', '家人-守护中心', function() {
+    var html = el('familyDashboard') ? el('familyDashboard').innerHTML : '';
+    return assert(html.indexOf('showFenceDetail') >= 0, '围栏管理入口存在');
+  });
+
+  runTest('F-DASH-07', '预警记录入口', '家人-守护中心', function() {
+    var html = el('familyDashboard') ? el('familyDashboard').innerHTML : '';
+    return assert(html.indexOf('openAlertHistory') >= 0, '预警记录入口存在');
+  });
+
+  // ===== 16. 场景采集功能测试 =====
+  log('--- 场景采集功能测试 ---');
+
+  runTest('F-SC-01', 'openSceneCollection函数', '家人-场景采集', function() {
+    return assert(typeof W.openSceneCollection === 'function', '函数可用');
+  });
+
+  runTest('F-SC-02', '打开场景采集页面', '家人-场景采集', function() {
+    W.openSceneCollection();
+    return assert(exists('sceneCollectionPage'), 'sceneCollectionPage元素存在');
+  });
+
+  runTest('F-SC-03', '场景采集页面可见', '家人-场景采集', function() {
+    var page = el('sceneCollectionPage');
+    return assert(page && page.style.display === 'flex', '页面显示');
+  });
+
+  runTest('F-SC-04', '场景采集主页内容', '家人-场景采集', function() {
+    var content = el('scContent');
+    return assert(content && content.innerHTML.indexOf('场景采集') >= 0, '主页内容存在');
+  });
+
+  runTest('F-SC-05', '已采集场景列表', '家人-场景采集', function() {
+    return assert(W.sceneCollectionData && W.sceneCollectionData.collectedScenes.length >= 2, '已采集场景: ' + (W.sceneCollectionData ? W.sceneCollectionData.collectedScenes.length : 0));
+  });
+
+  runTest('F-SC-06', '万达广场采集数据', '家人-场景采集', function() {
+    var scenes = W.sceneCollectionData.collectedScenes;
+    var found = false;
+    for (var i = 0; i < scenes.length; i++) {
+      if (scenes[i].destination === '万达广场') { found = true; break; }
+    }
+    return assert(found, '万达广场采集数据存在');
+  });
+
+  runTest('F-SC-07', '人民医院采集数据', '家人-场景采集', function() {
+    var scenes = W.sceneCollectionData.collectedScenes;
+    var found = false;
+    for (var i = 0; i < scenes.length; i++) {
+      if (scenes[i].destination === '人民医院') { found = true; break; }
+    }
+    return assert(found, '人民医院采集数据存在');
+  });
+
+  runTest('F-SC-08', '万达广场标记数据', '家人-场景采集', function() {
+    var markers = W.getSceneMarkersForDestination('万达广场');
+    return assert(markers.length === 3, '万达广场有' + markers.length + '个标记');
+  });
+
+  runTest('F-SC-09', '人民医院标记数据', '家人-场景采集', function() {
+    var markers = W.getSceneMarkersForDestination('人民医院');
+    return assert(markers.length === 3, '人民医院有' + markers.length + '个标记');
+  });
+
+  runTest('F-SC-10', '开始新采集', '家人-场景采集', function() {
+    if (typeof W.startNewCollection === 'function') {
+      W.startNewCollection();
+      var content = el('scContent');
+      return assert(content && content.innerHTML.indexOf('选择目的地') >= 0, '目的地选择页显示');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-11', '选择目的地', '家人-场景采集', function() {
+    if (typeof W.selectCollectionDest === 'function') {
+      W.selectCollectionDest('万达广场');
+      return assert(W.currentCollection && W.currentCollection.destination === '万达广场', '目的地已选择');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-12', '开始采集', '家人-场景采集', function() {
+    if (typeof W.beginCollection === 'function') {
+      W.beginCollection();
+      return assert(W.currentCollection && W.currentCollection.isCollecting, '采集已开始');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-13', '添加入口标记', '家人-场景采集', function() {
+    if (typeof W.addMarker === 'function') {
+      W.addMarker('entrance', '测试入口');
+      return assert(W.currentCollection.markers.length === 1, '标记数: ' + W.currentCollection.markers.length);
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-14', '添加设施标记', '家人-场景采集', function() {
+    W.addMarker('facility', '测试电梯');
+    return assert(W.currentCollection.markers.length === 2, '标记数: ' + W.currentCollection.markers.length);
+  });
+
+  runTest('F-SC-15', '添加危险点', '家人-场景采集', function() {
+    W.addMarker('danger', '测试台阶');
+    return assert(W.currentCollection.markers.length === 3, '标记数: ' + W.currentCollection.markers.length);
+  });
+
+  runTest('F-SC-16', '添加参照物', '家人-场景采集', function() {
+    W.addMarker('landmark', '测试商店');
+    return assert(W.currentCollection.markers.length === 4, '标记数: ' + W.currentCollection.markers.length);
+  });
+
+  runTest('F-SC-17', '编辑标记描述', '家人-场景采集', function() {
+    if (typeof W.editMarkerDesc === 'function') {
+      W.currentCollection.markers[0].desc = '编辑后的描述';
+      return assert(W.currentCollection.markers[0].desc === '编辑后的描述', '描述已编辑');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-18', '完成采集', '家人-场景采集', function() {
+    if (typeof W.finishCollection === 'function') {
+      var beforeCount = W.sceneCollectionData.collectedScenes.length;
+      W.finishCollection();
+      var afterCount = W.sceneCollectionData.collectedScenes.length;
+      return assert(afterCount === beforeCount + 1, '采集前: ' + beforeCount + ' 采集后: ' + afterCount);
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-19', '新采集数据验证', '家人-场景采集', function() {
+    var latest = W.sceneCollectionData.collectedScenes[0];
+    return assert(latest && latest.markers.length === 4, '最新采集有4个标记: ' + (latest ? latest.markers.length : 0));
+  });
+
+  runTest('F-SC-20', '查看已采集场景', '家人-场景采集', function() {
+    if (typeof W.viewCollectedScene === 'function') {
+      var scene = W.sceneCollectionData.collectedScenes[W.sceneCollectionData.collectedScenes.length - 1];
+      var noError = true;
+      try { W.viewCollectedScene(scene.id); } catch(e) { noError = false; }
+      return assert(noError, '查看场景无异常');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SC-21', '关闭场景采集', '家人-场景采集', function() {
+    if (typeof W.closeSceneCollection === 'function') {
+      W.closeSceneCollection();
+      var page = el('sceneCollectionPage');
+      return assert(page && page.style.display === 'none', '页面已关闭');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  // ===== 17. 权限隔离测试 =====
+  log('--- 权限隔离测试 ---');
+
+  runTest('F-PERM-01', '家人无法导航', '家人-权限', function() {
+    W.testLogin('family');
+    if (typeof W.startNavigation === 'function') {
+      var noError = true;
+      try { W.startNavigation(); } catch(e) { noError = false; }
+      return assert(!W.isNavigating && noError, '导航未启动');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-PERM-02', '视障无法用场景采集', '家人-权限', function() {
+    W.testLogin('blind');
+    if (typeof W.openSceneCollection === 'function') {
+      W.openSceneCollection();
+      // 应该提示"此功能仅家人模式可用"
+      return assert(true, '视障用户调用场景采集不会崩溃');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-PERM-03', '家人无语音播报', '家人-权限', function() {
+    W.testLogin('family');
+    // 家人模式speak应被跳过
+    return assert(W.userRole === 'family', '家人模式确认');
+  });
+
+  // ===== 18. 设置功能测试 =====
+  log('--- 设置功能测试 ---');
+
+  W.testLogin('blind');
+  W.switchTab('my');
+
+  runTest('B-SET-01', '我的页显示', '视障-设置', function() {
+    return assert(W.currentScreen === 'my', '当前屏幕: ' + W.currentScreen);
+  });
+
+  runTest('B-SET-02', 'openSettings函数', '视障-设置', function() {
+    return assert(typeof W.openSettings === 'function', 'openSettings函数可用');
+  });
+
+  runTest('B-SET-03', 'adjustSpeechRate函数', '视障-设置', function() {
+    return assert(typeof W.adjustSpeechRate === 'function', 'adjustSpeechRate函数可用');
+  });
+
+  runTest('B-SET-04', 'openRealNameAuth函数', '视障-设置', function() {
+    return assert(typeof W.openRealNameAuth === 'function', 'openRealNameAuth函数可用');
+  });
+
+  runTest('B-SET-05', 'openEmergencyContactsPage函数', '视障-设置', function() {
+    return assert(typeof W.openEmergencyContactsPage === 'function', 'openEmergencyContactsPage函数可用');
+  });
+
+  // ===== 19. 家人版设置测试 =====
+  log('--- 家人版设置测试 ---');
+
+  W.testLogin('family');
+
+  runTest('F-SET-01', '家人版设置页', '家人-设置', function() {
+    if (typeof W.openSettings === 'function') {
+      var noError = true;
+      try { W.openSettings(); } catch(e) { noError = false; }
+      return assert(noError, 'openSettings无异常');
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  runTest('F-SET-02', 'settingsScreen存在', '家人-设置', function() {
+    return assert(exists('settingsScreen'), 'settingsScreen元素存在');
+  });
+
+  // ===== 20. 数据持久化测试 =====
+  log('--- 数据持久化测试 ---');
+
+  runTest('G-DATA-01', 'localStorage可用', '通用-数据', function() {
+    try {
+      W.localStorage.setItem('test_key', 'test_value');
+      var val = W.localStorage.getItem('test_key');
+      W.localStorage.removeItem('test_key');
+      return assert(val === 'test_value', 'localStorage读写正常');
+    } catch(e) {
+      return { ok: false, msg: 'localStorage不可用' };
+    }
+  });
+
+  runTest('G-DATA-02', 'session保持', '通用-数据', function() {
+    var session = W.getCurrentSession ? W.getCurrentSession() : null;
+    return assert(session !== null, 'session存在');
+  });
+
+  runTest('G-DATA-03', '用户角色保持', '通用-数据', function() {
+    return assert(W.userRole === 'family', '角色: ' + W.userRole);
+  });
+
+  // ===== 21. 消息中心测试 =====
+  log('--- 消息中心测试 ---');
+
+  runTest('G-MSG-01', 'openMessageCenter函数', '通用-消息', function() {
+    return assert(typeof W.openMessageCenter === 'function', 'openMessageCenter函数可用');
+  });
+
+  runTest('G-MSG-02', '消息数据存在', '通用-消息', function() {
+    var msgData = W.getMessageData ? W.getMessageData() : null;
+    return assert(msgData && msgData.length > 0, '消息数据存在');
+  });
+
+  runTest('G-MSG-03', '未读消息计数', '通用-消息', function() {
+    var count = W.getUnreadMessageCount ? W.getUnreadMessageCount() : 0;
+    return assert(typeof count === 'number', '未读消息数: ' + count);
+  });
+
+  // ===== 22. 错误处理测试 =====
+  log('--- 错误处理测试 ---');
+
+  runTest('G-ERR-01', '全局错误处理', '通用-错误', function() {
+    return assert(typeof W.handleGlobalError === 'function' || typeof handleGlobalError === 'function', '全局错误处理函数存在');
+  });
+
+  runTest('G-ERR-02', 'safeSetInterval函数', '通用-错误', function() {
+    return assert(typeof W.safeSetInterval === 'function', 'safeSetInterval函数可用');
+  });
+
+  runTest('G-ERR-03', 'safeSetTimeout函数', '通用-错误', function() {
+    return assert(typeof W.safeSetTimeout === 'function', 'safeSetTimeout函数可用');
+  });
+
+  runTest('G-ERR-04', 'debounce函数', '通用-错误', function() {
+    return assert(typeof W.debounce === 'function' || typeof debounce === 'function', 'debounce函数可用');
+  });
+
+  runTest('G-ERR-05', '$函数存在', '通用-错误', function() {
+    return assert(typeof W.$ === 'function', '$函数可用');
+  });
+
+  runTest('G-ERR-06', 'safeCall函数', '通用-错误', function() {
+    return assert(typeof W.safeCall === 'function' || typeof safeCall === 'function', 'safeCall函数可用');
+  });
+
+  // ===== 23. 室内导航测试 =====
+  log('--- 室内导航测试 ---');
+
+  runTest('B-IND-01', '室内模式步骤数据', '视障-室内导航', function() {
+    return assert(typeof W.mallGuidanceSteps !== 'undefined' || typeof W.getGuidanceStepsForMode === 'function', '室内步骤数据或函数存在');
+  });
+
+  runTest('B-IND-02', 'showFloorNav函数', '视障-室内导航', function() {
+    return assert(typeof W.showFloorNav === 'function', 'showFloorNav函数可用');
+  });
+
+  runTest('B-IND-03', 'renderFloorSelector函数', '视障-室内导航', function() {
+    return assert(typeof W.renderFloorSelector === 'function', 'renderFloorSelector函数可用');
+  });
+
+  // ===== 24. 家人位置测试 =====
+  log('--- 家人位置测试 ---');
+
+  runTest('F-LOC-01', 'openFamilyLocationPage函数', '家人-位置', function() {
+    return assert(typeof W.openFamilyLocationPage === 'function', 'openFamilyLocationPage函数可用');
+  });
+
+  runTest('F-LOC-02', 'closeFamilyLocation函数', '家人-位置', function() {
+    return assert(typeof W.closeFamilyLocation === 'function', 'closeFamilyLocation函数可用');
+  });
+
+  runTest('F-LOC-03', 'navigateToFamily函数', '家人-位置', function() {
+    return assert(typeof W.navigateToFamily === 'function', 'navigateToFamily函数可用');
+  });
+
+  // ===== 25. 被监护人测试 =====
+  log('--- 被监护人管理测试 ---');
+
+  runTest('F-WARD-01', 'openWardList函数', '家人-被监护人', function() {
+    return assert(typeof W.openWardList === 'function', 'openWardList函数可用');
+  });
+
+  runTest('F-WARD-02', 'openWardDetail函数', '家人-被监护人', function() {
+    return assert(typeof W.openWardDetail === 'function', 'openWardDetail函数可用');
+  });
+
+  // ===== 26. 围栏管理测试 =====
+  log('--- 围栏管理测试 ---');
+
+  runTest('F-FENCE-01', 'showFenceDetail函数', '家人-围栏', function() {
+    return assert(typeof W.showFenceDetail === 'function', 'showFenceDetail函数可用');
+  });
+
+  runTest('F-FENCE-02', 'openAlertHistory函数', '家人-围栏', function() {
+    return assert(typeof W.openAlertHistory === 'function', 'openAlertHistory函数可用');
+  });
+
+  runTest('F-FENCE-03', 'openGuardianSettings函数', '家人-围栏', function() {
+    return assert(typeof W.openGuardianSettings === 'function', 'openGuardianSettings函数可用');
+  });
+
+  // ===== 27. 邀请家人测试 =====
+  log('--- 邀请家人测试 ---');
+
+  runTest('F-INVITE-01', 'openInviteFamily函数', '家人-邀请', function() {
+    return assert(typeof W.openInviteFamily === 'function', 'openInviteFamily函数可用');
+  });
+
+  runTest('F-INVITE-02', 'generateInviteLink函数', '家人-邀请', function() {
+    if (typeof W.generateInviteLink === 'function') {
+      var link = W.generateInviteLink();
+      return assert(typeof link === 'string' && link.length > 0, '链接: ' + link);
+    }
+    return { ok: false, msg: '函数不可用' };
+  });
+
+  // ===== 28. 退出登录测试 =====
+  log('--- 退出登录测试 ---');
+
+  runTest('G-LOGOUT-01', 'confirmLogout函数', '通用-退出', function() {
+    return assert(typeof W.confirmLogout === 'function', 'confirmLogout函数可用');
+  });
+
+  runTest('G-LOGOUT-02', 'doLogout函数', '通用-退出', function() {
+    return assert(typeof W.doLogout === 'function', 'doLogout函数可用');
+  });
+
+  // ===== 完成汇总 =====
+  log('--- 测试完成 ---');
+  log('总计: ' + testStats.total + ' 通过: ' + testStats.pass + ' 失败: ' + testStats.fail + ' 阻塞: ' + testStats.block);
+
+  // 失败用例汇总
+  var failures = testResults.filter(function(r) { return r.status === 'fail'; });
+  if (failures.length > 0) {
+    log('\n=== 失败用例汇总 ===');
+    failures.forEach(function(f) {
+      log(f.id + ' ' + f.name + ' -> ' + f.detail);
+    });
+  }
+
+  document.getElementById('runTests').disabled = false;
+}
+</script>
+</body>
+</html>

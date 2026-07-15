@@ -1,0 +1,1553 @@
+
+    // ============================================================
+    // DATA LAYER
+    // ============================================================
+    const STORAGE_KEY = "lightburn_pro_v3";
+
+    const levelDefs = [
+      { level: 1, xp: 0, title: "减脂小白", icon: "🌱" },
+      { level: 2, xp: 100, title: "入门新手", icon: "🌿" },
+      { level: 3, xp: 300, title: "初级玩家", icon: "🌳" },
+      { level: 4, xp: 600, title: "进阶达人", icon: "🌺" },
+      { level: 5, xp: 1000, title: "中级玩家", icon: "🌟" },
+      { level: 6, xp: 1600, title: "高级玩家", icon: "💎" },
+      { level: 7, xp: 2400, title: "减脂精英", icon: "🏆" },
+      { level: 8, xp: 3400, title: "减脂大师", icon: "👑" },
+      { level: 9, xp: 4600, title: "减脂传说", icon: "🔥" },
+      { level: 10, xp: 6000, title: "轻燃之神", icon: "⚡" }
+    ];
+
+    const petStages = [
+      { minStreak: 0, emoji: "🥚", name: "轻燃蛋", messages: ["今天也要好好吃饭哦！", "我还是一颗蛋，每天记录餐食让我孵化吧！", "坚持打卡，我会长大的！"] },
+      { minStreak: 3, emoji: "🐣", name: "轻燃小鸡", messages: ["破壳而出！你已经开始养成好习惯了！", "继续加油，我想快快长大！", "你已经连续3天打卡了，真棒！"] },
+      { minStreak: 7, emoji: "🐥", name: "成长小鸡", messages: ["羽翼渐丰，你越来越会选了！", "看到你每天坚持，我好开心！", "一周了！你不再是新手了！"] },
+      { minStreak: 14, emoji: "🐔", name: "活力小鸡", messages: ["活力满满！你的坚持让我茁壮成长！", "你已经连续14天打卡，太厉害了！", "我们一起走过了两周，继续前进！"] },
+      { minStreak: 30, emoji: "🦅", name: "轻燃凤凰", messages: ["浴火重生！你是真正的轻燃达人！", "一个月了！你已经完全蜕变！", "你的坚持换来了最好的自己！"] }
+    ];
+
+    const shopItems = [
+      { id: "pet_hat", name: "小精灵帽子", icon: "🎩", desc: "给你的小精灵戴上酷帽子", price: 50 },
+      { id: "pet_scarf", name: "温暖围巾", icon: "🧣", desc: "给小精灵加一条围巾", price: 80 },
+      { id: "gold_theme", name: "金色主题", icon: "✨", desc: "解锁金色UI主题配色", price: 150 },
+      { id: "title_custom", name: "自定义头衔", icon: "📝", desc: "可以自定义你的等级头衔", price: 200 },
+      { id: "pet_crown", name: "王者皇冠", icon: "👑", desc: "小精灵戴上皇冠，霸气十足", price: 300 },
+      { id: "rainbow_theme", name: "彩虹主题", icon: "🌈", desc: "解锁彩虹渐变主题配色", price: 500 }
+    ];
+
+    const defaultState = {
+      profile: { name: "", gender: "male", age: 25, height: 170, weight: 70, goal: "lose", activityLevel: "light", dailyCalorieTarget: 1800, dailyProteinTarget: 60, bmi: 24.2, bmiLabel: "标准" },
+      dailyLog: { date: new Date().toISOString().split("T")[0], meals: { breakfast: [], lunch: [], dinner: [], snack: [] }, waterCups: 0, weight: null, completed: false },
+      history: {}, streak: 0, lastActiveDate: null, achievements: [], totalMealsLogged: 0, totalSmartPicks: 0, totalRemedyUsed: 0, sugarFreeDays: 0, proteinGoalDays: 0,
+      weightHistory: [], onboardingDone: false, xp: 0, level: 1, coins: 0, spinAvailable: true, spinDate: null,
+      ownedItems: [], equippedItem: null, petMsgIndex: 0, waterGoalDays: 0, weeklyMeals: 0, weeklyChallengeCompleted: [],
+      sectMissionDate: null, sectDailyMissions: [], sectAcceptedMissions: [], sectCompletedMissions: [], sectRefreshCount: 0, sectContribution: 0, learnedCourses: [], completedStages: []
+    };
+
+    let state;
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          state = JSON.parse(raw);
+          const today = new Date().toISOString().split("T")[0];
+          if (state.dailyLog.date !== today) {
+            if (Object.values(state.dailyLog.meals).some(m => m.length > 0) || state.dailyLog.waterCups > 0) {
+              state.history[state.dailyLog.date] = JSON.parse(JSON.stringify(state.dailyLog));
+            }
+            state.dailyLog = { date: today, meals: { breakfast: [], lunch: [], dinner: [], snack: [] }, waterCups: 0, weight: null, completed: false };
+            state.spinAvailable = true; state.spinDate = null;
+          }
+          Object.keys(defaultState).forEach(k => { if (!(k in state)) state[k] = defaultState[k]; });
+          if (!state.history) state.history = {};
+          if (!state.totalMealsLogged) state.totalMealsLogged = 0;
+          if (!state.totalSmartPicks) state.totalSmartPicks = 0;
+          if (!state.totalRemedyUsed) state.totalRemedyUsed = 0;
+          if (!state.sugarFreeDays) state.sugarFreeDays = 0;
+          if (!state.proteinGoalDays) state.proteinGoalDays = 0;
+          if (!state.weightHistory) state.weightHistory = [];
+          if (!state.xp) state.xp = 0;
+          if (!state.level) state.level = 1;
+          if (!state.coins) state.coins = 0;
+          if (state.spinAvailable === undefined) state.spinAvailable = true;
+          if (!state.ownedItems) state.ownedItems = [];
+          if (!state.equippedItem) state.equippedItem = null;
+          if (state.petMsgIndex === undefined) state.petMsgIndex = 0;
+          if (!state.waterGoalDays) state.waterGoalDays = 0;
+          if (!state.weeklyMeals) state.weeklyMeals = 0;
+          if (!state.weeklyChallengeCompleted) state.weeklyChallengeCompleted = [];
+          if (!state.sectMissionDate) state.sectMissionDate = null;
+          if (!state.sectDailyMissions) state.sectDailyMissions = [];
+          if (!state.sectAcceptedMissions) state.sectAcceptedMissions = [];
+          if (!state.sectCompletedMissions) state.sectCompletedMissions = [];
+          if (!state.sectRefreshCount) state.sectRefreshCount = 0;
+          if (!state.sectContribution) state.sectContribution = 0;
+          if (!state.learnedCourses) state.learnedCourses = [];
+          if (!state.completedStages) state.completedStages = [];
+          return;
+        }
+      } catch (e) { /* ignore */ }
+      state = JSON.parse(JSON.stringify(defaultState));
+      state.dailyLog.date = new Date().toISOString().split("T")[0];
+    }
+
+    function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
+
+    function recalcProfile() {
+      const p = state.profile;
+      const h = p.height / 100;
+      p.bmi = Math.round((p.weight / (h * h)) * 10) / 10;
+      if (p.bmi < 18.5) p.bmiLabel = "偏瘦"; else if (p.bmi < 24) p.bmiLabel = "标准"; else if (p.bmi < 28) p.bmiLabel = "偏胖"; else p.bmiLabel = "肥胖";
+      let bmr = p.gender === "male" ? 10 * p.weight + 6.25 * p.height - 5 * p.age + 5 : 10 * p.weight + 6.25 * p.height - 5 * p.age - 161;
+      const act = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725 };
+      const tdee = Math.round(bmr * (act[p.activityLevel] || 1.375));
+      if (p.goal === "lose") p.dailyCalorieTarget = Math.round(tdee * 0.8);
+      else if (p.goal === "gain") p.dailyCalorieTarget = Math.round(tdee * 1.15);
+      else p.dailyCalorieTarget = tdee;
+      p.dailyProteinTarget = Math.round(p.weight * (p.goal === "gain" ? 1.8 : p.goal === "lose" ? 1.5 : 1.2));
+      p.dailyCalorieTarget = Math.max(1200, Math.min(3500, p.dailyCalorieTarget));
+      p.dailyProteinTarget = Math.max(30, Math.min(200, p.dailyProteinTarget));
+    }
+
+    function getLevelInfo() {
+      let info = levelDefs[0];
+      for (let i = levelDefs.length - 1; i >= 0; i--) { if (state.xp >= levelDefs[i].xp) { info = levelDefs[i]; break; } }
+      state.level = info.level;
+      const next = levelDefs.find(l => l.level === info.level + 1) || { xp: info.xp + 2000 };
+      const xpInLevel = state.xp - info.xp;
+      const xpNeeded = next.xp - info.xp;
+      return { ...info, xpInLevel, xpNeeded, nextXp: next.xp, progress: Math.min(100, Math.round((xpInLevel / xpNeeded) * 100)) };
+    }
+
+    function addXp(amount) {
+      const oldLevel = state.level;
+      state.xp += amount;
+      const newInfo = getLevelInfo();
+      saveState();
+      if (newInfo.level > oldLevel) showLevelUp(newInfo);
+    }
+
+    function addCoins(amount) { state.coins += amount; saveState(); updateCoinBadge(); showToast(`+${amount} 轻燃币`, "coin"); }
+
+    function showLevelUp(info) {
+      const overlay = document.getElementById("levelUpOverlay");
+      document.getElementById("luIcon").textContent = info.icon;
+      document.getElementById("luTitle").textContent = "升级！" + info.title;
+      document.getElementById("luSub").textContent = "恭喜你达到了 Lv." + info.level;
+      overlay.classList.add("show");
+      spawnConfetti();
+      showToast(info.icon + " 升级了！你已成为 " + info.title, "achievement");
+      setTimeout(() => overlay.classList.remove("show"), 2500);
+    }
+
+    function getPetStage() {
+      let stage = petStages[0];
+      for (let i = petStages.length - 1; i >= 0; i--) { if (state.streak >= petStages[i].minStreak) { stage = petStages[i]; break; } }
+      return stage;
+    }
+
+    function getPetMessage() {
+      const stage = getPetStage();
+      const msgs = stage.messages;
+      state.petMsgIndex = (state.petMsgIndex + 1) % msgs.length;
+      saveState();
+      return msgs[state.petMsgIndex];
+    }
+
+    function showPetSpeech(msg) {
+      const speech = document.getElementById("petSpeech");
+      speech.textContent = msg || getPetMessage();
+      speech.classList.add("show");
+      setTimeout(() => speech.classList.remove("show"), 3500);
+    }
+
+    function updatePet() {
+      const stage = getPetStage();
+      document.getElementById("petAvatar").textContent = stage.emoji;
+      document.getElementById("petLevel").textContent = state.level;
+    }
+
+    // ============================================================
+    // CONFETTI
+    // ============================================================
+    function spawnConfetti() {
+      const canvas = document.getElementById("confettiCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+      const colors = ["#ff9a5f","#f4c760","#93d69f","#6ba3d6","#a78bfa","#df6662","#fff","#ffb46d"];
+      const particles = [];
+      for (let i = 0; i < 120; i++) {
+        particles.push({ x: Math.random()*canvas.width, y: -20-Math.random()*100, w: 6+Math.random()*8, h: 4+Math.random()*6, color: colors[Math.floor(Math.random()*colors.length)], vx: (Math.random()-0.5)*4, vy: 2+Math.random()*5, rotation: Math.random()*360, rotSpeed: (Math.random()-0.5)*10, opacity: 1 });
+      }
+      let frame = 0;
+      function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); let alive = false;
+        particles.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vy+=0.08; p.rotation+=p.rotSpeed; p.opacity-=0.006; if (p.opacity>0&&p.y<canvas.height+50) { alive=true; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rotation*Math.PI/180); ctx.globalAlpha=Math.max(0,p.opacity); ctx.fillStyle=p.color; ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h); ctx.restore(); } });
+        frame++; if (alive&&frame<150) requestAnimationFrame(animate); else ctx.clearRect(0,0,canvas.width,canvas.height);
+      }
+      animate();
+    }
+
+    // ============================================================
+    // FOOD DB
+    // ============================================================
+    const scenes = [
+      { id:"breakfast", name:"早餐店", note:"包子、豆浆、鸡蛋、玉米", foods:[
+        { id:"tea-egg", name:"茶叶蛋", calories:70, protein:8, satiety:8, category:"protein", note:"高蛋白、低门槛" },
+        { id:"soy-milk", name:"无糖豆浆", calories:90, protein:7, satiety:7, category:"drink", note:"优于含糖奶茶" },
+        { id:"corn", name:"玉米", calories:120, protein:3, satiety:7, category:"carb", note:"主食更稳" },
+        { id:"steamed-bun", name:"肉包", calories:230, protein:8, satiety:6, category:"carb", note:"能量高于想象" },
+        { id:"fried-dough", name:"油条", calories:280, protein:4, satiety:4, category:"fried", note:"油脂偏高" },
+        { id:"sweet-soy", name:"加糖豆浆", calories:150, protein:6, satiety:5, category:"sugar", note:"容易甜上加甜" },
+        { id:"boiled-egg2", name:"水煮蛋 x2", calories:140, protein:14, satiety:8, category:"protein", note:"最纯粹的蛋白" },
+        { id:"oatmeal", name:"燕麦粥", calories:160, protein:5, satiety:7, category:"carb", note:"慢碳更稳" }
+      ], smartPick:["tea-egg","soy-milk","corn"] },
+      { id:"convenience", name:"便利店", note:"轻食、饭团、鸡胸、酸奶", foods:[
+        { id:"chicken-breast", name:"即食鸡胸", calories:140, protein:24, satiety:8, category:"protein", note:"蛋白补位神器" },
+        { id:"greek-yogurt", name:"高蛋白酸奶", calories:130, protein:12, satiety:7, category:"protein", note:"适合加餐" },
+        { id:"tuna-salad", name:"金枪鱼沙拉", calories:180, protein:16, satiety:7, category:"vegetable", note:"搭配更完整" },
+        { id:"rice-ball", name:"饭团", calories:220, protein:5, satiety:6, category:"carb", note:"主食方便但偏单一" },
+        { id:"sweet-milk-tea", name:"奶茶", calories:310, protein:3, satiety:4, category:"sugar", note:"最易失控" },
+        { id:"chips", name:"薯片", calories:260, protein:3, satiety:3, category:"snack", note:"脆爽但空热量高" },
+        { id:"sandwich", name:"三明治", calories:290, protein:14, satiety:6, category:"balanced", note:"有菜有肉" },
+        { id:"sugarfree-tea", name:"无糖茶饮", calories:5, protein:0, satiety:3, category:"drink", note:"零热量解渴" }
+      ], smartPick:["chicken-breast","tuna-salad","greek-yogurt"] },
+      { id:"canteen", name:"食堂", note:"最真实的减脂修罗场", foods:[
+        { id:"rice-half", name:"半份米饭", calories:145, protein:3, satiety:6, category:"carb", note:"主食可控" },
+        { id:"braised-chicken", name:"清炖鸡腿", calories:210, protein:22, satiety:8, category:"protein", note:"肉菜优先" },
+        { id:"stir-veg", name:"时蔬", calories:90, protein:3, satiety:7, category:"vegetable", note:"半盘蔬菜最稳" },
+        { id:"egg-tofu", name:"鸡蛋豆腐", calories:160, protein:10, satiety:6, category:"protein", note:"温和补蛋白" },
+        { id:"sweet-pork", name:"糖醋里脊", calories:320, protein:12, satiety:5, category:"fried", note:"糖油双高" },
+        { id:"cola", name:"可乐", calories:180, protein:0, satiety:2, category:"sugar", note:"液体热量快" },
+        { id:"steamed-fish", name:"清蒸鱼", calories:130, protein:20, satiety:7, category:"protein", note:"高蛋白低脂" },
+        { id:"mixed-rice", name:"杂粮饭", calories:170, protein:5, satiety:7, category:"carb", note:"比白米饭更稳" }
+      ], smartPick:["braised-chicken","stir-veg","rice-half"] },
+      { id:"delivery", name:"外卖", note:"忙起来最容易选错", foods:[
+        { id:"poke-bowl", name:"轻食能量碗", calories:360, protein:24, satiety:8, category:"balanced", note:"适合忙碌工作日" },
+        { id:"beef-roll", name:"牛肉卷", calories:290, protein:18, satiety:6, category:"protein", note:"蛋白够但蔬菜不足" },
+        { id:"soup-noodle", name:"汤面", calories:420, protein:10, satiety:6, category:"carb", note:"容易碳水过多" },
+        { id:"fried-chicken", name:"炸鸡套餐", calories:620, protein:22, satiety:5, category:"fried", note:"高油高盐" },
+        { id:"fruit-tea", name:"果茶", calories:260, protein:1, satiety:3, category:"sugar", note:"糖分常被低估" },
+        { id:"veggie-box", name:"杂蔬加蛋", calories:210, protein:12, satiety:7, category:"vegetable", note:"补蔬菜效果好" },
+        { id:"grilled-salmon", name:"烤三文鱼", calories:280, protein:26, satiety:8, category:"protein", note:"优质脂肪+蛋白" },
+        { id:"brown-rice-box", name:"糙米饭套餐", calories:350, protein:18, satiety:7, category:"balanced", note:"均衡选择" }
+      ], smartPick:["poke-bowl","veggie-box"] },
+      { id:"home", name:"家常菜", note:"自己做饭最可控", foods:[
+        { id:"tomato-egg", name:"番茄炒蛋", calories:180, protein:10, satiety:7, category:"balanced", note:"家常减脂菜" },
+        { id:"stir-fry-beef", name:"青椒牛肉", calories:250, protein:22, satiety:7, category:"protein", note:"高蛋白首选" },
+        { id:"steamed-veggie", name:"白灼蔬菜", calories:60, protein:3, satiety:6, category:"vegetable", note:"蔬菜打底" },
+        { id:"plain-rice", name:"白米饭", calories:200, protein:4, satiety:6, category:"carb", note:"控制一拳量" },
+        { id:"braised-pork", name:"红烧肉", calories:380, protein:12, satiety:5, category:"fried", note:"高油高糖" },
+        { id:"egg-soup", name:"蛋花汤", calories:80, protein:6, satiety:5, category:"drink", note:"饭前喝更稳" },
+        { id:"steamed-egg", name:"蒸水蛋", calories:120, protein:10, satiety:6, category:"protein", note:"温和补蛋白" },
+        { id:"cold-noodle", name:"凉拌荞麦面", calories:220, protein:8, satiety:7, category:"carb", note:"低GI主食" }
+      ], smartPick:["stir-fry-beef","steamed-veggie","plain-rice"] },
+      { id:"social", name:"聚餐应酬", note:"社交场景最难控", foods:[
+        { id:"hotpot-lean", name:"火锅清汤+瘦肉", calories:380, protein:28, satiety:7, category:"protein", note:"选清汤、多涮肉菜" },
+        { id:"bbq-lean", name:"烤肉生菜包", calories:350, protein:25, satiety:7, category:"protein", note:"多包生菜少蘸酱" },
+        { id:"hotpot-oil", name:"火锅麻辣+丸子", calories:650, protein:20, satiety:5, category:"fried", note:"高油高钠" },
+        { id:"beer", name:"啤酒 500ml", calories:210, protein:2, satiety:2, category:"sugar", note:"液体热量" },
+        { id:"sashimi", name:"刺身拼盘", calories:180, protein:24, satiety:6, category:"protein", note:"高蛋白好选择" },
+        { id:"grilled-veggie", name:"烤蔬菜拼盘", calories:120, protein:4, satiety:6, category:"vegetable", note:"先吃蔬菜垫底" },
+        { id:"sugarfree-drink", name:"无糖饮料", calories:5, protein:0, satiety:2, category:"drink", note:"替代含糖饮品" },
+        { id:"fried-snack", name:"炸物拼盘", calories:500, protein:10, satiety:4, category:"fried", note:"聚餐雷区" }
+      ], smartPick:["hotpot-lean","sashimi","grilled-veggie"] }
+    ];
+
+    const remedyPlans = [
+      { id:"milk-tea", title:"奶茶快乐保留，但别连锁失控", body:"今天已经喝了奶茶，也不需要靠不吃晚饭来补偿。把下一餐改成高蛋白 + 低油主食 + 蔬菜，晚上快走 25 分钟即可。", mindset:"一杯奶茶不会毁掉计划，真正毁计划的是'反正都喝了那就继续乱吃'。" },
+      { id:"late-night", title:"夜宵之后，先把节奏拉回正常", body:"第二天早餐不要空腹硬扛，改成蛋白质优先的早餐，白天正常吃，晚上增加 15 分钟力量训练或快走。", mindset:"补救不是惩罚身体，而是避免下一顿继续失控。" },
+      { id:"buffet", title:"聚餐吃多了，别开启自责模式", body:"下一餐直接回归正常减脂模板: 蛋白 + 蔬菜 + 控制主食，今天多喝水，饭后分段散步 30 分钟。", mindset:"真正的高手不是永远不失控，而是失控后恢复得很快。" },
+      { id:"sedentary", title:"久坐日的轻补偿方案", body:"如果今天几乎没动，就把晚餐主食略减一小拳，保证蛋白和蔬菜不减，再补 20 分钟站立拉伸和步行。", mindset:"别把'今天没空练'理解成全盘失败，把活动量找回来一点点就够。" }
+    ];
+
+    const goalModes = ["轻断负担", "稳定减脂", "塑形入门"];
+    const intensityModes = ["温和", "正常", "进阶"];
+    const weekTemplates = {
+      default: {
+        "轻断负担":[["早餐先加蛋白","快走15分钟","第一天只求开始"],["午餐半盘蔬菜","深蹲3组","把餐盘配比做对"],["奶茶换无糖","拉伸12分钟","先赢在选择"],["晚餐减少油炸","快走20分钟","不用追求完美"],["便利店组合练习","靠墙俯卧撑3组","会搭配比会忍更重要"],["外卖点单复盘","楼梯或步行18分钟","生活里也能减脂"],["一周复盘","舒缓拉伸","稳定执行已经很厉害"]],
+        "稳定减脂":[["蛋白早餐模板","快走20分钟","先把饱腹感拉满"],["食堂三件套","深蹲4组","今天练习做更稳的选择"],["下午加餐不乱吃","核心训练10分钟","减少报复性晚餐"],["外卖优先蛋白","快走25分钟","减脂不是吃苦，是降噪"],["聚餐前先垫底","俯卧撑或靠墙版4组","先保节奏再谈克制"],["奶茶补救实践","轻力量18分钟","吃超也有办法回来"],["称一周完成率","长步行35分钟","比起狠一次，更重要是没掉线"]],
+        "塑形入门":[["早餐蛋白拉满","力量训练18分钟","体态改变从蛋白开始"],["午餐主食适量","臀腿训练20分钟","吃够比乱饿更重要"],["训练前后加餐","快走15分钟","避免训练后暴食"],["食堂高蛋白组合","上肢训练18分钟","塑形先保肌肉"],["外卖避糖油","核心训练15分钟","让身体有明确反馈"],["聚餐稳住蛋白","全身循环20分钟","会恢复的人进步更快"],["本周体感复盘","舒缓拉伸","先练成节奏，再练成线条"]]
+      },
+      student: {
+        "轻断负担":[["早八前买蛋+豆浆","课间多走楼梯","学生党也能轻松开始"],["食堂先找肉菜","宿舍深蹲3组","先别急着算很细"],["下午别拿薯片续命","拉伸10分钟","撑过嘴馋时刻"],["晚餐主食减一小点","校园快走20分钟","慢慢做就够了"],["奶茶换小杯无糖","靠墙俯卧撑3组","不是不喝，是更会选"],["夜宵前先喝水","步行去拿快递","减少临时冲动"],["一周总结","拉伸放松","坚持比完美重要"]],
+        "稳定减脂":[["宿舍早餐模板","步行20分钟","学生党先赢在规律"],["食堂半盘菜","深蹲4组","中午决定下午状态"],["图书馆加餐换酸奶","核心10分钟","别饿到晚饭爆发"],["社团活动前补蛋白","校园快走25分钟","活动多也能稳住"],["夜宵补救日","靠墙俯卧撑4组","知道怎么回来就不怕破功"],["周末聚餐减损","全身循环16分钟","社交和减脂不冲突"],["拍照复盘餐盘","舒缓拉伸","你会越来越会选"]],
+        "塑形入门":[["早饭加蛋+奶","力量16分钟","保证上课不虚"],["食堂肉菜优先","臀腿18分钟","学生时代塑形性价比高"],["下午补蛋白","核心12分钟","别让饥饿感带着走"],["外卖少炸多蒸","上肢16分钟","体态改善从今天开始"],["奶茶周控制1次","校园快走20分钟","先减频率再减欲望"],["周末宿舍训练","全身循环18分钟","小空间也能练起来"],["观察体感变化","拉伸恢复","不是越狠越有效"]]
+      },
+      office: {
+        "轻断负担":[["通勤早餐三件套","午休后快走12分钟","忙也能先做对一点"],["午餐避双油","办公椅拉伸","先降低工作餐风险"],["下午加餐换酸奶","下班步行一站","少让晚餐报复性进食"],["外卖高蛋白组合","靠墙俯卧撑3组","办公室人群更要会选"],["奶茶补救日","饭后步行20分钟","把损失止在当天"],["晚餐不过量","深蹲3组","节奏比强度更重要"],["周复盘","舒缓拉伸","一周不掉线就算赢"]],
+        "稳定减脂":[["上班前备早餐","快走18分钟","忙碌也要先喂饱蛋白"],["食堂午餐标准盘","深蹲4组","把午饭变成稳态锚点"],["下午嘴馋管理","核心训练10分钟","低能量崩盘最伤节奏"],["商务外卖减损","步行25分钟","工作局也能稳住"],["久坐补偿日","臀腿16分钟","久坐人群优先恢复活动量"],["社交餐前预案","上肢16分钟","不靠意志硬扛"],["周末续航计划","长步行35分钟","让下周更轻松开始"]],
+        "塑形入门":[["通勤前蛋白早餐","力量18分钟","工作日也能塑形"],["午餐高蛋白优先","楼梯快走","上班族先保肌肉感"],["下午加餐控糖","核心12分钟","防止晚餐失守"],["应酬前先垫底","上肢训练18分钟","社交日也能减损"],["外卖改造实践","臀腿训练18分钟","一周总有两天能练起来"],["周末完整训练","全身循环20分钟","工作忙也别全压周末"],["体态复盘","拉伸恢复","塑形靠频率不是靠冲动"]]
+      }
+    };
+
+    const achievements = [
+      { id:"first_meal", name:"初次记录", desc:"完成第一次餐食记录", icon:"🍽️", cond:()=>state.totalMealsLogged>=1 },
+      { id:"streak_3", name:"连续3天", desc:"连续3天记录饮食", icon:"🔥", cond:()=>state.streak>=3 },
+      { id:"streak_7", name:"一周达人", desc:"连续7天记录饮食", icon:"⭐", cond:()=>state.streak>=7 },
+      { id:"streak_14", name:"两周坚持", desc:"连续14天记录饮食", icon:"💪", cond:()=>state.streak>=14 },
+      { id:"streak_30", name:"月度冠军", desc:"连续30天记录饮食", icon:"👑", cond:()=>state.streak>=30 },
+      { id:"meals_10", name:"十餐达人", desc:"累计记录10餐", icon:"📝", cond:()=>state.totalMealsLogged>=10 },
+      { id:"meals_50", name:"半百食记", desc:"累计记录50餐", icon:"📋", cond:()=>state.totalMealsLogged>=50 },
+      { id:"sugar_free", name:"控糖先锋", desc:"连续5天无含糖饮料", icon:"🚫", cond:()=>state.sugarFreeDays>=5 },
+      { id:"water_8", name:"饮水充足", desc:"单日饮水达到8杯", icon:"💧", cond:()=>state.dailyLog.waterCups>=8 },
+      { id:"smart_5", name:"聪明选择", desc:"使用智能推荐5次", icon:"🧠", cond:()=>state.totalSmartPicks>=5 },
+      { id:"remedy_use", name:"补救高手", desc:"使用超标补救功能", icon:"🩹", cond:()=>state.totalRemedyUsed>=1 },
+      { id:"weight_log", name:"体重管理", desc:"记录体重数据", icon:"⚖️", cond:()=>state.weightHistory.length>=1 }
+    ];
+
+    // ============================================================
+    // UI STATE
+    // ============================================================
+    const uiState = { activeSceneId:"breakfast", selectedFoods:[], activeMealType:"breakfast", activeRemedyId:"milk-tea", activeGoalMode:"稳定减脂", activeIntensity:"正常", activeTemplateKey:"default", activeTab:"dashboard" };
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
+    function getActiveScene() { return scenes.find(s=>s.id===uiState.activeSceneId)||scenes[0]; }
+    function getSelectedFoodObjects() { return getActiveScene().foods.filter(f=>uiState.selectedFoods.includes(f.id)); }
+    function flashResult() { const s=document.getElementById("resultShell"); if(!s)return; s.classList.remove("flash"); void s.offsetWidth; s.classList.add("flash"); }
+    function statusColor(s) { if(s==="稳妥")return"var(--mint-deep)"; if(s==="临界")return"var(--yellow)"; if(s==="踩雷")return"var(--red)"; return"var(--text)"; }
+    function showToast(msg,type) { type=type||"info"; const c=document.getElementById("toastContainer"); const t=document.createElement("div"); t.className="toast "+type; t.textContent=msg; c.appendChild(t); setTimeout(()=>{ t.style.animation="toastOut 300ms ease forwards"; setTimeout(()=>t.remove(),300); },2600); }
+
+    // ============================================================
+    // SCORING
+    // ============================================================
+    function scoreMeal(foods) {
+      if(!foods.length) return { calories:0,protein:0,satiety:0,score:18,status:"待选择",summary:["先选2到3样食物","优先把蛋白加进去","别急着一顿吃太少"],overview:"还没开始选择食物。减脂新手最先要学会的是看见'蛋白、主食、蔬菜、饮料'的差别。",adjust:"先挑一个高蛋白食物，再补一个主食或蔬菜，会比单纯挨饿更稳。",plate:"空餐盘",estimation:"一掌蛋白+一拳主食+半盘蔬菜，是最容易执行的入门标准。",estimationNote:"不需要称重，也能大致做对。",training:"今天先从12分钟开始:深蹲3组+靠墙俯卧撑3组+快走15分钟。",trainingNote:"重点不是练废自己，而是降低起步门槛。",hasSugar:false,hasFried:false };
+      const calories=foods.reduce((s,f)=>s+f.calories,0), protein=foods.reduce((s,f)=>s+f.protein,0), satiety=Math.round(foods.reduce((s,f)=>s+f.satiety,0)/foods.length);
+      const cc={ protein:foods.filter(f=>["protein","balanced"].includes(f.category)).length, vegetable:foods.filter(f=>f.category==="vegetable"||f.id==="veggie-box").length, carb:foods.filter(f=>f.category==="carb").length, sugar:foods.filter(f=>f.category==="sugar").length, fried:foods.filter(f=>f.category==="fried").length };
+      let score=56;
+      if(protein>=20)score+=18; else if(protein>=12)score+=8; else score-=12;
+      if(cc.vegetable>0)score+=12; else score-=6;
+      if(calories>=260&&calories<=520)score+=12; else if(calories<=180)score-=16; else if(calories>650)score-=20; else score-=6;
+      if(satiety>=7)score+=8;
+      if(cc.sugar>0)score-=18; if(cc.fried>0)score-=14; if(cc.protein===0)score-=8;
+      score=Math.max(18,Math.min(96,score));
+      let status="临界"; if(score>=75)status="稳妥"; else if(score<48)status="踩雷";
+      const summary=[`总热量 ${calories} kcal`,`蛋白估值 ${protein} g`,`饱腹感 ${satiety}/10`];
+      let overview="整体还算稳，但还有优化空间。";
+      if(status==="稳妥")overview="这顿饭对减脂小白比较友好，热量、蛋白和饱腹感都比较平衡，吃完不容易很快反扑。";
+      else if(status==="临界")overview="这顿饭不是不能吃，但结构还不够稳定。最常见的问题是蛋白不够、蔬菜不足，或者饮料悄悄拉高了热量。";
+      else overview="这顿饭更像'嘴巴先开心'，但身体很难稳住。糖油偏高、蛋白偏低，会让之后更容易饿、更容易继续乱吃。";
+      const suggestions=[];
+      if(protein<12)suggestions.push("补一个高蛋白主角"); if(cc.vegetable===0)suggestions.push("再加一份蔬菜");
+      if(cc.sugar>0)suggestions.push("把含糖饮料换成无糖"); if(cc.fried>0)suggestions.push("把油炸替换成蒸煮炖");
+      if(calories>650)suggestions.push("主食或高油菜减一份"); if(calories<220)suggestions.push("别吃太少，否则更容易晚点暴食");
+      const adjust=suggestions.length?`优先 ${suggestions.slice(0,2).join("，")}，这一餐就会稳很多。`:"结构已经不错，继续保持'蛋白优先+蔬菜打底+饮料控糖'的思路即可。";
+      const foodNames=foods.map(f=>f.name).join(" + "), plate=`当前组合: ${foodNames}`;
+      const estimation=cc.sugar>0||cc.fried>0?"如果这一餐出现了甜饮或油炸，说明餐盘已经偏离'半盘蔬菜+四分之一蛋白+四分之一主食'。":"把这一餐想成一个餐盘:蛋白是主角，主食够用就好，蔬菜负责拉高稳定感。";
+      const estimationNote=protein<12?"现在最缺的是蛋白，不是意志力。":"你已经接近'会选'的状态了。";
+      const training=status==="踩雷"?"今天适合做补救型运动:饭后快走25分钟+深蹲3组+拉伸8分钟。":status==="临界"?"今天做轻力量更合适:深蹲4组+靠墙俯卧撑3组+快走20分钟。":"今天保持即可:快走20分钟或做15分钟入门力量，巩固节奏感。";
+      const trainingNote=status==="踩雷"?"不需要报复性训练，重点是把今天拉回正常轨道。":"让运动服务饮食，而不是惩罚饮食。";
+      return { calories,protein,satiety,score,status,summary,overview,adjust,plate,estimation,estimationNote,training,trainingNote,hasSugar:cc.sugar>0,hasFried:cc.fried>0 };
+    }
+
+    // ============================================================
+    // STREAK / ACHIEVEMENTS / TASKS
+    // ============================================================
+    function updateStreak() { const today=new Date().toISOString().split("T")[0], yesterday=new Date(Date.now()-86400000).toISOString().split("T")[0]; if(state.lastActiveDate===today)return; if(state.lastActiveDate===yesterday)state.streak+=1; else if(state.lastActiveDate&&state.lastActiveDate!==today)state.streak=1; else if(!state.lastActiveDate)state.streak=1; state.lastActiveDate=today; // Reset sect daily data state.sectAcceptedMissions=[]; state.sectCompletedMissions=[]; state.sectMissionDate=null; state.sectRefreshCount=0; state.sectDailyMissions=[]; saveState(); }
+    function checkAchievements() { const newly=[]; achievements.forEach(ach=>{ if(!state.achievements.includes(ach.id)&&ach.cond()){ state.achievements.push(ach.id); newly.push(ach); } }); return newly; }
+    function updateSugarFreeDays() { const all=[...state.dailyLog.meals.breakfast,...state.dailyLog.meals.lunch,...state.dailyLog.meals.dinner,...state.dailyLog.meals.snack]; state.sugarFreeDays=all.some(f=>f.category==="sugar")?0:(all.length>0?state.sugarFreeDays+1:state.sugarFreeDays); }
+    function updateProteinGoalDays() { const all=[...state.dailyLog.meals.breakfast,...state.dailyLog.meals.lunch,...state.dailyLog.meals.dinner,...state.dailyLog.meals.snack]; if(all.reduce((s,f)=>s+(f.protein||0),0)>=state.profile.dailyProteinTarget) state.proteinGoalDays+=1; }
+    function getDailyTotals() { const all=[...state.dailyLog.meals.breakfast,...state.dailyLog.meals.lunch,...state.dailyLog.meals.dinner,...state.dailyLog.meals.snack]; return { totalKcal:all.reduce((s,f)=>s+(f.calories||0),0), totalProtein:all.reduce((s,f)=>s+(f.protein||0),0), mealCount:Object.values(state.dailyLog.meals).filter(m=>m.length>0).length, allMeals:all }; }
+    function getTaskStatus() { const { totalProtein }=getDailyTotals(); return [{ id:"breakfast",label:"记录早餐",reward:"+5 XP",done:state.dailyLog.meals.breakfast.length>0 },{ id:"lunch",label:"记录午餐",reward:"+5 XP",done:state.dailyLog.meals.lunch.length>0 },{ id:"dinner",label:"记录晚餐",reward:"+5 XP",done:state.dailyLog.meals.dinner.length>0 },{ id:"water",label:"喝水8杯",reward:"+10 XP",done:state.dailyLog.waterCups>=8 },{ id:"weight",label:"记录体重",reward:"+5 XP",done:state.dailyLog.weight!==null },{ id:"protein",label:"蛋白质达标",reward:"+10 XP",done:totalProtein>=state.profile.dailyProteinTarget }]; }
+    function generateAIInsight() { const { totalKcal,totalProtein,mealCount,allMeals }=getDailyTotals(); const target=state.profile.dailyCalorieTarget, pTarget=state.profile.dailyProteinTarget, ratio=target>0?Math.round((totalKcal/target)*100):0; if(mealCount===0)return"今天还没有记录餐食。研究表明，记录饮食的人减脂成功率提高2倍。现在就从早餐开始吧，哪怕只记录一顿也是胜利。"; const insights=[]; if(ratio<40)insights.push("目前摄入偏低，小心晚餐暴食。"); else if(ratio>90)insights.push(`已接近今日热量目标(${ratio}%)，晚餐建议以蔬菜和高蛋白为主。`); else insights.push(`当前热量进度${ratio}%，节奏控制得很好。`); if(totalProtein<pTarget*0.5)insights.push(`蛋白质(${totalProtein}g)距离目标(${pTarget}g)还差不少，下一餐优先选鸡胸、鱼、豆腐或鸡蛋。`); else if(totalProtein>=pTarget)insights.push("蛋白质目标已达成！充足的蛋白质有助于维持肌肉量和饱腹感。"); if(allMeals.some(f=>f.category==="sugar"))insights.push("检测到含糖食物/饮料。偶尔一次没关系，但不要让含糖选项成为习惯。"); if(state.streak>=3)insights.push(`你已经连续${state.streak}天打卡，自律正在成为你的新习惯。`); if(state.weightHistory.length>=3){ const recent=state.weightHistory.slice(-3); const trend=recent[recent.length-1].weight-recent[0].weight; if(trend<-0.5)insights.push("体重呈下降趋势，你的方法正在见效！"); else if(trend>0.5)insights.push("体重略有上升，检查一下最近是否聚餐或外卖偏多。"); else insights.push("体重保持稳定，这是很好的维持状态。"); } return insights.join(" ")||"继续按计划执行，你做得很好。"; }
+
+    // ============================================================
+    // RENDER: ONBOARDING
+    // ============================================================
+    function showOnboarding() { document.getElementById("onboardingModal").classList.remove("hidden"); document.getElementById("onGender").value=state.profile.gender; document.getElementById("onAge").value=state.profile.age; document.getElementById("onHeight").value=state.profile.height; document.getElementById("onWeight").value=state.profile.weight; document.getElementById("onActivity").value=state.profile.activityLevel; document.querySelectorAll("#goalOptions .goal-option").forEach(b=>b.classList.toggle("active",b.dataset.goal===state.profile.goal)); updateBmiPreview(); }
+    function updateBmiPreview() { const h=parseFloat(document.getElementById("onHeight").value)||170, w=parseFloat(document.getElementById("onWeight").value)||70; const bmi=Math.round((w/((h/100)**2))*10)/10; let label="标准"; if(bmi<18.5)label="偏瘦"; else if(bmi<24)label="标准"; else if(bmi<28)label="偏胖"; else label="肥胖"; document.getElementById("bmiResult").innerHTML=`<strong>BMI: ${bmi} (${label})</strong><p>系统将基于此数据计算你的每日热量目标和蛋白质需求。</p>`; }
+    function applyOnboarding() { state.profile.gender=document.getElementById("onGender").value; state.profile.age=parseInt(document.getElementById("onAge").value)||25; state.profile.height=parseInt(document.getElementById("onHeight").value)||170; state.profile.weight=parseFloat(document.getElementById("onWeight").value)||70; state.profile.activityLevel=document.getElementById("onActivity").value; const ag=document.querySelector("#goalOptions .goal-option.active"); state.profile.goal=ag?ag.dataset.goal:"lose"; recalcProfile(); state.onboardingDone=true; saveState(); document.getElementById("onboardingModal").classList.add("hidden"); showToast("个人数据已设置！每日热量目标:"+state.profile.dailyCalorieTarget+" kcal","success"); renderAll(); }
+
+    // ============================================================
+    // TAB NAVIGATION
+    // ============================================================
+    function switchTab(tabName) { uiState.activeTab=tabName; document.querySelectorAll(".tab-nav button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tabName)); document.querySelectorAll(".tab-content").forEach(c=>c.classList.toggle("active",c.id==="tab-"+tabName)); if(tabName==="dashboard")renderDashboard(); if(tabName==="meal-builder")renderMealBuilder(); if(tabName==="sect"){renderMissions();renderLearning();renderStages();} if(tabName==="leaderboard")renderLeaderboard(); if(tabName==="plans")renderPlans(); if(tabName==="achievements")renderAchievements(); if(tabName==="shop")renderShop(); }
+
+    // ============================================================
+    // RENDER: DASHBOARD
+    // ============================================================
+    function renderDashboard() {
+      const { totalKcal,totalProtein }=getDailyTotals(); const target=state.profile.dailyCalorieTarget, pTarget=state.profile.dailyProteinTarget;
+      const ratio=target>0?Math.min(100,Math.round((totalKcal/target)*100)):0;
+      const ring=document.getElementById("calorieRing"), circ=2*Math.PI*60;
+      ring.setAttribute("stroke-dashoffset",circ-(ratio/100)*circ);
+      document.getElementById("ringKcal").textContent=totalKcal; document.getElementById("ringTarget").textContent=`/ ${target} kcal`;
+      document.getElementById("todayKcal").textContent=totalKcal+" kcal"; document.getElementById("todayProtein").textContent=totalProtein+"g";
+      document.getElementById("proteinTarget").textContent=pTarget+"g";
+      if(ratio===0)document.getElementById("todayStatus").textContent="今天还没有记录餐食，开始你的第一餐吧。";
+      else if(ratio<50)document.getElementById("todayStatus").textContent=`完成 ${ratio}%，节奏不错，还有充足的余量。`;
+      else if(ratio<90)document.getElementById("todayStatus").textContent=`完成 ${ratio}%，晚餐注意控制，优先蔬菜和蛋白。`;
+      else document.getElementById("todayStatus").textContent=`已接近今日目标(${ratio}%)，今天做得很棒！`;
+
+      const info=getLevelInfo();
+      document.getElementById("levelName").textContent=`Lv.${info.level} ${info.title}`;
+      document.getElementById("levelXp").textContent=`${state.xp-info.xp} / ${info.nextXp-info.xp} XP`;
+      document.getElementById("levelBarFill").style.width=info.progress+"%";
+      document.getElementById("levelBadge").textContent=`Lv.${info.level} ${info.title}`;
+
+      const mealNames={breakfast:"早餐",lunch:"午餐",dinner:"晚餐",snack:"加餐"};
+      const mealIcons={breakfast:"🌅",lunch:"☀️",dinner:"🌙",snack:"🍪"};
+      const grid=document.getElementById("mealSummaryGrid"); grid.innerHTML="";
+      Object.entries(state.dailyLog.meals).forEach(([key,foods])=>{
+        const kcal=foods.reduce((s,f)=>s+(f.calories||0),0); let sc="empty",st="未记录";
+        if(foods.length>0){ const hasS=foods.some(f=>f.category==="sugar"),hasF=foods.some(f=>f.category==="fried"); if(hasS||hasF){sc="bad";st="需改善";} else if(foods.some(f=>f.category==="protein")){sc="good";st="稳妥";} else{sc="warn";st="可优化";} }
+        const item=document.createElement("div"); item.className="meal-summary-item";
+        item.innerHTML=`<div class="meal-icon">${mealIcons[key]}</div><span class="meal-name">${mealNames[key]}</span><span class="meal-kcal">${kcal} kcal</span><span class="meal-status ${sc}">${st}</span>`;
+        item.addEventListener("click",()=>{uiState.activeMealType=key;switchTab("meal-builder");renderMealBuilder();}); grid.appendChild(item);
+      });
+      renderWaterTracker(); renderTasks(); document.getElementById("aiInsightText").textContent=generateAIInsight();
+      renderWeightChart(); updateStreakBadge(); updateCoinBadge(); renderWeeklyChallenge();
+    }
+
+    function renderTasks() {
+      const tasks=getTaskStatus(); const list=document.getElementById("taskList"); list.innerHTML="";
+      tasks.forEach(task=>{ const div=document.createElement("div"); div.className=`task-item${task.done?" done":""}`; div.innerHTML=`<div class="task-check">${task.done?"✓":""}</div><span class="task-label">${task.label}</span><span class="task-reward">${task.reward}</span>`; list.appendChild(div); });
+      const doneCount=tasks.filter(t=>t.done).length; document.getElementById("taskProgressFill").style.width=(doneCount/tasks.length)*100+"%";
+      const bonus=document.getElementById("taskAllBonus"); bonus.classList.toggle("done",doneCount===tasks.length);
+      bonus.textContent=doneCount===tasks.length?"全部完成！获得 +40 XP 和 +20 轻燃币":`完成全部任务获得 +40 XP 和 +20 轻燃币 (${doneCount}/${tasks.length})`;
+    }
+
+    function renderWaterTracker() { document.querySelectorAll("#waterCups .water-cup").forEach(cup=>{ cup.classList.toggle("filled",parseInt(cup.dataset.cup)<=state.dailyLog.waterCups); }); const wl = document.getElementById("waterLabel"); if (wl) wl.textContent=`${state.dailyLog.waterCups} / 8 杯`; }
+
+    function renderWeeklyChallenge() {
+      getWeeklyChallenge();
+      if (!currentWeeklyChallenge) return;
+      const wc = currentWeeklyChallenge;
+      const elIcon = document.getElementById("wcIcon"); if (elIcon) elIcon.textContent = wc.icon;
+      const elName = document.getElementById("wcName"); if (elName) elName.textContent = wc.name;
+      const elDesc = document.getElementById("wcDesc"); if (elDesc) elDesc.textContent = wc.desc;
+      const elReward = document.getElementById("wcReward"); if (elReward) elReward.innerHTML = `+${wc.reward.xp} XP<br>+${wc.reward.coins} 币`;
+      const progress = Math.min(weeklyChallengeProgress || 0, wc.target);
+      const pct = Math.round((progress / wc.target) * 100);
+      const elFill = document.getElementById("wcProgressFill"); if (elFill) elFill.style.width = pct + "%";
+      const elText = document.getElementById("wcProgressText"); if (elText) elText.textContent = `${progress}/${wc.target}`;
+      const elStatus = document.getElementById("streakFreezeStatus");
+      if (elStatus) elStatus.textContent = streakFreezeUsed
+        ? "保护卡: 本周已用"
+        : streakFreezeAvailable
+          ? "保护卡: 可用"
+          : "保护卡: 完成挑战获得";
+    }
+
+    function renderWeightChart() {
+      const canvas=document.getElementById("weightChart"); if(!canvas)return; const ctx=canvas.getContext("2d"); const dpr=window.devicePixelRatio||1;
+      const rect=canvas.parentElement.getBoundingClientRect(); canvas.width=rect.width*dpr; canvas.height=140*dpr;
+      canvas.style.width=rect.width+"px"; canvas.style.height="140px"; ctx.setTransform(dpr,0,0,dpr,0,0);
+      const w=rect.width,h=140,pad={top:20,right:20,bottom:30,left:45},pw=w-pad.left-pad.right,ph=h-pad.top-pad.bottom;
+      ctx.clearRect(0,0,w,h);
+      if(state.weightHistory.length<2){ ctx.fillStyle="#5b6d66"; ctx.font="13px 'Noto Sans SC', sans-serif"; ctx.textAlign="center"; ctx.fillText("记录2次以上体重将显示趋势图",w/2,h/2); document.getElementById("weightTrend").textContent="暂无足够数据生成趋势，请坚持记录体重。"; return; }
+      const data=state.weightHistory.slice(-14),values=data.map(d=>d.weight),minW=Math.floor(Math.min(...values)-2),maxW=Math.ceil(Math.max(...values)+2);
+      ctx.strokeStyle="rgba(24,49,41,0.06)"; ctx.lineWidth=1;
+      for(let i=0;i<=4;i++){ const y=pad.top+(ph/4)*i; ctx.beginPath(); ctx.moveTo(pad.left,y); ctx.lineTo(w-pad.right,y); ctx.stroke(); ctx.fillStyle="#5b6d66"; ctx.font="10px 'Noto Sans SC', sans-serif"; ctx.textAlign="right"; ctx.fillText((maxW-((maxW-minW)/4)*i).toFixed(1),pad.left-8,y+4); }
+      ctx.beginPath(); ctx.strokeStyle="#ff9a5f"; ctx.lineWidth=2.5; ctx.lineJoin="round"; ctx.lineCap="round";
+      data.forEach((d,i)=>{ const x=pad.left+(pw/(data.length-1))*i,y=pad.top+ph-((d.weight-minW)/(maxW-minW))*ph; if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke();
+      ctx.lineTo(pad.left+(pw/(data.length-1))*(data.length-1),pad.top+ph); ctx.lineTo(pad.left,pad.top+ph); ctx.closePath();
+      const grad=ctx.createLinearGradient(0,pad.top,0,pad.top+ph); grad.addColorStop(0,"rgba(255,154,95,0.2)"); grad.addColorStop(1,"rgba(255,154,95,0.02)"); ctx.fillStyle=grad; ctx.fill();
+      data.forEach((d,i)=>{ const x=pad.left+(pw/(data.length-1))*i,y=pad.top+ph-((d.weight-minW)/(maxW-minW))*ph; ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fillStyle="#ff9a5f"; ctx.fill(); ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); });
+      const trend=data[data.length-1].weight-data[0].weight; document.getElementById("weightTrend").textContent=`近${data.length}天趋势: ${trend<-0.5?"↓ 下降趋势":trend>0.5?"↑ 略有上升":"→ 保持稳定"} | 最新: ${data[data.length-1].weight}kg`;
+    }
+
+    function updateStreakBadge() { const b=document.getElementById("streakBadge"); b.textContent=`连续打卡 ${state.streak} 天`; b.classList.toggle("no-streak",state.streak===0); }
+    function updateCoinBadge() { document.getElementById("coinBadge").textContent=`${state.coins} 轻燃币`; }
+    function updateFooterStats() { document.getElementById("footerStats").textContent=`已记录 ${state.totalMealsLogged} 餐 | 连续 ${state.streak} 天 | 解锁 ${state.achievements.length}/${achievements.length} 成就 | Lv.${state.level}`; }
+
+    // ============================================================
+    // RENDER: SHOP
+    // ============================================================
+    function renderShop() {
+      document.getElementById("shopBalance").textContent=state.coins; const grid=document.getElementById("shopGrid"); grid.innerHTML="";
+      shopItems.forEach(item=>{ const owned=state.ownedItems.includes(item.id),affordable=state.coins>=item.price; const div=document.createElement("div"); div.className="shop-item"; let priceClass="expensive",priceText=item.price+" 轻燃币"; if(owned){priceClass="owned";priceText="已拥有";} else if(affordable)priceClass="affordable"; div.innerHTML=`<div class="shop-icon">${item.icon}</div><span class="shop-name">${item.name}</span><span class="shop-desc">${item.desc}</span><div class="shop-price ${priceClass}">${priceText}</div>`; if(!owned){ div.querySelector(".shop-price").addEventListener("click",()=>{ if(state.coins>=item.price){ state.coins-=item.price; state.ownedItems.push(item.id); if(!state.equippedItem)state.equippedItem=item.id; saveState(); showToast(`购买了 ${item.name}！`,"success"); spawnConfetti(); updateCoinBadge(); renderShop(); } else showToast("轻燃币不足，继续打卡赚取吧！","info"); }); } grid.appendChild(div); });
+    }
+
+    // ============================================================
+    // RENDER: MEAL BUILDER
+    // ============================================================
+    function renderMealBuilder() { renderMealTypeRow(); renderSceneButtons(); renderFoodCards(); renderMealResult(); }
+    function renderMealTypeRow() { const row=document.getElementById("mealTypeRow"); const types=[{key:"breakfast",label:"早餐"},{key:"lunch",label:"午餐"},{key:"dinner",label:"晚餐"},{key:"snack",label:"加餐"}]; row.innerHTML=""; types.forEach(t=>{ const btn=document.createElement("button"); btn.className=`meal-type-btn${t.key===uiState.activeMealType?" active":""}`; btn.textContent=t.label; btn.addEventListener("click",()=>{uiState.activeMealType=t.key;uiState.selectedFoods=[];renderMealTypeRow();renderFoodCards();renderMealResult();}); row.appendChild(btn); }); }
+    function renderSceneButtons() { const container=document.getElementById("sceneButtons"); container.innerHTML=""; scenes.forEach(scene=>{ const btn=document.createElement("button"); btn.type="button"; btn.className=`scene-button${scene.id===uiState.activeSceneId?" active":""}`; btn.innerHTML=`${scene.name}<small>${scene.note}</small>`; btn.addEventListener("click",()=>{uiState.activeSceneId=scene.id;uiState.selectedFoods=[];renderSceneButtons();renderFoodCards();renderMealResult();}); container.appendChild(btn); }); }
+    function renderFoodCards() { const scene=getActiveScene(); const grid=document.getElementById("foodGrid"); grid.innerHTML=""; scene.foods.forEach(food=>{ const card=document.createElement("button"); card.type="button"; card.className=`food-card${uiState.selectedFoods.includes(food.id)?" active":""}`; card.innerHTML=`<strong>${food.name}</strong><div class="food-meta"><span class="pill">${food.calories} kcal</span><span class="pill">蛋白 ${food.protein} g</span></div><p>${food.note}</p>`; card.addEventListener("click",()=>toggleFood(food.id)); grid.appendChild(card); }); }
+    function renderMealResult() {
+      const scene=getActiveScene(),foods=getSelectedFoodObjects(),result=scoreMeal(foods);
+      document.getElementById("sceneBadge").textContent=`当前场景 / ${scene.name}`;
+      document.getElementById("resultTitle").textContent=foods.length?`${scene.name}这顿饭，现在属于"${result.status}"区间。`:"先拼一顿饭，看看它对减脂新手是否友好。";
+      document.getElementById("resultSummary").textContent=foods.length?"系统会按照热量、蛋白、饱腹感和糖油风险，实时给出小白可执行的判断。":"目标不是'吃最少'，而是'吃得更稳'。";
+      const sp=document.getElementById("statusPill"); sp.textContent=foods.length?`${result.status}指数: ${result.score}`:"稳妥指数: 18"; sp.style.color=statusColor(result.status);
+      document.getElementById("meterValue").textContent=`${foods.length?result.score:18} / 100`; document.getElementById("meterFill").style.width=`${foods.length?result.score:18}%`;
+      const tags=document.getElementById("summaryTags"); tags.innerHTML=""; result.summary.forEach(item=>{ const t=document.createElement("div"); t.className="pill"; t.textContent=item; tags.appendChild(t); });
+      document.getElementById("overviewText").textContent=result.overview; document.getElementById("adjustText").textContent=result.adjust; document.getElementById("plateText").textContent=result.plate;
+    }
+    function toggleFood(foodId) { uiState.selectedFoods=uiState.selectedFoods.includes(foodId)?uiState.selectedFoods.filter(id=>id!==foodId):[...uiState.selectedFoods,foodId]; renderFoodCards(); renderMealResult(); flashResult(); }
+    function applySmartPick() { uiState.selectedFoods=[...getActiveScene().smartPick]; state.totalSmartPicks+=1; saveState(); renderFoodCards(); renderMealResult(); flashResult(); const na=checkAchievements(); na.forEach(a=>showToast(`解锁成就: ${a.icon} ${a.name}`,"achievement")); if(na.length>0)spawnConfetti(); }
+    function clearMeal() { uiState.selectedFoods=[]; renderFoodCards(); renderMealResult(); flashResult(); }
+    function surpriseMeal() { const scene=getActiveScene(); const risky=scene.foods.filter(f=>["sugar","fried","snack"].includes(f.category)).slice(0,2).map(f=>f.id); const carb=scene.foods.find(f=>f.category==="carb"); uiState.selectedFoods=carb?[...risky,carb.id]:risky; renderFoodCards(); renderMealResult(); flashResult(); }
+    function saveMeal() {
+      const foods=getSelectedFoodObjects(); if(!foods.length){showToast("请先选择食物再保存","info");return;}
+      const mt=uiState.activeMealType; state.dailyLog.meals[mt]=foods.map(f=>({id:f.id,name:f.name,calories:f.calories,protein:f.protein,satiety:f.satiety,category:f.category,note:f.note}));
+      state.totalMealsLogged+=1; state.weeklyMeals = (state.weeklyMeals || 0) + 1; updateStreak(); updateSugarFreeDays(); updateProteinGoalDays(); addXp(10); addCoins(5); saveState();
+      const na=checkAchievements(); na.forEach(a=>showToast(`解锁成就: ${a.icon} ${a.name}`,"achievement")); if(na.length>0)spawnConfetti();
+      const mealNames={breakfast:"早餐",lunch:"午餐",dinner:"晚餐",snack:"加餐"}; showToast(`${mealNames[mt]}已保存！+10 XP +5 轻燃币`,"success");
+      showPetSpeech(); uiState.selectedFoods=[]; renderFoodCards(); renderMealResult(); updateStreakBadge(); updateFooterStats(); updatePet(); renderTasks();
+      const tasks=getTaskStatus(); if(tasks.every(t=>t.done)){addXp(40);addCoins(20);showToast("全部每日任务完成！+40 XP +20 轻燃币","success");spawnConfetti();}
+      checkWeeklyChallenge(); renderWeeklyChallenge();
+    }
+
+    // ============================================================
+    // RENDER: PLANS
+    // ============================================================
+    function renderPlans() { renderRemedyButtons(); renderRemedyPlan(); renderGoalButtons(); renderWeekPlan(); }
+    function renderRemedyButtons() { const container=document.getElementById("remedyButtons"); container.innerHTML=""; remedyPlans.forEach(plan=>{ const btn=document.createElement("button"); btn.type="button"; btn.className=`remedy-button${plan.id===uiState.activeRemedyId?" active":""}`; btn.textContent=plan.title.replace("，"," "); btn.addEventListener("click",()=>{uiState.activeRemedyId=plan.id;state.totalRemedyUsed+=1;saveState();renderRemedyButtons();renderRemedyPlan();const na=checkAchievements();na.forEach(a=>showToast(`解锁成就: ${a.icon} ${a.name}`,"achievement"));}); container.appendChild(btn); }); }
+    function renderRemedyPlan() { const plan=remedyPlans.find(p=>p.id===uiState.activeRemedyId)||remedyPlans[0]; document.getElementById("remedyPlanTitle").textContent=plan.title; document.getElementById("remedyPlanBody").textContent=plan.body; document.getElementById("mindsetText").textContent=plan.mindset; }
+    function renderGoalButtons() { const gc=document.getElementById("goalModeButtons"); gc.innerHTML=""; goalModes.forEach(mode=>{ const btn=document.createElement("button"); btn.type="button"; btn.className=`mode-button${mode===uiState.activeGoalMode?" active":""}`; btn.textContent=mode; btn.addEventListener("click",()=>{uiState.activeGoalMode=mode;renderGoalButtons();}); gc.appendChild(btn); }); const ic=document.getElementById("intensityButtons"); ic.innerHTML=""; intensityModes.forEach(mode=>{ const btn=document.createElement("button"); btn.type="button"; btn.className=`week-option${mode===uiState.activeIntensity?" active":""}`; btn.innerHTML=`${mode}<small>${mode==="温和"?"更好坚持":mode==="正常"?"适合大多数人":"有训练意愿"}</small>`; btn.addEventListener("click",()=>{uiState.activeIntensity=mode;renderGoalButtons();}); ic.appendChild(btn); }); }
+    function intensitySuffix(mode) { if(mode==="温和")return"训练量减一档，重点保连续。"; if(mode==="进阶")return"训练组数加一档，并强化蛋白摄入。"; return"保持基础执行，不追求过猛。"; }
+    function renderWeekPlan() { const tg=weekTemplates[uiState.activeTemplateKey]||weekTemplates.default; const plan=tg[uiState.activeGoalMode]; const grid=document.getElementById("weekGrid"); grid.innerHTML=""; plan.forEach((item,index)=>{ const card=document.createElement("article"); card.className="week-card"; card.innerHTML=`<span class="week-day">Day ${index+1}</span><span class="label">饮食重点</span><strong>${item[0]}</strong><span class="label">训练安排</span><p>${item[1]}</p><span class="label">信心提示</span><p>${item[2]} ${intensitySuffix(uiState.activeIntensity)}</p>`; grid.appendChild(card); }); }
+
+    // ============================================================
+    // RENDER: ACHIEVEMENTS
+    // ============================================================
+    function renderAchievements() {
+      const info=getLevelInfo(); document.getElementById("achLevelName").textContent=`Lv.${info.level} ${info.title}`; document.getElementById("achLevelXp").textContent=`${state.xp-info.xp} / ${info.nextXp-info.xp} XP`; document.getElementById("achLevelBarFill").style.width=info.progress+"%";
+      const grid=document.getElementById("achievementGrid"); grid.innerHTML="";
+      achievements.forEach(ach=>{ const unlocked=state.achievements.includes(ach.id); const card=document.createElement("div"); card.className=`achievement-card ${unlocked?"unlocked":"locked"}`; card.innerHTML=`<div class="ach-icon">${ach.icon}</div><span class="ach-name">${ach.name}</span><span class="ach-desc">${ach.desc}</span><span style="display:block;margin-top:6px;font-size:11px;color:${unlocked?"var(--mint-deep)":"var(--muted)"};">${unlocked?"已解锁":"未解锁"}</span>`; grid.appendChild(card); });
+      updateFooterStats();
+    }
+
+    // ============================================================
+    // SPIN WHEEL
+    // ============================================================
+    const spinRewards = [
+      { label:"+10 XP", icon:"⚡", value:10, type:"xp" }, { label:"+5 轻燃币", icon:"🪙", value:5, type:"coin" },
+      { label:"+20 XP", icon:"⚡⚡", value:20, type:"xp" }, { label:"+10 轻燃币", icon:"🪙🪙", value:10, type:"coin" },
+      { label:"+30 XP", icon:"💫", value:30, type:"xp" }, { label:"+15 轻燃币", icon:"💰", value:15, type:"coin" },
+      { label:"+50 XP", icon:"🌟", value:50, type:"xp" }, { label:"+25 轻燃币", icon:"💎", value:25, type:"coin" }
+    ];
+    let spinAngle = 0;
+
+    function showSpinModal() {
+      document.getElementById("spinModal").classList.remove("hidden");
+      document.getElementById("spinStreak").textContent = state.streak;
+      document.getElementById("spinResult").classList.add("hidden");
+      document.getElementById("spinBtn").style.display = "inline-flex";
+      drawSpinWheel(0);
+    }
+
+    function drawSpinWheel(rotation) {
+      const canvas = document.getElementById("spinCanvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const cx = 150, cy = 150, r = 140;
+      ctx.clearRect(0, 0, 300, 300);
+      const colors = ["#ff9a5f","#f4c760","#93d69f","#a78bfa","#6ba3d6","#df6662","#ffb46d","#5ea66a"];
+      const sliceAngle = (2 * Math.PI) / spinRewards.length;
+      spinRewards.forEach((reward, i) => {
+        const startAngle = rotation + i * sliceAngle;
+        const endAngle = startAngle + sliceAngle;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = colors[i];
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(startAngle + sliceAngle / 2);
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 14px 'Noto Sans SC', sans-serif";
+        ctx.fillText(reward.label, r * 0.62, 5);
+        ctx.font = "20px sans-serif";
+        ctx.fillText(reward.icon, r * 0.62, -10);
+        ctx.restore();
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.fillStyle = "#183129";
+      ctx.font = "bold 14px 'Noto Sans SC', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("GO", cx, cy + 5);
+    }
+
+    function spinWheel() {
+      const btn = document.getElementById("spinBtn");
+      if (!state.spinAvailable) { showToast("今天已经转过了，明天再来吧！", "info"); return; }
+      btn.disabled = true; btn.textContent = "转动中...";
+      const spins = 5 + Math.floor(Math.random() * 5);
+      const targetAngle = Math.random() * 2 * Math.PI;
+      const totalRotation = spins * 2 * Math.PI + targetAngle;
+      const duration = 3000;
+      const startTime = performance.now();
+      const startAngle = spinAngle;
+      function animate(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        spinAngle = startAngle + totalRotation * eased;
+        drawSpinWheel(spinAngle);
+        if (progress < 1) { requestAnimationFrame(animate); } else { finishSpin(); }
+      }
+      requestAnimationFrame(animate);
+    }
+
+    function finishSpin() {
+      const sliceAngle = (2 * Math.PI) / spinRewards.length;
+      const normalizedAngle = ((spinAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const pointerAngle = -Math.PI / 2;
+      let idx = Math.floor(((pointerAngle - normalizedAngle + 2 * Math.PI) % (2 * Math.PI)) / sliceAngle);
+      idx = (spinRewards.length - idx) % spinRewards.length;
+      const reward = spinRewards[idx];
+      state.spinAvailable = false;
+      state.spinDate = new Date().toISOString().split("T")[0];
+      if (reward.type === "xp") addXp(reward.value);
+      else addCoins(reward.value);
+      saveState();
+      const result = document.getElementById("spinResult");
+      result.classList.remove("hidden");
+      result.innerHTML = `<div class="big-icon">${reward.icon}</div><h3>恭喜获得 ${reward.label}！</h3><p style="color:var(--muted);">明天再来转动吧！</p>`;
+      document.getElementById("spinBtn").style.display = "none";
+      spawnConfetti();
+      updateStreakBadge();
+      updateCoinBadge();
+      const na = checkAchievements();
+      na.forEach(a => showToast("解锁成就: " + a.icon + " " + a.name, "achievement"));
+      if (na.length > 0) spawnConfetti();
+      renderTasks();
+      updatePet();
+    }
+
+    // ============================================================
+    // AI CAMERA SIMULATION
+    // ============================================================
+    const aiFoodDB = [
+      { name: "鸡胸肉沙拉", calories: 220, protein: 28, confidence: 94 },
+      { name: "牛肉面", calories: 480, protein: 22, confidence: 88 },
+      { name: "三文鱼寿司", calories: 350, protein: 18, confidence: 91 },
+      { name: "水果酸奶碗", calories: 180, protein: 8, confidence: 85 },
+      { name: "麻辣香锅", calories: 650, protein: 30, confidence: 82 },
+      { name: "番茄鸡蛋盖饭", calories: 420, protein: 16, confidence: 87 },
+      { name: "蔬菜沙拉", calories: 120, protein: 5, confidence: 90 },
+      { name: "炸鸡汉堡套餐", calories: 750, protein: 28, confidence: 93 },
+      { name: "清蒸鱼配米饭", calories: 380, protein: 26, confidence: 89 },
+      { name: "珍珠奶茶", calories: 310, protein: 3, confidence: 95 }
+    ];
+
+    function simulateCamera() {
+      const frame = document.getElementById("cameraFrame");
+      const aiResult = document.getElementById("aiResult");
+      const aiConf = document.getElementById("aiConfidence");
+      const scanLine = document.createElement("div");
+      scanLine.className = "scanning";
+      frame.appendChild(scanLine);
+      frame.querySelector(".food-placeholder").textContent = "🔍";
+      frame.querySelector("p").textContent = "AI 正在识别中...";
+      aiResult.classList.add("hidden");
+      aiConf.classList.add("hidden");
+      document.getElementById("takePhotoBtn").disabled = true;
+      document.getElementById("takePhotoBtn").textContent = "识别中...";
+      setTimeout(() => {
+        scanLine.remove();
+        const food = aiFoodDB[Math.floor(Math.random() * aiFoodDB.length)];
+        frame.querySelector(".food-placeholder").textContent = "🍽️";
+        frame.querySelector("p").textContent = "识别完成！";
+        aiResult.classList.remove("hidden");
+        aiResult.innerHTML = aiFoodDB.slice(0, 3).map((f, i) => {
+          const isMain = i === 0;
+          return `<div class="ai-result-item" style="${isMain ? 'border-color:rgba(94,166,106,0.3);background:rgba(94,166,106,0.06);' : ''}">
+            <span class="ai-food">${isMain ? '⭐ ' : ''}${f.name}</span>
+            <span class="ai-kcal">${f.calories} kcal | 蛋白 ${f.protein}g</span>
+          </div>`;
+        }).join("");
+        aiConf.classList.remove("hidden");
+        aiConf.innerHTML = `AI 置信度: ${food.confidence}% | 识别用时: ${(0.8 + Math.random() * 0.4).toFixed(1)}s`;
+        document.getElementById("takePhotoBtn").disabled = false;
+        document.getElementById("takePhotoBtn").textContent = "拍照识别";
+        showToast("AI识别完成！检测到: " + food.name, "success");
+      }, 1800 + Math.random() * 800);
+    }
+
+    function simulateVoice() {
+      const voiceResult = document.getElementById("voiceResult");
+      voiceResult.classList.remove("hidden");
+      voiceResult.innerHTML = `<div class="ai-result-item" style="border-color:rgba(107,163,214,0.3);background:rgba(107,163,214,0.06);">
+        <span class="ai-food">🎤 语音识别中...</span>
+        <span class="ai-kcal">正在处理</span>
+      </div>`;
+      const phrases = [
+        "我今天吃了两个鸡蛋和一碗燕麦粥",
+        "中午吃了鸡胸肉沙拉和全麦面包",
+        "晚餐是清蒸鱼和蔬菜，喝了一杯无糖豆浆",
+        "今天吃了一碗牛肉面和一个茶叶蛋",
+        "早餐是酸奶加水果，午餐是外卖轻食"
+      ];
+      const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+      setTimeout(() => {
+        voiceResult.innerHTML = `<div class="ai-result-item" style="border-color:rgba(94,166,106,0.3);background:rgba(94,166,106,0.06);">
+          <span class="ai-food">🎤 ${phrase}</span>
+          <span class="ai-kcal">已自动录入 ~${250 + Math.floor(Math.random() * 200)} kcal</span>
+        </div>`;
+        state.totalMealsLogged += 1;
+        addXp(5);
+        addCoins(3);
+        saveState();
+        showToast("语音已识别并自动记录！+5 XP +3 轻燃币", "success");
+        updateFooterStats();
+        renderTasks();
+      }, 1500);
+    }
+
+    // ============================================================
+    // WEEKLY CHALLENGE
+    // ============================================================
+    const weeklyChallenges = [
+      { id: "wc_protein", name: "蛋白质达人", desc: "本周累计5天蛋白质达标", icon: "🥩", target: 5, check: () => state.proteinGoalDays >= 5, reward: { xp: 80, coins: 30 } },
+      { id: "wc_water", name: "饮水冠军", desc: "本周累计5天喝够8杯水", icon: "💧", target: 5, check: () => state.waterGoalDays >= 5, reward: { xp: 60, coins: 20 } },
+      { id: "wc_meals", name: "全勤记录", desc: "本周记录15餐以上", icon: "📋", target: 15, check: () => state.weeklyMeals >= 15, reward: { xp: 100, coins: 40 } },
+      { id: "wc_nosugar", name: "控糖周", desc: "本周连续5天无含糖饮料", icon: "🚫", target: 5, check: () => state.sugarFreeDays >= 5, reward: { xp: 70, coins: 25 } }
+    ];
+    let currentWeeklyChallenge = weeklyChallenges[0];
+    let weeklyChallengeProgress = 0;
+
+    function getWeeklyChallenge() {
+      const weekIdx = Math.floor((state.totalMealsLogged || 0) / 7) % weeklyChallenges.length;
+      currentWeeklyChallenge = weeklyChallenges[weekIdx];
+      if (currentWeeklyChallenge.id === "wc_protein") weeklyChallengeProgress = state.proteinGoalDays || 0;
+      else if (currentWeeklyChallenge.id === "wc_water") weeklyChallengeProgress = state.waterGoalDays || 0;
+      else if (currentWeeklyChallenge.id === "wc_meals") weeklyChallengeProgress = state.weeklyMeals || 0;
+      else if (currentWeeklyChallenge.id === "wc_nosugar") weeklyChallengeProgress = state.sugarFreeDays || 0;
+    }
+
+    function checkWeeklyChallenge() {
+      if (!state.weeklyChallengeCompleted) state.weeklyChallengeCompleted = [];
+      getWeeklyChallenge();
+      if (currentWeeklyChallenge.check() && !state.weeklyChallengeCompleted.includes(currentWeeklyChallenge.id)) {
+        state.weeklyChallengeCompleted.push(currentWeeklyChallenge.id);
+        addXp(currentWeeklyChallenge.reward.xp);
+        addCoins(currentWeeklyChallenge.reward.coins);
+        showToast(currentWeeklyChallenge.icon + " 本周挑战完成！+" + currentWeeklyChallenge.reward.xp + " XP +" + currentWeeklyChallenge.reward.coins + " 轻燃币", "achievement");
+        spawnConfetti();
+        saveState();
+      }
+    }
+
+    // ============================================================
+    // STREAK FREEZE (保护卡)
+    // ============================================================
+    let streakFreezeAvailable = true;
+    let streakFreezeUsed = false;
+
+    function useStreakFreeze() {
+      if (!streakFreezeAvailable) { showToast("保护卡已使用过，完成每周挑战可重新获得", "info"); return; }
+      if (streakFreezeUsed) { showToast("本周已使用过保护卡", "info"); return; }
+      streakFreezeUsed = true;
+      streakFreezeAvailable = false;
+      state.streak += 1;
+      saveState();
+      updateStreakBadge();
+      showToast("🛡️ 保护卡已生效！连续打卡天数已保护，明天继续加油！", "success");
+      showPetSpeech("我用保护卡帮你守住了一天！明天一定要来哦！");
+    }
+
+    function resetStreakFreeze() {
+      if (!streakFreezeAvailable && state.weeklyChallengeCompleted && state.weeklyChallengeCompleted.length > 0) {
+        streakFreezeAvailable = true;
+        streakFreezeUsed = false;
+      }
+    }
+
+    // ============================================================
+    // SECT MISSION SYSTEM (宗门任务系统)
+    // ============================================================
+    const sectDiscipleTitles = [
+      { minLevel: 1, title: "外门弟子", icon: "🌱" },
+      { minLevel: 3, title: "内门弟子", icon: "🌿" },
+      { minLevel: 5, title: "真传弟子", icon: "🌟" },
+      { minLevel: 7, title: "长老亲传", icon: "💎" },
+      { minLevel: 9, title: "宗门护法", icon: "👑" },
+      { minLevel: 10, title: "轻燃宗主", icon: "⚡" }
+    ];
+
+    function getSectTitle() {
+      const lv = state.level || 1;
+      let title = sectDiscipleTitles[0];
+      for (let i = sectDiscipleTitles.length - 1; i >= 0; i--) {
+        if (lv >= sectDiscipleTitles[i].minLevel) { title = sectDiscipleTitles[i]; break; }
+      }
+      return title;
+    }
+
+    // Mission pool - daily randomized
+    const missionPool = [
+      { id:"m1", diff:"fan", diffLabel:"凡级", icon:"🍳", title:"早餐记录", desc:"在餐食记录中完成一次早餐记录", check:()=>state.dailyLog.meals.breakfast.length>0, reward:{xp:15,coins:5,contribution:10} },
+      { id:"m2", diff:"fan", diffLabel:"凡级", icon:"☀️", title:"午餐记录", desc:"在餐食记录中完成一次午餐记录", check:()=>state.dailyLog.meals.lunch.length>0, reward:{xp:15,coins:5,contribution:10} },
+      { id:"m3", diff:"fan", diffLabel:"凡级", icon:"🌙", title:"晚餐记录", desc:"在餐食记录中完成一次晚餐记录", check:()=>state.dailyLog.meals.dinner.length>0, reward:{xp:15,coins:5,contribution:10} },
+      { id:"m4", diff:"fan", diffLabel:"凡级", icon:"💧", title:"饮水入门", desc:"今日饮水达到4杯", check:()=>state.dailyLog.waterCups>=4, reward:{xp:10,coins:3,contribution:8} },
+      { id:"m5", diff:"ling", diffLabel:"灵级", icon:"🧠", title:"智能推荐", desc:"使用一次智能推荐搭配餐食", check:()=>{return (state.totalSmartPicks||0)>0;}, reward:{xp:25,coins:10,contribution:20} },
+      { id:"m6", diff:"ling", diffLabel:"灵级", icon:"📸", title:"AI拍照识食", desc:"使用AI拍照识别功能一次", check:()=>{return true;}, reward:{xp:20,coins:8,contribution:15} },
+      { id:"m7", diff:"ling", diffLabel:"灵级", icon:"🎯", title:"蛋白质达标", desc:"今日蛋白质摄入达到目标值", check:()=>{const t=getDailyTotals();return t.totalProtein>=state.profile.dailyProteinTarget;}, reward:{xp:30,coins:12,contribution:25} },
+      { id:"m8", diff:"ling", diffLabel:"灵级", icon:"💧", title:"饮水达人", desc:"今日饮水达到8杯", check:()=>state.dailyLog.waterCups>=8, reward:{xp:20,coins:8,contribution:15} },
+      { id:"m9", diff:"xian", diffLabel:"仙级", icon:"🔥", title:"热量控制", desc:"今日总热量不超过目标值", check:()=>{const t=getDailyTotals();return t.totalKcal>0&&t.totalKcal<=state.profile.dailyCalorieTarget;}, reward:{xp:40,coins:15,contribution:30} },
+      { id:"m10", diff:"xian", diffLabel:"仙级", icon:"🚫", title:"控糖高手", desc:"今日无含糖饮料/食物记录", check:()=>{const all=getAllMealsToday();return all.length>0&&!all.some(f=>f.category==="sugar");}, reward:{xp:35,coins:15,contribution:28} },
+      { id:"m11", diff:"xian", diffLabel:"仙级", icon:"⚖️", title:"体重记录", desc:"记录今日体重并查看趋势", check:()=>state.dailyLog.weight!==null, reward:{xp:25,coins:10,contribution:20} },
+      { id:"m12", diff:"xian", diffLabel:"仙级", icon:"🏃", title:"运动达人", desc:"完成一项运动记录（模拟）", check:()=>{return (state.dailyLog.exercise||false);}, reward:{xp:30,coins:12,contribution:25} },
+      { id:"m13", diff:"xian", diffLabel:"仙级", icon:"🥗", title:"四餐全勤", desc:"今日记录早餐+午餐+晚餐+加餐", check:()=>Object.values(state.dailyLog.meals).every(m=>m.length>0), reward:{xp:50,coins:20,contribution:40} },
+      { id:"m14", diff:"xian", diffLabel:"仙级", icon:"📚", title:"完成学习", desc:"在藏经阁完成一门课程", check:()=>(state.learnedCourses||[]).length>0, reward:{xp:35,coins:15,contribution:30} },
+      { id:"m15", diff:"tian", diffLabel:"天级", icon:"🏆", title:"全部任务", desc:"完成今日所有已接宗门任务", check:()=>{const am=getAcceptedMissions();return am.length>0&&am.every(m=>m.check());}, reward:{xp:80,coins:30,contribution:60} },
+      { id:"m16", diff:"tian", diffLabel:"天级", icon:"🌟", title:"至尊挑战", desc:"使用幸运转盘+完成学习+记录三餐", check:()=>{const t=getDailyTotals();return t.mealCount>=3&&(state.learnedCourses||[]).length>0;}, reward:{xp:100,coins:40,contribution:80} }
+    ];
+
+    function getAllMealsToday() {
+      return [...state.dailyLog.meals.breakfast,...state.dailyLog.meals.lunch,...state.dailyLog.meals.dinner,...state.dailyLog.meals.snack];
+    }
+
+    function getAcceptedMissions() {
+      return (state.sectAcceptedMissions||[]).map(id=>missionPool.find(m=>m.id===id)).filter(Boolean);
+    }
+
+    function generateDailyMissions() {
+      const today = new Date().toISOString().split("T")[0];
+      if (state.sectMissionDate === today && state.sectDailyMissions && state.sectDailyMissions.length > 0) return;
+      // Generate 6 missions with distributed difficulty
+      const shuffled = [...missionPool].sort(() => Math.random() - 0.5);
+      const fan = shuffled.filter(m => m.diff === "fan").slice(0, 2);
+      const ling = shuffled.filter(m => m.diff === "ling").slice(0, 2);
+      const xian = shuffled.filter(m => m.diff === "xian").slice(0, 1);
+      const tian = shuffled.filter(m => m.diff === "tian").slice(0, 1);
+      state.sectDailyMissions = [...fan, ...ling, ...xian, ...tian].map(m => m.id);
+      state.sectMissionDate = today;
+      state.sectRefreshCount = 0;
+      state.sectAcceptedMissions = [];
+      saveState();
+    }
+
+    function acceptMission(missionId) {
+      const accepted = state.sectAcceptedMissions || [];
+      if (accepted.length >= 3) { showToast("最多同时接取3个任务，请先完成已有任务", "info"); return; }
+      if (accepted.includes(missionId)) { showToast("已接取该任务", "info"); return; }
+      state.sectAcceptedMissions = [...accepted, missionId];
+      saveState();
+      const mission = missionPool.find(m => m.id === missionId);
+      showToast("已接取任务: " + (mission ? mission.icon : "") + " " + (mission ? mission.title : ""), "success");
+      showPetSpeech("接了新任务！加油完成吧！");
+      renderMissions();
+    }
+
+    function submitMission(missionId) {
+      const mission = missionPool.find(m => m.id === missionId);
+      if (!mission) return;
+      if (!mission.check()) { showToast("任务条件尚未满足，请继续努力！", "info"); return; }
+      const completed = state.sectCompletedMissions || [];
+      if (completed.includes(missionId)) { showToast("该任务已完成", "info"); return; }
+      state.sectCompletedMissions = [...completed, missionId];
+      state.sectAcceptedMissions = (state.sectAcceptedMissions||[]).filter(id => id !== missionId);
+      state.sectContribution = (state.sectContribution || 0) + mission.reward.contribution;
+      addXp(mission.reward.xp);
+      addCoins(mission.reward.coins);
+      saveState();
+      showToast("任务完成！" + mission.icon + " +" + mission.reward.xp + " XP +" + mission.reward.coins + " 轻燃币", "achievement");
+      spawnConfetti();
+      checkWeeklyChallenge();
+      renderMissions();
+      renderDashboard();
+    }
+
+    function refreshMissions() {
+      if ((state.sectRefreshCount || 0) >= 3) { showToast("今日刷新次数已用完", "info"); return; }
+      const today = new Date().toISOString().split("T")[0];
+      state.sectMissionDate = null;
+      state.sectRefreshCount = (state.sectRefreshCount || 0) + 1;
+      generateDailyMissions();
+      saveState();
+      showToast("任务已刷新！剩余刷新次数: " + (3 - state.sectRefreshCount), "success");
+      renderMissions();
+    }
+
+    function renderMissions() {
+      const board = document.getElementById("missionBoard");
+      if (!board) return;
+      generateDailyMissions();
+      const dailyMissions = (state.sectDailyMissions || []).map(id => missionPool.find(m => m.id === id)).filter(Boolean);
+      const accepted = state.sectAcceptedMissions || [];
+      const completed = state.sectCompletedMissions || [];
+      document.getElementById("acceptedCount").textContent = accepted.length;
+      board.innerHTML = dailyMissions.map(m => {
+        const isAccepted = accepted.includes(m.id);
+        const isCompleted = completed.includes(m.id);
+        let cardClass = "";
+        if (isCompleted) cardClass = "completed";
+        else if (isAccepted) cardClass = "accepted";
+        let btnHtml = "";
+        if (isCompleted) {
+          btnHtml = '<button class="mission-btn done">已完成</button>';
+        } else if (isAccepted) {
+          const canSubmit = m.check();
+          btnHtml = canSubmit
+            ? '<button class="mission-btn submit" onclick="submitMission(\'' + m.id + '\')">提交任务</button>'
+            : '<button class="mission-btn accept" style="background:var(--muted);">进行中...</button>';
+        } else {
+          btnHtml = accepted.length >= 3
+            ? '<button class="mission-btn done">任务已满</button>'
+            : '<button class="mission-btn accept" onclick="acceptMission(\'' + m.id + '\')">接取任务</button>';
+        }
+        return '<div class="mission-card ' + cardClass + '">' +
+          '<span class="mission-diff sect-badge ' + m.diff + '">' + m.diffLabel + '</span>' +
+          '<span class="mission-title">' + m.icon + ' ' + m.title + '</span>' +
+          '<span class="mission-desc">' + m.desc + '</span>' +
+          '<div class="mission-footer">' +
+            '<span class="mission-reward">+'+m.reward.xp+' XP +'+m.reward.coins+' 币 +'+m.reward.contribution+'贡献</span>' +
+            btnHtml +
+          '</div>' +
+        '</div>';
+      }).join("");
+      // Update sect header
+      document.getElementById("sectDiscipleTitle").textContent = getSectTitle().icon + " " + getSectTitle().title;
+      document.getElementById("sectContribution").textContent = "宗门贡献: " + (state.sectContribution || 0);
+    }
+
+    // ============================================================
+    // LEARNING SYSTEM (藏经阁)
+    // ============================================================
+    const learningCourses = [
+      { id:"l1", icon:"📖", title:"热量基础", desc:"了解什么是卡路里，如何计算每日所需热量", content:"热量（卡路里）是衡量食物能量的单位。基础代谢率（BMR）是身体在静止状态下消耗的热量。每天总消耗（TDEE）= BMR × 活动系数。减脂需要热量缺口（摄入 < 消耗），增肌需要热量盈余。一般来说，每天300-500kcal的缺口是安全且可持续的。", quiz:[{q:"减脂应该保持什么状态？",opts:["热量缺口","热量盈余","热量平衡","不吃不喝"],ans:0},{q:"每天安全的热量缺口范围是多少？",opts:["1000-1500 kcal","300-500 kcal","50-100 kcal","2000 kcal以上"],ans:1},{q:"TDEE代表什么？",opts:["基础代谢率","每日总消耗","体重指数","蛋白质需求"],ans:1}] },
+      { id:"l2", icon:"🥩", title:"三大营养素", desc:"蛋白质、碳水、脂肪的作用与搭配", content:"蛋白质: 每克4kcal，维持肌肉、增强饱腹感。减脂期建议每公斤体重1.2-2.0g。碳水化合物: 每克4kcal，身体主要能量来源。优先选择慢碳（全谷物、杂粮）。脂肪: 每克9kcal，必需但需控制。选择不饱和脂肪（坚果、鱼油、橄榄油）。一餐理想的搭配: 一掌蛋白 + 一拳主食 + 半盘蔬菜。", quiz:[{q:"每克蛋白质含多少热量？",opts:["9 kcal","4 kcal","7 kcal","2 kcal"],ans:1},{q:"减脂期建议每公斤体重摄入多少蛋白质？",opts:["0.5-0.8g","1.2-2.0g","3.0-4.0g","不需要蛋白质"],ans:1},{q:"哪种是慢碳？",opts:["白米饭","全麦面包","糖果","可乐"],ans:1}] },
+      { id:"l3", icon:"🍽️", title:"餐盘搭配法", desc:"不用称重也能吃对的餐盘法则", content:"餐盘法是最简单的饮食控制方法: 将餐盘分为四份，一半放蔬菜，四分之一放蛋白质，四分之一放主食。蔬菜优先选择深色蔬菜，蛋白质可选鸡胸、鱼、豆腐、鸡蛋，主食选全谷物或杂粮。这个方法不需要称重，适合新手快速上手。外出就餐时，先吃蔬菜和蛋白质，再吃主食，能有效控制摄入量。", quiz:[{q:"餐盘法中蔬菜应占多少？",opts:["四分之一","一半","四分之三","不需要蔬菜"],ans:1},{q:"先吃什么有助于控制食量？",opts:["主食","甜点","蔬菜和蛋白质","饮料"],ans:2},{q:"外出就餐时哪种顺序最科学？",opts:["先喝汤→蔬菜→蛋白质→主食","先吃主食→蔬菜→蛋白质","先吃甜点→主食","只喝饮料"],ans:0}] },
+      { id:"l4", icon:"🥤", title:"隐形热量陷阱", desc:"识别饮料、酱料、零食中的隐藏热量", content:"很多看似'健康'的食物热量很高: 一杯奶茶≈300-400kcal（相当于一碗半米饭），一份沙拉酱≈150kcal，一包薯片≈250kcal，一杯果汁≈200kcal（缺少纤维，不如直接吃水果）。建议: 饮品选无糖（茶、黑咖啡、零度饮料），酱料用醋/柠檬汁替代，零食选原味坚果（每天一小把）、酸奶或水果。", quiz:[{q:"一杯奶茶大约相当于多少米饭？",opts:["半碗","一碗半","三碗","五碗"],ans:1},{q:"以下哪种饮品热量最低？",opts:["果汁","奶茶","无糖茶","可乐"],ans:2},{q:"沙拉酱可以换成什么？",opts:["更多沙拉酱","醋或柠檬汁","蜂蜜","巧克力酱"],ans:1}] },
+      { id:"l5", icon:"🏃", title:"运动与饮食", desc:"运动前后如何吃，才能事半功倍", content:"运动前1-2小时: 吃易消化的碳水+少量蛋白（如香蕉+酸奶），提供能量。运动后30分钟内: 补充蛋白质+碳水（如鸡胸+全麦面包），帮助肌肉恢复。有氧运动（跑步、游泳）主要消耗热量，力量训练（深蹲、俯卧撑）帮助维持肌肉。减脂最佳组合: 力量训练 + 有氧运动，每周3-5次，每次30-60分钟。", quiz:[{q:"运动后多久内补充营养最佳？",opts:["2小时后","30分钟内","不需要补充","第二天"],ans:1},{q:"减脂最佳运动组合是什么？",opts:["只做有氧","只做力量","力量+有氧","不运动"],ans:2},{q:"运动前推荐吃什么？",opts:["炸鸡","易消化碳水+少量蛋白","什么都不吃","大量高脂食物"],ans:1}] },
+      { id:"l6", icon:"🧘", title:"心态与习惯", desc:"减脂的心理建设与长期习惯养成", content:"减脂不是短跑，而是改变生活方式的马拉松。重要原则: ①80/20法则: 80%时间做对，20%允许弹性；②不要追求完美: 一顿吃超不代表失败；③关注过程而非结果: 体重会波动，但好习惯会积累；④找到适合自己的节奏: 别人的方法不一定适合你；⑤奖励自己: 每达成一个小目标就给自己非食物奖励。记住: 可持续的减脂速度是每周0.5-1kg。", quiz:[{q:"80/20法则是什么意思？",opts:["80%时间节食","80%时间做对，20%允许弹性","80天减肥","每天吃80%"],ans:1},{q:"健康的减脂速度是多少？",opts:["每周3-5kg","每周0.5-1kg","每天1kg","每月10kg"],ans:1},{q:"一顿吃超了应该怎么办？",opts:["自责放弃","下一顿回归正常","接下来三天不吃","疯狂运动惩罚自己"],ans:1}] }
+    ];
+
+    let quizState = { courseId: null, currentQ: 0, correctCount: 0, totalQ: 0 };
+
+    function startQuiz(courseId) {
+      const course = learningCourses.find(c => c.id === courseId);
+      if (!course) return;
+      quizState = { courseId, currentQ: 0, correctCount: 0, totalQ: course.quiz.length };
+      document.getElementById("quizModal").classList.remove("hidden");
+      document.getElementById("quizResult").classList.add("hidden");
+      showQuizQuestion();
+    }
+
+    function showQuizQuestion() {
+      const course = learningCourses.find(c => c.id === quizState.courseId);
+      if (!course) return;
+      const q = course.quiz[quizState.currentQ];
+      document.getElementById("quizCounter").textContent = "第 " + (quizState.currentQ + 1) + "/" + quizState.totalQ + " 题";
+      document.getElementById("quizProgressFill").style.width = ((quizState.currentQ / quizState.totalQ) * 100) + "%";
+      document.getElementById("quizQuestion").textContent = q.q;
+      const opts = document.getElementById("quizOptions");
+      opts.innerHTML = q.opts.map((opt, i) =>
+        '<button class="quiz-option" onclick="answerQuiz(' + i + ')">' + opt + '</button>'
+      ).join("");
+      document.getElementById("quizResult").classList.add("hidden");
+    }
+
+    function answerQuiz(idx) {
+      const course = learningCourses.find(c => c.id === quizState.courseId);
+      if (!course) return;
+      const q = course.quiz[quizState.currentQ];
+      const opts = document.querySelectorAll("#quizOptions .quiz-option");
+      opts.forEach((btn, i) => {
+        btn.style.pointerEvents = "none";
+        if (i === q.ans) btn.classList.add("correct");
+        if (i === idx && i !== q.ans) btn.classList.add("wrong");
+      });
+      if (idx === q.ans) quizState.correctCount++;
+      setTimeout(() => {
+        quizState.currentQ++;
+        if (quizState.currentQ >= quizState.totalQ) {
+          finishQuiz();
+        } else {
+          showQuizQuestion();
+        }
+      }, 800);
+    }
+
+    function finishQuiz() {
+      const course = learningCourses.find(c => c.id === quizState.courseId);
+      const passed = quizState.correctCount >= quizState.totalQ * 0.6;
+      document.getElementById("quizProgressFill").style.width = "100%";
+      document.getElementById("quizCounter").textContent = "完成！";
+      document.getElementById("quizQuestion").textContent = "";
+      document.getElementById("quizOptions").innerHTML = "";
+      const result = document.getElementById("quizResult");
+      result.classList.remove("hidden");
+      if (passed) {
+        result.innerHTML = '<div class="big-icon">🎉</div><h3>恭喜通过！</h3><p style="color:var(--muted);">答对 ' + quizState.correctCount + '/' + quizState.totalQ + ' 题</p><button class="btn btn-primary" style="width:auto;margin-top:12px;" onclick="closeQuiz(true)">领取奖励 +30 XP +15 轻燃币</button>';
+      } else {
+        result.innerHTML = '<div class="big-icon">📚</div><h3>还需努力</h3><p style="color:var(--muted);">答对 ' + quizState.correctCount + '/' + quizState.totalQ + ' 题，需要60%正确率通过</p><button class="btn btn-primary" style="width:auto;margin-top:12px;" onclick="closeQuiz(false)">再学一次</button>';
+      }
+    }
+
+    function closeQuiz(passed) {
+      document.getElementById("quizModal").classList.add("hidden");
+      if (passed) {
+        const learned = state.learnedCourses || [];
+        if (!learned.includes(quizState.courseId)) {
+          state.learnedCourses = [...learned, quizState.courseId];
+          addXp(30);
+          addCoins(15);
+          state.sectContribution = (state.sectContribution || 0) + 20;
+          saveState();
+          showToast("课程完成！+30 XP +15 轻燃币 +20 宗门贡献", "achievement");
+          spawnConfetti();
+          renderLearning();
+          checkWeeklyChallenge();
+        }
+      } else {
+        // Retry
+        startQuiz(quizState.courseId);
+      }
+    }
+
+    function renderLearning() {
+      const grid = document.getElementById("learningGrid");
+      if (!grid) return;
+      const learned = state.learnedCourses || [];
+      document.getElementById("learnedCount").textContent = learned.length;
+      grid.innerHTML = learningCourses.map(c => {
+        const passed = learned.includes(c.id);
+        return '<div class="learning-card' + (passed ? ' passed' : '') + '" onclick="showLearningContent(\'' + c.id + '\')">' +
+          '<div class="learn-icon">' + c.icon + '</div>' +
+          '<span class="learn-title">' + c.title + '</span>' +
+          '<span class="learn-desc">' + c.desc + '</span>' +
+          '<span class="learn-reward">' + (passed ? '已完成' : '奖励: +30 XP +15 轻燃币') + '</span>' +
+        '</div>';
+      }).join("");
+    }
+
+    function showLearningContent(courseId) {
+      const course = learningCourses.find(c => c.id === courseId);
+      if (!course) return;
+      const learned = state.learnedCourses || [];
+      if (learned.includes(courseId)) {
+        showToast("已学完此课程，可以复习但不能重复获得奖励", "info");
+      }
+      // Show content in a simple modal-like alert with confirm to start quiz
+      const msg = course.icon + " " + course.title + "\n\n" + course.content + "\n\n是否开始测验？（3道题，答对60%即可通过）";
+      if (confirm(msg)) {
+        startQuiz(courseId);
+      }
+    }
+
+    // ============================================================
+    // CHALLENGE STAGES (演武场闯关)
+    // ============================================================
+    const challengeStages = [
+      { id:"s1", num:1, icon:"🥚", name:"初入宗门", desc:"记录3餐并完成1门课程", unlock:()=>state.totalMealsLogged>=3, reward:{xp:50,coins:20,contribution:30} },
+      { id:"s2", num:2, icon:"🐣", name:"小试身手", desc:"连续打卡3天+使用智能推荐", unlock:()=>state.streak>=3, reward:{xp:80,coins:30,contribution:40} },
+      { id:"s3", num:3, icon:"🐥", name:"渐入佳境", desc:"连续打卡7天+蛋白质达标5天", unlock:()=>state.streak>=7, reward:{xp:120,coins:45,contribution:55} },
+      { id:"s4", num:4, icon:"🐔", name:"实力飞升", desc:"连续打卡14天+记录50餐", unlock:()=>state.streak>=14, reward:{xp:180,coins:60,contribution:70} },
+      { id:"s5", num:5, icon:"🦅", name:"宗门精英", desc:"连续打卡21天+解锁10项成就", unlock:()=>state.streak>=21, reward:{xp:250,coins:80,contribution:90} },
+      { id:"s6", num:6, icon:"🐉", name:"轻燃传说", desc:"连续打卡30天+全部课程完成", unlock:()=>state.streak>=30, reward:{xp:400,coins:120,contribution:150} }
+    ];
+
+    function renderStages() {
+      const grid = document.getElementById("stageGrid");
+      if (!grid) return;
+      const completed = state.completedStages || [];
+      grid.innerHTML = challengeStages.map((stage, idx) => {
+        const isCompleted = completed.includes(stage.id);
+        const isUnlocked = !isCompleted && stage.unlock();
+        const prevUnlocked = idx === 0 || completed.includes(challengeStages[idx - 1].id);
+        let cardClass = "locked";
+        if (isCompleted) cardClass = "completed";
+        else if (isUnlocked) cardClass = "unlocked";
+        let action = "";
+        if (isCompleted) action = "已完成";
+        else if (isUnlocked) action = '<button class="btn btn-primary btn-sm" style="margin-top:8px;width:auto;font-size:12px;" onclick="completeStage(\'' + stage.id + '\')">挑战</button>';
+        else action = "未解锁";
+        return '<div class="stage-card ' + cardClass + '">' +
+          '<span class="stage-num">第' + stage.num + '关</span>' +
+          '<span class="stage-icon">' + stage.icon + '</span>' +
+          '<span class="stage-name">' + stage.name + '</span>' +
+          '<span class="stage-desc">' + stage.desc + '</span>' +
+          '<span class="stage-reward">+'+stage.reward.xp+' XP +'+stage.reward.coins+' 币</span>' +
+          '<div>' + action + '</div>' +
+        '</div>';
+      }).join("");
+    }
+
+    function completeStage(stageId) {
+      const stage = challengeStages.find(s => s.id === stageId);
+      if (!stage || !stage.unlock()) { showToast("条件未满足，无法挑战此关", "info"); return; }
+      const completed = state.completedStages || [];
+      if (completed.includes(stageId)) { showToast("此关已完成", "info"); return; }
+      state.completedStages = [...completed, stageId];
+      state.sectContribution = (state.sectContribution || 0) + stage.reward.contribution;
+      addXp(stage.reward.xp);
+      addCoins(stage.reward.coins);
+      saveState();
+      showToast(stage.icon + " 闯关成功！" + stage.name + " +" + stage.reward.xp + " XP +" + stage.reward.coins + " 轻燃币", "achievement");
+      spawnConfetti();
+      showPetSpeech("太厉害了！你成功闯过了" + stage.name + "！");
+      renderStages();
+      checkWeeklyChallenge();
+    }
+
+    // Attach inline-onclick functions to window for global scope
+    window.submitMission = submitMission;
+    window.acceptMission = acceptMission;
+    window.answerQuiz = answerQuiz;
+    window.closeQuiz = closeQuiz;
+    window.showLearningContent = showLearningContent;
+    window.completeStage = completeStage;
+
+    // ============================================================
+    // LEADERBOARD (好友排行)
+    // ============================================================
+    const mockFriends = [
+      { name:"轻燃小仙女", avatar:"🧚", level:8, xp:4200, streak:28, achievements:10 },
+      { name:"减脂战士", avatar:"⚔️", level:7, xp:3500, streak:21, achievements:9 },
+      { name:"卡路里杀手", avatar:"🗡️", level:6, xp:2800, streak:18, achievements:8 },
+      { name:"蛋白超人", avatar:"🦸", level:6, xp:2600, streak:15, achievements:7 },
+      { name:"沙拉女王", avatar:"👸", level:5, xp:2100, streak:12, achievements:6 },
+      { name:"健身达人", avatar:"💪", level:5, xp:1800, streak:14, achievements:5 },
+      { name:"瘦身先锋", avatar:"🏃", level:4, xp:1400, streak:10, achievements:5 },
+      { name:"饮食规划师", avatar:"📋", level:4, xp:1200, streak:9, achievements:4 },
+      { name:"蔬菜狂魔", avatar:"🥬", level:3, xp:900, streak:7, achievements:4 },
+      { name:"奶茶戒断者", avatar:"🍵", level:3, xp:750, streak:6, achievements:3 },
+      { name:"晨跑选手", avatar:"🌅", level:3, xp:600, streak:5, achievements:3 },
+      { name:"新手上路", avatar:"🚶", level:2, xp:400, streak:4, achievements:2 }
+    ];
+
+    let lbSortBy = "xp";
+
+    function renderLeaderboard(sortBy) {
+      lbSortBy = sortBy || lbSortBy;
+      const tbody = document.getElementById("lbBody");
+      if (!tbody) return;
+      const info = getLevelInfo();
+      const me = { name:"我", avatar:"⭐", level:info.level, xp:state.xp, streak:state.streak, achievements:state.achievements.length, isMe:true };
+      let all = [...mockFriends, me];
+      if (lbSortBy === "xp") all.sort((a, b) => b.xp - a.xp);
+      else if (lbSortBy === "streak") all.sort((a, b) => b.streak - a.streak);
+      else all.sort((a, b) => b.achievements - a.achievements);
+
+      const myRank = all.findIndex(p => p.isMe) + 1;
+      document.getElementById("lbMyRank").textContent = myRank > 0 ? "第 " + myRank + " 名" : "未上榜";
+
+      tbody.innerHTML = all.map((p, i) => {
+        const rank = i + 1;
+        let rankClass = "";
+        if (rank === 1) rankClass = "gold";
+        else if (rank === 2) rankClass = "silver";
+        else if (rank === 3) rankClass = "bronze";
+        const rankDisplay = rank <= 3
+          ? '<span class="rank-badge ' + rankClass + '">' + rank + '</span>'
+          : '<span style="color:var(--muted);font-weight:700;">' + rank + '</span>';
+        return '<tr class="' + (p.isMe ? 'me' : '') + '">' +
+          '<td>' + rankDisplay + '</td>' +
+          '<td><span class="lb-avatar">' + p.avatar + '</span><span class="lb-name">' + p.name + '</span></td>' +
+          '<td><span class="lb-level">Lv.' + p.level + '</span></td>' +
+          '<td>' + p.streak + ' 天</td>' +
+          '<td>' + p.achievements + ' 个</td>' +
+          '<td><span class="lb-xp">' + p.xp + '</span></td>' +
+        '</tr>';
+      }).join("");
+    }
+
+    // ============================================================
+    // EXPORT REPORT
+    // ============================================================
+    function exportReport() {
+      const { totalKcal, totalProtein } = getDailyTotals();
+      const info = getLevelInfo();
+      const report = [
+        "═══════════════════════════════",
+        "  轻燃餐盘教练 Pro - 健康报告",
+        "═══════════════════════════════",
+        "",
+        "日期: " + new Date().toLocaleDateString("zh-CN"),
+        "等级: Lv." + info.level + " " + info.title,
+        "连续打卡: " + state.streak + " 天",
+        "轻燃币: " + state.coins,
+        "",
+        "── 今日饮食 ──",
+        "热量摄入: " + totalKcal + " / " + state.profile.dailyCalorieTarget + " kcal",
+        "蛋白质: " + totalProtein + " / " + state.profile.dailyProteinTarget + " g",
+        "饮水: " + state.dailyLog.waterCups + " / 8 杯",
+        "",
+        "── 成就进度 ──",
+        "已解锁: " + state.achievements.length + " / " + achievements.length,
+        "总记录餐数: " + state.totalMealsLogged,
+        "",
+        "── 体重趋势 ──",
+        state.weightHistory.length > 0
+          ? "最新: " + state.weightHistory[state.weightHistory.length - 1].weight + " kg (共" + state.weightHistory.length + "条记录)"
+          : "暂无体重记录",
+        "",
+        "── AI 洞察 ──",
+        generateAIInsight(),
+        "",
+        "═══════════════════════════════",
+        "轻燃餐盘教练 Pro - 让减脂像养成游戏一样有趣",
+        "═══════════════════════════════"
+      ].join("\n");
+      const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "轻燃健康报告_" + new Date().toISOString().split("T")[0] + ".txt";
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("报告已导出！", "success");
+      addXp(15);
+      saveState();
+    }
+
+    // ============================================================
+    // DEMO DATA
+    // ============================================================
+    function loadDemoData() {
+      state.streak = 5;
+      state.lastActiveDate = new Date().toISOString().split("T")[0];
+      state.xp = 250;
+      state.coins = 85;
+      state.totalMealsLogged = 12;
+      state.totalSmartPicks = 3;
+      state.totalRemedyUsed = 1;
+      state.sugarFreeDays = 2;
+      state.proteinGoalDays = 3;
+      state.waterGoalDays = 2;
+      state.weeklyMeals = 8;
+      state.weeklyChallengeCompleted = [];
+      state.achievements = ["first_meal", "streak_3", "meals_10", "smart_5", "remedy_use"];
+      state.weightHistory = [
+        { date: new Date(Date.now() - 4 * 86400000).toISOString().split("T")[0], weight: 72.5 },
+        { date: new Date(Date.now() - 3 * 86400000).toISOString().split("T")[0], weight: 72.1 },
+        { date: new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0], weight: 71.8 },
+        { date: new Date(Date.now() - 86400000).toISOString().split("T")[0], weight: 71.5 },
+        { date: new Date().toISOString().split("T")[0], weight: 71.3 }
+      ];
+      state.dailyLog.waterCups = 5;
+      state.dailyLog.meals.breakfast = [
+        { id: "tea-egg", name: "茶叶蛋", calories: 70, protein: 8, satiety: 8, category: "protein", note: "高蛋白、低门槛" },
+        { id: "soy-milk", name: "无糖豆浆", calories: 90, protein: 7, satiety: 7, category: "drink", note: "优于含糖奶茶" }
+      ];
+      state.dailyLog.meals.lunch = [
+        { id: "chicken-breast", name: "即食鸡胸", calories: 140, protein: 24, satiety: 8, category: "protein", note: "蛋白补位神器" },
+        { id: "tuna-salad", name: "金枪鱼沙拉", calories: 180, protein: 16, satiety: 7, category: "vegetable", note: "搭配更完整" }
+      ];
+      state.dailyLog.meals.dinner = [
+        { id: "stir-fry-beef", name: "青椒牛肉", calories: 250, protein: 22, satiety: 7, category: "protein", note: "高蛋白首选" },
+        { id: "steamed-veggie", name: "白灼蔬菜", calories: 60, protein: 3, satiety: 6, category: "vegetable", note: "蔬菜打底" }
+      ];
+      state.sectContribution = 60;
+      state.sectAcceptedMissions = ["m1", "m7"];
+      state.sectCompletedMissions = ["m4", "m5"];
+      state.sectMissionDate = new Date().toISOString().split("T")[0];
+      state.sectDailyMissions = ["m1", "m2", "m4", "m7", "m9", "m15"];
+      state.sectRefreshCount = 1;
+      state.learnedCourses = ["l1", "l2"];
+      state.completedStages = ["s1"];
+      getLevelInfo();
+      saveState();
+      showToast("演示数据已加载！连续5天打卡，12餐记录，快来体验吧！", "success");
+      spawnConfetti();
+      renderAll();
+      showPetSpeech("哇！你已经有5天记录了，继续加油！");
+    }
+
+    // ============================================================
+    // WATER & WEIGHT HANDLERS
+    // ============================================================
+    function setupWaterCups() {
+      document.querySelectorAll("#waterCups .water-cup").forEach(cup => {
+        cup.addEventListener("click", () => {
+          const n = parseInt(cup.dataset.cup);
+          if (n <= state.dailyLog.waterCups) {
+            state.dailyLog.waterCups = n - 1;
+          } else {
+            state.dailyLog.waterCups = n;
+          }
+          if (state.dailyLog.waterCups >= 8) {
+            state.waterGoalDays = (state.waterGoalDays || 0) + 1;
+            showToast("今日饮水达标！+5 XP", "success");
+            addXp(5);
+            const na = checkAchievements();
+            na.forEach(a => showToast("解锁成就: " + a.icon + " " + a.name, "achievement"));
+            if (na.length > 0) spawnConfetti();
+            checkWeeklyChallenge();
+          }
+          saveState();
+          renderWaterTracker();
+          renderTasks();
+        });
+      });
+    }
+
+    function setupWeightInput() {
+      const wsBtn = document.getElementById("weightSaveBtn");
+      if (!wsBtn) return;
+      wsBtn.addEventListener("click", () => {
+        const input = document.getElementById("weightInput");
+        const val = parseFloat(input.value);
+        if (!val || val < 30 || val > 250) { showToast("请输入有效的体重值 (30-250 kg)", "info"); return; }
+        state.dailyLog.weight = val;
+        state.weightHistory.push({ date: new Date().toISOString().split("T")[0], weight: val });
+        state.profile.weight = val;
+        recalcProfile();
+        addXp(5);
+        addCoins(3);
+        saveState();
+        showToast("体重已记录: " + val + " kg！+5 XP +3 轻燃币", "success");
+        const na = checkAchievements();
+        na.forEach(a => showToast("解锁成就: " + a.icon + " " + a.name, "achievement"));
+        if (na.length > 0) spawnConfetti();
+        input.value = "";
+        renderWeightChart();
+        renderTasks();
+        updateFooterStats();
+      });
+    }
+
+    // ============================================================
+    // QUICK ACTIONS
+    // ============================================================
+    function setupQuickActions() {
+      const qs = document.getElementById("quickSpinBtn"); if (qs) qs.addEventListener("click", () => showSpinModal());
+      const qc = document.getElementById("quickCameraBtn"); if (qc) qc.addEventListener("click", () => { const cm = document.getElementById("cameraModal"); if (cm) cm.classList.remove("hidden"); });
+      const qr = document.getElementById("quickRecordBtn"); if (qr) qr.addEventListener("click", () => { switchTab("meal-builder"); renderMealBuilder(); });
+      const qrp = document.getElementById("quickReportBtn"); if (qrp) qrp.addEventListener("click", exportReport);
+      const rp = document.getElementById("resetProfileBtn"); if (rp) rp.addEventListener("click", () => {
+        if (confirm("确定要修改个人数据吗？这将重新计算你的每日目标。")) {
+          document.getElementById("onboardingModal").classList.remove("hidden");
+          document.getElementById("onGender").value = state.profile.gender;
+          document.getElementById("onAge").value = state.profile.age;
+          document.getElementById("onHeight").value = state.profile.height;
+          document.getElementById("onWeight").value = state.profile.weight;
+          document.getElementById("onActivity").value = state.profile.activityLevel;
+          document.querySelectorAll("#goalOptions .goal-option").forEach(b => b.classList.toggle("active", b.dataset.goal === state.profile.goal));
+          updateBmiPreview();
+        }
+      });
+    }
+
+    // ============================================================
+    // RENDER ALL
+    // ============================================================
+    function renderAll() {
+      renderDashboard();
+      renderMealBuilder();
+      renderPlans();
+      renderAchievements();
+      renderShop();
+      renderMissions();
+      renderLearning();
+      renderStages();
+      renderLeaderboard();
+      updateStreakBadge();
+      updateCoinBadge();
+      updateFooterStats();
+      updatePet();
+      getLevelInfo();
+      getWeeklyChallenge();
+      checkWeeklyChallenge();
+      resetStreakFreeze();
+    }
+
+    // ============================================================
+    // EVENT LISTENERS & INIT
+    // ============================================================
+    function init() {
+      try {
+      loadState();
+      if (!state.onboardingDone) {
+        showOnboarding();
+      } else {
+        recalcProfile();
+      }
+      updateStreak();
+
+      // Tab navigation
+      document.querySelectorAll(".tab-nav button").forEach(btn => {
+        btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+      });
+
+      // Onboarding
+      const obSubmit = document.getElementById("onboardingSubmit");
+      if (obSubmit) obSubmit.addEventListener("click", applyOnboarding);
+      const obSkip = document.getElementById("onboardingSkip");
+      if (obSkip) obSkip.addEventListener("click", () => {
+        state.onboardingDone = true;
+        recalcProfile();
+        saveState();
+        document.getElementById("onboardingModal").classList.add("hidden");
+        showToast("已使用默认设置，可随时在快捷操作中修改", "info");
+        renderAll();
+      });
+      document.querySelectorAll("#goalOptions .goal-option").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("#goalOptions .goal-option").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          updateBmiPreview();
+        });
+      });
+      const onH = document.getElementById("onHeight");
+      if (onH) onH.addEventListener("input", updateBmiPreview);
+      const onW = document.getElementById("onWeight");
+      if (onW) onW.addEventListener("input", updateBmiPreview);
+
+      // Spin modal
+      const spinBtn = document.getElementById("spinBtn");
+      if (spinBtn) spinBtn.addEventListener("click", spinWheel);
+      const spinModal = document.getElementById("spinModal");
+      if (spinModal) spinModal.addEventListener("click", (e) => {
+        if (e.target === spinModal) spinModal.classList.add("hidden");
+      });
+
+      // Camera modal
+      const takePhoto = document.getElementById("takePhotoBtn");
+      if (takePhoto) takePhoto.addEventListener("click", simulateCamera);
+      const voiceBtn = document.getElementById("voiceInputBtn");
+      if (voiceBtn) voiceBtn.addEventListener("click", simulateVoice);
+      const camModal = document.getElementById("cameraModal");
+      if (camModal) camModal.addEventListener("click", (e) => {
+        if (e.target === camModal) camModal.classList.add("hidden");
+      });
+
+      // Meal builder buttons
+      const smartPickBtn = document.getElementById("smartPickBtn");
+      if (smartPickBtn) smartPickBtn.addEventListener("click", applySmartPick);
+      const clearMealBtn = document.getElementById("clearMealBtn");
+      if (clearMealBtn) clearMealBtn.addEventListener("click", clearMeal);
+      const surpriseBtn = document.getElementById("surpriseBtn");
+      if (surpriseBtn) surpriseBtn.addEventListener("click", surpriseMeal);
+      const saveMealBtn = document.getElementById("saveMealBtn");
+      if (saveMealBtn) saveMealBtn.addEventListener("click", saveMeal);
+
+      // Plans
+      const genWeek = document.getElementById("generateWeekBtn");
+      if (genWeek) genWeek.addEventListener("click", () => { renderWeekPlan(); showToast("7天计划已生成！", "success"); });
+      const stuMode = document.getElementById("studentModeBtn");
+      if (stuMode) stuMode.addEventListener("click", () => { uiState.activeTemplateKey = "student"; renderWeekPlan(); showToast("已切换为学生党模板", "info"); });
+      const offMode = document.getElementById("officeModeBtn");
+      if (offMode) offMode.addEventListener("click", () => { uiState.activeTemplateKey = "office"; renderWeekPlan(); showToast("已切换为上班族模板", "info"); });
+
+      // Water
+      setupWaterCups();
+
+      // Weight
+      setupWeightInput();
+
+      // Quick actions
+      setupQuickActions();
+
+      // Streak freeze
+      const sfBtn = document.getElementById("streakFreezeBtn");
+      if (sfBtn) sfBtn.addEventListener("click", useStreakFreeze);
+
+      // Demo data button
+      const ddBtn = document.getElementById("demoDataBtn");
+      if (ddBtn) ddBtn.addEventListener("click", loadDemoData);
+
+      // Sect sub-nav
+      document.querySelectorAll("#sectSubNav button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("#sectSubNav button").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          document.querySelectorAll("#tab-sect .sect-sub-content").forEach(c => c.classList.remove("active"));
+          const sub = btn.dataset.sub;
+          if (sub === "hall") { const el = document.getElementById("sect-hall"); if (el) el.classList.add("active"); renderMissions(); }
+          else if (sub === "library") { const el = document.getElementById("sect-library"); if (el) el.classList.add("active"); renderLearning(); }
+          else if (sub === "arena") { const el = document.getElementById("sect-arena"); if (el) el.classList.add("active"); renderStages(); }
+        });
+      });
+
+      // Refresh missions
+      const refBtn = document.getElementById("refreshMissionsBtn");
+      if (refBtn) refBtn.addEventListener("click", refreshMissions);
+
+      // Leaderboard filter
+      document.querySelectorAll("#lbFilter button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("#lbFilter button").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          renderLeaderboard(btn.dataset.sort);
+        });
+      });
+
+      // Quiz modal close on overlay
+      const qm = document.getElementById("quizModal");
+      if (qm) qm.addEventListener("click", (e) => {
+        if (e.target === qm) qm.classList.add("hidden");
+      });
+
+      // Pet click
+      const pet = document.getElementById("petContainer");
+      if (pet) pet.addEventListener("click", () => {
+        showPetSpeech();
+        if (state.streak === 0) {
+          showToast("记录今天的餐食，让小精灵孵化吧！", "info");
+        }
+      });
+
+      // Demo data loader - keyboard shortcut Ctrl+Shift+D
+      document.addEventListener("keydown", (e) => {
+        if (e.ctrlKey && e.shiftKey && e.key === "D") {
+          e.preventDefault();
+          loadDemoData();
+        }
+      });
+
+      // Close modals on overlay click
+      const obModal = document.getElementById("onboardingModal");
+      if (obModal) obModal.addEventListener("click", (e) => {
+        if (e.target === obModal && state.onboardingDone) {
+          obModal.classList.add("hidden");
+        }
+      });
+
+      // Initial render
+      try { renderAll(); } catch (re) { console.error("renderAll error:", re); }
+
+      // FAB listeners
+      const fabR = document.getElementById("fabRecord");
+      if (fabR) fabR.addEventListener("click", () => { switchTab("meal-builder"); renderMealBuilder(); });
+      const fabM = document.getElementById("fabMain");
+      if (fabM) fabM.addEventListener("click", () => showSpinModal());
+      const fabMi = document.getElementById("fabMission");
+      if (fabMi) fabMi.addEventListener("click", () => { switchTab("sect"); renderMissions(); });
+
+      // Guided tour for first-time users
+      if (!state.onboardingDone || state.totalMealsLogged < 2) {
+        setTimeout(() => {
+          showToast("欢迎来到轻燃宗门！点击「宗门任务」接取每日悬赏，或点击「餐食记录」开始你的第一餐", "info");
+        }, 1500);
+      }
+
+      // Auto pet speech after 3 seconds
+      setTimeout(() => {
+        if (state.streak > 0) showPetSpeech();
+      }, 3000);
+
+      // Periodic pet speech every 2 minutes
+      setInterval(() => {
+        if (document.hidden) return;
+        const today = new Date().toISOString().split("T")[0];
+        if (state.dailyLog.date === today) {
+          const { mealCount } = getDailyTotals();
+          if (mealCount === 0 && Math.random() < 0.3) showPetSpeech("今天还没记录餐食哦，快来记录吧！");
+          else if (Math.random() < 0.15) showPetSpeech();
+        }
+      }, 120000);
+
+      console.log("轻燃餐盘教练 Pro 已启动");
+      console.log("按 Ctrl+Shift+D 加载演示数据");
+      console.log("等级:", getLevelInfo().title, "| 连续打卡:", state.streak, "天 | 轻燃币:", state.coins);
+
+      // Resize handler for weight chart
+      window.addEventListener("resize", () => {
+        if (uiState.activeTab === "dashboard") renderWeightChart();
+      });
+
+      } catch (initErr) { console.error("Init error:", initErr); alert("页面初始化失败，请刷新页面或清除浏览器缓存。错误: " + initErr.message); }
+    }
+
+    document.addEventListener("DOMContentLoaded", init);
+  

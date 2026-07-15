@@ -1,0 +1,2590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>智游记 · AI 多城市旅行规划</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* ========== CSS Variables (对齐 UI 设计规范) ========== */
+:root {
+  --primary: #87C4E8;
+  --secondary: #A8D1A8;
+  --accent: #F5C9A8;
+  --white: #FFFFFF;
+  --bg-light: #F8F9FA;
+  --bg-blue-tint: #F5F9FC;
+  --bg-orange-tint: #FFF9F5;
+  --line: #738CA6;
+  --border: #E8EFF5;
+  --border-medium: #D8E3ED;
+  --text: #5A6C7D;
+  --text-secondary: #94A3B0;
+  --error: #E8A8A8;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font: 14px;
+  --font-lg: 15px;
+  --font-h3: 16px;
+  --font-h2: 18px;
+  --font-h1: 22px;
+  --font-price: 18px;
+  --safe-bottom: env(safe-area-inset-bottom, 20px);
+}
+
+/* ========== Reset & Base ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  font-size: var(--font);
+  color: var(--text);
+  background: var(--white);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+}
+button { border: none; background: none; font: inherit; color: inherit; cursor: pointer; }
+input, select { font: inherit; }
+
+/* ========== Screen Container ========== */
+.screen { display: none; flex-direction: column; min-height: 100vh; }
+.screen.active { display: flex; }
+
+/* ========== Components ========== */
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 48px; border-radius: var(--radius); font-size: var(--font-lg);
+  font-weight: 600; cursor: pointer; transition: all .15s ease;
+  padding: 0 24px; gap: 6px;
+}
+.btn:active { transform: scale(.97); }
+.btn--primary { background: var(--primary); color: var(--white); }
+.btn--secondary { background: transparent; border: 2px solid var(--primary); color: var(--primary); }
+.btn--text { background: transparent; color: var(--primary); font-size: var(--font); font-weight: 600; }
+.btn--danger { background: var(--error); color: var(--white); }
+.btn--sm { height: 36px; font-size: var(--font-sm); padding: 0 16px; }
+.btn--full { width: 100%; }
+.btn--block { display: flex; width: 100%; }
+
+.card {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+}
+.card--large { border-radius: var(--radius-lg); }
+
+.chip {
+  display: inline-flex; align-items: center; padding: 4px 12px;
+  border-radius: var(--radius-pill); font-size: var(--font-sm); font-weight: 600;
+  background: var(--bg-blue-tint); color: var(--text);
+  transition: all .15s ease; cursor: pointer; user-select: none;
+  white-space: nowrap; margin: 4px;
+}
+.chip.selected { background: var(--primary); color: var(--white); }
+.chip:active { transform: scale(.95); }
+
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  font-size: var(--font-xs); background: var(--bg-blue-tint); color: var(--text-secondary);
+}
+.tag--green { color: var(--secondary); background: #F0F8F0; }
+.tag--orange { color: var(--accent); background: var(--bg-orange-tint); }
+.tag--red { color: var(--error); background: #FFF0F0; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--font-xs); color: var(--text-secondary);
+}
+.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+.badge--fresh::before { background: var(--secondary); }
+.badge--cached::before { background: var(--accent); }
+.badge--stale::before { background: var(--error); }
+
+/* ========== Navigation Bar ========== */
+.navbar {
+  display: flex; align-items: center; height: 44px; padding: 0 16px;
+  background: var(--white); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.navbar__back { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.navbar__title { flex: 1; text-align: center; font-size: var(--font-h3); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navbar__action { font-size: var(--font); color: var(--primary); font-weight: 600; padding: 0 8px; flex-shrink: 0; }
+
+/* ========== Tab Bar ========== */
+.tabbar {
+  display: flex; background: var(--white); border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-bottom); position: sticky; bottom: 0; z-index: 100;
+}
+.tabbar__item {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 2px; cursor: pointer; transition: all .15s;
+}
+.tabbar__item.active { color: var(--primary); }
+.tabbar__item:not(.active) { color: var(--text-secondary); }
+.tabbar__icon { width: 24px; height: 24px; }
+.tabbar__label { font-size: 10px; }
+
+/* ========== Fixed Bottom Actions ========== */
+.fixed-actions {
+  position: sticky; bottom: 0; background: var(--white);
+  border-top: 1px solid var(--border); padding: 12px 16px;
+  padding-bottom: calc(12px + var(--safe-bottom));
+  display: flex; gap: 12px; z-index: 20;
+}
+.fixed-actions .btn { flex: 1; }
+
+/* ========== Toast ========== */
+.toast {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  background: var(--white); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 20px; font-size: var(--font); z-index: 999;
+  opacity: 0; transition: opacity .3s; box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  pointer-events: none;
+}
+.toast.show { opacity: 1; }
+.toast--success { border-top: 3px solid var(--secondary); }
+.toast--error { border-top: 3px solid var(--error); }
+.toast--warning { border-top: 3px solid var(--accent); }
+
+/* ========== Scrollable Content ========== */
+.scroll-area { flex: 1; overflow-y: auto; padding: 16px; }
+
+/* ========== Pill Tabs (胶囊Tab) ========== */
+.pill-tabs {
+  display: flex; gap: 8px; overflow-x: auto; padding: 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.pill-tabs::-webkit-scrollbar { display: none; }
+.pill-tab {
+  flex-shrink: 0; padding: 8px 20px; border-radius: var(--radius-pill);
+  font-size: var(--font); font-weight: 600; cursor: pointer;
+  background: var(--bg-blue-tint); color: var(--text);
+  transition: all .15s; white-space: nowrap;
+}
+.pill-tab.active { background: var(--primary); color: var(--white); }
+
+/* ========== Timeline ========== */
+.timeline { position: relative; padding-left: 28px; }
+.timeline::before {
+  content: ''; position: absolute; left: 11px; top: 8px; bottom: 8px;
+  width: 2px; background: var(--primary);
+}
+.timeline-node { position: relative; margin-bottom: 12px; }
+.timeline-node::before {
+  content: ''; position: absolute; left: -21px; top: 14px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--primary);
+}
+.timeline-node--first::before { background: var(--accent); }
+.timeline-node--last::before { background: var(--secondary); }
+.timeline-node--transport::before { background: var(--text-secondary); }
+.timeline-node--restaurant::before { background: var(--secondary); }
+
+.node-card {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+  border-left: 3px solid var(--primary); cursor: pointer; transition: all .15s;
+}
+.node-card:active { transform: scale(.98); }
+.node-card--restaurant { border-left-color: var(--secondary); }
+.node-card--hotel { border-left-color: var(--primary); }
+.node-card--transport {
+  background: var(--bg-blue-tint); border-left: none; border-radius: 8px;
+  padding: 8px 12px; display: flex; align-items: center; gap: 10px;
+}
+.node-card__title { font-size: var(--font); font-weight: 600; margin-bottom: 4px; }
+.node-card__sub { font-size: var(--font-sm); color: var(--text-secondary); }
+.node-card__tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ========== Budget Scroll (横向滚动) ========== */
+.budget-scroll {
+  display: flex; gap: 10px; overflow-x: auto; padding: 4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+.budget-scroll::-webkit-scrollbar { display: none; }
+.budget-card {
+  flex-shrink: 0; width: 80px; text-align: center;
+  padding: 10px 8px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--white);
+}
+.budget-card__label { font-size: var(--font-xs); color: var(--text-secondary); margin-bottom: 4px; }
+.budget-card__value { font-size: var(--font); font-weight: 600; color: var(--text); }
+.budget-card--total { background: var(--bg-blue-tint); border-color: var(--primary); }
+.budget-card--total .budget-card__value { color: var(--primary); font-size: var(--font-price); }
+
+/* ========== Home Chat ========== */
+.chat-list { padding: 16px; }
+.chat-item { margin-bottom: 20px; }
+.chat-ai {
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.chat-ai__avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--bg-blue-tint);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  font-size: 18px;
+}
+.chat-ai__bubble {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: 12px 12px 12px 4px; padding: 12px 16px;
+  font-size: var(--font); max-width: 80%;
+}
+.chat-user {
+  display: flex; justify-content: flex-end; margin-top: 8px;
+}
+.chat-user__tags {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+  max-width: 85%;
+}
+
+/* ========== Option Grid ========== */
+.option-grid {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+}
+.option-card {
+  padding: 10px 16px; border-radius: var(--radius); font-size: var(--font);
+  border: 1px solid var(--border); cursor: pointer; transition: all .15s;
+  background: var(--white); text-align: center;
+}
+.option-card.selected { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.option-card:active { transform: scale(.95); }
+.option-card--half { flex: 0 0 calc(50% - 4px); }
+
+/* ========== Map Area ========== */
+.map-area {
+  position: relative; height: 220px; overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.map-area .leaflet-container { width: 100%; height: 100%; background: #f0f4f8; }
+.map-area .leaflet-control-zoom { display: none; }
+.map-area .leaflet-control-attribution { font-size: 8px; }
+.leaflet-city-marker { background: transparent !important; border: none !important; }
+
+/* ========== Trip Card ========== */
+.trip-card {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px; margin-bottom: 12px;
+  cursor: pointer; transition: all .15s;
+}
+.trip-card:active { transform: scale(.98); }
+.trip-card__header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.trip-card__title { font-size: var(--font-h2); font-weight: 600; }
+.trip-card__route { font-size: var(--font-sm); color: var(--text-secondary); margin: 4px 0; }
+.trip-card__meta { font-size: var(--font-sm); color: var(--text-secondary); }
+.trip-card__theme { width: 8px; height: 40px; border-radius: 4px; flex-shrink: 0; }
+.trip-card__theme--blue { background: var(--primary); }
+.trip-card__theme--green { background: var(--secondary); }
+.trip-card__theme--orange { background: var(--accent); }
+
+/* ========== Detail Page Hero ========== */
+.hero-img {
+  width: 100%; height: 180px; object-fit: cover;
+  background: linear-gradient(135deg, #E8F4F8 0%, #D0E8F0 50%, #C8E0E8 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-img__icon { font-size: 48px; opacity: .6; }
+
+/* ========== Info Grid ========== */
+.info-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  padding: 16px;
+}
+.info-item {
+  background: var(--bg-blue-tint); border-radius: var(--radius);
+  padding: 12px; text-align: center;
+}
+.info-item__label { font-size: var(--font-xs); color: var(--text-secondary); margin-bottom: 4px; }
+.info-item__value { font-size: var(--font); font-weight: 600; }
+
+/* ========== Section ========== */
+.section { padding: 16px; }
+.section__title { font-size: var(--font-h3); font-weight: 600; margin-bottom: 12px; }
+.section__text { font-size: var(--font); line-height: 1.7; color: var(--text); }
+
+/* ========== Risk Banner ========== */
+.risk-banner {
+  background: var(--bg-orange-tint); border: 1px solid var(--accent);
+  border-radius: 8px; padding: 12px 16px; margin: 0 16px 12px;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.risk-banner__icon { font-size: 20px; flex-shrink: 0; }
+.risk-banner__text { flex: 1; font-size: var(--font-sm); }
+
+/* ========== Review Card ========== */
+.review-card {
+  padding: 12px; border-bottom: 1px solid var(--border);
+}
+.review-card__header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.review-card__avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-blue-tint); }
+.review-card__name { font-size: var(--font-sm); font-weight: 600; }
+.review-card__platform { font-size: var(--font-xs); color: var(--text-secondary); }
+.review-card__text { font-size: var(--font-sm); color: var(--text); line-height: 1.6; }
+
+/* ========== Empty State ========== */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 32px; text-align: center;
+}
+.empty-state__icon { font-size: 64px; margin-bottom: 16px; opacity: .4; }
+.empty-state__text { font-size: var(--font); color: var(--text-secondary); margin-bottom: 16px; }
+
+/* ========== Generating Page ========== */
+.generating {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: 1; padding: 48px 32px; text-align: center;
+}
+.generating__icon { font-size: 64px; margin-bottom: 24px; }
+.generating__text { font-size: var(--font); color: var(--text-secondary); margin-bottom: 24px; }
+.progress-bar {
+  width: 240px; height: 4px; background: var(--border); border-radius: 2px;
+  overflow: hidden; margin-bottom: 8px;
+}
+.progress-bar__fill {
+  height: 100%; background: var(--primary); border-radius: 2px;
+  transition: width .3s linear;
+}
+.generating__sources { font-size: var(--font-xs); color: var(--text-secondary); margin-top: 16px; }
+
+/* ========== Confirm Page ========== */
+.confirm-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+}
+.confirm-item__label { font-size: var(--font); color: var(--text-secondary); }
+.confirm-item__value { font-size: var(--font); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.confirm-item__edit { color: var(--primary); font-size: var(--font-sm); cursor: pointer; }
+
+/* ========== Modal ========== */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.3); z-index: 200;
+  display: none; align-items: flex-end; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--white); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  width: 100%; max-width: 430px; padding: 24px; max-height: 70vh;
+  overflow-y: auto; animation: slideUp .25s ease-out;
+}
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.modal__title { font-size: var(--font-h2); font-weight: 600; margin-bottom: 16px; }
+
+/* ========== User Profile ========== */
+.profile-header {
+  display: flex; align-items: center; gap: 16px; padding: 24px 16px;
+  background: var(--white); border-bottom: 1px solid var(--border);
+}
+.profile__avatar {
+  width: 56px; height: 56px; border-radius: 50%; background: var(--bg-blue-tint);
+  display: flex; align-items: center; justify-content: center; font-size: 28px;
+}
+.profile__name { font-size: var(--font-h2); font-weight: 600; }
+.profile__phone { font-size: var(--font-sm); color: var(--text-secondary); }
+.menu-list { padding: 8px 0; }
+.menu-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px; background: var(--white); border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: all .15s;
+}
+.menu-item:active { background: var(--bg-blue-tint); }
+.menu-item__left { display: flex; align-items: center; gap: 12px; }
+.menu-item__icon { font-size: 20px; width: 24px; text-align: center; }
+.menu-item__arrow { color: var(--text-secondary); }
+
+/* ========== Disclaimer ========== */
+.disclaimer {
+  text-align: center; font-size: var(--font-xs); color: var(--text-secondary);
+  padding: 24px 16px; line-height: 1.6;
+}
+
+/* ========== Segment Tabs ========== */
+.segment {
+  display: flex; background: var(--bg-blue-tint); border-radius: var(--radius);
+  padding: 2px; margin: 0 16px;
+}
+.segment__item {
+  flex: 1; text-align: center; padding: 8px 0; border-radius: 8px;
+  font-size: var(--font-sm); font-weight: 600; cursor: pointer; transition: all .15s;
+  color: var(--text-secondary);
+}
+.segment__item.active { background: var(--white); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+
+/* ========== Transport Detail ========== */
+.transport-hero {
+  display: flex; flex-direction: column; align-items: center; padding: 32px 16px;
+  background: var(--bg-blue-tint); gap: 12px;
+}
+.transport-hero__icon { font-size: 48px; }
+.transport-hero__mode { font-size: var(--font-h2); font-weight: 600; }
+.transport-hero__route { font-size: var(--font); color: var(--text-secondary); }
+
+/* ========== Service Area ========== */
+.service-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px; border-bottom: 1px solid var(--border);
+}
+.service-item__name { font-size: var(--font); font-weight: 600; }
+.service-item__meta { font-size: var(--font-sm); color: var(--text-secondary); }
+
+/* ========== Responsive Scroll ========== */
+.scroll-area::-webkit-scrollbar { display: none; }
+
+/* ========== Animations ========== */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeIn .3s ease-out; }
+
+/* ========== Step Indicator ========== */
+.step-indicator {
+  display: flex; align-items: center; gap: 4px; padding: 8px 16px;
+  font-size: var(--font-xs); color: var(--text-secondary);
+}
+.step-indicator__current { color: var(--primary); font-weight: 600; }
+
+/* ========== Input ========== */
+.input {
+  width: 100%; height: 48px; border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-medium); padding: 0 16px;
+  font-size: var(--font-lg); color: var(--text); background: var(--white);
+  transition: border-color .15s;
+}
+.input:focus { outline: none; border-color: var(--primary); }
+.input::placeholder { color: var(--text-secondary); }
+
+/* ========== Counter ========== */
+.counter {
+  display: flex; align-items: center; gap: 16px;
+}
+.counter__btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--border-medium);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: var(--text); transition: all .15s;
+}
+.counter__btn:active { background: var(--bg-blue-tint); }
+.counter__value { font-size: var(--font-h2); font-weight: 600; min-width: 40px; text-align: center; }
+
+/* ================================================================ */
+/* NEW STYLES — 地图优化                                              */
+/* ================================================================ */
+.map-gradient-bg { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+.weather-tag {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; background: rgba(255,255,255,.85); padding: 2px 6px;
+  border-radius: var(--radius-sm); white-space: nowrap;
+}
+
+.city-card-row {
+  display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.city-card-row::-webkit-scrollbar { display: none; }
+.city-card-mini {
+  flex-shrink: 0; width: 100px; padding: 10px 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--white); text-align: center;
+  cursor: pointer; transition: all .15s;
+}
+.city-card-mini:active { transform: scale(.95); }
+.city-card-mini__name { font-size: var(--font); font-weight: 600; margin-bottom: 2px; }
+.city-card-mini__weather { font-size: var(--font-xs); color: var(--text-secondary); }
+.city-card-mini__days { font-size: var(--font-xs); color: var(--primary); margin-top: 2px; }
+
+/* ================================================================ */
+/* NEW STYLES — 预算网格优化                                           */
+/* ================================================================ */
+.budget-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+
+.budget-total-card {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, var(--bg-blue-tint) 0%, #E8F4F8 100%);
+  border: 1.5px solid var(--primary); border-radius: var(--radius-lg);
+  padding: 16px; display: flex; align-items: center; gap: 16px;
+  margin-bottom: 4px;
+}
+.budget-total-card__icon {
+  width: 48px; height: 48px; border-radius: 50%; background: var(--primary);
+  display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0;
+}
+.budget-total-card__info { flex: 1; }
+.budget-total-card__label { font-size: var(--font-sm); color: var(--text-secondary); }
+.budget-total-card__amount { font-size: 24px; font-weight: 700; color: var(--text); }
+.budget-total-card__bar {
+  width: 100%; height: 6px; background: var(--border); border-radius: 3px;
+  overflow: hidden; margin-top: 6px;
+}
+.budget-total-card__bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--secondary), var(--primary));
+  border-radius: 3px; transition: width .3s;
+}
+.budget-total-card__bar-label {
+  font-size: var(--font-xs); color: var(--text-secondary); margin-top: 2px;
+}
+
+.budget-item-card {
+  display: flex; align-items: center; gap: 10px; padding: 12px;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); transition: all .15s;
+}
+.budget-item-card--highlight {
+  border-color: var(--primary); background: var(--bg-blue-tint);
+}
+.budget-item-card__icon {
+  width: 36px; height: 36px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
+}
+.budget-item-card__info { flex: 1; min-width: 0; }
+.budget-item-card__label { font-size: var(--font-xs); color: var(--text-secondary); }
+.budget-item-card__amount { font-size: var(--font-price); font-weight: 700; color: var(--text); }
+
+/* ================================================================ */
+/* NEW STYLES — 城际交通卡片                                          */
+/* ================================================================ */
+.intercity-transport-card {
+  background: linear-gradient(135deg, #E8F4F8 0%, #DCE8F0 100%);
+  border: 1px solid var(--primary); border-radius: var(--radius-lg);
+  padding: 16px; display: flex; align-items: center; gap: 14px;
+  cursor: pointer; transition: all .15s; margin-bottom: 12px;
+}
+.intercity-transport-card:active { transform: scale(.98); }
+.intercity-transport-card__icon {
+  width: 52px; height: 52px; border-radius: var(--radius); background: var(--white);
+  display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+.intercity-transport-card__info { flex: 1; min-width: 0; }
+.intercity-transport-card__route {
+  font-size: var(--font); font-weight: 600; margin-bottom: 2px;
+  display: flex; align-items: center; gap: 6px;
+}
+.intercity-transport-card__route-arrow { color: var(--primary); font-size: 12px; }
+.intercity-transport-card__meta { font-size: var(--font-sm); color: var(--text-secondary); }
+.intercity-transport-card__price {
+  font-size: var(--font-price); font-weight: 700; color: var(--text);
+  text-align: right; flex-shrink: 0;
+}
+.intercity-transport-card__price-label { font-size: var(--font-xs); color: var(--text-secondary); }
+
+/* ================================================================ */
+/* NEW STYLES — 详情页 Hero 增强                                      */
+/* ================================================================ */
+.detail-hero {
+  position: relative; width: 100%; height: 200px;
+  background: linear-gradient(135deg, #E8F4F8 0%, #D0E8F0 50%, #C0D8E8 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+.detail-hero__icon { font-size: 56px; opacity: .7; }
+.detail-hero__overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 16px; background: linear-gradient(transparent, rgba(0,0,0,.35));
+}
+.detail-hero__name { font-size: var(--font-h2); font-weight: 700; color: var(--white); }
+.detail-hero__rating { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.detail-hero__stars { color: #FFB347; font-size: var(--font-sm); }
+.detail-hero__score { color: var(--white); font-size: var(--font-sm); font-weight: 600; }
+.detail-hero__tags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.detail-hero__tag {
+  padding: 2px 10px; border-radius: var(--radius-pill); font-size: var(--font-xs);
+  background: rgba(255,255,255,.25); color: var(--white); font-weight: 600;
+}
+
+/* ================================================================ */
+/* NEW STYLES — 快速信息行                                            */
+/* ================================================================ */
+.quick-info-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  padding: 16px; background: var(--white); border-bottom: 1px solid var(--border);
+}
+.quick-info-item {
+  text-align: center; padding: 8px 4px;
+}
+.quick-info-item__icon { font-size: 20px; margin-bottom: 4px; }
+.quick-info-item__label { font-size: var(--font-xs); color: var(--text-secondary); }
+.quick-info-item__value { font-size: var(--font-sm); font-weight: 600; margin-top: 2px; }
+
+/* ================================================================ */
+/* NEW STYLES — 折叠面板                                              */
+/* ================================================================ */
+.collapsible { border-bottom: 1px solid var(--border); }
+.collapsible__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px; cursor: pointer; user-select: none;
+}
+.collapsible__title { font-size: var(--font-h3); font-weight: 600; }
+.collapsible__arrow { transition: transform .25s; font-size: 12px; color: var(--text-secondary); }
+.collapsible__arrow.open { transform: rotate(180deg); }
+.collapsible__body { padding: 0 16px 16px; display: none; }
+.collapsible__body.open { display: block; }
+
+/* ================================================================ */
+/* NEW STYLES — 设施图标网格                                          */
+/* ================================================================ */
+.facility-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  padding: 0 16px 16px;
+}
+.facility-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 8px; background: var(--bg-blue-tint); border-radius: var(--radius);
+  text-align: center;
+}
+.facility-item__icon { font-size: 24px; }
+.facility-item__name { font-size: var(--font-xs); color: var(--text-secondary); }
+
+/* ================================================================ */
+/* NEW STYLES — 房型卡片                                              */
+/* ================================================================ */
+.room-card {
+  display: flex; align-items: center; gap: 12px; padding: 14px;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 8px; cursor: pointer; transition: all .15s;
+}
+.room-card:active { transform: scale(.98); }
+.room-card__img {
+  width: 72px; height: 56px; border-radius: var(--radius-sm);
+  background: var(--bg-blue-tint); display: flex; align-items: center; justify-content: center;
+  font-size: 28px; flex-shrink: 0;
+}
+.room-card__info { flex: 1; min-width: 0; }
+.room-card__name { font-size: var(--font); font-weight: 600; }
+.room-card__meta { font-size: var(--font-xs); color: var(--text-secondary); }
+.room-card__price { font-size: var(--font-price); font-weight: 700; color: var(--text); text-align: right; }
+.room-card__price-unit { font-size: var(--font-xs); color: var(--text-secondary); font-weight: 400; }
+
+/* ================================================================ */
+/* NEW STYLES — 推荐菜品横向滚动                                       */
+/* ================================================================ */
+.dish-scroll {
+  display: flex; gap: 10px; overflow-x: auto; padding: 0 0 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.dish-scroll::-webkit-scrollbar { display: none; }
+.dish-card {
+  flex-shrink: 0; width: 140px; padding: 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--white);
+}
+.dish-card__img {
+  width: 100%; height: 80px; border-radius: var(--radius-sm);
+  background: var(--bg-blue-tint); display: flex; align-items: center; justify-content: center;
+  font-size: 36px; margin-bottom: 8px;
+}
+.dish-card__name { font-size: var(--font); font-weight: 600; }
+.dish-card__price { font-size: var(--font-sm); color: var(--text-secondary); margin-top: 2px; }
+.dish-card__recommend { font-size: var(--font-xs); color: var(--accent); margin-top: 2px; display: flex; align-items: center; gap: 2px; }
+
+/* ================================================================ */
+/* NEW STYLES — 交通路线可视化                                        */
+/* ================================================================ */
+.route-viz {
+  display: flex; flex-direction: column; align-items: center; padding: 24px 16px;
+  background: var(--bg-blue-tint); gap: 0;
+}
+.route-viz__cities {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 0 16px;
+}
+.route-viz__city {
+  text-align: center; flex: 1;
+}
+.route-viz__city-name { font-size: var(--font-h2); font-weight: 600; }
+.route-viz__city-time { font-size: var(--font-xs); color: var(--text-secondary); }
+.route-viz__line {
+  width: 100%; height: 3px; background: var(--primary); border-radius: 2px;
+  margin: 12px 0; position: relative;
+}
+.route-viz__line::after {
+  content: '▶'; position: absolute; right: -4px; top: -7px;
+  font-size: 10px; color: var(--primary);
+}
+.route-viz__mid {
+  display: flex; align-items: center; gap: 8px; font-size: var(--font-sm); color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.route-viz__mid-icon { font-size: 20px; }
+
+.alt-route-card {
+  display: flex; align-items: center; gap: 12px; padding: 14px;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 8px; cursor: pointer; transition: all .15s;
+}
+.alt-route-card--best { border: 1.5px solid var(--secondary); background: #F0F8F0; }
+.alt-route-card:active { transform: scale(.98); }
+.alt-route-card__icon {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--bg-blue-tint);
+  display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+}
+.alt-route-card__info { flex: 1; min-width: 0; }
+.alt-route-card__mode { font-size: var(--font); font-weight: 600; }
+.alt-route-card__meta { font-size: var(--font-xs); color: var(--text-secondary); }
+.alt-route-card__price { font-size: var(--font); font-weight: 700; color: var(--text); text-align: right; }
+.alt-route-card__best-tag {
+  font-size: 10px; color: var(--secondary); font-weight: 600; margin-top: 2px;
+}
+
+/* ================================================================ */
+/* NEW STYLES — 编辑页面                                              */
+/* ================================================================ */
+.edit-section { padding: 16px; border-bottom: 1px solid var(--border); }
+.edit-section__label { font-size: var(--font-xs); color: var(--text-secondary); margin-bottom: 6px; }
+.edit-input {
+  width: 100%; height: 44px; border-radius: var(--radius);
+  border: 1.5px solid var(--border-medium); padding: 0 14px;
+  font-size: var(--font-lg); color: var(--text); background: var(--white);
+  transition: border-color .15s;
+}
+.edit-input:focus { outline: none; border-color: var(--primary); }
+
+.edit-node-list { padding: 8px 16px; }
+.edit-node-item {
+  display: flex; align-items: center; gap: 10px; padding: 12px;
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 8px; transition: all .15s;
+}
+.edit-node-item__drag {
+  display: flex; flex-direction: column; gap: 2px; flex-shrink: 0;
+}
+.edit-node-item__drag-btn {
+  width: 24px; height: 20px; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--text-secondary); border-radius: 4px; transition: all .1s;
+}
+.edit-node-item__drag-btn:active { background: var(--bg-blue-tint); color: var(--primary); }
+.edit-node-item__icon {
+  width: 36px; height: 36px; border-radius: var(--radius-sm);
+  background: var(--bg-blue-tint); display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.edit-node-item__info { flex: 1; min-width: 0; }
+.edit-node-item__name { font-size: var(--font); font-weight: 600; }
+.edit-node-item__type { font-size: var(--font-xs); color: var(--text-secondary); }
+.edit-node-item__delete {
+  width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--error); flex-shrink: 0; transition: all .1s;
+}
+.edit-node-item__delete:active { background: #FFF0F0; }
+
+.add-node-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; height: 48px; border: 2px dashed var(--border-medium);
+  border-radius: var(--radius); color: var(--text-secondary); font-size: var(--font);
+  margin: 16px 0; transition: all .15s; cursor: pointer;
+}
+.add-node-btn:active { background: var(--bg-blue-tint); border-color: var(--primary); color: var(--primary); }
+
+.add-node-type-item {
+  display: flex; align-items: center; gap: 12px; padding: 14px;
+  border-bottom: 1px solid var(--border); cursor: pointer; transition: all .1s;
+}
+.add-node-type-item:active { background: var(--bg-blue-tint); }
+.add-node-type-item__icon {
+  width: 40px; height: 40px; border-radius: var(--radius-sm);
+  background: var(--bg-blue-tint); display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+}
+.add-node-type-item__label { font-size: var(--font); font-weight: 600; }
+.add-node-type-item__desc { font-size: var(--font-xs); color: var(--text-secondary); }
+
+/* ================================================================ */
+/* NEW STYLES — 分享页增强                                            */
+/* ================================================================ */
+.share-card {
+  width: 100%; background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 16px;
+}
+.share-card__header {
+  background: linear-gradient(135deg, var(--primary) 0%, #6BB5D8 100%);
+  padding: 20px 16px; text-align: center; color: var(--white);
+}
+.share-card__title { font-size: var(--font-h2); font-weight: 700; }
+.share-card__route {
+  font-size: var(--font-sm); opacity: .85; margin-top: 4px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.share-card__route-arrow { opacity: .6; }
+.share-card__body { padding: 16px; }
+.share-card__stats {
+  display: flex; justify-content: space-around; padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+.share-card__stat { text-align: center; }
+.share-card__stat-value { font-size: var(--font-h2); font-weight: 700; color: var(--text); }
+.share-card__stat-label { font-size: var(--font-xs); color: var(--text-secondary); }
+.share-card__qr {
+  display: flex; flex-direction: column; align-items: center; padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.share-card__qr-box {
+  width: 110px; height: 110px; background: var(--bg-blue-tint); border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 6px;
+  border: 1px solid var(--border);
+}
+.share-card__qr-text { font-size: var(--font-xs); color: var(--text-secondary); }
+.share-card__source {
+  text-align: center; padding: 12px 0 0; font-size: var(--font-xs); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.share-actions {
+  display: flex; gap: 12px; padding: 0 16px 16px;
+}
+.share-actions .btn { flex: 1; }
+
+/* ================================================================ */
+/* NEW STYLES — 星级评分                                              */
+/* ================================================================ */
+.stars { display: inline-flex; gap: 1px; }
+.stars--sm { font-size: 12px; }
+.stars--md { font-size: 14px; }
+.stars--lg { font-size: 16px; }
+
+/* ================================================================ */
+/* NEW STYLES — 编辑模态框表单                                         */
+/* ================================================================ */
+.edit-form { padding: 8px 0; }
+.edit-form__field { margin-bottom: 12px; }
+.edit-form__label { font-size: var(--font-sm); color: var(--text-secondary); margin-bottom: 4px; }
+.edit-form__input {
+  width: 100%; height: 44px; border-radius: var(--radius);
+  border: 1.5px solid var(--border-medium); padding: 0 14px;
+  font-size: var(--font); color: var(--text);
+}
+.edit-form__input:focus { outline: none; border-color: var(--primary); }
+.edit-form__textarea {
+  width: 100%; min-height: 80px; border-radius: var(--radius);
+  border: 1.5px solid var(--border-medium); padding: 10px 14px;
+  font-size: var(--font); color: var(--text); resize: vertical;
+}
+.edit-form__textarea:focus { outline: none; border-color: var(--primary); }
+</style>
+</head>
+<body>
+
+<!-- ========== Toast ========== -->
+<div class="toast" id="toast"></div>
+
+<!-- ========== Modal ========== -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+  <div class="modal" id="modal" onclick="event.stopPropagation()"></div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 1: 首页 (Home - 对话式行程创建)          -->
+<!-- ============================================= -->
+<div class="screen active" id="screen-home">
+  <div class="navbar">
+    <span style="font-size:var(--font-h2);font-weight:700;color:var(--primary);">智游记</span>
+    <span style="margin-left:auto;font-size:var(--font-xs);color:var(--text-secondary);">还可免费体验 1 次</span>
+  </div>
+  <div class="step-indicator" id="stepIndicator">
+    <span>步骤</span>
+    <span class="step-indicator__current" id="stepCurrent">1</span>
+    <span>/ 10</span>
+  </div>
+  <div class="scroll-area" id="chatArea">
+    <div class="chat-list" id="chatList"></div>
+  </div>
+  <div class="fixed-actions" id="homeActions">
+    <button class="btn btn--secondary btn--full" id="btnPrev" onclick="prevStep()" style="display:none;">上一步</button>
+    <button class="btn btn--primary btn--full" id="btnNext" onclick="nextStep()">确认并继续</button>
+  </div>
+  <div class="tabbar">
+    <div class="tabbar__item active" onclick="switchTab('home')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span class="tabbar__label">首页</span>
+    </div>
+    <div class="tabbar__item" onclick="switchTab('trips')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      <span class="tabbar__label">我的行程</span>
+    </div>
+    <div class="tabbar__item" onclick="switchTab('mine')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="tabbar__label">我的</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 2: 行程信息清单确认                     -->
+<!-- ============================================= -->
+<div class="screen" id="screen-confirm">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('home')">←</button>
+    <span class="navbar__title">行程信息确认</span>
+  </div>
+  <div class="scroll-area">
+    <div class="card card--large" style="margin-bottom:12px;">
+      <div style="font-size:var(--font-h2);font-weight:600;margin-bottom:16px;">行程信息清单</div>
+      <div id="confirmList"></div>
+    </div>
+    <div class="disclaimer">AI 生成内容及第三方实时数据仅供参考</div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--primary btn--full" onclick="startGenerating()">确认无误，开始规划</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 3: 生成等待页                           -->
+<!-- ============================================= -->
+<div class="screen" id="screen-generating">
+  <div class="navbar">
+    <span class="navbar__title">正在生成行程</span>
+  </div>
+  <div class="generating" id="genPage">
+    <div class="generating__icon">🚐</div>
+    <div class="generating__text" id="genMessage">正在规划路线...</div>
+    <div class="progress-bar">
+      <div class="progress-bar__fill" id="genProgress" style="width:0%"></div>
+    </div>
+    <div style="font-size:var(--font-xs);color:var(--text-secondary);margin-top:4px;" id="genPercent">0%</div>
+    <div class="generating__sources" id="genSources" style="display:none;">
+      数据来源：高德地图 · 和风天气 · FlyAI · 小红书/微博
+    </div>
+    <div id="genTimeout" style="display:none;margin-top:24px;color:var(--accent);font-size:var(--font-sm);">
+      仍在处理中，请耐心等待...
+    </div>
+    <button class="btn btn--primary" id="genRetry" style="display:none;margin-top:16px;" onclick="retryGenerate()">重新生成</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 4: 行程总览 (Overview)                  -->
+<!-- ============================================= -->
+<div class="screen" id="screen-overview">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('trips')">←</button>
+    <span class="navbar__title" id="ovTitle">江南慢游记</span>
+    <button class="navbar__action" onclick="showScreen('share')">分享</button>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <!-- 地图区域 -->
+    <div class="map-area" id="mapArea">
+      <div id="leafletMap"></div>
+    </div>
+    <!-- 城市缩略卡片行 -->
+    <div class="city-card-row" id="cityCardRow"></div>
+    <!-- 行程信息 -->
+    <div class="section" style="padding-top:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:var(--font-h2);font-weight:600;" id="ovTitle2">江南慢游记</span>
+        <span style="font-size:var(--font-sm);color:var(--text-secondary);" id="ovMeta">5天4晚 · 2人</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;" id="ovCities"></div>
+      <div class="badge badge--fresh" style="font-size:var(--font-xs);" id="ovSources">数据来源：高德地图 · FlyAI · 和风天气</div>
+    </div>
+    <!-- 预算网格 -->
+    <div class="section" style="padding-top:0;">
+      <div style="font-size:var(--font-h3);font-weight:600;margin-bottom:8px;">预算概览</div>
+      <div id="budgetGrid"></div>
+    </div>
+    <!-- 每日行程入口 -->
+    <div class="section" style="padding-top:0;">
+      <div style="font-size:var(--font-h3);font-weight:600;margin-bottom:8px;">每日行程</div>
+      <div id="dayEntries"></div>
+    </div>
+    <div class="disclaimer">AI 生成内容及第三方实时数据仅供参考，开放时间、票价、余票、天气和交通情况可能发生变化，请在出行前通过官方渠道再次确认。</div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--primary btn--full" onclick="viewDailyDetail()">查看每日详情</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 5: 行程详情 (Daily Detail)              -->
+<!-- ============================================= -->
+<div class="screen" id="screen-detail">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('overview')">←</button>
+    <span class="navbar__title" id="dtTitle">Day 1 · 杭州</span>
+    <button class="navbar__action" onclick="openEditDay()">编辑</button>
+  </div>
+  <!-- 天数胶囊Tab -->
+  <div class="pill-tabs" id="dayTabs"></div>
+  <div class="scroll-area" style="padding:1px 16px;">
+    <!-- 天气 + 预算 -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;font-size:var(--font-sm);">
+      <span id="dtWeather">🌤 多云 22–26℃</span>
+      <span style="font-weight:600;" id="dtBudget">当日预计 ¥720</span>
+    </div>
+    <!-- 风险提示 -->
+    <div class="risk-banner" id="riskBanner" style="display:none;">
+      <span class="risk-banner__icon">⚠️</span>
+      <div class="risk-banner__text">
+        <div style="font-weight:600;margin-bottom:4px;" id="riskTitle"></div>
+        <div id="riskDesc"></div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;" id="riskAlts"></div>
+      </div>
+    </div>
+    <!-- 城际交通卡片（Day 1） -->
+    <div id="intercityTransport" style="display:none;"></div>
+    <!-- 时间轴 -->
+    <div class="timeline" id="timeline"></div>
+    <div style="display:flex;align-items:center;gap:6px;padding:8px 0 16px 28px;">
+      <span class="badge badge--fresh">数据更新于 10:30</span>
+    </div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--secondary" onclick="openEditDay()">编辑</button>
+    <button class="btn btn--secondary" onclick="showScreen('share')">分享当天</button>
+    <button class="btn btn--primary" onclick="showToast('行程已保存', 'success')">保存</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 6: 景点详情                             -->
+<!-- ============================================= -->
+<div class="screen" id="screen-attraction">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('detail')">←</button>
+    <span class="navbar__title" id="attrName">西湖风景名胜区</span>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="detail-hero" id="attrHero">
+      <span class="detail-hero__icon">🏔️</span>
+      <div class="detail-hero__overlay">
+        <div class="detail-hero__name" id="attrHeroName">西湖风景名胜区</div>
+        <div class="detail-hero__rating">
+          <span class="detail-hero__stars">★★★★★</span>
+          <span class="detail-hero__score">4.8</span>
+        </div>
+        <div class="detail-hero__tags" id="attrHeroTags"></div>
+      </div>
+    </div>
+    <div class="quick-info-row" id="attrQuickInfo"></div>
+    <div class="collapsible" id="attrCollapsible">
+      <div class="collapsible__header" onclick="toggleCollapsible('attrCollapsible')">
+        <span class="collapsible__title">景区介绍</span>
+        <span class="collapsible__arrow" id="attrCollapsibleArrow">▼</span>
+      </div>
+      <div class="collapsible__body" id="attrCollapsibleBody">
+        <div class="section__text" id="attrDesc"></div>
+      </div>
+    </div>
+    <div class="section">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="attrSources"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">用户评价 <span class="tag tag--orange">UGC内容，仅供参考</span></div>
+      <div id="attrReviews"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">周边推荐</div>
+      <div id="attrNearby"></div>
+    </div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--secondary" onclick="showToast('已收藏', 'success')">收藏</button>
+    <button class="btn btn--primary btn--full" onclick="showToast('正在唤起地图导航...', 'success')">导航到此</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 7: 酒店详情                             -->
+<!-- ============================================= -->
+<div class="screen" id="screen-hotel">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('detail')">←</button>
+    <span class="navbar__title" id="hotelName">杭州西湖国宾馆</span>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="detail-hero" id="hotelHero">
+      <span class="detail-hero__icon">🏨</span>
+      <div class="detail-hero__overlay">
+        <div class="detail-hero__name" id="hotelHeroName">杭州西湖国宾馆</div>
+        <div class="detail-hero__rating">
+          <span class="detail-hero__stars">★★★★★</span>
+          <span class="detail-hero__score">4.9</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;" id="hotelPriceRange"></div>
+      </div>
+    </div>
+    <div class="quick-info-row" id="hotelQuickInfo"></div>
+    <div class="section">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="hotelSources"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">设施与服务</div>
+      <div class="facility-grid" id="hotelFacilities"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">推荐房型</div>
+      <div id="hotelRooms"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">用户评价 <span class="tag tag--orange">UGC内容，仅供参考</span></div>
+      <div id="hotelReviews"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">周边配套</div>
+      <div id="hotelNearby"></div>
+    </div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--secondary" onclick="showToast('已收藏', 'success')">收藏</button>
+    <button class="btn btn--primary btn--full" onclick="showToast('正在唤起地图导航...', 'success')">导航到此</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 8: 餐厅详情                             -->
+<!-- ============================================= -->
+<div class="screen" id="screen-restaurant">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('detail')">←</button>
+    <span class="navbar__title" id="restName">楼外楼孤山店</span>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="detail-hero" id="restHero">
+      <span class="detail-hero__icon">🍽️</span>
+      <div class="detail-hero__overlay">
+        <div class="detail-hero__name" id="restHeroName">楼外楼孤山店</div>
+        <div class="detail-hero__rating">
+          <span class="detail-hero__stars">★★★★☆</span>
+          <span class="detail-hero__score">4.6</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;" id="restHeroMeta"></div>
+      </div>
+    </div>
+    <div class="quick-info-row" id="restQuickInfo"></div>
+    <div class="section">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="restSources"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">推荐菜品</div>
+      <div class="dish-scroll" id="restDishes"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div class="section__title">用户评价 <span class="tag tag--orange">UGC内容，仅供参考</span></div>
+      <div id="restReviews"></div>
+    </div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--secondary" onclick="showToast('已收藏', 'success')">收藏</button>
+    <button class="btn btn--primary btn--full" onclick="showToast('正在唤起地图导航...', 'success')">导航到此</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 9: 交通详情                             -->
+<!-- ============================================= -->
+<div class="screen" id="screen-transport">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('detail')">←</button>
+    <span class="navbar__title" id="transTitle">交通详情</span>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="route-viz" id="transRouteViz"></div>
+    <div class="section" id="transCostDetail">
+      <div class="section__title">费用明细</div>
+      <div id="transCostList"></div>
+    </div>
+    <div class="section" style="padding-top:0;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;" id="transSources"></div>
+    </div>
+    <div class="section" style="padding-top:0;" id="transAltSection">
+      <div class="section__title">备选方案</div>
+      <div id="transAltList"></div>
+    </div>
+    <div class="section" style="padding-top:0;" id="transServices" style="display:none;">
+      <div class="section__title">沿途服务区</div>
+      <div id="transServicesList"></div>
+    </div>
+    <div class="section" style="padding-top:0;" id="transParking" style="display:none;">
+      <div class="section__title">目的地停车场</div>
+      <div id="transParkingList"></div>
+    </div>
+  </div>
+  <div class="fixed-actions">
+    <button class="btn btn--secondary btn--sm" onclick="showToast('数据已刷新', 'success')">刷新数据</button>
+    <button class="btn btn--primary btn--full" onclick="showToast('正在唤起地图导航...', 'success')">开始导航</button>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 10: 行程列表 (My Trips)                 -->
+<!-- ============================================= -->
+<div class="screen" id="screen-trips">
+  <div class="navbar">
+    <span class="navbar__title">我的行程</span>
+  </div>
+  <div style="display:flex;gap:8px;padding:12px 16px;" id="tripFilters">
+    <button class="chip selected" data-filter="all" onclick="filterTrips('all',this)">全部</button>
+    <button class="chip" data-filter="mine" onclick="filterTrips('mine',this)">我的</button>
+    <button class="chip" data-filter="collab" onclick="filterTrips('collab',this)">协作</button>
+  </div>
+  <div class="scroll-area" id="tripsList"></div>
+  <div class="tabbar">
+    <div class="tabbar__item active" onclick="switchTab('home')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span class="tabbar__label">首页</span>
+    </div>
+    <div class="tabbar__item" onclick="switchTab('trips')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      <span class="tabbar__label">我的行程</span>
+    </div>
+    <div class="tabbar__item" onclick="switchTab('mine')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="tabbar__label">我的</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 11: 我的 (Mine)                         -->
+<!-- ============================================= -->
+<div class="screen" id="screen-mine">
+  <div class="navbar">
+    <span class="navbar__title">我的</span>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="profile-header">
+      <div class="profile__avatar">🧑</div>
+      <div>
+        <div class="profile__name">旅行者</div>
+        <div class="profile__phone" id="minePhone">138****1234</div>
+      </div>
+    </div>
+    <div style="padding:12px 16px;">
+      <div class="segment" id="appearanceSegment">
+        <div class="segment__item active" data-value="white" onclick="setAppearance('white',this)">纯白</div>
+        <div class="segment__item" data-value="blue" onclick="setAppearance('blue',this)">微蓝底</div>
+      </div>
+    </div>
+    <div class="menu-list">
+      <div class="menu-item" onclick="showToast('收藏与偏好', 'warning')">
+        <div class="menu-item__left"><span class="menu-item__icon">⭐</span>收藏与偏好</div>
+        <span class="menu-item__arrow">›</span>
+      </div>
+      <div class="menu-item" onclick="showToast('隐私设置', 'warning')">
+        <div class="menu-item__left"><span class="menu-item__icon">🔒</span>隐私设置</div>
+        <span class="menu-item__arrow">›</span>
+      </div>
+      <div class="menu-item" onclick="showToast('关于智游记', 'warning')">
+        <div class="menu-item__left"><span class="menu-item__icon">ℹ️</span>关于</div>
+        <span class="menu-item__arrow">›</span>
+      </div>
+    </div>
+    <div style="padding:16px;text-align:center;">
+      <button class="btn btn--danger" style="width:100%;" id="btnLogout" onclick="toggleAuth()">退出登录</button>
+    </div>
+  </div>
+  <div class="tabbar">
+    <div class="tabbar__item" onclick="switchTab('home')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span class="tabbar__label">首页</span>
+    </div>
+    <div class="tabbar__item" onclick="switchTab('trips')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      <span class="tabbar__label">我的行程</span>
+    </div>
+    <div class="tabbar__item active" onclick="switchTab('mine')">
+      <svg class="tabbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="tabbar__label">我的</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 12: 分享页                              -->
+<!-- ============================================= -->
+<div class="screen" id="screen-share">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen(previousScreen)">←</button>
+    <span class="navbar__title">分享行程</span>
+  </div>
+  <div class="scroll-area" style="padding:16px;">
+    <div class="share-card" id="shareCard">
+      <div class="share-card__header">
+        <div class="share-card__title" id="shareTitle">江南慢游记</div>
+        <div class="share-card__route" id="shareRoute"></div>
+      </div>
+      <div class="share-card__body">
+        <div class="share-card__stats">
+          <div class="share-card__stat">
+            <div class="share-card__stat-value" id="shareDays">5天</div>
+            <div class="share-card__stat-label">行程天数</div>
+          </div>
+          <div class="share-card__stat">
+            <div class="share-card__stat-value" id="shareCities">3城</div>
+            <div class="share-card__stat-label">途经城市</div>
+          </div>
+          <div class="share-card__stat">
+            <div class="share-card__stat-value" id="shareBudget">¥4,860</div>
+            <div class="share-card__stat-label">人均预算</div>
+          </div>
+        </div>
+        <div class="share-card__qr">
+          <div class="share-card__qr-box">QR Code</div>
+          <div class="share-card__qr-text">扫码查看完整行程</div>
+        </div>
+        <div class="share-card__source">
+          <span>📊</span> 数据来源：智游记 · AI 多城市旅行规划
+        </div>
+      </div>
+    </div>
+    <div class="share-actions">
+      <button class="btn btn--secondary" onclick="showToast('链接已复制到剪贴板', 'success')">📋 复制链接</button>
+      <button class="btn btn--primary" onclick="showToast('行程图片已保存', 'success')">💾 保存图片</button>
+    </div>
+    <div style="text-align:center;margin-top:12px;">
+      <button class="btn btn--text" onclick="showToast('已分享到微信', 'success')">💬 分享给微信好友</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================= -->
+<!-- SCREEN 13: 编辑行程 (Edit Day)                  -->
+<!-- ============================================= -->
+<div class="screen" id="screen-edit">
+  <div class="navbar">
+    <button class="navbar__back" onclick="showScreen('detail')">←</button>
+    <span class="navbar__title">编辑行程</span>
+    <button class="navbar__action" onclick="saveEditDay()">保存</button>
+  </div>
+  <div class="scroll-area" style="padding:0;">
+    <div class="edit-section">
+      <div class="edit-section__label">当天标题</div>
+      <input class="edit-input" id="editDayTitle" placeholder="例如：Day 1 · 杭州">
+    </div>
+    <div class="edit-section">
+      <div class="edit-section__label">城市</div>
+      <input class="edit-input" id="editDayCity" placeholder="例如：杭州">
+    </div>
+    <div class="edit-section">
+      <div class="edit-section__label">天气</div>
+      <input class="edit-input" id="editDayWeather" placeholder="例如：多云 22–26℃">
+    </div>
+    <div style="padding:12px 16px;font-size:var(--font-h3);font-weight:600;">节点列表</div>
+    <div class="edit-node-list" id="editNodeList"></div>
+    <div style="padding:0 16px;">
+      <button class="add-node-btn" onclick="openAddNodeModal()">+ 添加节点</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== MOCK DATA ====================
+const source = (name, status = "fresh", updatedAt = "10:30") => ({ name, status, updatedAt });
+
+const place = (id, type, name, extra = {}) => ({
+  id, kind: "place", type, name, cost: 0, reason: "",
+  source: source(type === "restaurant" ? "高德地图" : "FlyAI"), ...extra
+});
+
+const transport = (id, mode, duration, cost, extra = {}) => ({
+  id, kind: "transport", mode, duration, cost,
+  source: source("高德地图", "fresh", "10:29"), ...extra
+});
+
+const trip = {
+  id: "trip-jiangnan-2026",
+  version: 7,
+  title: "江南慢游记",
+  routeText: "上海 → 杭州 → 苏州 → 上海",
+  departure: "上海",
+  startDate: "2026-09-18",
+  endDate: "2026-09-22",
+  daysCount: 5,
+  nightsCount: 4,
+  people: 2,
+  transportMode: "公共交通",
+  budgetPerPerson: 5000,
+  estimatePerPerson: 4860,
+  cities: ["杭州", "苏州"],
+  interests: ["自然风光", "历史人文", "美食探店"],
+  foodPreferences: ["本地特色", "低辣"],
+  hotelPreferences: ["舒适型", "近交通枢纽", "含早餐"],
+  allergyNotes: "无",
+  sources: [
+    source("高德地图", "fresh", "10:29"),
+    source("FlyAI", "fresh", "10:29"),
+    source("和风天气", "fresh", "10:28"),
+    source("小红书/微博", "ugc", "09:40")
+  ],
+  weather: [
+    { city: "上海", text: "晴", temperature: "23–28℃", source: source("和风天气", "fresh", "10:28") },
+    { city: "杭州", text: "多云", temperature: "22–27℃", source: source("和风天气", "fresh", "10:28") },
+    { city: "苏州", text: "晴", temperature: "23–28℃", source: source("和风天气", "fresh", "10:28") }
+  ],
+  days: [
+    {
+      day: 1, date: "9月18日", city: "杭州", weather: "多云 22–26℃", estimate: 720, returnToHotel: true,
+      nodes: []
+    },
+    {
+      day: 2, date: "9月19日", city: "杭州", weather: "多云 22–27℃", estimate: 436, returnToHotel: true,
+      nodes: [
+        place("hotel-start", "hotel", "杭州西湖国宾馆", { subtitle: "出发酒店", reason: "近西湖，出行便利" }),
+        transport("walk-1", "步行", "12分钟", 0),
+        place("west-lake", "attraction", "西湖风景名胜区", { cost: 0, reason: "清晨沿湖游览更从容", tags: ["世界文化遗产", "摄影打卡"] }),
+        transport("bus-1", "公交", "28分钟", 2),
+        place("louwailou", "restaurant", "楼外楼孤山店", { cost: 148, subtitle: "午餐 · 杭帮菜", reason: "体验经典杭帮菜", tags: ["西湖醋鱼", "龙井虾仁"] }),
+        transport("walk-2", "步行", "15分钟", 0),
+        place("zhejiang-museum", "attraction", "浙江省博物馆孤山馆", { cost: 0, reason: "室内人文体验，路线顺畅" }),
+        transport("taxi-1", "打车", "18分钟", 26),
+        place("zhiweiguan", "restaurant", "知味观湖滨总店", { cost: 86, subtitle: "晚餐 · 杭帮小吃", reason: "适合低辣偏好" }),
+        transport("metro-1", "地铁", "24分钟", 3),
+        place("hotel-end", "hotel", "杭州西湖国宾馆", { subtitle: "返回酒店", reason: "结束当日行程" })
+      ],
+      risk: {
+        level: "warning",
+        title: "午后可能有短时强降雨",
+        description: "午后可能出现短时强降雨，西湖户外游览体验可能受到影响。",
+        alternatives: [
+          { name: "中国丝绸博物馆", meta: "室内展馆 · 交通增加 12 分钟 · 预算 +¥0" },
+          { name: "浙江自然博物院", meta: "大型室内展馆 · 交通增加 20 分钟 · 预算 +¥8" }
+        ]
+      }
+    },
+    {
+      day: 3, date: "9月20日", city: "杭州", weather: "晴 23–28℃", estimate: 680, returnToHotel: true,
+      nodes: [
+        place("hotel-start-3", "hotel", "杭州西湖国宾馆", { subtitle: "出发酒店" }),
+        transport("metro-2", "地铁", "22分钟", 3),
+        place("lingyin", "attraction", "灵隐寺", { cost: 75, reason: "杭州必游古刹，清晨人少清净", tags: ["千年古刹", "佛教文化"] }),
+        transport("walk-3", "步行", "10分钟", 0),
+        place("longjing", "restaurant", "龙井草堂", { cost: 180, subtitle: "午餐 · 杭帮菜", reason: "龙井村内，环境清幽" }),
+        transport("bus-2", "公交", "35分钟", 2),
+        place("leifeng", "attraction", "雷峰塔", { cost: 40, reason: "俯瞰西湖全景", tags: ["地标建筑", "西湖全景"] }),
+        transport("taxi-2", "打车", "15分钟", 20),
+        place("green-tea", "restaurant", "绿茶餐厅湖滨店", { cost: 70, subtitle: "晚餐 · 创意中餐", reason: "网红餐厅，性价比高" }),
+        transport("walk-4", "步行", "12分钟", 0),
+        place("hotel-end-3", "hotel", "杭州西湖国宾馆", { subtitle: "返回酒店" })
+      ]
+    },
+    {
+      day: 4, date: "9月21日", city: "苏州", weather: "晴 23–28℃", estimate: 550, returnToHotel: true,
+      nodes: [
+        place("hotel-start-4", "hotel", "苏州金鸡湖凯宾斯基", { subtitle: "出发酒店", reason: "近金鸡湖景区" }),
+        transport("subway-1", "地铁", "35分钟", 4),
+        place("zhuozheng", "attraction", "拙政园", { cost: 80, reason: "中国四大名园之首", tags: ["世界文化遗产", "苏州园林"] }),
+        transport("walk-5", "步行", "8分钟", 0),
+        place("songhelou", "restaurant", "松鹤楼观前店", { cost: 160, subtitle: "午餐 · 苏帮菜", reason: "百年老字号", tags: ["松鼠桂鱼", "响油鳝糊"] }),
+        transport("bus-3", "公交", "25分钟", 2),
+        place("hanshan", "attraction", "寒山寺", { cost: 20, reason: "姑苏城外寒山寺", tags: ["千年古寺", "诗词文化"] }),
+        transport("taxi-3", "打车", "20分钟", 28),
+        place("deyuelou", "restaurant", "得月楼", { cost: 130, subtitle: "晚餐 · 苏帮菜", reason: "《舌尖上的中国》推荐" }),
+        transport("metro-3", "地铁", "18分钟", 3),
+        place("hotel-end-4", "hotel", "苏州金鸡湖凯宾斯基", { subtitle: "返回酒店" })
+      ]
+    },
+    {
+      day: 5, date: "9月22日", city: "苏州", weather: "多云 22–27℃", estimate: 380, returnToHotel: false,
+      nodes: [
+        place("hotel-start-5", "hotel", "苏州金鸡湖凯宾斯基", { subtitle: "出发酒店" }),
+        transport("walk-6", "步行", "10分钟", 0),
+        place("shantang", "attraction", "山塘街", { cost: 0, reason: "苏州古街，临别漫步", tags: ["历史文化街区", "水乡风情"] }),
+        transport("taxi-4", "打车", "30分钟", 45),
+        place("train-station", "attraction", "苏州站", { subtitle: "火车站", reason: "返程出发" })
+      ]
+    }
+  ],
+  budget: {
+    intercity: 720, localTransport: 210, accommodation: 1860,
+    tickets: 380, dining: 1090, shopping: 400, other: 200, total: 4860
+  }
+};
+
+const trips = [
+  { id: trip.id, title: trip.title, route: "杭州 · 苏州", date: "2026.09.18 - 09.22", summary: "5天4晚 · 2人 · 人均预计 ¥4,860", status: "ready", theme: "blue", updatedAt: "2026.07.14" },
+  { id: "trip-beijing", title: "京津周末游", route: "北京 · 天津", date: "2026.10.01 - 10.03", summary: "3天2晚 · 2人 · 人均预计 ¥2,500", status: "collaborating", theme: "green", updatedAt: "2026.07.12" },
+  { id: "trip-chengdu", title: "成都慢生活", route: "成都", date: "2026.11.01 - 11.05", summary: "5天4晚 · 1人 · 人均预计 ¥3,200", status: "draft", theme: "orange", updatedAt: "2026.07.10" }
+];
+
+const weatherIcons = {
+  "晴": "☀️", "多云": "⛅", "阴": "☁️", "小雨": "🌧", "大雨": "🌧", "雪": "❄️"
+};
+
+// ==================== STATE ====================
+let currentScreen = 'home';
+let previousScreen = 'home';
+let currentDay = 1;
+let authState = true;
+let tripFilter = 'all';
+let editDayData = null;
+
+// Home state
+const cityOptions = ["上海", "北京", "深圳", "广州", "成都", "杭州", "武汉", "西安", "厦门", "重庆", "桂林", "苏州", "三亚", "天津", "珠海", "青岛", "南京", "丽江", "昆明", "长沙"];
+const interestOptions = ["历史人文", "自然风光", "城市地标", "美食探店", "亲子娱乐", "主题乐园", "艺术展览", "购物休闲", "夜生活", "摄影打卡"];
+const foodOptions = ["本地特色", "小吃快餐", "火锅烧烤", "中餐", "西餐", "素食", "清真", "低辣", "无辣", "甜品咖啡"];
+const hotelOptions = ["经济型", "舒适型", "豪华型", "民宿", "近景区", "近交通枢纽", "含早餐", "无偏好"];
+const budgetOptions = ["¥1,000", "¥2,000", "¥3,000", "¥5,000", "¥8,000"];
+const departureOptions = ["上海", "北京", "广州", "深圳", "成都", "杭州", "武汉", "南京"];
+const purposeOptions = ["休闲度假", "亲子出游", "蜜月旅行", "毕业旅行", "团建活动", "美食之旅", "文化探索", "摄影打卡"];
+
+const steps = [
+  { key: "cities", question: "你好！想去哪里玩？选择 1–5 个城市吧", type: "multi", options: cityOptions, max: 5 },
+  { key: "departure", question: "从哪里出发？", type: "single", options: departureOptions },
+  { key: "destination", question: "最终目的地是哪里？（默认与出发地相同）", type: "single", options: departureOptions },
+  { key: "purpose", question: "这次出游的目的是什么？", type: "single", options: purposeOptions },
+  { key: "date", question: "什么时候出发，计划玩几天？", type: "date" },
+  { key: "people", question: "几个人一起出行？", type: "counter", min: 1, max: 20 },
+  { key: "budget", question: "人均预算大概多少？", type: "single", options: budgetOptions },
+  { key: "interests", question: "对什么感兴趣？选择 1–5 项吧", type: "multi", options: interestOptions, max: 5 },
+  { key: "food", question: "餐饮有什么偏好？最多选 5 项", type: "multi", options: foodOptions, max: 5 },
+  { key: "hotel", question: "对酒店有什么偏好？最多选 3 项", type: "multi", options: hotelOptions, max: 3 }
+];
+
+let homeState = {
+  currentStepIndex: 0,
+  selectedCities: ["杭州", "苏州"],
+  selectedInterests: ["自然风光", "历史人文", "美食探店"],
+  selectedFoods: ["本地特色", "低辣"],
+  selectedHotels: ["舒适型", "近交通枢纽", "含早餐"],
+  startDate: "2026-09-18",
+  daysCount: 5,
+  peopleCount: 2,
+  budget: "¥5,000",
+  departure: "上海",
+  destination: "上海",
+  purpose: "休闲度假",
+  transportMode: "公共交通",
+  allergyNotes: "",
+  chatHistory: []
+};
+
+// ==================== SCREEN MANAGEMENT ====================
+function showScreen(name) {
+  previousScreen = currentScreen;
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const screen = document.getElementById('screen-' + name);
+  if (screen) screen.classList.add('active');
+  currentScreen = name;
+  window.scrollTo(0, 0);
+
+  if (name === 'overview') renderOverview();
+  if (name === 'detail') renderDetail();
+  if (name === 'trips') renderTrips();
+  if (name === 'home') renderHome();
+  if (name === 'mine') renderMine();
+  if (name === 'share') renderShare();
+}
+
+function switchTab(name) {
+  previousScreen = currentScreen;
+  const tabScreens = ['home', 'trips', 'mine'];
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  currentScreen = name;
+  window.scrollTo(0, 0);
+
+  // Update tabbar active states
+  document.querySelectorAll('.tabbar').forEach(tb => {
+    tb.querySelectorAll('.tabbar__item').forEach((item, i) => {
+      item.classList.toggle('active', tabScreens[i] === name);
+    });
+  });
+
+  if (name === 'trips') renderTrips();
+  if (name === 'home') renderHome();
+  if (name === 'mine') renderMine();
+}
+
+// ==================== TOAST ====================
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast toast--' + type + ' show';
+  setTimeout(() => { toast.classList.remove('show'); }, 2000);
+}
+
+// ==================== MODAL ====================
+function openModal(html) {
+  document.getElementById('modal').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+
+// ==================== HOME SCREEN ====================
+function renderHome() {
+  const chatList = document.getElementById('chatList');
+  const step = steps[homeState.currentStepIndex];
+  let html = '';
+
+  // Render chat history
+  homeState.chatHistory.forEach((entry, idx) => {
+    html += '<div class="chat-item fade-in">';
+    html += '<div class="chat-ai"><div class="chat-ai__avatar">🤖</div>';
+    html += '<div class="chat-ai__bubble">' + steps[idx].question + '</div></div>';
+    if (entry.tags && entry.tags.length > 0) {
+      html += '<div class="chat-user"><div class="chat-user__tags">';
+      entry.tags.forEach(t => { html += '<span class="chip selected">' + t + '</span>'; });
+      html += '</div></div>';
+    }
+    html += '</div>';
+  });
+
+  // Current question
+  html += '<div class="chat-item fade-in" id="currentQuestion">';
+  html += '<div class="chat-ai"><div class="chat-ai__avatar">🤖</div>';
+  html += '<div class="chat-ai__bubble">' + step.question + '</div></div>';
+
+  // Current options
+  html += '<div style="margin-top:10px;margin-left:46px;">';
+  if (step.type === 'multi') {
+    html += '<div class="option-grid">';
+    step.options.forEach(opt => {
+      const selected = isSelected(step.key, opt);
+      html += '<div class="option-card' + (selected ? ' selected' : '') + '" onclick="toggleOption(\'' + step.key + '\',\'' + opt + '\')">' + opt + '</div>';
+    });
+    html += '</div>';
+    if (step.key === 'food') {
+      html += '<div style="margin-top:8px;"><input class="input" placeholder="过敏原与忌口（选填）· 请向餐厅再次确认" value="' + homeState.allergyNotes + '" onchange="homeState.allergyNotes=this.value" style="font-size:var(--font-sm);height:40px;"></div>';
+    }
+  } else if (step.type === 'single') {
+    html += '<div class="option-grid">';
+    step.options.forEach(opt => {
+      const selected = getSingleValue(step.key) === opt;
+      html += '<div class="option-card' + (selected ? ' selected' : '') + '" onclick="selectSingle(\'' + step.key + '\',\'' + opt + '\')">' + opt + '</div>';
+    });
+    html += '</div>';
+  } else if (step.type === 'date') {
+    html += '<div style="margin-bottom:12px;"><input type="date" class="input" value="' + homeState.startDate + '" onchange="homeState.startDate=this.value" style="max-width:200px;"></div>';
+    html += '<div class="counter"><button class="counter__btn" onclick="changeCounter(-1,\'days\')">−</button><span class="counter__value">' + homeState.daysCount + '</span><span style="color:var(--text-secondary);">天</span><button class="counter__btn" onclick="changeCounter(1,\'days\')">+</button></div>';
+  } else if (step.type === 'counter') {
+    html += '<div class="counter"><button class="counter__btn" onclick="changeCounter(-1,\'people\')">−</button><span class="counter__value">' + homeState.peopleCount + '</span><span style="color:var(--text-secondary);">人</span><button class="counter__btn" onclick="changeCounter(1,\'people\')">+</button></div>';
+  }
+  html += '</div></div>';
+
+  chatList.innerHTML = html;
+
+  // Update step indicator
+  document.getElementById('stepCurrent').textContent = homeState.currentStepIndex + 1;
+
+  // Update buttons
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
+  btnPrev.style.display = homeState.currentStepIndex > 0 ? 'flex' : 'none';
+  btnNext.textContent = homeState.currentStepIndex >= steps.length - 1 ? '确认信息' : '确认并继续';
+  btnNext.className = 'btn btn--primary btn--full' + (canProceed() ? '' : '');
+  btnNext.style.opacity = canProceed() ? '1' : '0.5';
+
+  // Scroll to current question
+  setTimeout(() => {
+    const el = document.getElementById('currentQuestion');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 100);
+}
+
+function isSelected(key, value) {
+  const map = {
+    cities: homeState.selectedCities,
+    interests: homeState.selectedInterests,
+    food: homeState.selectedFoods,
+    hotel: homeState.selectedHotels
+  };
+  return (map[key] || []).includes(value);
+}
+
+function getSingleValue(key) {
+  const map = {
+    departure: homeState.departure,
+    destination: homeState.destination,
+    purpose: homeState.purpose,
+    budget: homeState.budget
+  };
+  return map[key] || '';
+}
+
+function toggleOption(key, value) {
+  const map = {
+    cities: ['selectedCities', 5],
+    interests: ['selectedInterests', 5],
+    food: ['selectedFoods', 5],
+    hotel: ['selectedHotels', 3]
+  };
+  const [arrKey, max] = map[key];
+  let arr = [...homeState[arrKey]];
+
+  if (key === 'hotel' && value === '无偏好') {
+    arr = arr.includes(value) ? [] : ['无偏好'];
+  } else {
+    if (key === 'hotel') arr = arr.filter(x => x !== '无偏好');
+    if (arr.includes(value)) {
+      arr = arr.filter(x => x !== value);
+    } else if (arr.length < max) {
+      arr.push(value);
+    }
+  }
+  homeState[arrKey] = arr;
+  renderHome();
+}
+
+function selectSingle(key, value) {
+  const map = {
+    departure: 'departure',
+    destination: 'destination',
+    purpose: 'purpose',
+    budget: 'budget'
+  };
+  homeState[map[key]] = value;
+  if (key === 'departure') homeState.destination = value;
+  renderHome();
+}
+
+function changeCounter(delta, type) {
+  if (type === 'days') {
+    const v = homeState.daysCount + delta;
+    if (v >= 1 && v <= 15) homeState.daysCount = v;
+  } else if (type === 'people') {
+    const v = homeState.peopleCount + delta;
+    if (v >= 1 && v <= 20) homeState.peopleCount = v;
+  }
+  renderHome();
+}
+
+function canProceed() {
+  const s = homeState;
+  const step = steps[homeState.currentStepIndex];
+  switch (step.key) {
+    case 'cities': return s.selectedCities.length >= 1 && s.selectedCities.length <= 5;
+    case 'departure': return Boolean(s.departure);
+    case 'destination': return Boolean(s.destination);
+    case 'purpose': return Boolean(s.purpose);
+    case 'date': return Boolean(s.startDate && s.daysCount >= 1);
+    case 'people': return s.peopleCount >= 1;
+    case 'budget': return Boolean(s.budget);
+    case 'interests': return s.selectedInterests.length >= 1;
+    case 'food': return s.selectedFoods.length <= 5;
+    case 'hotel': return s.selectedHotels.length >= 1;
+    default: return true;
+  }
+}
+
+function prevStep() {
+  if (homeState.currentStepIndex <= 0) return;
+  homeState.chatHistory.pop();
+  homeState.currentStepIndex--;
+  renderHome();
+}
+
+function nextStep() {
+  if (!canProceed()) { showToast('请先完成当前选择', 'warning'); return; }
+
+  const step = steps[homeState.currentStepIndex];
+  let tags = [];
+  switch (step.key) {
+    case 'cities': tags = homeState.selectedCities; break;
+    case 'departure': tags = [homeState.departure]; break;
+    case 'destination': tags = [homeState.destination]; break;
+    case 'purpose': tags = [homeState.purpose]; break;
+    case 'date': tags = [homeState.startDate + ' · ' + homeState.daysCount + '天']; break;
+    case 'people': tags = [homeState.peopleCount + '人']; break;
+    case 'budget': tags = [homeState.budget]; break;
+    case 'interests': tags = homeState.selectedInterests; break;
+    case 'food': tags = [...homeState.selectedFoods];
+      if (homeState.allergyNotes) tags.push('忌口: ' + homeState.allergyNotes); break;
+    case 'hotel': tags = homeState.selectedHotels; break;
+  }
+
+  homeState.chatHistory.push({ tags });
+  homeState.currentStepIndex++;
+
+  if (homeState.currentStepIndex >= steps.length) {
+    renderConfirm();
+    showScreen('confirm');
+    return;
+  }
+  renderHome();
+}
+
+// ==================== CONFIRM SCREEN ====================
+function renderConfirm() {
+  const s = homeState;
+  const items = [
+    { label: '目的城市', value: s.selectedCities.join(' · ') },
+    { label: '出发地', value: s.departure },
+    { label: '最终目的地', value: s.destination },
+    { label: '出游目的', value: s.purpose },
+    { label: '出行日期', value: s.startDate + ' · ' + s.daysCount + '天' },
+    { label: '出行人数', value: s.peopleCount + '人' },
+    { label: '人均预算', value: s.budget },
+    { label: '出行方式', value: s.transportMode },
+    { label: '兴趣偏好', value: s.selectedInterests.join(' · ') },
+    { label: '餐饮偏好', value: s.selectedFoods.length > 0 ? s.selectedFoods.join(' · ') : '无特殊偏好' },
+    { label: '酒店偏好', value: s.selectedHotels.join(' · ') },
+    { label: '过敏原/忌口', value: s.allergyNotes || '无' }
+  ];
+
+  let html = '';
+  items.forEach(item => {
+    html += '<div class="confirm-item">';
+    html += '<span class="confirm-item__label">' + item.label + '</span>';
+    html += '<span class="confirm-item__value">' + item.value + ' <span class="confirm-item__edit" onclick="showScreen(\'home\');showToast(\'点击对应选项修改\',\'warning\')">✎</span></span>';
+    html += '</div>';
+  });
+  document.getElementById('confirmList').innerHTML = html;
+}
+
+// ==================== GENERATING SCREEN ====================
+function startGenerating() {
+  showScreen('generating');
+  const messages = ["正在规划路线...", "正在查询天气...", "正在计算预算...", "正在推荐景点...", "正在查找餐厅和酒店..."];
+  let progress = 0;
+  let msgIdx = 0;
+  const genProgress = document.getElementById('genProgress');
+  const genMessage = document.getElementById('genMessage');
+  const genPercent = document.getElementById('genPercent');
+  const genSources = document.getElementById('genSources');
+  const genTimeout = document.getElementById('genTimeout');
+  const genRetry = document.getElementById('genRetry');
+
+  genTimeout.style.display = 'none';
+  genRetry.style.display = 'none';
+  genSources.style.display = 'none';
+
+  const interval = setInterval(() => {
+    progress += Math.random() * 15 + 5;
+    if (progress >= 100) {
+      progress = 100;
+      clearInterval(interval);
+      genMessage.textContent = '行程生成完成！';
+      genSources.style.display = 'block';
+      setTimeout(() => {
+        showScreen('overview');
+      }, 800);
+    }
+    genProgress.style.width = progress + '%';
+    genPercent.textContent = Math.floor(progress) + '%';
+
+    const newMsgIdx = Math.floor(progress / 20);
+    if (newMsgIdx !== msgIdx && newMsgIdx < messages.length) {
+      msgIdx = newMsgIdx;
+      genMessage.textContent = messages[msgIdx];
+    }
+
+    if (progress > 60 && progress < 100 && genTimeout.style.display === 'none') {
+      genTimeout.style.display = 'block';
+    }
+  }, 400);
+
+  document.getElementById('genRetry').onclick = function() {
+    clearInterval(interval);
+    startGenerating();
+  };
+}
+
+function retryGenerate() {
+  startGenerating();
+}
+
+// ==================== OVERVIEW SCREEN ====================
+const cityLatLng = {
+  "上海": [31.2304, 121.4737], "杭州": [30.2741, 120.1551],
+  "苏州": [31.2990, 120.5853], "南京": [32.0603, 118.7969],
+  "北京": [39.9042, 116.4074], "成都": [30.5728, 104.0668],
+  "深圳": [22.5431, 114.0579], "广州": [23.1291, 113.2644],
+  "武汉": [30.5928, 114.3055], "西安": [34.3416, 108.9398],
+  "厦门": [24.4798, 118.0894], "重庆": [29.4316, 106.9123],
+  "桂林": [25.2736, 110.2900], "三亚": [18.2528, 109.5120],
+  "天津": [39.3434, 117.3616], "珠海": [22.2707, 113.5767],
+  "青岛": [36.0671, 120.3826], "丽江": [26.8721, 100.2299],
+  "昆明": [25.0389, 102.7183], "长沙": [28.2282, 112.9388]
+};
+
+let leafletMap = null;
+let leafletMarkers = [];
+let leafletLine = null;
+
+function initLeafletMap(routeCities) {
+  const el = document.getElementById('leafletMap');
+  if (!el || el._leaflet_id) return; // already initialized
+
+  leafletMap = L.map('leafletMap', {
+    zoomControl: false,
+    attributionControl: true,
+    dragging: true,
+    scrollWheelZoom: false,
+    touchZoom: true
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 18
+  }).addTo(leafletMap);
+
+  // Fit to route cities
+  const coords = routeCities.map(c => cityLatLng[c]).filter(Boolean);
+  if (coords.length === 0) coords.push([30.2741, 120.1551]); // default Hangzhou
+
+  const bounds = L.latLngBounds(coords);
+  leafletMap.fitBounds(bounds, { padding: [40, 40] });
+
+  // Add markers
+  coords.forEach((latlng, i) => {
+    const isFirst = i === 0;
+    const isLast = i === coords.length - 1 && coords.length > 1;
+    let color = '#87C4E8';
+    if (isFirst) color = '#A8D1A8';
+    else if (isLast) color = '#F5C9A8';
+
+    const icon = L.divIcon({
+      className: 'leaflet-city-marker',
+      html: '<div style="width:18px;height:18px;border-radius:50%;background:' + color + ';border:2.5px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.2);position:relative;"><div style="width:5px;height:5px;border-radius:50%;background:white;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:0.8;"></div></div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9]
+    });
+
+    const marker = L.marker(latlng, { icon }).addTo(leafletMap);
+    marker.bindTooltip(routeCities[i], { direction: 'top', offset: [0, -8] });
+    leafletMarkers.push(marker);
+  });
+
+  // Draw route line
+  if (coords.length >= 2) {
+    leafletLine = L.polyline(coords, {
+      color: '#87C4E8',
+      weight: 3,
+      opacity: 0.8,
+      dashArray: '6,3'
+    }).addTo(leafletMap);
+  }
+}
+
+function renderOverview() {
+  const routeCities = trip.routeText.split(/→/).map(s => s.trim()).filter(s => s);
+  const uniqueCities = [...new Set(routeCities)];
+
+  // Init Leaflet map (once)
+  if (!window._mapInited) { initLeafletMap(routeCities); window._mapInited = true; }
+
+  // Title & meta
+  document.getElementById('ovTitle').textContent = trip.title;
+  document.getElementById('ovTitle2').textContent = trip.title;
+  document.getElementById('ovMeta').textContent = trip.daysCount + '天' + trip.nightsCount + '晚 · ' + trip.people + '人';
+
+  // Cities
+  let citiesHtml = '';
+  routeCities.forEach((city, i) => {
+    citiesHtml += '<span class="chip">' + city + '</span>';
+  });
+  document.getElementById('ovCities').innerHTML = citiesHtml;
+
+  // Sources
+  const sourceNames = trip.sources.filter(s => s.status === 'fresh').map(s => s.name);
+  document.getElementById('ovSources').textContent = '数据来源：' + sourceNames.join(' · ');
+
+  // Budget grid
+  renderBudgetGrid();
+
+  // Day entries
+  let dayHtml = '';
+  trip.days.forEach((day, i) => {
+    dayHtml += '<div class="trip-card" onclick="currentDay=' + (i + 1) + ';showScreen(\'detail\')" style="cursor:pointer;">';
+    dayHtml += '<div class="trip-card__header">';
+    dayHtml += '<div><div class="trip-card__title">Day ' + (i + 1) + ' · ' + (day.city || '') + '</div>';
+    dayHtml += '<div class="trip-card__meta">' + day.date + ' · 预计 ¥' + (day.estimate || 0) + '</div></div>';
+    dayHtml += '<span style="color:var(--text-secondary);font-size:20px;">›</span>';
+    dayHtml += '</div></div>';
+  });
+  document.getElementById('dayEntries').innerHTML = dayHtml;
+
+  // City cards
+  renderCityCards(uniqueCities);
+}
+
+function renderBudgetGrid() {
+  const b = trip.budget;
+  const budgetItems = [
+    { label: '住宿', value: b.accommodation, icon: '🏨', color: '#E8F4F8' },
+    { label: '城际交通', value: b.intercity, icon: '🚄', color: '#E8F4F8' },
+    { label: '餐饮', value: b.dining, icon: '🍽️', color: '#F0F8F0' },
+    { label: '购物', value: b.shopping, icon: '🛍️', color: '#F0F8F0' },
+    { label: '门票', value: b.tickets, icon: '🎫', color: '#FFF8F0' },
+    { label: '市内交通', value: b.localTransport, icon: '🚌', color: '#FFF8F0' },
+    { label: '其他', value: b.other, icon: '📦', color: '#F5F0F8' }
+  ];
+
+  // Sort by amount descending
+  budgetItems.sort((a, b) => b.value - a.value);
+
+  const maxValue = Math.max(...budgetItems.map(i => i.value));
+  const usagePercent = Math.min(100, Math.round((b.total / trip.budgetPerPerson) * 100));
+
+  let html = '';
+
+  // Total card
+  html += '<div class="budget-total-card">';
+  html += '<div class="budget-total-card__icon">💰</div>';
+  html += '<div class="budget-total-card__info">';
+  html += '<div class="budget-total-card__label">人均总计</div>';
+  html += '<div class="budget-total-card__amount">¥' + b.total.toLocaleString() + '</div>';
+  html += '<div class="budget-total-card__bar">';
+  html += '<div class="budget-total-card__bar-fill" style="width:' + usagePercent + '%;"></div>';
+  html += '</div>';
+  html += '<div class="budget-total-card__bar-label">预算使用 ' + usagePercent + '% · 预算 ¥' + trip.budgetPerPerson.toLocaleString() + '</div>';
+  html += '</div></div>';
+
+  // Item cards in 2-column grid
+  html += '<div class="budget-grid">';
+  budgetItems.forEach((item, i) => {
+    const highlight = i < 2; // top 2 items get highlight
+    html += '<div class="budget-item-card' + (highlight ? ' budget-item-card--highlight' : '') + '">';
+    html += '<div class="budget-item-card__icon" style="background:' + item.color + ';">' + item.icon + '</div>';
+    html += '<div class="budget-item-card__info">';
+    html += '<div class="budget-item-card__label">' + item.label + '</div>';
+    html += '<div class="budget-item-card__amount">¥' + item.value.toLocaleString() + '</div>';
+    html += '</div></div>';
+  });
+  html += '</div>';
+
+  document.getElementById('budgetGrid').innerHTML = html;
+}
+
+function renderCityCards(uniqueCities) {
+  if (!uniqueCities || uniqueCities.length === 0) return;
+  let html = '';
+  uniqueCities.forEach(city => {
+    const w = trip.weather.find(w => w.city === city) || { text: '晴', temperature: '20–28℃' };
+    const wi = weatherIcons[w.text] || '🌤';
+    const days = trip.days.filter(d => d.city === city).length;
+    html += '<div class="city-card-mini">';
+    html += '<div class="city-card-mini__name">' + city + '</div>';
+    html += '<div class="city-card-mini__weather">' + wi + ' ' + w.temperature + '</div>';
+    html += '<div class="city-card-mini__days">' + days + '天</div>';
+    html += '</div>';
+  });
+  document.getElementById('cityCardRow').innerHTML = html;
+}
+
+function viewDailyDetail() {
+  currentDay = 1;
+  showScreen('detail');
+}
+
+// ==================== DETAIL SCREEN ====================
+function renderDetail() {
+  // Day tabs
+  let tabsHtml = '';
+  for (let i = 1; i <= trip.daysCount; i++) {
+    tabsHtml += '<div class="pill-tab' + (i === currentDay ? ' active' : '') + '" onclick="currentDay=' + i + ';renderDetail();">Day ' + i + '</div>';
+  }
+  document.getElementById('dayTabs').innerHTML = tabsHtml;
+
+  const day = trip.days[currentDay - 1];
+  if (!day) return;
+
+  document.getElementById('dtTitle').textContent = 'Day ' + currentDay + ' · ' + (day.city || '');
+  document.getElementById('dtWeather').textContent = '🌤 ' + (day.weather || '');
+  document.getElementById('dtBudget').textContent = '当日预计 ¥' + (day.estimate || 0);
+
+  // Risk
+  const riskBanner = document.getElementById('riskBanner');
+  if (day.risk) {
+    riskBanner.style.display = 'flex';
+    document.getElementById('riskTitle').textContent = day.risk.title;
+    document.getElementById('riskDesc').textContent = day.risk.description;
+    let altHtml = '';
+    (day.risk.alternatives || []).forEach(alt => {
+      altHtml += '<span class="chip" style="cursor:pointer;" onclick="showToast(\'已应用替代方案: ' + alt.name + '\',\'success\')">' + alt.name + '</span>';
+    });
+    document.getElementById('riskAlts').innerHTML = altHtml;
+  } else {
+    riskBanner.style.display = 'none';
+  }
+
+  // Inter-city transport for Day 1 (empty nodes)
+  const intercityEl = document.getElementById('intercityTransport');
+  if (day.nodes.length === 0 && currentDay === 1) {
+    intercityEl.style.display = 'block';
+    const routeCities = trip.routeText.split(/→/).map(s => s.trim()).filter(s => s);
+    const from = routeCities[0] || '上海';
+    const to = routeCities[1] || '杭州';
+    const mode = getTransportModeForRoute(from, to);
+    const modeName = mode.split(' ')[0] || '🚄高铁';
+    const duration = mode.split(' ')[1] || '1h';
+    const cost = trip.budget?.intercity ? Math.round(trip.budget.intercity / (routeCities.filter((c,i) => i < routeCities.length - 1).length || 2)) : 360;
+
+    intercityEl.innerHTML = '<div class="intercity-transport-card" onclick="openIntercityTransport(\'' + from + '\',\'' + to + '\',\'' + modeName + '\',\'' + duration + '\',' + cost + ')">' +
+      '<div class="intercity-transport-card__icon">' + (modeName.includes('高铁') ? '🚄' : modeName.includes('飞') ? '✈️' : '🚗') + '</div>' +
+      '<div class="intercity-transport-card__info">' +
+      '<div class="intercity-transport-card__route"><span>' + from + '</span><span class="intercity-transport-card__route-arrow">→</span><span>' + to + '</span></div>' +
+      '<div class="intercity-transport-card__meta">' + modeName + ' · ' + duration + '</div>' +
+      '</div>' +
+      '<div class="intercity-transport-card__price">' +
+      '<div>¥' + cost + '</div>' +
+      '<div class="intercity-transport-card__price-label">/人</div>' +
+      '</div></div>';
+  } else {
+    intercityEl.style.display = 'none';
+  }
+
+  // Timeline
+  let timelineHtml = '';
+  const nodes = day.nodes || [];
+  if (nodes.length === 0) {
+    if (currentDay !== 1) {
+      timelineHtml = '<div class="empty-state"><div class="empty-state__icon">🚗</div><div class="empty-state__text">出发日，从' + trip.departure + '前往' + day.city + '</div></div>';
+    }
+  } else {
+    nodes.forEach((node, idx) => {
+      const isFirst = idx === 0;
+      const isLast = idx === nodes.length - 1;
+      let nodeClass = 'timeline-node';
+      if (isFirst && node.kind === 'place') nodeClass += ' timeline-node--first';
+      else if (isLast && node.kind === 'place') nodeClass += ' timeline-node--last';
+      if (node.kind === 'transport') nodeClass += ' timeline-node--transport';
+      if (node.type === 'restaurant') nodeClass += ' timeline-node--restaurant';
+
+      timelineHtml += '<div class="' + nodeClass + '">';
+
+      if (node.kind === 'transport') {
+        const modeIcons = { '步行': '🚶', '公交': '🚌', '地铁': '🚇', '打车': '🚕', '自驾': '🚗' };
+        timelineHtml += '<div class="node-card node-card--transport" onclick="openTransportDetail(\'' + node.mode + '\',\'' + node.duration + '\',' + node.cost + ')">';
+        timelineHtml += '<span>' + (modeIcons[node.mode] || '🚗') + '</span>';
+        timelineHtml += '<span style="font-weight:600;">' + node.mode + '</span>';
+        timelineHtml += '<span style="color:var(--text-secondary);">' + node.duration + '</span>';
+        timelineHtml += '<span style="margin-left:auto;font-weight:600;">' + (node.cost > 0 ? '¥' + node.cost : '免费') + '</span>';
+        timelineHtml += '</div>';
+      } else {
+        let cardClass = 'node-card';
+        if (node.type === 'restaurant') cardClass += ' node-card--restaurant';
+        if (node.type === 'hotel') cardClass += ' node-card--hotel';
+
+        const clickAction = node.type === 'attraction' ? 'openAttraction' : (node.type === 'hotel' ? 'openHotel' : (node.type === 'restaurant' ? 'openRestaurant' : ''));
+        timelineHtml += '<div class="' + cardClass + '" onclick="' + (clickAction ? clickAction + '(\'' + node.name + '\')' : '') + '">';
+        timelineHtml += '<div class="node-card__title">' + node.name + '</div>';
+        if (node.subtitle) timelineHtml += '<div class="node-card__sub">' + node.subtitle + '</div>';
+        if (node.reason) timelineHtml += '<div class="node-card__sub">' + node.reason + '</div>';
+        if (node.cost > 0) timelineHtml += '<div class="node-card__sub" style="font-weight:600;">¥' + node.cost + '</div>';
+        if (node.tags) {
+          timelineHtml += '<div class="node-card__tags">';
+          node.tags.forEach(t => { timelineHtml += '<span class="tag">' + t + '</span>'; });
+          timelineHtml += '</div>';
+        }
+        timelineHtml += '</div>';
+      }
+      timelineHtml += '</div>';
+    });
+  }
+  document.getElementById('timeline').innerHTML = timelineHtml;
+}
+
+// ==================== DETAIL PAGES ====================
+function openAttraction(name) {
+  name = name || '西湖风景名胜区';
+  document.getElementById('attrName').textContent = name;
+  document.getElementById('attrHeroName').textContent = name;
+  document.getElementById('attrHeroTags').innerHTML = '<span class="detail-hero__tag">世界文化遗产</span><span class="detail-hero__tag">5A景区</span><span class="detail-hero__tag">摄影打卡</span>';
+  document.getElementById('attrQuickInfo').innerHTML = `
+    <div class="quick-info-item"><div class="quick-info-item__icon">🎫</div><div class="quick-info-item__label">门票</div><div class="quick-info-item__value">免费</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">🕐</div><div class="quick-info-item__label">开放时间</div><div class="quick-info-item__value">全天</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">⏱️</div><div class="quick-info-item__label">建议游玩</div><div class="quick-info-item__value">3-4小时</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">⭐</div><div class="quick-info-item__label">评分</div><div class="quick-info-item__value">4.8</div></div>`;
+  document.getElementById('attrSources').innerHTML = '<span class="badge badge--fresh">FlyAI · 更新于 10:29</span><span class="tag tag--orange">UGC 评分参考</span>';
+  document.getElementById('attrDesc').textContent = '西湖风景名胜区位于浙江省杭州市，是中国首批国家重点风景名胜区之一，也是中国十大风景名胜之一。西湖三面环山，一面临城，湖中有白堤、苏堤、杨公堤，将湖面分割成若干区域。西湖以其"山水相依、城湖合璧"的独特景观闻名于世，2011年被列入世界文化遗产名录。';
+  document.getElementById('attrReviews').innerHTML = `
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">旅行达人小王</div><div class="review-card__platform">小红书</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐⭐</span></div><div class="review-card__text">清晨的西湖太美了！建议早上6点到，人少景美，可以静静地看日出。</div></div>
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">吃货在路上</div><div class="review-card__platform">微博</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐☆</span></div><div class="review-card__text">西湖边上的楼外楼一定要去，西湖醋鱼绝了！</div></div>`;
+  document.getElementById('attrNearby').innerHTML = `
+    <div class="service-item"><span class="service-item__name">楼外楼孤山店</span><span class="service-item__meta">餐饮 · 800m · ⭐4.6</span></div>
+    <div class="service-item"><span class="service-item__name">浙江省博物馆</span><span class="service-item__meta">景点 · 600m · ⭐4.5</span></div>
+    <div class="service-item"><span class="service-item__name">湖滨银泰in77</span><span class="service-item__meta">购物 · 1.2km · ⭐4.4</span></div>`;
+  // Reset collapsible
+  document.getElementById('attrCollapsibleBody').classList.remove('open');
+  document.getElementById('attrCollapsibleArrow').classList.remove('open');
+  showScreen('attraction');
+}
+
+function openHotel(name) {
+  name = name || '杭州西湖国宾馆';
+  document.getElementById('hotelName').textContent = name;
+  document.getElementById('hotelHeroName').textContent = name;
+  document.getElementById('hotelPriceRange').innerHTML = '<span class="detail-hero__tag">¥680-2,800</span>';
+  document.getElementById('hotelQuickInfo').innerHTML = `
+    <div class="quick-info-item"><div class="quick-info-item__icon">🕐</div><div class="quick-info-item__label">入住/退房</div><div class="quick-info-item__value">14:00/12:00</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">📞</div><div class="quick-info-item__label">联系方式</div><div class="quick-info-item__value">0571-8797****</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">📍</div><div class="quick-info-item__label">地址</div><div class="quick-info-item__value">杨公堤18号</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">⭐</div><div class="quick-info-item__label">评分</div><div class="quick-info-item__value">4.9</div></div>`;
+  document.getElementById('hotelSources').innerHTML = '<span class="badge badge--fresh">FlyAI · 更新于 10:29</span><span class="badge badge--fresh">高德地图</span>';
+  document.getElementById('hotelFacilities').innerHTML = `
+    <div class="facility-item"><div class="facility-item__icon">📶</div><div class="facility-item__name">WiFi</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🅿️</div><div class="facility-item__name">停车场</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🏊</div><div class="facility-item__name">游泳池</div></div>
+    <div class="facility-item"><div class="facility-item__icon">💪</div><div class="facility-item__name">健身房</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🍳</div><div class="facility-item__name">含早餐</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🧴</div><div class="facility-item__name">SPA</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🚗</div><div class="facility-item__name">接送机</div></div>
+    <div class="facility-item"><div class="facility-item__icon">🧹</div><div class="facility-item__name">洗衣服务</div></div>`;
+  document.getElementById('hotelRooms').innerHTML = `
+    <div class="room-card"><div class="room-card__img">🛏️</div><div class="room-card__info"><div class="room-card__name">豪华大床房</div><div class="room-card__meta">30㎡ · 含早 · 湖景</div></div><div class="room-card__price">¥680<span class="room-card__price-unit">/晚</span></div></div>
+    <div class="room-card"><div class="room-card__img">🛋️</div><div class="room-card__info"><div class="room-card__name">行政套房</div><div class="room-card__meta">55㎡ · 含早 · 湖景 · 行政酒廊</div></div><div class="room-card__price">¥1,580<span class="room-card__price-unit">/晚</span></div></div>
+    <div class="room-card"><div class="room-card__img">🏠</div><div class="room-card__info"><div class="room-card__name">园景双床房</div><div class="room-card__meta">28㎡ · 含早 · 园景</div></div><div class="room-card__price">¥580<span class="room-card__price-unit">/晚</span></div></div>`;
+  document.getElementById('hotelReviews').innerHTML = `
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">酒店控</div><div class="review-card__platform">小红书</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐⭐</span></div><div class="review-card__text">西湖边的老牌酒店，园林景观绝美，早餐品种丰富，推荐！</div></div>
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">商务旅客</div><div class="review-card__platform">携程</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐☆</span></div><div class="review-card__text">地理位置优越，步行可达西湖，服务周到，下次还会入住。</div></div>`;
+  document.getElementById('hotelNearby').innerHTML = `
+    <div class="service-item"><span class="service-item__name">西湖风景名胜区</span><span class="service-item__meta">景点 · 600m</span></div>
+    <div class="service-item"><span class="service-item__name">楼外楼孤山店</span><span class="service-item__meta">餐饮 · 800m</span></div>
+    <div class="service-item"><span class="service-item__name">龙翔桥地铁站</span><span class="service-item__meta">交通 · 1.5km</span></div>`;
+  showScreen('hotel');
+}
+
+function openRestaurant(name) {
+  name = name || '楼外楼孤山店';
+  document.getElementById('restName').textContent = name;
+  document.getElementById('restHeroName').textContent = name;
+  document.getElementById('restHeroMeta').innerHTML = '<span class="detail-hero__tag">¥148/人</span><span class="detail-hero__tag">杭帮菜</span>';
+  document.getElementById('restQuickInfo').innerHTML = `
+    <div class="quick-info-item"><div class="quick-info-item__icon">🍳</div><div class="quick-info-item__label">菜系</div><div class="quick-info-item__value">杭帮菜</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">🕐</div><div class="quick-info-item__label">营业时间</div><div class="quick-info-item__value">11:00-21:00</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">💰</div><div class="quick-info-item__label">人均</div><div class="quick-info-item__value">¥148</div></div>
+    <div class="quick-info-item"><div class="quick-info-item__icon">⭐</div><div class="quick-info-item__label">评分</div><div class="quick-info-item__value">4.6</div></div>`;
+  document.getElementById('restSources').innerHTML = '<span class="badge badge--fresh">高德地图 · 更新于 10:29</span><span class="tag tag--orange">UGC 评分参考</span>';
+  document.getElementById('restDishes').innerHTML = `
+    <div class="dish-card"><div class="dish-card__img">🐟</div><div class="dish-card__name">西湖醋鱼</div><div class="dish-card__price">¥88</div><div class="dish-card__recommend">👍 推荐指数 98%</div></div>
+    <div class="dish-card"><div class="dish-card__img">🦐</div><div class="dish-card__name">龙井虾仁</div><div class="dish-card__price">¥128</div><div class="dish-card__recommend">👍 推荐指数 95%</div></div>
+    <div class="dish-card"><div class="dish-card__img">🥩</div><div class="dish-card__name">东坡肉</div><div class="dish-card__price">¥58</div><div class="dish-card__recommend">👍 推荐指数 92%</div></div>
+    <div class="dish-card"><div class="dish-card__img">🐔</div><div class="dish-card__name">叫花鸡</div><div class="dish-card__price">¥138</div><div class="dish-card__recommend">👍 推荐指数 89%</div></div>`;
+  document.getElementById('restReviews').innerHTML = `
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">美食侦探</div><div class="review-card__platform">小红书</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐☆</span></div><div class="review-card__text">西湖醋鱼必点！酸甜适口，鱼肉鲜嫩。建议提前预约，饭点排队很久。</div></div>
+    <div class="review-card"><div class="review-card__header"><div class="review-card__avatar"></div><div class="review-card__name">杭城小当家</div><div class="review-card__platform">微博</div><span class="stars stars--sm" style="margin-left:auto;">⭐⭐⭐⭐⭐</span></div><div class="review-card__text">百年老店，环境优雅，来杭州不可错过的美食体验。</div></div>`;
+  showScreen('restaurant');
+}
+
+function openTransportDetail(mode, duration, cost) {
+  document.getElementById('transTitle').textContent = '城内交通详情';
+  const modeIcons = { '步行': '🚶', '公交': '🚌', '地铁': '🚇', '打车': '🚕', '自驾': '🚗' };
+  const icon = modeIcons[mode] || '🚗';
+  // Route viz
+  document.getElementById('transRouteViz').innerHTML = `
+    <div class="route-viz__cities">
+      <div class="route-viz__city"><div class="route-viz__city-name">出发</div><div class="route-viz__city-time">预计 09:00</div></div>
+      <div class="route-viz__city"><div class="route-viz__city-name">到达</div><div class="route-viz__city-time">预计 09:${duration.replace(/[^0-9]/g,'').padStart(2,'0') || '12'}</div></div>
+    </div>
+    <div class="route-viz__mid"><span class="route-viz__mid-icon">${icon}</span>${mode} · ${duration}</div>
+    <div class="route-viz__line"></div>`;
+  document.getElementById('transCostList').innerHTML = `
+    <div class="service-item"><span class="service-item__name">${mode}费用</span><span class="service-item__meta">¥${cost}</span></div>
+    <div class="service-item"><span class="service-item__name">实时路况</span><span class="service-item__meta" style="color:var(--secondary);">畅通</span></div>`;
+  document.getElementById('transSources').innerHTML = '<span class="badge badge--fresh">高德地图 · 更新于 10:29</span>';
+  document.getElementById('transAltList').innerHTML = `
+    <div class="alt-route-card alt-route-card--best"><div class="alt-route-card__icon">🚌</div><div class="alt-route-card__info"><div class="alt-route-card__mode">公交</div><div class="alt-route-card__meta">约${Math.floor(Math.random()*10+20)}分钟 · 全程约${Math.floor(Math.random()*5+3)}站</div><div class="alt-route-card__best-tag">推荐</div></div><div class="alt-route-card__price">¥2</div></div>
+    <div class="alt-route-card"><div class="alt-route-card__icon">🚶</div><div class="alt-route-card__info"><div class="alt-route-card__mode">步行</div><div class="alt-route-card__meta">约${Math.floor(Math.random()*20+25)}分钟 · 约${Math.floor(Math.random()*2+1)}.5km</div></div><div class="alt-route-card__price">免费</div></div>`;
+  document.getElementById('transServices').style.display = 'none';
+  document.getElementById('transParking').style.display = 'none';
+  document.getElementById('transCostDetail').style.display = 'block';
+  document.getElementById('transAltSection').style.display = 'block';
+  showScreen('transport');
+}
+
+function openIntercityTransport(from, to, mode, duration, cost) {
+  document.getElementById('transTitle').textContent = '城际交通详情';
+  const icon = mode.includes('高铁') ? '🚄' : mode.includes('飞') ? '✈️' : '🚗';
+  document.getElementById('transRouteViz').innerHTML = `
+    <div class="route-viz__cities">
+      <div class="route-viz__city"><div class="route-viz__city-name">${from}</div><div class="route-viz__city-time">出发 08:00</div></div>
+      <div class="route-viz__city"><div class="route-viz__city-name">${to}</div><div class="route-viz__city-time">到达 09:${duration.replace(/[^0-9]/g,'').padStart(2,'0') || '00'}</div></div>
+    </div>
+    <div class="route-viz__mid"><span class="route-viz__mid-icon">${icon}</span>${mode} · ${duration}</div>
+    <div class="route-viz__line"></div>`;
+  document.getElementById('transCostList').innerHTML = `
+    <div class="service-item"><span class="service-item__name">${mode}票价</span><span class="service-item__meta">¥${cost}/人</span></div>
+    <div class="service-item"><span class="service-item__name">${trip.people}人合计</span><span class="service-item__meta" style="font-weight:700;">¥${cost * trip.people}</span></div>
+    <div class="service-item"><span class="service-item__name">预订状态</span><span class="service-item__meta" style="color:var(--secondary);">可预订</span></div>`;
+  document.getElementById('transSources').innerHTML = '<span class="badge badge--fresh">高德地图 · 12306 · 更新于 10:29</span>';
+  document.getElementById('transAltList').innerHTML = `
+    <div class="alt-route-card alt-route-card--best"><div class="alt-route-card__icon">🚄</div><div class="alt-route-card__info"><div class="alt-route-card__mode">高铁</div><div class="alt-route-card__meta">约${duration} · 车次充足</div><div class="alt-route-card__best-tag">推荐</div></div><div class="alt-route-card__price">¥${cost}</div></div>
+    <div class="alt-route-card"><div class="alt-route-card__icon">✈️</div><div class="alt-route-card__info"><div class="alt-route-card__mode">飞机</div><div class="alt-route-card__meta">约1h20min · 含机场交通</div></div><div class="alt-route-card__price">¥${Math.round(cost*1.5)}</div></div>
+    <div class="alt-route-card"><div class="alt-route-card__icon">🚗</div><div class="alt-route-card__info"><div class="alt-route-card__mode">自驾</div><div class="alt-route-card__meta">约${Math.ceil(parseInt(duration)*2)}h · 高速费另计</div></div><div class="alt-route-card__price">¥${Math.round(cost*0.6)}</div></div>`;
+  document.getElementById('transServices').style.display = 'none';
+  document.getElementById('transParking').style.display = 'none';
+  document.getElementById('transCostDetail').style.display = 'block';
+  document.getElementById('transAltSection').style.display = 'block';
+  showScreen('transport');
+}
+
+// ==================== EDIT SCREEN ====================
+function openEditDay() {
+  const day = trip.days[currentDay - 1];
+  if (!day) return;
+  editDayData = JSON.parse(JSON.stringify(day));
+  document.getElementById('editDayTitle').value = 'Day ' + currentDay + ' · ' + (day.city || '');
+  document.getElementById('editDayCity').value = day.city || '';
+  document.getElementById('editDayWeather').value = day.weather || '';
+  renderEditNodeList();
+  showScreen('edit');
+}
+
+function renderEditNodeList() {
+  if (!editDayData) return;
+  const nodes = editDayData.nodes || [];
+  const typeIcons = { attraction: '🏔️', hotel: '🏨', restaurant: '🍽️' };
+  const typeNames = { attraction: '景点', hotel: '酒店', restaurant: '餐厅', transport: '交通' };
+  let html = '';
+
+  nodes.forEach((node, idx) => {
+    if (node.kind === 'transport') {
+      html += '<div class="edit-node-item">';
+      html += '<div class="edit-node-item__drag">';
+      if (idx > 0) html += '<button class="edit-node-item__drag-btn" onclick="moveEditNode(' + idx + ',-1)">▲</button>';
+      if (idx < nodes.length - 1) html += '<button class="edit-node-item__drag-btn" onclick="moveEditNode(' + idx + ',1)">▼</button>';
+      html += '</div>';
+      html += '<div class="edit-node-item__icon">🚗</div>';
+      html += '<div class="edit-node-item__info">';
+      html += '<div class="edit-node-item__name">' + node.mode + '</div>';
+      html += '<div class="edit-node-item__type">交通 · ' + node.duration + ' · ¥' + node.cost + '</div>';
+      html += '</div>';
+      html += '<button class="edit-node-item__delete" onclick="deleteEditNode(' + idx + ')">✕</button>';
+      html += '</div>';
+    } else {
+      const icon = typeIcons[node.type] || '📍';
+      const typeName = typeNames[node.type] || '节点';
+      html += '<div class="edit-node-item">';
+      html += '<div class="edit-node-item__drag">';
+      if (idx > 0) html += '<button class="edit-node-item__drag-btn" onclick="moveEditNode(' + idx + ',-1)">▲</button>';
+      if (idx < nodes.length - 1) html += '<button class="edit-node-item__drag-btn" onclick="moveEditNode(' + idx + ',1)">▼</button>';
+      html += '</div>';
+      html += '<div class="edit-node-item__icon">' + icon + '</div>';
+      html += '<div class="edit-node-item__info">';
+      html += '<div class="edit-node-item__name">' + node.name + '</div>';
+      html += '<div class="edit-node-item__type">' + typeName + (node.subtitle ? ' · ' + node.subtitle : '') + (node.cost > 0 ? ' · ¥' + node.cost : '') + '</div>';
+      html += '</div>';
+      html += '<button class="edit-node-item__delete" onclick="deleteEditNode(' + idx + ')">✕</button>';
+      html += '</div>';
+    }
+  });
+
+  if (nodes.length === 0) {
+    html = '<div class="empty-state" style="padding:32px;"><div class="empty-state__icon">📋</div><div class="empty-state__text">暂无节点，点击下方添加</div></div>';
+  }
+
+  document.getElementById('editNodeList').innerHTML = html;
+}
+
+function moveEditNode(idx, direction) {
+  if (!editDayData) return;
+  const nodes = editDayData.nodes;
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= nodes.length) return;
+  [nodes[idx], nodes[newIdx]] = [nodes[newIdx], nodes[idx]];
+  renderEditNodeList();
+}
+
+function deleteEditNode(idx) {
+  if (!editDayData) return;
+  editDayData.nodes.splice(idx, 1);
+  renderEditNodeList();
+}
+
+function openAddNodeModal() {
+  const html = `
+    <div class="modal__title">添加节点</div>
+    <div class="add-node-type-item" onclick="showAddNodeForm('attraction')">
+      <div class="add-node-type-item__icon">🏔️</div>
+      <div><div class="add-node-type-item__label">景点</div><div class="add-node-type-item__desc">添加一个景点或游览目的地</div></div>
+    </div>
+    <div class="add-node-type-item" onclick="showAddNodeForm('restaurant')">
+      <div class="add-node-type-item__icon">🍽️</div>
+      <div><div class="add-node-type-item__label">餐厅</div><div class="add-node-type-item__desc">添加一个餐厅或美食地点</div></div>
+    </div>
+    <div class="add-node-type-item" onclick="showAddNodeForm('hotel')">
+      <div class="add-node-type-item__icon">🏨</div>
+      <div><div class="add-node-type-item__label">酒店</div><div class="add-node-type-item__desc">添加住宿地点</div></div>
+    </div>
+    <div class="add-node-type-item" onclick="showAddNodeForm('transport')">
+      <div class="add-node-type-item__icon">🚗</div>
+      <div><div class="add-node-type-item__label">交通</div><div class="add-node-type-item__desc">添加交通方式（步行/公交/打车等）</div></div>
+    </div>
+    <div style="text-align:center;margin-top:16px;">
+      <button class="btn btn--secondary btn--full" onclick="closeModal()">取消</button>
+    </div>`;
+  openModal(html);
+}
+
+function showAddNodeForm(type) {
+  const typeNames = { attraction: '景点', restaurant: '餐厅', hotel: '酒店', transport: '交通' };
+  const typeName = typeNames[type] || '节点';
+  let formHtml = '<div class="modal__title">添加' + typeName + '</div><div class="edit-form">';
+
+  if (type === 'transport') {
+    formHtml += '<div class="edit-form__field"><div class="edit-form__label">交通方式</div><select class="edit-form__input" id="addNodeMode"><option>步行</option><option>公交</option><option>地铁</option><option>打车</option><option>自驾</option></select></div>';
+    formHtml += '<div class="edit-form__field"><div class="edit-form__label">预计时长</div><input class="edit-form__input" id="addNodeDuration" placeholder="例如：15分钟"></div>';
+    formHtml += '<div class="edit-form__field"><div class="edit-form__label">费用</div><input class="edit-form__input" id="addNodeCost" placeholder="例如：0" type="number"></div>';
+  } else {
+    formHtml += '<div class="edit-form__field"><div class="edit-form__label">名称</div><input class="edit-form__input" id="addNodeName" placeholder="例如：西湖"></div>';
+    formHtml += '<div class="edit-form__field"><div class="edit-form__label">备注</div><textarea class="edit-form__textarea" id="addNodeNote" placeholder="备注信息..."></textarea></div>';
+    if (type !== 'hotel') {
+      formHtml += '<div class="edit-form__field"><div class="edit-form__label">费用（¥）</div><input class="edit-form__input" id="addNodeCost" placeholder="0" type="number"></div>';
+    }
+  }
+  formHtml += '</div>';
+  formHtml += '<div style="display:flex;gap:12px;margin-top:16px;">';
+  formHtml += '<button class="btn btn--secondary" onclick="openAddNodeModal()" style="flex:1;">返回</button>';
+  formHtml += '<button class="btn btn--primary" onclick="confirmAddNode(\'' + type + '\')" style="flex:1;">确认添加</button>';
+  formHtml += '</div>';
+
+  openModal(formHtml);
+}
+
+function confirmAddNode(type) {
+  if (!editDayData) { closeModal(); return; }
+
+  if (type === 'transport') {
+    const mode = document.getElementById('addNodeMode')?.value || '步行';
+    const duration = document.getElementById('addNodeDuration')?.value || '15分钟';
+    const cost = parseInt(document.getElementById('addNodeCost')?.value || '0');
+    const newNode = transport('edit-transport-' + Date.now(), mode, duration, cost);
+    editDayData.nodes.push(newNode);
+  } else {
+    const name = document.getElementById('addNodeName')?.value || '未命名';
+    const note = document.getElementById('addNodeNote')?.value || '';
+    const cost = parseInt(document.getElementById('addNodeCost')?.value || '0');
+    const newNode = place('edit-place-' + Date.now(), type, name, { subtitle: note, cost: cost });
+    editDayData.nodes.push(newNode);
+  }
+
+  closeModal();
+  renderEditNodeList();
+  showToast('节点已添加', 'success');
+}
+
+function saveEditDay() {
+  if (!editDayData) return;
+
+  const title = document.getElementById('editDayTitle').value.trim();
+  const city = document.getElementById('editDayCity').value.trim();
+  const weather = document.getElementById('editDayWeather').value.trim();
+
+  if (title) {
+    editDayData.city = city || editDayData.city;
+    editDayData.weather = weather || editDayData.weather;
+  }
+
+  // Sync back to trip
+  const dayIdx = currentDay - 1;
+  if (trip.days[dayIdx]) {
+    trip.days[dayIdx] = JSON.parse(JSON.stringify(editDayData));
+  }
+
+  // Recalculate estimate
+  let totalEstimate = 0;
+  (editDayData.nodes || []).forEach(n => {
+    if (n.cost) totalEstimate += n.cost;
+  });
+  trip.days[dayIdx].estimate = totalEstimate || trip.days[dayIdx].estimate;
+
+  showToast('行程已保存', 'success');
+  showScreen('detail');
+}
+
+// ==================== SHARE SCREEN ====================
+function renderShare() {
+  document.getElementById('shareTitle').textContent = trip.title;
+  const routeCities = trip.routeText.split(/→/).map(s => s.trim()).filter(s => s);
+  const intermediateCities = [...new Set(routeCities)].filter(c => c !== routeCities[0] && c !== routeCities[routeCities.length - 1]);
+  const routeHtml = routeCities.map((c, i) => {
+    if (i === 0) return '<span style="font-weight:600;">' + c + '</span>';
+    return '<span class="share-card__route-arrow">→</span><span>' + c + '</span>';
+  }).join('');
+  document.getElementById('shareRoute').innerHTML = routeHtml;
+  document.getElementById('shareDays').textContent = trip.daysCount + '天';
+  document.getElementById('shareCities').textContent = [...new Set(routeCities)].length + '城';
+  document.getElementById('shareBudget').textContent = '¥' + trip.budget.total.toLocaleString();
+}
+
+// ==================== COLLAPSIBLE ====================
+function toggleCollapsible(id) {
+  const body = document.getElementById(id + 'Body');
+  const arrow = document.getElementById(id + 'Arrow');
+  if (body && arrow) {
+    body.classList.toggle('open');
+    arrow.classList.toggle('open');
+  }
+}
+
+// ==================== TRIPS SCREEN ====================
+function renderTrips() {
+  document.getElementById('tripsList').innerHTML = renderTripCards();
+}
+
+function renderTripCards(filteredTrips) {
+  const data = filteredTrips || trips;
+  if (data.length === 0) {
+    return '<div class="empty-state"><div class="empty-state__icon">🗺️</div><div class="empty-state__text">还没有行程，开始规划吧</div><button class="btn btn--primary" onclick="switchTab(\'home\')">新建行程</button></div>';
+  }
+  let html = '';
+  data.forEach(t => {
+    html += '<div class="trip-card fade-in" onclick="loadTrip(\'' + t.id + '\')">';
+    html += '<div class="trip-card__header">';
+    html += '<div style="flex:1;">';
+    html += '<div class="trip-card__title">' + t.title + '</div>';
+    html += '<div class="trip-card__route">' + t.route + '</div>';
+    html += '<div class="trip-card__meta">' + t.summary + '</div>';
+    html += '</div>';
+    html += '<div class="trip-card__theme trip-card__theme--' + t.theme + '"></div>';
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">';
+    html += '<span style="font-size:var(--font-xs);color:var(--text-secondary);">更新于 ' + t.updatedAt + '</span>';
+    html += '<div style="display:flex;gap:8px;">';
+    html += '<button class="btn btn--text btn--sm" onclick="event.stopPropagation();duplicateTrip(\'' + t.id + '\')">复制</button>';
+    html += '<button class="btn btn--text btn--sm" style="color:var(--error);" onclick="event.stopPropagation();deleteTrip(\'' + t.id + '\')">删除</button>';
+    html += '</div></div></div>';
+  });
+  return html;
+}
+
+function filterTrips(filter, btn) {
+  tripFilter = filter;
+  document.querySelectorAll('#tripFilters .chip').forEach(c => c.classList.remove('selected'));
+  btn.classList.add('selected');
+  let filtered = trips;
+  if (filter === 'mine') filtered = trips.filter(t => t.status !== 'collaborating');
+  else if (filter === 'collab') filtered = trips.filter(t => t.status === 'collaborating');
+  document.getElementById('tripsList').innerHTML = renderTripCards(filtered);
+}
+
+function loadTrip(id) {
+  showScreen('overview');
+}
+
+function duplicateTrip(id) {
+  showToast('已复制为新行程', 'success');
+}
+
+function deleteTrip(id) {
+  if (confirm('确定要删除这个行程吗？删除后协作者也将无法访问。')) {
+    showToast('行程已删除', 'success');
+    const idx = trips.findIndex(t => t.id === id);
+    if (idx >= 0) trips.splice(idx, 1);
+    renderTrips();
+  }
+}
+
+// ==================== MINE SCREEN ====================
+function renderMine() {
+  document.getElementById('minePhone').textContent = authState ? '138****1234' : '未授权';
+  document.getElementById('btnLogout').textContent = authState ? '退出登录' : '授权登录';
+}
+
+function toggleAuth() {
+  authState = !authState;
+  renderMine();
+  showToast(authState ? '已登录' : '已退出登录', authState ? 'success' : 'warning');
+}
+
+function setAppearance(value, btn) {
+  document.querySelectorAll('#appearanceSegment .segment__item').forEach(s => s.classList.remove('active'));
+  btn.classList.add('active');
+  if (value === 'blue') {
+    document.body.style.background = '#F5F9FC';
+  } else {
+    document.body.style.background = '#FFFFFF';
+  }
+  showToast('外观已切换为' + (value === 'blue' ? '微蓝底' : '纯白'), 'success');
+}
+
+// ==================== INITIALIZATION ====================
+renderHome();
+</script>
+
+</body>
+</html>

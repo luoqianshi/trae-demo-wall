@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0a0e1a" />
+<title>SkyWatch · 抬头看飞机</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css" rel="stylesheet" />
+<style>
+  :root{
+    --bg0:#070a14; --bg1:#0a0e1a; --bg2:#0f1729; --bg3:#141d33;
+    --ink:#e8ecf4; --dim:#8b95a8; --faint:#5a6378;
+    --amber:#f5b942; --soft:#ffd89b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(ellipse at 50% 0%, #0f1729 0%, #0a0e1a 55%, #070a14 100%);
+    color:var(--ink);
+    font-family:'LXGW WenKai','LXGW WenKai Screen',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overscroll-behavior:none;
+    min-height:100dvh;
+  }
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-feature-settings:'tnum' 1}
+  button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:none}
+  canvas{display:block}
+
+  /* 星空 */
+  .stars{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .stars span{position:absolute;border-radius:50%;background:#fff;animation:pulse 3s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.12}50%{opacity:.55}}
+
+  /* 页面容器 */
+  .app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100dvh}
+
+  /* ===== 状态栏 ===== */
+  .statusbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 16px;padding-top:calc(env(safe-area-inset-top) + 10px);
+  }
+  .sb-left{min-width:0;flex:1;display:flex;align-items:center;gap:8px}
+  .sb-loc{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sb-demo{flex-shrink:0;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid rgba(245,185,66,.4);background:rgba(245,185,66,.1);color:var(--amber)}
+  .sb-mid{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.05);padding:4px 12px;border-radius:999px}
+  .sb-mid svg{width:14px;height:14px;color:var(--soft)}
+  .sb-count{font-size:12px}
+  .sb-unit{font-size:10px;color:var(--dim)}
+  .sb-right{flex:1;display:flex;align-items:center;justify-content:flex-end;gap:12px}
+  .sb-fresh{font-size:10px;color:var(--faint)}
+  .sb-fresh.stale{color:var(--amber)}
+  .sb-set{width:32px;height:32px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+  .sb-set svg{width:20px;height:20px}
+
+  /* ===== 天空盘区 ===== */
+  .dome-area{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 16px 170px}
+  .dome-wrap{display:flex;align-items:center;justify-content:center;width:100%}
+  #skyDome{touch-action:manipulation;cursor:pointer}
+  .hint{position:absolute;bottom:150px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--faint);pointer-events:none;text-align:center;white-space:nowrap}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 32px;pointer-events:none;animation:fadein .4s ease-out both}
+  .overlay .big{font-size:18px}
+  .overlay .small{font-size:12px;color:var(--faint);margin-top:8px}
+  @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+  /* ===== 横幅 ===== */
+  .banner{position:fixed;inset-x:0;top:0;z-index:20;padding:0 12px;padding-top:calc(env(safe-area-inset-top) + 52px)}
+  .banner-inner{display:flex;align-items:center;gap:10px;max-width:480px;margin:0 auto;padding:9px 16px;border-radius:999px;border:1px solid rgba(245,185,66,.4);background:rgba(15,23,41,.9);backdrop-filter:blur(8px);animation:fadein .4s ease-out both}
+  .banner-inner svg{width:14px;height:14px;flex-shrink:0;color:var(--amber);transform:rotate(-45deg)}
+  .banner-txt{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .banner-txt b{color:var(--amber)}
+  .banner-x{flex-shrink:0;color:var(--faint)}
+  .banner-x svg{width:14px;height:14px;transform:none}
+
+  /* ===== 即将飞过面板 ===== */
+  .upcoming{position:fixed;inset-inline:0;bottom:0;z-index:20;transition:transform .3s cubic-bezier(.22,1,.36,1)}
+  .upcoming.closed{transform:translateY(calc(100% - 56px))}
+  .up-panel{max-width:480px;margin:0 auto;border-top:1px solid rgba(255,255,255,.1);background:rgba(10,14,26,.96);backdrop-filter:blur(10px);border-radius:24px 24px 0 0}
+  .up-head{display:flex;align-items:center;justify-content:space-between;width:100%;padding:14px 20px;padding-bottom:calc(env(safe-area-inset-bottom) + 12px)}
+  .up-hl{display:flex;align-items:center;gap:8px}
+  .up-dot{width:6px;height:6px;border-radius:50%;background:var(--amber);animation:pulseSoft 2.4s ease-in-out infinite}
+  @keyframes pulseSoft{0%,100%{opacity:.6}50%{opacity:1}}
+  .up-title{font-size:14px}
+  .up-badge{font-size:10px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--dim)}
+  .up-chev{transition:transform .3s}
+  .up-chev svg{width:20px;height:20px;color:var(--dim)}
+  .upcoming.closed .up-chev{transform:rotate(180deg)}
+  .up-list{overflow-y:auto;max-height:55vh;padding:0 16px 16px}
+  .upcoming.closed .up-list{max-height:0;padding:0 16px}
+  .up-empty{padding:48px 0;text-align:center}
+  .up-empty .big{font-size:14px;color:var(--faint)}
+  .up-empty .small{font-size:11px;color:var(--faint);margin-top:6px;opacity:.7}
+  .up-item{display:flex;align-items:center;justify-content:space-between;width:100%;padding:12px 16px;border:1px solid rgba(255,255,255,.06);border-radius:16px;background:rgba(255,255,255,.03);margin-bottom:8px;transition:.2s}
+  .up-item:active{transform:scale(.98);background:rgba(255,255,255,.07)}
+  .up-cs{font-size:14px;font-weight:500}
+  .up-from{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);margin-top:2px}
+  .up-from svg{width:12px;height:12px;color:rgba(245,185,66,.7)}
+  .up-meta{font-size:10px;color:var(--faint);margin-top:2px}
+  .up-cd{display:flex;align-items:center;gap:6px;flex-shrink:0;padding:6px 12px;border-radius:999px;background:rgba(245,185,66,.12)}
+  .up-cd svg{width:12px;height:12px;color:var(--amber)}
+  .up-cd span{font-size:11px;color:var(--amber)}
+
+  /* ===== 详情卡 ===== */
+  .detail-mask{position:fixed;inset:0;z-index:30;display:flex;align-items:flex-end;justify-content:center}
+  .detail-bg{position:absolute;inset:0;background:rgba(0,0,0,.3);backdrop-filter:blur(2px)}
+  .detail-card{position:relative;width:100%;max-width:480px;border-top:1px solid rgba(255,255,255,.1);background:rgba(10,14,26,.97);border-radius:28px 28px 0 0;padding:12px 20px calc(env(safe-area-inset-bottom) + 20px);box-shadow:0 -10px 40px rgba(0,0,0,.4);animation:slideup .3s cubic-bezier(.22,1,.36,1) both}
+  @keyframes slideup{from{transform:translateY(100%)}to{transform:translateY(0)}}
+  .detail-grab{width:40px;height:4px;border-radius:999px;background:rgba(255,255,255,.15);margin:0 auto 16px}
+  .detail-x{position:absolute;right:16px;top:16px;color:var(--dim)}
+  .detail-x svg{width:20px;height:20px}
+  .detail-cs{font-size:24px;font-weight:600;letter-spacing:1px;margin-bottom:4px}
+  .detail-loc{font-size:13px;color:var(--dim);margin-bottom:20px}
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+  .dc{border:1px solid rgba(255,255,255,.06);border-radius:12px;background:rgba(255,255,255,.04);padding:10px 12px}
+  .dc-l{display:flex;align-items:center;gap:6px;color:var(--faint)}
+  .dc-l svg{width:14px;height:14px}
+  .dc-l span{font-size:10px}
+  .dc-v{font-size:14px;margin-top:4px}
+  .metaphor{border:1px solid rgba(245,185,66,.3);background:rgba(245,185,66,.1);border-radius:16px;padding:14px 16px}
+  .met-l{font-size:10px;letter-spacing:1.5px;color:rgba(245,185,66,.7);text-transform:uppercase;margin-bottom:6px}
+  .met-big{display:flex;align-items:center;gap:8px;font-size:15px}
+  .met-big span.emoji{font-size:18px}
+  .met-tech{font-size:10px;color:var(--faint);margin-top:8px}
+
+  /* ===== 设置抽屉 ===== */
+  .set-mask{position:fixed;inset:0;z-index:40;display:flex;justify-content:flex-end}
+  .set-bg{position:absolute;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(2px)}
+  .set-panel{position:relative;height:100%;width:100%;max-width:380px;overflow-y:auto;border-left:1px solid rgba(255,255,255,.1);background:rgba(10,14,26,.98);padding:0 20px 40px;padding-top:calc(env(safe-area-inset-top) + 16px);animation:fadein .3s both}
+  .set-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+  .set-title{font-size:18px}
+  .set-x{color:var(--dim)}
+  .set-x svg{width:20px;height:20px}
+  .set-sec{margin-bottom:20px}
+  .set-sec-h{display:flex;align-items:center;gap:8px;color:var(--dim);margin-bottom:10px}
+  .set-sec-h svg{width:16px;height:16px}
+  .set-sec-h span{font-size:14px}
+  .seg{display:flex;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:3px}
+  .seg button{flex:1;padding:8px 0;border-radius:9px;font-size:12px;color:var(--dim);transition:.2s}
+  .seg button.on{background:var(--amber);color:#070a14;font-weight:500}
+  .set-note{font-size:11px;color:var(--faint);margin-top:8px;line-height:1.6}
+  .set-row{display:flex;align-items:center;justify-content:space-between}
+  .toggle{position:relative;width:48px;height:28px;border-radius:999px;background:rgba(255,255,255,.12);transition:.2s}
+  .toggle.on{background:var(--amber)}
+  .toggle i{position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s}
+  .toggle.on i{left:24px}
+  .set-reset{display:flex;align-items:center;gap:8px;width:100%;padding:12px 16px;border:1px solid rgba(255,255,255,.08);border-radius:12px;margin-top:8px;font-size:14px}
+  .set-reset svg{width:16px;height:16px;color:var(--dim)}
+  .set-about{margin-top:24px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);border-radius:12px;padding:12px 16px}
+  .set-about h4{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;margin-bottom:6px}
+  .set-about h4 svg{width:14px;height:14px}
+  .set-about p{font-size:11px;color:var(--faint);line-height:1.7}
+  .set-about .ver{font-size:10px;color:var(--faint);margin-top:8px}
+  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+  .preset-grid button{text-align:left;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.04);border-radius:12px;padding:8px 12px;transition:.2s}
+  .preset-grid button:active{border-color:rgba(245,185,66,.3)}
+  .preset-grid .pc{font-size:12px}
+  .preset-grid .pl{font-size:9px;color:var(--faint);margin-top:2px}
+
+  /* ===== 欢迎页 ===== */
+  .welcome{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;min-height:100dvh;padding:0 24px 40px;padding-top:calc(env(safe-area-inset-top) + 64px)}
+  .radar{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  .radar-scan{position:absolute;left:50%;top:96px;width:520px;height:520px;transform:translateX(-50%);border-radius:50%;background:conic-gradient(from 0deg,rgba(245,185,66,0) 0deg,rgba(245,185,66,.12) 40deg,rgba(245,185,66,0) 60deg);opacity:.4}
+  .radar-scan.on{animation:scan 3s linear infinite}
+  @keyframes scan{to{transform:translateX(-50%) rotate(360deg)}}
+  .w-logo{position:relative;width:96px;height:96px;margin:0 auto 28px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(15,23,41,.6);box-shadow:0 0 28px 4px rgba(245,185,66,.18);display:flex;align-items:center;justify-content:center}
+  .w-logo::before{content:"";position:absolute;inset:10px;border-radius:50%;border:1px solid rgba(255,255,255,.06)}
+  .w-logo svg{width:42px;height:42px;transform:rotate(-45deg);color:var(--amber)}
+  .w-h1{font-size:24px;text-align:center;line-height:1.5}
+  .w-h1 b{color:var(--amber)}
+  .w-sub{margin-top:12px;max-width:320px;font-size:14px;color:var(--dim);text-align:center;line-height:1.7}
+  .w-btn{margin-top:32px;height:48px;width:100%;max-width:320px;border-radius:999px;background:var(--amber);color:#070a14;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s}
+  .w-btn:active{transform:scale(.95)}
+  .w-btn:disabled{opacity:.7}
+  .w-btn svg{width:16px;height:16px}
+  .w-denied{margin-top:12px;max-width:320px;font-size:12px;color:rgba(245,185,66,.8);text-align:center;animation:fadein .4s both}
+  .w-presets{margin-top:40px;width:100%;max-width:320px}
+  .w-pl{display:flex;align-items:center;gap:8px;padding:0 4px;font-size:11px;color:var(--faint);margin-bottom:12px}
+  .w-pl svg{width:14px;height:14px}
+  .w-pc{display:block;width:100%;text-align:left;border:1px solid rgba(255,255,255,.08);background:rgba(15,23,41,.4);border-radius:16px;padding:14px 16px;margin-bottom:10px;transition:.2s}
+  .w-pc:active{transform:scale(.98);border-color:rgba(245,185,66,.4)}
+  .w-pc .pn{font-size:14px}
+  .w-pc .pg{font-size:10px;color:var(--faint);margin-top:2px}
+  .w-pc .ph{float:right;font-size:10px;color:var(--amber);background:rgba(245,185,66,.1);padding:2px 8px;border-radius:999px;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="stars" id="stars"></div>
+<div id="root"></div>
+
+<script>
+// ===================== 计算模块 =====================
+const EARTH_R=6371000, AIRCRAFT_LEN=38, DEG=Math.PI/180;
+const DIRS=['北','东北','东','东南','南','西南','西','西北'];
+
+function haversine(la1,lo1,la2,lo2){
+  const dLa=(la2-la1)*DEG,dLo=(lo2-lo1)*DEG;
+  const a=Math.sin(dLa/2)**2+Math.cos(la1*DEG)*Math.cos(la2*DEG)*Math.sin(dLo/2)**2;
+  return EARTH_R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function azimuth(oLa,oLo,aLa,aLo){
+  const dLo=(aLo-oLo)*DEG;
+  const x=Math.sin(dLo)*Math.cos(aLa*DEG);
+  const y=Math.cos(oLa*DEG)*Math.sin(aLa*DEG)-Math.sin(oLa*DEG)*Math.cos(aLa*DEG)*Math.cos(dLo);
+  return (Math.atan2(x,y)*(180/Math.PI)+360)%360;
+}
+function elevSlant(ground,alt){
+  const el=ground===0?90:Math.atan2(alt,ground)*(180/Math.PI);
+  return {elevation:el,slant:Math.sqrt(ground**2+alt**2)};
+}
+function deadReckon(la,lo,v,hd,dt){
+  if(dt<=0)return{lat:la,lon:lo};
+  const d=v*dt;
+  return{
+    lat:la+((d*Math.cos(hd*DEG))/EARTH_R)*(180/Math.PI),
+    lon:lo+((d*Math.sin(hd*DEG))/(EARTH_R*Math.cos(la*DEG)))*(180/Math.PI)
+  };
+}
+function predictClosest(obs,ac){
+  if(ac.velocity<10)return null;
+  const cur=haversine(obs.lat,obs.lon,ac.latitude,ac.longitude);
+  let min=cur,mt=0;
+  for(let t=0;t<=1500;t+=10){
+    const p=deadReckon(ac.latitude,ac.longitude,ac.velocity,ac.heading,t);
+    const d=haversine(obs.lat,obs.lon,p.lat,p.lon);
+    if(d<min){min=d;mt=t;}
+    if(d>min*1.5&&t>mt+60)break;
+  }
+  return{secondsToClosest:mt,closestGroundDistance:min,closestSlantDistance:Math.sqrt(min**2+ac.altitude**2),isApproaching:min<cur*0.95,willPassOverhead:min<5000};
+}
+function angSize(slant){return slant<=0?0:(AIRCRAFT_LEN/slant)*(180/Math.PI);}
+function sizeMeta(ang){
+  if(ang>0.5)return{level:'huge',text:'比满月还大，非常醒目',emoji:'🌕'};
+  if(ang>0.2)return{level:'moon',text:'约满月大小，很容易找到',emoji:'🌕'};
+  if(ang>0.1)return{level:'rice',text:'像伸直手臂时的一粒米',emoji:'🔍'};
+  if(ang>0.05)return{level:'sesame',text:'像伸直手臂时的一粒芝麻',emoji:'🔍'};
+  return{level:'speck',text:'一个移动的小亮点，需仔细看',emoji:'✨'};
+}
+function dirName(az){return DIRS[Math.round(az/45)%8];}
+function elevHuman(el){
+  if(el>=75)return'几乎在头顶';
+  if(el>=50)return'高高在上';
+  if(el>=30)return'半空中';
+  if(el>=15)return'半空中偏下';
+  if(el>5)return'接近地平线';
+  return'地平线附近';
+}
+function enhance(obs,raw,now){
+  const dt=now-raw.time_position;
+  const{lat,lon}=deadReckon(raw.latitude,raw.longitude,raw.velocity,raw.heading,dt>0?dt:0);
+  const az=azimuth(obs.lat,obs.lon,lat,lon);
+  const ground=haversine(obs.lat,obs.lon,lat,lon);
+  const{elevation,slant}=elevSlant(ground,raw.altitude);
+  const ang=angSize(slant);
+  const meta=sizeMeta(ang);
+  const pred=predictClosest(obs,{latitude:lat,longitude:lon,altitude:raw.altitude,velocity:raw.velocity,heading:raw.heading})||{secondsToClosest:0,closestGroundDistance:ground,closestSlantDistance:slant,isApproaching:false,willPassOverhead:false};
+  return{icao24:raw.icao24,callsign:raw.callsign,latitude:lat,longitude:lon,altitude:raw.altitude,velocity:raw.velocity,heading:raw.heading,azimuth:az,elevation,elevation,distance:slant,direction:dirName(az),visible:elevation>5,angular_size:ang,size_metaphor:meta,prediction:pred};
+}
+
+// ===================== Mock 数据源 =====================
+const PREFIXES=['CCA','CES','CSN','CPA','CKK'];
+const RADIUS_KM=300;
+const fleets=new Map();
+function rand(a,b){return a+Math.random()*(b-a);}
+function genCallsign(){return PREFIXES[Math.floor(Math.random()*PREFIXES.length)]+(100+Math.floor(Math.random()*900));}
+function genIcao(){return Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');}
+function bearingFromObs(obs,km,br){
+  const R=6371,b=br*DEG,l1=obs.lat*DEG,lo1=obs.lon*DEG;
+  const l2=Math.asin(Math.sin(l1)*Math.cos(km/R)+Math.cos(l1)*Math.sin(km/R)*Math.cos(b));
+  const lo2=lo1+Math.atan2(Math.sin(b)*Math.sin(km/R)*Math.cos(l1),Math.cos(km/R)-Math.sin(l1)*Math.sin(l2));
+  return{lat:l2*180/Math.PI,lon:lo2*180/Math.PI};
+}
+function spawn(obs){
+  const km=rand(30,150),br=rand(0,360);
+  const pos=bearingFromObs(obs,km,br);
+  const toObs=(br+180)%360;
+  return{icao24:genIcao(),callsign:genCallsign(),latitude:pos.lat,longitude:pos.lon,altitude:rand(3000,11000),velocity:rand(180,260),heading:(toObs+rand(-40,40)+360)%360,vertical_rate:rand(-5,5),time_position:Math.floor(Date.now()/1000)};
+}
+function getMock(obs){
+  const key=obs.lat.toFixed(1)+','+obs.lon.toFixed(1);
+  let f=fleets.get(key);
+  if(!f){f=Array.from({length:Math.floor(rand(10,16))},()=>spawn(obs));fleets.set(key,f);}
+  const now=Math.floor(Date.now()/1000);
+  const out=[];
+  for(const p of f){
+    const dt=now-p.time_position;
+    if(dt>0){const np=deadReckon(p.latitude,p.longitude,p.velocity,p.heading,dt);p.latitude=np.lat;p.longitude=np.lon;p.time_position=now;}
+    const d=haversine(obs.lat,obs.lon,p.latitude,p.longitude);
+    if(d>RADIUS_KM*1000){Object.assign(p,spawn(obs));p.time_position=now;}
+    out.push({...p});
+  }
+  return{time:now,aircraft:out};
+}
+
+// ===================== 天空盘绘制 =====================
+function domeProject(az,el,cx,cy,R){
+  const r=(90-el)/90;
+  return{x:cx+r*Math.sin(az*DEG)*R,y:cy-r*Math.cos(az*DEG)*R};
+}
+function lerpAz(from,to){
+  let d=to-from;
+  if(d>180)to-=360;else if(d<-180)to+=360;
+  return to;
+}
+const INTERP_WIN=9000;
+function updInterp(prev,acs,now){
+  const next=new Map();
+  for(const ac of acs){
+    const old=prev.get(ac.icao24);
+    if(old){
+      const fAz=old.curAz,tAz=lerpAz(fAz,ac.azimuth);
+      next.set(ac.icao24,{icao:ac.icao24,fromAz:fAz,fromElev:old.curElev,toAz:tAz,toElev:ac.elevation,startTs:now,duration:INTERP_WIN,curAz:fAz,curElev:old.curElev,callsign:ac.callsign,heading:ac.heading});
+    }else{
+      next.set(ac.icao24,{icao:ac.icao24,fromAz:ac.azimuth,fromElev:ac.elevation,toAz:ac.azimuth,toElev:ac.elevation,startTs:now,duration:INTERP_WIN,curAz:ac.azimuth,curElev:ac.elevation,callsign:ac.callsign,heading:ac.heading});
+    }
+  }
+  return next;
+}
+function stepInterp(st,now){
+  for(const s of st.values()){
+    const t=Math.min(1,Math.max(0,(now-s.startTs)/s.duration));
+    s.curAz=(s.fromAz+(s.toAz-s.fromAz)*t+360)%360;
+    s.curElev=s.fromElev+(s.toElev-s.fromElev)*t;
+  }
+}
+function drawStatic(ctx,cx,cy,R){
+  const g=ctx.createRadialGradient(cx,cy,R*0.1,cx,cy,R);
+  g.addColorStop(0,'rgba(31,45,74,.55)');g.addColorStop(0.6,'rgba(15,23,41,.35)');g.addColorStop(1,'rgba(7,10,20,.2)');
+  ctx.beginPath();ctx.arc(cx,cy,R,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,R,0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.stroke();
+  for(const e of[60,30]){const rr=((90-e)/90)*R;ctx.beginPath();ctx.arc(cx,cy,rr,0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,.06)';ctx.stroke();}
+  ctx.strokeStyle='rgba(255,255,255,.04)';ctx.beginPath();ctx.moveTo(cx-R,cy);ctx.lineTo(cx+R,cy);ctx.moveTo(cx,cy-R);ctx.lineTo(cx,cy+R);ctx.stroke();
+  const lbs=[['N',0],['E',90],['S',180],['W',270]];
+  ctx.font='600 13px "JetBrains Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+  for(const[l,a]of lbs){const ag=a*DEG;const lx=cx+Math.sin(ag)*(R+18),ly=cy-Math.cos(ag)*(R+18);ctx.fillStyle=l==='N'?'rgba(245,185,66,.85)':'rgba(255,255,255,.4)';ctx.fillText(l,lx,ly);}
+  ctx.beginPath();ctx.arc(cx,cy,2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.25)';ctx.fill();
+}
+function drawAc(ctx,s,cx,cy,R,sel){
+  if(s.curElev<0)return;
+  const{x,y}=domeProject(s.curAz,s.curElev,cx,cy,R);
+  ctx.save();ctx.translate(x,y);ctx.rotate((s.heading)*DEG);
+  if(sel){ctx.beginPath();ctx.arc(0,0,11,0,Math.PI*2);ctx.fillStyle='rgba(245,185,66,.18)';ctx.fill();ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.strokeStyle='rgba(245,185,66,.95)';ctx.lineWidth=1.5;ctx.stroke();}
+  const gl=ctx.createRadialGradient(0,0,0,0,0,9);
+  gl.addColorStop(0,'rgba(255,216,155,.9)');gl.addColorStop(0.4,'rgba(255,216,155,.35)');gl.addColorStop(1,'rgba(255,216,155,0)');
+  ctx.fillStyle=gl;ctx.beginPath();ctx.arc(0,0,9,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.moveTo(0,-5.5);ctx.lineTo(3.2,4);ctx.lineTo(0,2.4);ctx.lineTo(-3.2,4);ctx.closePath();
+  ctx.fillStyle=sel?'#fff4dc':'#ffd89b';ctx.fill();
+  ctx.restore();
+  if(sel){
+    ctx.save();ctx.font='600 12px "JetBrains Mono",monospace';ctx.textAlign='center';ctx.textBaseline='bottom';
+    const t=s.callsign||'----';const tw=ctx.measureText(t).width;
+    ctx.fillStyle='rgba(10,14,26,.85)';ctx.beginPath();ctx.roundRect(x-tw/2-7,y-30,tw+14,18,9);ctx.fill();
+    ctx.fillStyle='#ffd89b';ctx.fillText(t,x,y-16);ctx.restore();
+  }
+}
+function hitTest(st,px,py,cx,cy,R){
+  let best=null,bd=44;
+  for(const s of st.values()){
+    if(s.curElev<0)continue;
+    const{x,y}=domeProject(s.curAz,s.curElev,cx,cy,R);
+    const d=Math.hypot(x-px,y-py);
+    if(d<bd){bd=d;best=s.icao;}
+  }
+  return best;
+}
+
+// ===================== 应用状态 =====================
+const PRESETS=[
+  {name:'上海浦东机场',city:'上海',lat:31.15,lon:121.8},
+  {name:'上海虹桥机场',city:'上海',lat:31.2,lon:121.34},
+  {name:'北京首都机场',city:'北京',lat:40.07,lon:116.6},
+  {name:'伦敦希思罗机场',city:'伦敦',lat:51.47,lon:-0.45},
+];
+const state={
+  observer:null,locName:'',hasLoc:false,
+  mode:'demo',selected:null,upcomingOpen:false,settingsOpen:false,
+  radius:250,unit:'km',notify:true,
+  visible:[],upcoming:[],time:null,stale:false,loading:false,error:null,
+  interp:new Map(),bannerDismissed:null,
+};
+const svgPlane='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>';
+const ic={plane:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>',
+settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+arr:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>',
+ruler:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 8.7 8.7 21.3a1 1 0 0 1-1.4 0l-4.6-4.6a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/><path d="m4.5 13.5 2 2"/></svg>',
+mount:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>',
+gauge:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>',
+nav:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>',
+pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+compass:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
+bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+reset:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
+spark:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M5.6 18.4l12.8-12.8"/></svg>',
+load:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>',
+};
+
+// ===================== 格式化 =====================
+function fDist(m,u){if(u==='mi')return(m/1609.34).toFixed(1)+' mi';return m>=1000?(m/1000).toFixed(1)+' km':Math.round(m)+' m';}
+function fAlt(m,u){return u==='mi'?Math.round(m/0.3048)+' ft':(m/1000).toFixed(1)+' km';}
+function fSpd(ms,u){return u==='mi'?(ms*2.23694).toFixed(0)+' mph':(ms*3.6).toFixed(0)+' km/h';}
+function fCountdown(s){if(s<=0)return'即将进入视野';const m=Math.round(s/60);return m<=0?`约 ${Math.round(s)} 秒后`:`约 ${m} 分钟后`;}
+function fFresh(t,now){const d=now-t;if(d<10)return'刚刚更新';if(d<60)return`更新于 ${d} 秒前`;return`更新于 ${Math.floor(d/60)} 分钟前`;}
+function dirSentence(ac){
+  const w=ac.elevation>=75?'几乎在头顶':ac.elevation>=30?'半空中':'接近地平线';
+  return`在你的${ac.direction}方，${w}`;
+}
+
+// ===================== 渲染 =====================
+const root=document.getElementById('root');
+let canvasCtx=null,canvasSize=0;
+
+function render(){
+  if(!state.hasLoc||!state.observer){
+    renderWelcome();return;
+  }
+  renderMain();
+}
+
+function renderWelcome(){
+  const denied=state._denied;
+  root.innerHTML=`
+    <div class="welcome">
+      <div class="radar"><div class="radar-scan ${state._locating?'on':''}"></div></div>
+      <div class="w-logo">${svgPlane}</div>
+      <h1 class="w-h1">抬头，认识头顶的<br><b>那架飞机</b></h1>
+      <p class="w-sub">圆心是你头顶，边缘是地平线。天上每架飞机都是盘上的一个点，照着盘抬头，就能认出它。</p>
+      <button class="w-btn" id="btnLoc" ${state._locating?'disabled':''}>
+        ${state._locating?`${ic.load}`:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'}
+        ${state._locating?'正在定位…':'使用我的位置'}
+      </button>
+      ${denied?'<p class="w-denied">没关系，选一个预设点也能看满盘飞机 ✈️</p>':''}
+      <div class="w-presets">
+        <div class="w-pl">${ic.spark}<span>常有飞机的预设点</span></div>
+        ${PRESETS.map((p,i)=>`
+          <button class="w-pc" data-preset="${i}">
+            <div class="pn">${p.name}</div>
+            <div class="pg mono">${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}</div>
+            <span class="ph">常有飞机</span>
+          </button>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('btnLoc').onclick=handleLocate;
+  document.querySelectorAll('[data-preset]').forEach(b=>{
+    b.onclick=()=>{const p=PRESETS[+b.dataset.preset];setObserver({lat:p.lat,lon:p.lon},p.name);};
+  });
+}
+
+function renderMain(){
+  const sel=state.selected?[...state.visible,...state.upcoming].find(a=>a.icao24===state.selected):null;
+  const target=state.notify&&state.upcoming.length>0&&!sel?(state.upcoming.find(a=>a.prediction.willPassOverhead)||state.upcoming[0]):null;
+  const showBanner=target&&state.bannerDismissed!==target.icao24;
+  const skyEmpty=state.visible.length===0&&!state.loading;
+  root.innerHTML=`
+    <div class="app">
+      <div class="statusbar">
+        <div class="sb-left">
+          <span class="sb-loc">${state.locName}上空</span>
+          ${state.mode==='demo'?'<span class="sb-demo mono">演示数据</span>':''}
+        </div>
+        <div class="sb-mid">${ic.plane}<span class="sb-count mono">${state.visible.length}</span><span class="sb-unit">架可见</span></div>
+        <div class="sb-right">
+          <span class="sb-fresh ${state.stale?'stale':''}">${state.time?fFresh(state.time,Math.floor(Date.now()/1000)):'加载中'}</span>
+          <button class="sb-set" id="btnSet">${ic.settings}</button>
+        </div>
+      </div>
+      ${showBanner?`<div class="banner"><div class="banner-inner">${ic.plane}<button class="banner-txt" data-pick="${target.icao24}">${fCountdown(target.prediction.secondsToClosest)}，${target.callsign}将从<b>${target.direction}</b>方飞过头顶</button><button class="banner-x" data-dismiss="${target.icao24}">${ic.x}</button></div></div>`:''}
+      <div class="dome-area">
+        <div class="dome-wrap"><canvas id="skyDome"></canvas></div>
+        ${state.visible.length>0&&!sel?'<div class="hint">圆心是头顶，边缘是地平线</div>':''}
+        ${state.loading&&state.visible.length===0?`<div class="overlay">${ic.plane.replace('width:','style="width:').replace(/style="width:/,'')}<p class="small">正在扫描天空…</p></div>`:''}
+        ${skyEmpty&&!state.error?`<div class="overlay"><p class="big">此刻你的天空很安静</p><p class="small">${state.upcoming.length>0?`不过有 ${state.upcoming.length} 架正在靠近`:'抬头等等，云上总有航线'}</p></div>`:''}
+        ${state.error&&state.visible.length===0&&state.upcoming.length===0?`<div class="overlay"><p class="big" style="color:rgba(245,185,66,.8)">${state.error}</p><p class="small">可在设置中切换演示数据继续体验</p></div>`:''}
+      </div>
+      ${renderUpcoming()}
+      ${sel?renderDetail(sel):''}
+      ${state.settingsOpen?renderSettings():''}
+    </div>`;
+  document.getElementById('btnSet').onclick=()=>{state.settingsOpen=true;render();};
+  if(showBanner){
+    document.querySelector('[data-pick]')?.addEventListener('click',()=>selectAircraft(target.icao24));
+    document.querySelector('[data-dismiss]')?.addEventListener('click',()=>{state.bannerDismissed=target.icao24;render();});
+  }
+  setupCanvas();
+}
+
+function renderUpcoming(){
+  return`
+    <div class="upcoming ${state.upcomingOpen?'':'closed'}">
+      <div class="up-panel">
+        <button class="up-head" id="btnUp">
+          <div class="up-hl"><span class="up-dot"></span><span class="up-title">即将飞过</span><span class="up-badge mono">${state.upcoming.length}</span></div>
+          <span class="up-chev">${ic.chev}</span>
+        </button>
+        <div class="up-list">
+          ${state.upcoming.length===0?`<div class="up-empty"><div class="big">此刻没有飞机正在靠近</div><div class="small">抬头等等，天空总会热闹起来</div></div>`:
+            state.upcoming.map(a=>`
+              <button class="up-item" data-up="${a.icao24}">
+                <div>
+                  <div class="up-cs mono">${a.callsign||'----'}</div>
+                  <div class="up-from">${ic.arr}从${a.direction}方向来</div>
+                  <div class="up-meta mono">${fAlt(a.altitude,state.unit)} · ${fDist(a.distance,state.unit)}</div>
+                </div>
+                <div class="up-cd">${ic.clock}<span>${fCountdown(a.prediction.secondsToClosest)}</span></div>
+              </button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDetail(ac){
+  const m=ac.size_metaphor;
+  return`
+    <div class="detail-mask" id="detailMask">
+      <div class="detail-bg" data-close></div>
+      <div class="detail-card">
+        <div class="detail-grab"></div>
+        <button class="detail-x" data-close>${ic.x}</button>
+        <div class="detail-cs mono">${ac.callsign||'----'}</div>
+        <div class="detail-loc">${dirSentence(ac)}</div>
+        <div class="detail-grid">
+          <div class="dc"><div class="dc-l">${ic.ruler}<span>距离</span></div><div class="dc-v mono">${fDist(ac.distance,state.unit)}</div></div>
+          <div class="dc"><div class="dc-l">${ic.mount}<span>高度</span></div><div class="dc-v mono">${fAlt(ac.altitude,state.unit)}</div></div>
+          <div class="dc"><div class="dc-l">${ic.gauge}<span>速度</span></div><div class="dc-v mono">${fSpd(ac.velocity,state.unit)}</div></div>
+          <div class="dc"><div class="dc-l">${ic.nav}<span>航向</span></div><div class="dc-v mono">${Math.round(ac.heading)}°</div></div>
+        </div>
+        <div class="metaphor">
+          <div class="met-l mono">此刻它看起来</div>
+          <div class="met-big"><span class="emoji">${m.emoji}</span><span>${m.text}</span></div>
+          <div class="met-tech mono">视角 ${ac.angular_size.toFixed(3)}° · 方位 ${Math.round(ac.azimuth)}° · 仰角 ${ac.elevation.toFixed(1)}°</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSettings(){
+  const s=state;
+  return`
+    <div class="set-mask" id="setMask">
+      <div class="set-bg" data-setclose></div>
+      <div class="set-panel">
+        <div class="set-head"><span class="set-title">设置</span><button class="set-x" data-setclose>${ic.x}</button></div>
+        <div class="set-sec">
+          <div class="set-sec-h">${ic.plane}<span>数据模式</span></div>
+          <div class="seg">
+            <button class="${s.mode==='live'?'on':''}" data-mode="live">真实数据</button>
+            <button class="${s.mode==='demo'?'on':''}" data-mode="demo">演示数据</button>
+          </div>
+          <p class="set-note">${s.mode==='demo'?'模拟飞机按真实物理规律飞行，断网也能演示':'来自 OpenSky Network 的真实航班数据（演示版 HTML 仅支持演示模式）'}</p>
+        </div>
+        <div class="set-sec">
+          <div class="set-sec-h">${ic.compass}<span>搜索半径</span></div>
+          <div class="seg">
+            ${[100,250,400].map(r=>`<button class="${s.radius===r?'on':''}" data-radius="${r}">${r} km</button>`).join('')}
+          </div>
+        </div>
+        <div class="set-sec">
+          <div class="set-sec-h">${ic.pin}<span>单位</span></div>
+          <div class="seg">
+            <button class="${s.unit==='km'?'on':''}" data-unit="km">公制</button>
+            <button class="${s.unit==='mi'?'on':''}" data-unit="mi">英制</button>
+          </div>
+        </div>
+        <div class="set-sec">
+          <div class="set-sec-h">${ic.bell}<span>即将飞过提醒</span></div>
+          <div class="set-row">
+            <button class="toggle ${s.notify?'on':''}" data-toggle="notify"><i></i></button>
+          </div>
+        </div>
+        <button class="set-reset" id="btnReset">${ic.reset}<span>重新选择位置</span></button>
+        <div class="set-about">
+          <h4>${ic.info}<span>关于 SkyWatch</span></h4>
+          <p>一个让人抬头看飞机的应用。圆心是你头顶，边缘是地平线。数据有 10–30 秒延迟，已用航迹外推补偿。</p>
+          <div class="ver mono">v1.0 · TRAE AI 创造力大赛参赛作品</div>
+        </div>
+        <div class="preset-grid">
+          ${PRESETS.map((p,i)=>`<button data-preset="${i}"><div class="pc">${p.city}</div><div class="pl mono">${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}</div></button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ===================== Canvas 设置与渲染循环 =====================
+function setupCanvas(){
+  const cv=document.getElementById('skyDome');
+  if(!cv)return;
+  const wrap=cv.parentElement;
+  const ctx=cv.getContext('2d');
+  const DPR=window.devicePixelRatio||1;
+  const w=wrap.clientWidth;
+  const size=Math.max(240,Math.min(w,420));
+  canvasSize=size;
+  cv.style.width=size+'px';cv.style.height=size+'px';
+  cv.width=Math.floor(size*DPR);cv.height=Math.floor(size*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  canvasCtx=ctx;
+
+  cv.onclick=(e)=>{
+    const rect=cv.getBoundingClientRect();
+    const px=e.clientX-rect.left,py=e.clientY-rect.top;
+    const cx=size/2,cy=size/2,R=size/2-22;
+    const hit=hitTest(state.interp,px,py,cx,cy,R);
+    selectAircraft(hit);
+  };
+
+  if(!window._rafStarted){
+    window._rafStarted=true;
+    rafLoop();
+  }
+  // ResizeObserver
+  if(!window._ro){
+    window._ro=new ResizeObserver(()=>{if(state.hasLoc)setupCanvas();});
+    window._ro.observe(wrap);
+  }
+}
+
+function rafLoop(){
+  if(canvasCtx&&state.hasLoc){
+    const ctx=canvasCtx,size=canvasSize;
+    stepInterp(state.interp,performance.now());
+    ctx.clearRect(0,0,size,size);
+    const cx=size/2,cy=size/2,R=size/2-22;
+    drawStatic(ctx,cx,cy,R);
+    for(const s of state.interp.values()){
+      drawAc(ctx,s,cx,cy,R,s.icao===state.selected);
+    }
+  }
+  requestAnimationFrame(rafLoop);
+}
+
+// ===================== 交互处理 =====================
+function setObserver(obs,name){
+  state.observer=obs;state.locName=name;state.hasLoc=true;
+  state.interp=new Map();state.selected=null;
+  fetchData();
+  render();
+}
+function selectAircraft(icao){
+  state.selected=icao;
+  if(icao)state.upcomingOpen=false;
+  render();
+  // 重新绑定详情/设置事件
+  bindOverlayEvents();
+}
+function bindOverlayEvents(){
+  document.querySelectorAll('[data-close]').forEach(el=>el.onclick=()=>{state.selected=null;render();bindOverlayEvents();});
+  document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>selectAircraft(b.dataset.up));
+  document.getElementById('btnUp')?.addEventListener('click',()=>{state.upcomingOpen=!state.upcomingOpen;render();bindOverlayEvents();});
+  document.querySelectorAll('[data-setclose]').forEach(el=>el.onclick=()=>{state.settingsOpen=false;render();bindOverlayEvents();});
+  document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode;fetchData();render();bindOverlayEvents();});
+  document.querySelectorAll('[data-radius]').forEach(b=>b.onclick=()=>{state.radius=+b.dataset.radius;fetchData();render();bindOverlayEvents();});
+  document.querySelectorAll('[data-unit]').forEach(b=>b.onclick=()=>{state.unit=b.dataset.unit;render();bindOverlayEvents();});
+  document.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=()=>{state.notify=!state.notify;render();bindOverlayEvents();});
+  document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{const p=PRESETS[+b.dataset.preset];state.settingsOpen=false;setObserver({lat:p.lat,lon:p.lon},p.name);});
+  document.getElementById('btnReset')?.addEventListener('click',()=>{state.settingsOpen=false;state.hasLoc=false;state.observer=null;state.interp=new Map();render();});
+}
+
+function handleLocate(){
+  state._locating=true;render();
+  if(!('geolocation'in navigator)){
+    state._locating=false;state._denied=true;render();return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos=>{state._locating=false;setObserver({lat:pos.coords.latitude,lon:pos.coords.longitude},'我的位置');},
+    ()=>{state._locating=false;state._denied=true;render();},
+    {enableHighAccuracy:false,timeout:8000,maximumAge:30000}
+  );
+}
+
+// ===================== 数据拉取 =====================
+let fetchTimer=null;
+function fetchData(){
+  if(!state.observer)return;
+  if(fetchTimer)clearInterval(fetchTimer);
+  const tick=()=>{
+    // 纯前端演示版：只支持 demo 模式（不依赖后端）
+    try{
+      const raw=getMock(state.observer);
+      const now=Math.floor(Date.now()/1000);
+      const acs=raw.aircraft.map(a=>enhance(state.observer,a,now))
+        .sort((a,b)=>a.distance-b.distance);
+      state.visible=acs.filter(a=>a.visible);
+      state.upcoming=acs.filter(a=>!a.visible&&a.prediction.isApproaching)
+        .sort((a,b)=>a.prediction.secondsToClosest-b.prediction.secondsToClosest);
+      state.time=raw.time;state.stale=false;state.error=null;state.loading=false;
+      state.interp=updInterp(state.interp,state.visible,performance.now());
+      render();bindOverlayEvents();
+    }catch(e){state.loading=false;state.error='数据异常';render();bindOverlayEvents();}
+  };
+  state.loading=state.visible.length===0;
+  tick();
+  fetchTimer=setInterval(tick,10000);
+}
+
+// ===================== 星空 =====================
+(function(){
+  const box=document.getElementById('stars');
+  for(let i=0;i<60;i++){
+    const s=document.createElement('span');
+    s.style.left=Math.random()*100+'%';
+    s.style.top=Math.random()*70+'%';
+    const r=Math.random()*1.2+.3;
+    s.style.width=r+'px';s.style.height=r+'px';
+    s.style.opacity=Math.random()*.5+.15;
+    s.style.animationDelay=Math.random()*4+'s';
+    box.appendChild(s);
+  }
+})();
+
+// 兜底：roundRect 兼容
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    this.beginPath();
+    this.moveTo(x+r,y);this.arcTo(x+w,y,x+w,y+h,r);this.arcTo(x+w,y+h,x,y+h,r);
+    this.arcTo(x,y+h,x,y,r);this.arcTo(x,y,x+w,y,r);this.closePath();return this;
+  };
+}
+
+// 启动
+render();
+</script>
+</body>
+</html>

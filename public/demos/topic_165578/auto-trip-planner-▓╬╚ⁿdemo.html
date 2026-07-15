@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>攻略成路 - AI旅行路线规划工具 | TRAE AI 创造力大赛参赛作品</title>
+<meta name="description" content="粘贴小红书或B站旅行攻略链接，AI自动提取景点、规划自驾路线、一键生成专属地图。">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+/* ===== DESIGN TOKENS ===== */
+:root {
+  --bg: #fafaf9;
+  --bg-elev: #ffffff;
+  --bg-dark: #0c0a09;
+  --text: #1c1917;
+  --text-muted: #78716c;
+  --text-light: #a8a29e;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --accent-light: #14b8a6;
+  --accent-bg: rgba(13, 148, 136, 0.08);
+  --border: #e7e5e4;
+  --border-strong: #d6d3d1;
+  --radius: 16px;
+  --radius-sm: 8px;
+  --max-w: 1200px;
+  --nav-h: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --bg-elev: #1c1917;
+    --text: #fafaf9;
+    --text-muted: #a8a29e;
+    --text-light: #78716c;
+    --accent: #2dd4bf;
+    --accent-hover: #14b8a6;
+    --accent-bg: rgba(45, 212, 191, 0.1);
+    --border: #292524;
+    --border-strong: #44403c;
+  }
+}
+
+/* ===== RESET ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Noto Sans SC', 'Outfit', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+h1, h2, h3, h4 { font-family: 'Outfit', 'Noto Sans SC', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+::selection { background: var(--accent); color: white; }
+
+/* ===== UTILITIES ===== */
+.container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.accent-text { color: var(--accent); }
+
+/* ===== NAV ===== */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--nav-h);
+  background: rgba(250, 250, 249, 0.85);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+  display: flex; align-items: center;
+}
+@media (prefers-color-scheme: dark) {
+  nav { background: rgba(12, 10, 9, 0.85); }
+}
+nav .container { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+.nav-brand { font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 18px; letter-spacing: -0.03em; }
+.nav-brand span { color: var(--accent); }
+.nav-links { display: flex; gap: 32px; align-items: center; }
+.nav-links a { font-size: 14px; color: var(--text-muted); transition: color 0.2s; }
+.nav-links a:hover { color: var(--text); }
+@media (max-width: 640px) { .nav-links { display: none; } }
+
+/* ===== HERO ===== */
+.hero {
+  position: relative;
+  min-height: 100dvh;
+  display: flex; align-items: flex-end;
+  padding: 120px 0 80px;
+  overflow: hidden;
+}
+.hero-bg { position: absolute; inset: 0; z-index: 0; }
+.hero-bg img { width: 100%; height: 100%; object-fit: cover; }
+.hero-bg::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(105deg, rgba(12, 10, 9, 0.88) 0%, rgba(12, 10, 9, 0.72) 40%, rgba(12, 10, 9, 0.35) 70%, transparent 100%);
+}
+.hero-content {
+  position: relative; z-index: 1;
+  max-width: 640px;
+  color: #fafaf9;
+}
+.hero-tag {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500;
+  color: var(--accent-light);
+  margin-bottom: 24px;
+  letter-spacing: 0.02em;
+}
+.hero-tag::before {
+  content: ''; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent-light);
+  display: inline-block;
+}
+.hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 800;
+  color: #fafaf9;
+  margin-bottom: 20px;
+  line-height: 1.1;
+}
+.hero h1 .accent { color: var(--accent-light); }
+.hero p {
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  color: rgba(250, 250, 249, 0.8);
+  max-width: 480px;
+  margin-bottom: 36px;
+  line-height: 1.5;
+}
+.hero-cta { display: flex; gap: 16px; flex-wrap: wrap; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 14px 28px;
+  border-radius: 999px;
+  font-size: 15px; font-weight: 600;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+.btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fafaf9;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(8px);
+}
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ===== SECTION COMMON ===== */
+section { padding: 100px 0; }
+.section-head { margin-bottom: 56px; }
+.section-head h2 { font-size: clamp(1.75rem, 4vw, 2.75rem); margin-bottom: 12px; }
+.section-head p { color: var(--text-muted); font-size: 1.05rem; max-width: 560px; }
+
+/* ===== PROBLEM SECTION ===== */
+.problem { background: var(--bg-elev); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+@media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 500px) { .stat-grid { grid-template-columns: 1fr; } }
+.stat-card {
+  padding: 32px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: var(--accent); }
+.stat-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.stat-label { font-size: 14px; color: var(--text-muted); line-height: 1.4; }
+
+/* ===== PIPELINE SECTION ===== */
+.pipeline-sim {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 40px;
+  flex-wrap: wrap;
+}
+.sim-btn {
+  padding: 12px 24px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+  transition: all 0.2s;
+}
+.sim-btn:hover { background: var(--accent-hover); }
+.sim-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sim-status { font-size: 14px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+.pipeline-steps {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) { .pipeline-steps { grid-template-columns: 1fr; } }
+.pipeline-step {
+  padding: 28px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+.pipeline-step.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 8px 24px rgba(13, 148, 136, 0.12);
+}
+.pipeline-step.done { border-color: var(--accent); }
+.pipeline-step.done::after {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px; background: var(--accent);
+}
+.step-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; color: var(--text-light);
+  margin-bottom: 12px;
+}
+.step-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.step-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; }
+.step-tech {
+  font-size: 11px; font-family: 'JetBrains Mono', monospace;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.step-result {
+  margin-top: 12px;
+  font-size: 13px; color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: all 0.3s;
+}
+.pipeline-step.done .step-result { opacity: 1; transform: translateY(0); }
+
+/* ===== DEMO SECTION ===== */
+.demo { background: var(--bg-elev); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.demo-wrapper {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+@media (max-width: 900px) { .demo-wrapper { grid-template-columns: 1fr; } }
+#route-map {
+  height: 520px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  z-index: 1;
+}
+.poi-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  max-height: 520px;
+}
+.poi-panel-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.poi-panel-head h3 { font-size: 15px; font-weight: 600; }
+.poi-count { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+.poi-list {
+  flex: 1; overflow-y: auto;
+  padding: 8px;
+}
+.poi-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.poi-item:hover { background: var(--accent-bg); }
+.poi-item.active { background: var(--accent-bg); }
+.poi-idx {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+}
+.poi-name { font-size: 14px; font-weight: 500; }
+.poi-addr { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.route-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+@media (max-width: 700px) { .route-stats { grid-template-columns: repeat(2, 1fr); } }
+.route-stat-item { text-align: center; }
+.route-stat-val {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.route-stat-label { font-size: 12px; color: var(--text-muted); }
+
+/* Leaflet custom markers */
+.route-marker {
+  background: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  display: flex !important;
+  align-items: center; justify-content: center;
+  color: #fff;
+  font-size: 10px; font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+.leaflet-popup-content-wrapper { border-radius: 12px; }
+.leaflet-popup-content { margin: 12px 16px; font-family: 'Noto Sans SC', sans-serif; }
+.leaflet-popup-content strong { font-size: 14px; }
+.leaflet-popup-content small { color: var(--text-muted); font-size: 12px; }
+
+/* ===== FEATURES BENTO ===== */
+.features-bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) { .features-bento { grid-template-columns: 1fr; } }
+.bento-cell {
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  transition: transform 0.2s, border-color 0.2s;
+}
+.bento-cell:hover { transform: translateY(-2px); border-color: var(--accent); }
+.bento-cell.wide { grid-column: span 2; }
+@media (max-width: 900px) { .bento-cell.wide { grid-column: span 1; } }
+.bento-cell.featured {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.bento-cell.featured .bento-desc { color: rgba(255,255,255,0.85); }
+.bento-cell.featured .bento-icon { color: rgba(255,255,255,0.9); }
+.bento-icon { font-size: 28px; margin-bottom: 16px; color: var(--accent); }
+.bento-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.bento-desc { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+/* ===== TRAE SECTION ===== */
+.trae-section { background: var(--bg-elev); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.trae-wrapper {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: start;
+}
+@media (max-width: 800px) { .trae-wrapper { grid-template-columns: 1fr; } }
+.trae-arch {
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.arch-layer { margin-bottom: 20px; }
+.arch-layer:last-child { margin-bottom: 0; }
+.arch-layer-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 8px;
+}
+.arch-layer-items {
+  padding-left: 20px;
+  font-size: 13px; color: var(--text-muted);
+  line-height: 1.8;
+}
+.arch-layer-items code {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--accent-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.dev-stats { display: grid; gap: 16px; }
+.dev-stat {
+  display: flex; align-items: baseline; gap: 16px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.dev-stat-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: 2rem; font-weight: 800;
+  color: var(--accent);
+  min-width: 80px;
+}
+.dev-stat-text { font-size: 14px; color: var(--text-muted); }
+
+/* ===== FOOTER ===== */
+footer {
+  padding: 48px 0 32px;
+  border-top: 1px solid var(--border);
+}
+.footer-content {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 16px;
+}
+.footer-brand { font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px; }
+.footer-brand span { color: var(--accent); }
+.footer-meta { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+/* ===== SCROLL ANIMATIONS ===== */
+.fade-up {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fade-up.visible { opacity: 1; transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .fade-up { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* ===== MOBILE ===== */
+@media (max-width: 640px) {
+  section { padding: 64px 0; }
+  .hero { padding: 100px 0 60px; }
+  .container { padding: 0 16px; }
+  #route-map { height: 380px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="container">
+    <div class="nav-brand">攻略<span>成路</span></div>
+    <div class="nav-links">
+      <a href="#problem">问题</a>
+      <a href="#pipeline">原理</a>
+      <a href="#demo">体验</a>
+      <a href="#tech">技术</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg">
+    <img src="assets/hero-road.jpg" alt="广西喀斯特地貌公路航拍" />
+  </div>
+  <div class="container">
+    <div class="hero-content">
+      <div class="hero-tag">TRAE AI 创造力大赛参赛作品</div>
+      <h1>把旅行攻略<br><span class="accent">变成可导航路线</span></h1>
+      <p>粘贴小红书或B站攻略链接，AI自动提取景点、规划自驾路线、一键生成专属地图。</p>
+      <div class="hero-cta">
+        <a href="#demo" class="btn btn-primary">开始体验</a>
+        <a href="#pipeline" class="btn btn-ghost">工作原理</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLEM -->
+<section class="problem" id="problem">
+  <div class="container">
+    <div class="section-head fade-up">
+      <h2>从种草到出发<br>你要切换多少个App</h2>
+      <p>看攻略用小红书，搜地址用高德，订酒店用携程，记路线用备忘录，分享给朋友用微信。一个攻略，五次切换，三十分钟。</p>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-card fade-up">
+        <div class="stat-num">5+</div>
+        <div class="stat-label">用户需要切换的App数量<br>小红书、高德、携程、备忘录、微信</div>
+      </div>
+      <div class="stat-card fade-up">
+        <div class="stat-num">30<span style="font-size:0.6em">min</span></div>
+        <div class="stat-label">手动整理42个景点路线<br>所需时间（实测）</div>
+      </div>
+      <div class="stat-card fade-up">
+        <div class="stat-num">42</div>
+        <div class="stat-label">从8篇小红书笔记<br>自动提取的POI数量</div>
+      </div>
+      <div class="stat-card fade-up">
+        <div class="stat-num">3<span style="font-size:0.6em">种</span></div>
+        <div class="stat-label">一键导出格式<br>地图链接 / KML / Markdown路书</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PIPELINE -->
+<section id="pipeline">
+  <div class="container">
+    <div class="section-head fade-up">
+      <h2>五步全自动<br>从攻略到路线</h2>
+      <p>从内容采集到路线导出，全流程由TRAE AI Agent串联完成，无需人工干预。</p>
+    </div>
+    <div class="pipeline-sim fade-up">
+      <button class="sim-btn" id="sim-btn" onclick="runSimulation()">模拟运行</button>
+      <span class="sim-status" id="sim-status">点击按钮体验完整流程</span>
+    </div>
+    <div class="pipeline-steps">
+      <div class="pipeline-step" id="step-1">
+        <div class="step-num">STEP 01</div>
+        <div class="step-title">内容采集</div>
+        <div class="step-desc">从小红书或B站下载攻略内容，提取文本、图片、元数据。</div>
+        <div class="step-tech">FunASR + xhshow + CDP</div>
+        <div class="step-result"></div>
+      </div>
+      <div class="pipeline-step" id="step-2">
+        <div class="step-num">STEP 02</div>
+        <div class="step-title">POI抽取</div>
+        <div class="step-desc">AI识别文本中的地名、景点、餐厅，结构化为POI列表。</div>
+        <div class="step-tech">LLM + 规则消歧</div>
+        <div class="step-result"></div>
+      </div>
+      <div class="pipeline-step" id="step-3">
+        <div class="step-num">STEP 03</div>
+        <div class="step-title">地理编码</div>
+        <div class="step-desc">调用高德MCP反查每个POI的精确坐标和地址。</div>
+        <div class="step-tech">amap MCP Server</div>
+        <div class="step-result"></div>
+      </div>
+      <div class="pipeline-step" id="step-4">
+        <div class="step-num">STEP 04</div>
+        <div class="step-title">路线规划</div>
+        <div class="step-desc">最近邻TSP优化访问顺序，生成最优自驾路线。</div>
+        <div class="step-tech">TSP + direction_driving</div>
+        <div class="step-result"></div>
+      </div>
+      <div class="pipeline-step" id="step-5">
+        <div class="step-num">STEP 05</div>
+        <div class="step-title">一键导出</div>
+        <div class="step-desc">生成高德专属地图链接、KML文件、Markdown路书。</div>
+        <div class="step-tech">personal_map + KML</div>
+        <div class="step-result"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO -->
+<section class="demo" id="demo">
+  <div class="container">
+    <div class="section-head fade-up">
+      <h2>真实路线展示<br>崇左百色自驾42站</h2>
+      <p>以下数据来自8篇小红书崇左百色自驾攻略笔记，经AI提取和高德MCP校验后的真实路线。点击地图标记或右侧列表查看景点详情。</p>
+    </div>
+    <div class="demo-wrapper fade-up">
+      <div id="route-map"></div>
+      <div class="poi-panel">
+        <div class="poi-panel-head">
+          <h3>途经景点</h3>
+          <span class="poi-count">42 POIs</span>
+        </div>
+        <div class="poi-list" id="poi-list"></div>
+      </div>
+    </div>
+    <div class="route-stats fade-up">
+      <div class="route-stat-item">
+        <div class="route-stat-val">8</div>
+        <div class="route-stat-label">小红书笔记来源</div>
+      </div>
+      <div class="route-stat-item">
+        <div class="route-stat-val">42</div>
+        <div class="route-stat-label">提取POI数量</div>
+      </div>
+      <div class="route-stat-item">
+        <div class="route-stat-val">41</div>
+        <div class="route-stat-label">路线段数</div>
+      </div>
+      <div class="route-stat-item">
+        <div class="route-stat-val">127</div>
+        <div class="route-stat-label">MCP调用次数</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="container">
+    <div class="section-head fade-up">
+      <h2>核心能力</h2>
+    </div>
+    <div class="features-bento">
+      <div class="bento-cell wide fade-up">
+        <div class="bento-icon">&#128241;</div>
+        <div class="bento-title">多源内容采集</div>
+        <div class="bento-desc">支持B站视频和小红书图文笔记。B站通过yt-dlp下载音频，FunASR中文语音转写；小红书通过Chrome CDP抓取笔记正文、标题、标签和图片，可选PaddleOCR识别图片中的文字信息。</div>
+      </div>
+      <div class="bento-cell featured fade-up">
+        <div class="bento-icon">&#129504;</div>
+        <div class="bento-title">AI智能POI抽取</div>
+        <div class="bento-desc">LLM从非结构化文本中提取地名、景点、餐厅。配合规则化后处理：同义词展开、路线上下文消歧、非地名过滤，准确率远超纯LLM方案。</div>
+      </div>
+      <div class="bento-cell fade-up">
+        <div class="bento-icon">&#128205;</div>
+        <div class="bento-title">高德MCP坐标校验</div>
+        <div class="bento-desc">每个POI通过高德text_search和search_detail两步校验，获取精确经纬度和地址。失败自动降级到agent_batch_geocode。</div>
+      </div>
+      <div class="bento-cell fade-up">
+        <div class="bento-icon">&#128663;</div>
+        <div class="bento-title">TSP路线优化</div>
+        <div class="bento-desc">最近邻算法优化景点访问顺序，避免路线折返。haversine公式计算球面距离，以第一个POI为起点贪心选择下一站。</div>
+      </div>
+      <div class="bento-cell fade-up">
+        <div class="bento-icon">&#128230;</div>
+        <div class="bento-title">三种格式一键导出</div>
+        <div class="bento-desc">高德个人地图链接（手机直接导航）、KML文件（Google Earth可打开）、Markdown路书（含景点地址、坐标、分段驾驶信息）。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TRAE TECH -->
+<section class="trae-section" id="tech">
+  <div class="container">
+    <div class="section-head fade-up">
+      <h2>TRAE技术实践</h2>
+      <p>基于TRAE IDE开发，通过Skill + MCP + Agent模式构建端到端自动化工具。</p>
+    </div>
+    <div class="trae-wrapper">
+      <div class="trae-arch fade-up">
+        <div class="arch-layer">
+          <div class="arch-layer-head">CONTENT LAYER</div>
+          <div class="arch-layer-items">
+            <code>yt-dlp</code> B站音频下载<br>
+            <code>FunASR</code> SenseVoiceSmall中文ASR<br>
+            <code>xhshow</code> 小红书笔记签名请求<br>
+            <code>PaddleOCR</code> 图片文字识别（可选）
+          </div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-head">INTELLIGENCE LAYER</div>
+          <div class="arch-layer-items">
+            <code>LLM</code> POI抽取与结构化<br>
+            <code>poi_resolver</code> 同义词+上下文消歧<br>
+            <code>route_rules</code> 路线规则引擎<br>
+            <code>TSP</code> 最近邻路径优化
+          </div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-head">MAP LAYER</div>
+          <div class="arch-layer-items">
+            <code>amap MCP</code> text_search + search_detail<br>
+            <code>direction_driving</code> 驾车路线规划<br>
+            <code>personal_map</code> 专属地图生成<br>
+            <code>KML</code> 路线文件导出
+          </div>
+        </div>
+        <div class="arch-layer">
+          <div class="arch-layer-head">ORCHESTRATION</div>
+          <div class="arch-layer-items">
+            <code>TRAE Skill</code> 定义完整Pipeline工作流<br>
+            <code>TRAE Agent</code> 串联各步骤自动执行<br>
+            <code>MCP Protocol</code> 标准化地图API调用
+          </div>
+        </div>
+      </div>
+      <div class="dev-stats fade-up">
+        <div class="dev-stat">
+          <div class="dev-stat-num">4</div>
+          <div class="dev-stat-text">轮Eval Loop迭代<br>评分从6.7提升到9.2/10</div>
+        </div>
+        <div class="dev-stat">
+          <div class="dev-stat-num">34+</div>
+          <div class="dev-stat-text">修复的问题数量<br>含3个Critical + 9个Major</div>
+        </div>
+        <div class="dev-stat">
+          <div class="dev-stat-num">99</div>
+          <div class="dev-stat-text">单元测试通过<br>覆盖核心解析和路线逻辑</div>
+        </div>
+        <div class="dev-stat">
+          <div class="dev-stat-num">127</div>
+          <div class="dev-stat-text">MCP调用完成路线规划<br>text_search + search_detail + driving</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">攻略<span>成路</span> Auto Trip Planner</div>
+      <div class="footer-meta">TRAE AI Skill + Amap MCP / 2026</div>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ===== REAL ROUTE DATA ===== */
+const pois = [
+  {id:1, name:"南宁", address:"青秀区", lat:22.8177, lng:108.3664},
+  {id:2, name:"凭祥", address:"凭祥市", lat:22.0944, lng:106.7667},
+  {id:3, name:"友谊关", address:"友谊镇", lat:21.9777, lng:106.7122},
+  {id:4, name:"明仕田园", address:"532县道", lat:22.7043, lng:106.9226},
+  {id:5, name:"伏那秘境", address:"536县道", lat:22.7655, lng:107.1546},
+  {id:6, name:"德天瀑布", address:"硕龙镇", lat:22.8531, lng:106.7284},
+  {id:7, name:"靖西", address:"靖西市", lat:23.1344, lng:106.4177},
+  {id:8, name:"古龙山大峡谷", address:"湖润镇", lat:23.0075, lng:106.6905},
+  {id:9, name:"浩坤湖", address:"浩坤湖景区", lat:24.2001, lng:106.6759},
+  {id:10, name:"巴马", address:"巴马瑶族自治县", lat:24.1422, lng:107.2587},
+  {id:11, name:"长寿村", address:"活水乡", lat:24.2993, lng:107.1030},
+  {id:12, name:"三门海", address:"三门海镇", lat:24.4078, lng:107.0342},
+  {id:13, name:"江洲地下长廊", address:"江洲", lat:24.3334, lng:106.9852},
+  {id:14, name:"凤山", address:"凤山县", lat:24.5469, lng:107.0422},
+  {id:15, name:"歌娅思谷", address:"里湖乡", lat:25.0635, lng:107.6285},
+  {id:16, name:"洞天盛景", address:"里湖瑶族乡", lat:25.0892, lng:107.6535},
+  {id:17, name:"南丹", address:"南丹县", lat:24.9751, lng:107.5406},
+  {id:18, name:"河池小三峡", address:"六甲镇", lat:24.7574, lng:107.9032},
+  {id:19, name:"九顿天窗", address:"大兴镇", lat:24.1654, lng:107.9882},
+  {id:20, name:"鹅泉", address:"新靖镇鹅泉村", lat:23.0983, lng:106.3897},
+  {id:21, name:"渠洋湖", address:"渠洋镇", lat:23.3199, lng:106.3273},
+  {id:22, name:"百色", address:"右江区", lat:23.9031, lng:106.6187},
+  {id:23, name:"通灵大峡谷", address:"湖润镇新灵村", lat:23.0161, lng:106.6533},
+  {id:24, name:"三叠岭瀑布", address:"湖润镇新桥屯", lat:22.9918, lng:106.6743},
+  {id:25, name:"社更穿洞", address:"袍里乡坡心村", lat:24.4122, lng:107.0245},
+  {id:26, name:"青秀山", address:"凤岭南路6号", lat:22.7887, lng:108.3953},
+  {id:27, name:"太平古城", address:"太平路178号", lat:22.4165, lng:107.3559},
+  {id:28, name:"锦绣古镇", address:"靖西市", lat:23.1238, lng:106.4284},
+  {id:29, name:"岜旗屯", address:"渠洋镇东风村", lat:23.3292, lng:106.3138},
+  {id:30, name:"龙州县", address:"龙州县", lat:22.3436, lng:106.8540},
+  {id:31, name:"合那高速", address:"大新县", lat:22.9540, lng:106.7494},
+  {id:32, name:"广西博物馆", address:"民族大道34号", lat:22.8125, lng:108.3352},
+  {id:33, name:"广西民族博物馆", address:"青环路11号", lat:22.7746, lng:108.4018},
+  {id:34, name:"三街两巷", address:"民族大道37号", lat:22.8134, lng:108.3193},
+  {id:35, name:"平西夜市", address:"平西路2号", lat:22.7979, lng:108.3117},
+  {id:36, name:"南宁动物园", address:"大学东路73号", lat:22.8349, lng:108.2685},
+  {id:37, name:"百魔洞", address:"005乡道", lat:24.2993, lng:107.1030},
+  {id:38, name:"峒那屿湾", address:"雷平镇安平村", lat:22.7173, lng:107.0501},
+  {id:39, name:"老木棉景区", address:"沿边公路", lat:22.8181, lng:106.7858},
+  {id:40, name:"浩坤湖观景台", address:"浩坤湖景区西侧", lat:24.1977, lng:106.6634},
+  {id:41, name:"广西大学", address:"大学东路100号", lat:22.8451, lng:108.2912},
+  {id:42, name:"瑶望天下", address:"里湖乡王尚屯", lat:25.0851, lng:107.6528}
+];
+
+/* ===== INIT MAP ===== */
+let map, markers = [];
+
+function initMap() {
+  map = L.map('route-map', { scrollWheelZoom: false }).setView([23.0, 107.0], 7);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    maxZoom: 18
+  }).addTo(map);
+
+  pois.forEach(poi => {
+    const icon = L.divIcon({
+      className: 'route-marker',
+      html: poi.id,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+    const marker = L.marker([poi.lat, poi.lng], { icon })
+      .addTo(map)
+      .bindPopup(`<strong>${poi.id}. ${poi.name}</strong><br><small>${poi.address}</small><br><small class="mono">${poi.lat.toFixed(4)}, ${poi.lng.toFixed(4)}</small>`);
+    markers.push(marker);
+  });
+
+  const latlngs = pois.map(p => [p.lat, p.lng]);
+  L.polyline(latlngs, { color: '#0d9488', weight: 2.5, opacity: 0.6, dashArray: '6 4' }).addTo(map);
+
+  map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
+}
+
+/* ===== POI LIST ===== */
+function renderPoiList() {
+  const list = document.getElementById('poi-list');
+  list.innerHTML = pois.map(poi => `
+    <div class="poi-item" data-id="${poi.id}" onclick="flyToPoi(${poi.id})">
+      <div class="poi-idx">${poi.id}</div>
+      <div>
+        <div class="poi-name">${poi.name}</div>
+        <div class="poi-addr">${poi.address}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function flyToPoi(id) {
+  const poi = pois.find(p => p.id === id);
+  if (!poi) return;
+  map.flyTo([poi.lat, poi.lng], 12, { duration: 1 });
+  markers[id - 1].openPopup();
+  document.querySelectorAll('.poi-item').forEach(el => el.classList.remove('active'));
+  document.querySelector(`.poi-item[data-id="${id}"]`).classList.add('active');
+}
+
+/* ===== PIPELINE SIMULATION ===== */
+const stepResults = [
+  '8篇笔记获取成功',
+  '提取到42个POI',
+  '42个POI坐标校验完成',
+  '41段路线规划完成',
+  '地图链接+KML+路书 已生成'
+];
+
+let simRunning = false;
+
+async function runSimulation() {
+  if (simRunning) return;
+  simRunning = true;
+  const btn = document.getElementById('sim-btn');
+  const status = document.getElementById('sim-status');
+  btn.disabled = true;
+  btn.textContent = '运行中...';
+
+  for (let i = 0; i < 5; i++) {
+    const step = document.getElementById(`step-${i + 1}`);
+    step.classList.add('active');
+    status.textContent = `正在执行: ${step.querySelector('.step-title').textContent}...`;
+    await sleep(800);
+    step.classList.remove('active');
+    step.classList.add('done');
+    step.querySelector('.step-result').textContent = stepResults[i];
+    await sleep(300);
+  }
+
+  status.textContent = '8篇笔记 -> 42个POI -> 41段路线 -> 3种格式导出';
+  btn.textContent = '重新运行';
+  btn.disabled = false;
+
+  setTimeout(() => {
+    document.querySelectorAll('.pipeline-step').forEach(s => {
+      s.classList.remove('done');
+      s.querySelector('.step-result').textContent = '';
+    });
+    status.textContent = '点击按钮体验完整流程';
+    btn.textContent = '模拟运行';
+    simRunning = false;
+  }, 5000);
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+/* ===== SCROLL ANIMATIONS ===== */
+function initScrollAnimations() {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+}
+
+/* ===== INIT ===== */
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  renderPoiList();
+  initScrollAnimations();
+});
+</script>
+
+</body>
+</html>

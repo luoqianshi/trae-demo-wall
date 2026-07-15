@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>朝花夕拾</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            min-height: 100vh;
+            background-color: #faf9f5;
+            font-family: 'Noto Serif SC', serif;
+            overflow: hidden;
+        }
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+        #canvas-container canvas {
+            display: block;
+        }
+        .content {
+            position: relative;
+            z-index: 1;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+        .title {
+            font-size: 48px;
+            font-weight: 600;
+            color: #141413;
+            opacity: 0;
+            transform: translateY(10px);
+            filter: blur(14px);
+            transition: opacity 1.8s cubic-bezier(0.22, 0.61, 0.36, 1),
+                        transform 1.8s cubic-bezier(0.22, 0.61, 0.36, 1),
+                        filter 1.8s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+        .title.visible {
+            opacity: 1;
+            transform: translateY(0);
+            filter: blur(0);
+        }
+        .subtitle {
+            margin-top: 18px;
+            font-size: 15px;
+            font-weight: 400;
+            color: #b0aea5;
+            letter-spacing: 0.15em;
+            opacity: 0;
+            transform: translateY(6px);
+            filter: blur(8px);
+            transition: opacity 1.4s cubic-bezier(0.22, 0.61, 0.36, 1),
+                        transform 1.4s cubic-bezier(0.22, 0.61, 0.36, 1),
+                        filter 1.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+        .subtitle.visible {
+            opacity: 1;
+            transform: translateY(0);
+            filter: blur(0);
+        }
+        .start-btn-wrap {
+            position: fixed;
+            bottom: 18%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 1.6s ease 0.8s;
+        }
+        .start-btn-wrap.show {
+            opacity: 1;
+        }
+        .start-btn {
+            pointer-events: auto;
+            font-family: 'Noto Serif SC', serif;
+            font-size: 15px;
+            font-weight: 400;
+            color: #d97757;
+            background: transparent;
+            border: 1px solid rgba(217, 119, 87, 0.35);
+            padding: 10px 36px;
+            border-radius: 2px;
+            cursor: pointer;
+            letter-spacing: 0.25em;
+            transition: all 0.4s ease;
+            text-indent: 0.25em;
+        }
+        .start-btn:hover {
+            background: rgba(217, 119, 87, 0.08);
+            border-color: rgba(217, 119, 87, 0.6);
+            transform: translateY(-1px);
+        }
+        .start-btn:active {
+            transform: translateY(0);
+        }
+        .start-btn.fading {
+            opacity: 0;
+            transform: translateY(-4px);
+            pointer-events: none;
+        }
+
+        /* 吹散动画的字符 */
+        .title-scatter span {
+            display: inline-block;
+            opacity: 0;
+        }
+        @media (max-width: 768px) {
+            .title {
+                font-size: 36px;
+            }
+            .subtitle {
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div class="content">
+        <h1 class="title" id="title">朝花夕拾</h1>
+        <p class="subtitle" id="subtitle">花开有时　记忆无声</p>
+    </div>
+    <div class="start-btn-wrap" id="startBtnWrap">
+        <button class="start-btn" id="startBtn">开　始</button>
+    </div>
+    <script>
+        // ═══════════════════════════════════════════════════════════
+        // 落英潮 (Luò Yīng Cháo) — Blossom Gust
+        // 一阵风卷着桃花瓣与整花从左上呼啸扫过右下，
+        // 花潮拂过屏幕正中时，文字以模糊渐显丝滑唤醒，
+        // 花潮出场后，画面过渡到温和缓慢的落英缤纷。
+        // 点击开始：风把文字吹散，飘向新的页面。
+        // ═══════════════════════════════════════════════════════════
+
+        const SEED = 20240715;
+
+        // ── 品牌色 ──
+        const ACCENT = { r: 217, g: 119, b: 87 };  // #d97757
+        const MUTED  = { r: 176, g: 174, b: 165 };  // #b0aea5
+        const BG     = { r: 250, g: 249, b: 245 };  // #faf9f5
+        const INK    = { r: 20,  g: 20,  b: 19  };  // #141413
+
+        // ── 阶段 ──
+        // gust → settle → drift → fall
+        let phase = 'gust';
+        let phaseStart;
+
+        // ── 花潮粒子（开场） ──
+        let gustParticles = [];
+        const GUST_COUNT = 24;
+
+        // ── 持续飘落粒子 ──
+        let driftParticles = [];
+
+        // ── 文字触发 ──
+        let textTriggered = false;
+        let btnTriggered = false;
+
+        // ── 掉落的桃花 ──
+        let fallBlossom = null;
+
+        // ═══════════════════════════════════════════════════════════
+        // setup
+        // ═══════════════════════════════════════════════════════════
+
+        function setup() {
+            let canvas = createCanvas(windowWidth, windowHeight);
+            canvas.parent('canvas-container');
+            randomSeed(SEED);
+            noiseSeed(SEED);
+
+            initGust();
+            phaseStart = millis();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 花潮初始化 — 20+ 片花瓣与整花，参差不齐的时间差
+        // ═══════════════════════════════════════════════════════════
+
+        function initGust() {
+            gustParticles = [];
+            for (let i = 0; i < GUST_COUNT; i++) {
+                gustParticles.push(new GustPetal(i));
+            }
+        }
+
+        class GustPetal {
+            constructor(idx) {
+                this.delay = random(0, 900);
+                this.duration = random(1400, 2200);
+                this.startX = random(-120, width * 0.15);
+                this.startY = random(-80, height * 0.2);
+                this.endX = random(width * 0.85, width + 140);
+                this.endY = random(height * 0.8, height + 100);
+                this.waveAmp = random(40, 90);
+                this.waveFreq = random(1.5, 3.5);
+                this.wavePhase = random(TWO_PI);
+                this.isFull = random() < 0.2;
+                this.size = this.isFull ? random(18, 26) : random(10, 16);
+                this.rotation = random(TWO_PI);
+                this.spinSpeed = random(-0.06, 0.06);
+                this.swayAmp = random(0.15, 0.35);
+                this.swayFreq = random(3, 6);
+                this.colorMix = random();
+                this.alpha = this.isFull ? random(0.7, 0.95) : random(0.45, 0.8);
+                this.drag = random(0.3, 0.6);
+            }
+
+            getT(elapsed) {
+                let localT = (elapsed - this.delay) / this.duration;
+                return constrain(localT, -0.1, 1);
+            }
+
+            getPos(t) {
+                let baseX = lerp(this.startX, this.endX, t);
+                let baseY = lerp(this.startY, this.endY, t);
+                let pathAngle = atan2(this.endY - this.startY, this.endX - this.startX);
+                let wave = sin(t * PI * this.waveFreq + this.wavePhase) * this.waveAmp * (1 - this.drag * t);
+                let perpX = cos(pathAngle + HALF_PI);
+                let perpY = sin(pathAngle + HALF_PI);
+                return {
+                    x: baseX + perpX * wave,
+                    y: baseY + perpY * wave,
+                    angle: pathAngle
+                };
+            }
+
+            display(elapsed) {
+                let t = this.getT(elapsed);
+                if (t < 0) return;
+                let easedT = 1 - pow(1 - t, 1 + this.drag * 2);
+                let pos = this.getPos(easedT);
+                let spin = this.rotation + elapsed * 0.001 * this.spinSpeed * 60;
+                let sway = sin(elapsed * 0.003 * this.swayFreq + this.wavePhase) * this.swayAmp;
+
+                if (this.isFull) {
+                    drawPeachBlossom(pos.x, pos.y, spin + sway, this.size, this.alpha, true, this.colorMix);
+                } else {
+                    drawSinglePetal(pos.x, pos.y, spin + sway, this.size, this.alpha, this.colorMix);
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // draw — 主循环
+        // ═══════════════════════════════════════════════════════════
+
+        function draw() {
+            background(BG.r, BG.g, BG.b);
+
+            let elapsed = millis() - phaseStart;
+
+            if (phase === 'gust') {
+                drawGustPhase(elapsed);
+            } else if (phase === 'settle') {
+                drawSettlePhase(elapsed);
+            } else if (phase === 'drift') {
+                drawDriftPhase(elapsed);
+            } else if (phase === 'fall') {
+                drawFallPhase(elapsed);
+            }
+        }
+
+        // ── 花潮阶段 ──
+
+        function drawGustPhase(elapsed) {
+            let allDone = true;
+
+            for (let p of gustParticles) {
+                p.display(elapsed);
+                let t = p.getT(elapsed);
+                if (t < 1) allDone = false;
+
+                if (!textTriggered) {
+                    let t2 = p.getT(elapsed);
+                    if (t2 > 0.35 && t2 < 0.65) {
+                        let pos = p.getPos(constrain(t2, 0, 1));
+                        if (pos.x > width * 0.3 && pos.x < width * 0.7 &&
+                            pos.y > height * 0.3 && pos.y < height * 0.7) {
+                            triggerText();
+                        }
+                    }
+                }
+            }
+
+            if (allDone && elapsed > 1200) {
+                phase = 'settle';
+                phaseStart = millis();
+                initDrift();
+            }
+        }
+
+        // ── 过渡阶段 ──
+
+        function drawSettlePhase(elapsed) {
+            let settleT = constrain(elapsed / 1500, 0, 1);
+            let driftAlpha = settleT;
+
+            for (let p of driftParticles) {
+                p.update();
+                p.display(driftAlpha);
+            }
+
+            if (settleT >= 1) {
+                phase = 'drift';
+                phaseStart = millis();
+            }
+        }
+
+        // ── 持续落英阶段 ──
+
+        function drawDriftPhase(elapsed) {
+            for (let p of driftParticles) {
+                p.update();
+                p.display(1);
+            }
+        }
+
+        // ── 桃花掉落 + 文字渐隐 + 页面渐进 ──
+
+        function drawFallPhase(elapsed) {
+            if (!fallBlossom) return;
+
+            fallBlossom.update(elapsed);
+
+            let progress = fallBlossom.getProgress(elapsed);
+
+            // 文字中间位置对应的距离比例（约屏幕中央）
+            let textMidDistRatio = (height / 2 - fallBlossom.startY) / (fallBlossom.endY - fallBlossom.startY);
+
+            // 文字渐隐：桃花从顶部开始掉落时开始渐隐，
+            // 落到文字中间时渐隐完成
+            let textFadeT = constrain(progress / textMidDistRatio, 0, 1);
+            let textOpacity = 1 - textFadeT;
+
+            let titleEl = document.getElementById('title');
+            let subEl = document.getElementById('subtitle');
+            if (titleEl) titleEl.style.opacity = textOpacity;
+            if (subEl)   subEl.style.opacity = textOpacity;
+
+            // 页面渐进：桃花经过文字中间后开始，
+            // 落到屏幕底部时完成
+            let pageFadeT = constrain(
+                (progress - textMidDistRatio) / (1 - textMidDistRatio),
+                0, 1
+            );
+
+            // 绘制落英（随页面渐进逐渐淡出）
+            for (let p of driftParticles) {
+                p.update();
+                p.display(1 - pageFadeT * 0.7);
+            }
+
+            // 绘制桃花
+            fallBlossom.display(1 - pageFadeT * 0.3);
+
+            // 页面渐白
+            noStroke();
+            fill(BG.r, BG.g, BG.b, pageFadeT * 255 * 0.9);
+            rect(0, 0, width, height);
+
+            // 桃花落地时跳转
+            if (progress >= 1) {
+                window.location.href = 'main.html';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 持续飘落粒子
+        // ═══════════════════════════════════════════════════════════
+
+        function initDrift() {
+            driftParticles = [];
+            let count = floor(map(windowWidth * windowHeight, 480000, 4000000, 30, 60, true));
+            for (let i = 0; i < count; i++) {
+                driftParticles.push(new DriftPetal(true));
+            }
+        }
+
+        class DriftPetal {
+            constructor(initial = false) {
+                this.reset(initial);
+            }
+
+            reset(initial = false) {
+                this.x = random(-40, width + 40);
+                this.y = initial ? random(-height * 0.3, height * 1.1) : random(-100, -20);
+                this.size = random(6, 16);
+                this.vx = random(-0.2, 0.2);
+                this.vy = random(0.25, 0.7);
+                this.rotation = random(TWO_PI);
+                this.rotSpeed = random(-0.015, 0.015);
+                this.opacity = random(0.15, 0.5);
+                this.colorMix = random();
+                this.swayPhase = random(TWO_PI);
+                this.swaySpeed = random(0.008, 0.02);
+                this.isFull = random() < 0.1;
+            }
+
+            update() {
+                let windX = (noise(this.x * 0.003, this.y * 0.003, frameCount * 0.002) - 0.5) * 2.0;
+                let windY = (noise(this.x * 0.003 + 200, this.y * 0.003 + 200, frameCount * 0.002) - 0.5) * 0.3;
+
+                this.vx += windX * 0.008;
+                this.vx *= 0.978;
+                this.vy += windY * 0.006;
+                this.vy = constrain(this.vy, 0.15, 1.2);
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.rotation += this.rotSpeed + sin(frameCount * this.swaySpeed + this.swayPhase) * 0.006;
+
+                if (this.y > height + 40) this.reset();
+                if (this.x < -60) this.x = width + 50;
+                if (this.x > width + 60) this.x = -50;
+            }
+
+            display(alphaMul) {
+                if (this.isFull) {
+                    drawPeachBlossom(this.x, this.y, this.rotation, this.size * 0.7, this.opacity * alphaMul, false, this.colorMix);
+                } else {
+                    drawSinglePetal(this.x, this.y, this.rotation, this.size, this.opacity * alphaMul, this.colorMix);
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 掉落的桃花 — 从屏幕上方悠然飘落
+        // 时间驱动，精确对齐文字渐隐和页面渐进
+        // ═══════════════════════════════════════════════════════════
+
+        function initFallBlossom() {
+            fallBlossom = new FallBlossom();
+        }
+
+        class FallBlossom {
+            constructor() {
+                this.size = 36;
+                this.startX = width / 2;
+                this.startY = -this.size * 1.2;
+                this.endY = height + this.size * 1.5;
+                this.totalDuration = 2000;
+                this.rotation = -0.05;
+                this.x = this.startX;
+                this.y = this.startY;
+            }
+
+            getY(elapsed) {
+                let t = constrain(elapsed / this.totalDuration, 0, 1);
+                return lerp(this.startY, this.endY, t * t * (3 - 2 * t));
+            }
+
+            getX(elapsed) {
+                return this.startX;
+            }
+
+            update(elapsed) {
+                this.y = this.getY(elapsed);
+                this.x = this.getX(elapsed);
+            }
+
+            getProgress(elapsed) {
+                return constrain((this.y - this.startY) / (this.endY - this.startY), 0, 1);
+            }
+
+            display(alphaMul = 1) {
+                let ctx = drawingContext;
+                let s = this.size;
+                let alpha = alphaMul;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+
+                let grad = ctx.createRadialGradient(
+                    0, -s * 0.25, s * 0.05,
+                    0, -s * 0.35, s * 0.75
+                );
+                grad.addColorStop(0,   `rgba(255, 182, 193, ${alpha})`);
+                grad.addColorStop(1,   `rgba(240, 128, 160, ${alpha * 0.9})`);
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(0, s * 0.12);
+                ctx.bezierCurveTo(
+                     s * 0.28, s * 0.02,
+                     s * 0.45, -s * 0.32,
+                     s * 0.15, -s * 0.5
+                );
+                ctx.bezierCurveTo(
+                     0, -s * 0.6,
+                    -s * 0.15, -s * 0.5,
+                    -s * 0.22, -s * 0.32
+                );
+                ctx.bezierCurveTo(
+                    -s * 0.35, s * 0.0,
+                    -s * 0.15, s * 0.15,
+                     0, s * 0.12
+                );
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.strokeStyle = `rgba(255, 240, 245, ${alpha * 0.4})`;
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                ctx.moveTo(0, s * 0.1);
+                ctx.bezierCurveTo(
+                     s * 0.02, -s * 0.15,
+                     0, -s * 0.4,
+                     0, -s * 0.48
+                );
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 绘制函数
+        // ═══════════════════════════════════════════════════════════
+
+        function drawPeachBlossom(x, y, angle, size, alpha, withStamen, colorMix) {
+            push();
+            translate(x, y);
+            rotate(angle);
+            noStroke();
+
+            let cr = lerp(ACCENT.r, MUTED.r, colorMix * 0.4);
+            let cg = lerp(ACCENT.g, MUTED.g, colorMix * 0.4);
+            let cb = lerp(ACCENT.b, MUTED.b, colorMix * 0.4);
+            fill(cr, cg, cb, alpha * 255);
+
+            let s = size;
+            for (let i = 0; i < 5; i++) {
+                push();
+                rotate(TWO_PI * i / 5);
+                beginShape();
+                vertex(0, -s * 0.2);
+                bezierVertex(
+                     s * 0.4, -s * 0.5,
+                     s * 0.55, -s * 0.15,
+                     s * 0.1,  s * 0.12
+                );
+                bezierVertex(
+                    -s * 0.1,  s * 0.12,
+                    -s * 0.55, -s * 0.15,
+                    0, -s * 0.2
+                );
+                endShape(CLOSE);
+                pop();
+            }
+
+            fill(255, 245, 235, alpha * 200);
+            ellipse(0, 0, s * 0.28, s * 0.28);
+
+            if (withStamen) {
+                fill(180, 90, 60, alpha * 220);
+                ellipse(0, 0, s * 0.1, s * 0.1);
+            }
+
+            pop();
+        }
+
+        function drawSinglePetal(x, y, angle, size, alpha, colorMix) {
+            let ctx = drawingContext;
+            let s = size;
+
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+
+            let grad = ctx.createRadialGradient(
+                0, -s * 0.25, s * 0.05,
+                0, -s * 0.35, s * 0.75
+            );
+            grad.addColorStop(0,   `rgba(232, 168, 146, ${alpha})`);
+            grad.addColorStop(1,   `rgba(217, 119, 87, ${alpha * 0.9})`);
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(0, s * 0.12);
+            ctx.bezierCurveTo(
+                 s * 0.28, s * 0.02,
+                 s * 0.45, -s * 0.32,
+                 s * 0.15, -s * 0.5
+            );
+            ctx.bezierCurveTo(
+                 0, -s * 0.6,
+                -s * 0.15, -s * 0.5,
+                -s * 0.22, -s * 0.32
+            );
+            ctx.bezierCurveTo(
+                -s * 0.35, s * 0.0,
+                -s * 0.15, s * 0.15,
+                 0, s * 0.12
+            );
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = `rgba(250, 249, 245, ${alpha * 0.35})`;
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(0, s * 0.1);
+            ctx.bezierCurveTo(
+                 s * 0.02, -s * 0.15,
+                 0, -s * 0.4,
+                 0, -s * 0.48
+            );
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 文字触发
+        // ═══════════════════════════════════════════════════════════
+
+        function triggerText() {
+            if (textTriggered) return;
+            textTriggered = true;
+
+            document.getElementById('title').classList.add('visible');
+
+            setTimeout(() => {
+                document.getElementById('subtitle').classList.add('visible');
+            }, 1100);
+
+            // 按钮稍晚浮现
+            setTimeout(() => {
+                document.getElementById('startBtnWrap').classList.add('show');
+            }, 1800);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 开始按钮交互
+        // ═══════════════════════════════════════════════════════════
+
+        document.getElementById('startBtn').addEventListener('click', function() {
+            if (phase === 'fall') return;
+
+            this.classList.add('fading');
+
+            // 按钮淡出后开始桃花掉落
+            setTimeout(() => {
+                phase = 'fall';
+                phaseStart = millis();
+                initFallBlossom();
+            }, 300);
+        });
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        // 兜底：6秒后强制显示文字和按钮
+        setTimeout(() => {
+            let title = document.getElementById('title');
+            if (title && !title.classList.contains('visible')) {
+                title.classList.add('visible');
+                document.getElementById('subtitle').classList.add('visible');
+                document.getElementById('startBtnWrap').classList.add('show');
+            }
+        }, 6000);
+    </script>
+</body>
+</html>

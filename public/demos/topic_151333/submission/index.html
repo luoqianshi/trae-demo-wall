@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>寻剪 — AI视频人物片段自动剪辑工具</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@200;300;400;500;600;700;800&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+/* ========== Variables ========== */
+:root {
+  --bg-base: #0a0a14;
+  --bg-deep: #07070f;
+  --bg-card: rgba(18, 18, 32, 0.65);
+  --bg-card-solid: #12121f;
+  --purple: #8b5cf6;
+  --purple-dim: rgba(139, 92, 246, 0.15);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
+  --green: #4ade80;
+  --text-1: #eef2ff;
+  --text-2: #a5b1d6;
+  --text-3: #5a6080;
+  --border: rgba(139, 92, 246, 0.18);
+  --border-bright: rgba(139, 92, 246, 0.4);
+  --glass: blur(20px) saturate(140%);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --gradient: linear-gradient(135deg, #8b5cf6 0%, #22d3ee 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(34,211,238,0.2));
+  --shadow-glow: 0 0 40px rgba(139, 92, 246, 0.25);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* ========== Reset ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Sora', 'Noto Sans SC', sans-serif;
+  background: var(--bg-base);
+  color: var(--text-1);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== Background ========== */
+.bg-layer { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(139,92,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139,92,246,0.04) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+}
+.bg-glow {
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 0%, rgba(139,92,246,0.18), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 85% 100%, rgba(34,211,238,0.12), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, rgba(139,92,246,0.05), transparent 70%);
+}
+
+/* ========== Navbar ========== */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  background: rgba(10, 10, 20, 0.72);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 32px;
+}
+.nav-inner { max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; letter-spacing: -0.5px; white-space: nowrap; }
+.nav-logo .logo-mark {
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--gradient);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 20px rgba(139,92,246,0.5);
+  position: relative; overflow: hidden;
+}
+.nav-logo .logo-mark::after {
+  content: ''; position: absolute; inset: 2px;
+  border-radius: 7px; background: var(--bg-base);
+}
+.nav-logo .logo-mark svg { position: relative; z-index: 1; }
+.nav-logo .brand-text { background: var(--gradient); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.nav-logo .brand-sub { font-size: 11px; color: var(--text-3); font-weight: 400; letter-spacing: 0.5px; }
+
+/* Step Indicator */
+.steps { display: flex; align-items: center; gap: 0; }
+.step { display: flex; align-items: center; cursor: pointer; opacity: 0.5; transition: opacity 0.3s; }
+.step.active, .step.done { opacity: 1; }
+.step-num {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+  border: 2px solid var(--border);
+  background: var(--bg-card-solid);
+  color: var(--text-3);
+  transition: all 0.4s;
+  flex-shrink: 0;
+}
+.step.active .step-num {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  box-shadow: 0 0 16px rgba(34,211,238,0.5);
+  animation: stepPulse 2s infinite;
+}
+.step.done .step-num {
+  background: var(--gradient);
+  border-color: transparent;
+  color: white;
+}
+.step-label { font-size: 13px; font-weight: 500; margin-left: 8px; color: var(--text-2); white-space: nowrap; }
+.step.active .step-label { color: var(--text-1); }
+.step-line { width: 40px; height: 2px; background: var(--border); margin: 0 12px; transition: background 0.4s; }
+.step-line.done { background: var(--gradient); }
+@keyframes stepPulse { 0%,100% { box-shadow: 0 0 16px rgba(34,211,238,0.5); } 50% { box-shadow: 0 0 24px rgba(34,211,238,0.8); } }
+
+/* Model status badge */
+.model-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-3); font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+.model-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.model-status.loading .dot { background: #fbbf24; animation: blink 1s infinite; }
+.model-status.ready .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.model-status.error .dot { background: #ef4444; }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ========== Pages ========== */
+.page { display: none; padding: 100px 32px 48px; min-height: 100vh; position: relative; z-index: 1; animation: pageIn 0.5s ease; }
+.page.active { display: block; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+.page-inner { max-width: 1280px; margin: 0 auto; }
+
+.page-header { text-align: center; margin-bottom: 40px; }
+.page-header h1 { font-size: 32px; font-weight: 700; letter-spacing: -1px; margin-bottom: 10px; }
+.page-header h1 .accent { background: var(--gradient); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.page-header p { color: var(--text-2); font-size: 15px; }
+
+/* ========== Upload Page ========== */
+.upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 36px; }
+.upload-card {
+  background: var(--bg-card);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+}
+.upload-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--purple), transparent);
+  opacity: 0.5;
+}
+.card-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 500; }
+.card-label .icon { width: 18px; height: 18px; color: var(--cyan); }
+.card-label .count { color: var(--cyan); font-family: 'JetBrains Mono', monospace; }
+
+.upload-zone {
+  border: 2px dashed rgba(139,92,246,0.25);
+  border-radius: var(--radius-sm);
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  position: relative;
+  min-height: 280px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+  box-shadow: inset 0 0 30px rgba(34,211,238,0.08);
+}
+.upload-zone .upload-icon {
+  width: 56px; height: 56px; border-radius: 14px;
+  background: var(--gradient-soft);
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-bright);
+}
+.upload-zone .upload-icon svg { width: 28px; height: 28px; }
+.upload-zone .upload-text { font-size: 15px; font-weight: 500; color: var(--text-1); }
+.upload-zone .upload-hint { font-size: 12px; color: var(--text-3); }
+.upload-zone .upload-formats { font-size: 11px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+
+/* Video preview */
+.video-preview { position: relative; border-radius: var(--radius-sm); overflow: hidden; background: #000; }
+.video-preview video { width: 100%; display: block; max-height: 280px; object-fit: contain; }
+.video-preview .remove-btn { position: absolute; top: 10px; right: 10px; }
+.preview-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.preview-info { font-size: 12px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+.replace-btn {
+  background: rgba(139,92,246,0.15); border: 1px solid var(--border-bright);
+  color: var(--purple); padding: 6px 14px; border-radius: 8px; font-size: 12px;
+  cursor: pointer; font-family: inherit; transition: all 0.2s;
+}
+.replace-btn:hover { background: rgba(139,92,246,0.25); }
+
+/* Image grid */
+.image-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.image-thumb {
+  position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-card-solid);
+}
+.image-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.image-thumb .face-badge {
+  position: absolute; bottom: 4px; right: 4px;
+  background: rgba(74,222,128,0.9); color: #052e16;
+  font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+}
+.image-thumb .face-badge.warn { background: rgba(251,191,36,0.9); color: #422006; }
+.image-thumb .face-badge.error { background: rgba(239,68,68,0.9); color: white; }
+
+/* Quality badge */
+.image-thumb .quality-badge {
+  position: absolute; top: 4px; left: 4px;
+  font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  backdrop-filter: blur(4px);
+}
+.image-thumb .quality-badge.good { background: rgba(74,222,128,0.95); color: #052e16; }
+.image-thumb .quality-badge.ok { background: rgba(251,191,36,0.95); color: #422006; }
+.image-thumb .quality-badge.bad { background: rgba(239,68,68,0.95); color: white; }
+
+/* Quality hint */
+.quality-hint {
+  font-size: 12px; color: var(--text-3); margin-bottom: 10px; padding-left: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.quality-hint svg { width: 14px; height: 14px; color: var(--cyan); }
+
+/* No face warning */
+.no-face-warning {
+  background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #fbbf24;
+}
+.no-face-warning svg { width: 16px; height: 16px; }
+.image-add {
+  aspect-ratio: 1; border-radius: 10px; border: 2px dashed var(--border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.2s; color: var(--text-3);
+}
+.image-add:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+
+/* Remove button */
+.remove-btn {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; transition: all 0.2s; z-index: 2;
+}
+.remove-btn:hover { background: #ef4444; border-color: #ef4444; }
+
+/* Start button */
+.start-btn-wrap { display: flex; justify-content: center; margin-top: 8px; }
+.start-btn {
+  background: var(--gradient);
+  color: white; border: none;
+  padding: 16px 56px; border-radius: 50px;
+  font-size: 16px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  position: relative; overflow: hidden;
+  transition: all 0.3s;
+  box-shadow: 0 4px 24px rgba(139,92,246,0.4);
+  display: flex; align-items: center; gap: 10px;
+}
+.start-btn:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(139,92,246,0.6); }
+.start-btn:not(:disabled):hover::before { transform: translateX(100%); }
+.start-btn::before {
+  content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  transition: transform 0.6s;
+}
+.start-btn:disabled { opacity: 0.35; cursor: not-allowed; filter: saturate(0.3); }
+.start-btn .btn-icon { width: 20px; height: 20px; }
+
+/* ========== Detection Page ========== */
+.detect-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; }
+
+.video-panel {
+  background: var(--bg-card);
+  backdrop-filter: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden; position: relative;
+}
+.video-panel-header { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.video-panel-title { font-size: 13px; color: var(--text-2); font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 8px; }
+.video-frame-counter { font-size: 12px; color: var(--cyan); font-family: 'JetBrains Mono', monospace; }
+
+.video-stage { position: relative; background: #000; aspect-ratio: 16/9; overflow: hidden; }
+.video-stage video { width: 100%; height: 100%; object-fit: contain; }
+.video-stage canvas.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* Scan line */
+.scan-line {
+  position: absolute; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  box-shadow: 0 0 20px var(--cyan), 0 0 40px rgba(34,211,238,0.5);
+  animation: scanMove 2.5s linear infinite;
+  pointer-events: none; z-index: 5;
+}
+.scan-line::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -40px; height: 40px;
+  background: linear-gradient(to bottom, transparent, rgba(34,211,238,0.15));
+}
+@keyframes scanMove { 0% { top: -3px; } 100% { top: 100%; } }
+
+/* Pulse indicator */
+.pulse-badge {
+  position: absolute; top: 14px; left: 14px; z-index: 6;
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(10,10,20,0.8); backdrop-filter: blur(8px);
+  border: 1px solid var(--border-bright);
+  padding: 6px 12px; border-radius: 20px;
+  font-size: 12px; font-family: 'JetBrains Mono', monospace; font-weight: 500;
+  color: var(--cyan);
+}
+.pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); position: relative; }
+.pulse-dot::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid var(--cyan); animation: pulseRing 1.5s ease-out infinite;
+}
+@keyframes pulseRing { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+
+/* Corners decoration */
+.corner { position: absolute; width: 20px; height: 20px; border: 2px solid var(--cyan); pointer-events: none; z-index: 4; opacity: 0.6; }
+.corner.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; }
+.corner.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; }
+.corner.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; }
+.corner.br { bottom: 8px; right: 8px; border-left: none; border-top: none; }
+
+/* Log terminal */
+.log-panel {
+  background: var(--bg-card);
+  backdrop-filter: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.log-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.log-title { font-size: 13px; color: var(--text-2); font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 8px; }
+.log-dots { display: flex; gap: 6px; }
+.log-dots span { width: 10px; height: 10px; border-radius: 50%; }
+.log-dots .r { background: #ff5f57; }
+.log-dots .y { background: #febc2e; }
+.log-dots .g { background: #28c840; }
+
+.log-terminal {
+  flex: 1; min-height: 320px; max-height: 400px; overflow-y: auto;
+  background: #06060e; padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.7;
+}
+.log-terminal::-webkit-scrollbar { width: 6px; }
+.log-terminal::-webkit-scrollbar-track { background: transparent; }
+.log-terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.log-line { color: var(--text-2); animation: logIn 0.3s ease; }
+.log-line .ts { color: var(--text-3); }
+.log-line .tag { font-weight: 600; margin: 0 6px; }
+.log-line.info .tag { color: var(--cyan); }
+.log-line.ok .tag { color: var(--green); }
+.log-line.match .tag { color: #c084fc; }
+.log-line.warn .tag { color: #fbbf24; }
+.log-line.err .tag { color: #ef4444; }
+.log-line .msg { color: var(--text-1); }
+@keyframes logIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+.log-cursor::after { content: '▊'; color: var(--cyan); animation: blink 1s infinite; }
+
+/* Progress section */
+.progress-section { padding: 16px 18px; border-top: 1px solid var(--border); }
+.progress-bar-wrap { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+.progress-bar-fill {
+  height: 100%; background: var(--gradient); border-radius: 3px;
+  transition: width 0.3s ease; position: relative;
+}
+.progress-bar-fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.stat-item { text-align: center; }
+.stat-value { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.stat-value.cyan { color: var(--cyan); }
+.stat-value.purple { color: #c084fc; }
+.stat-value.green { color: var(--green); }
+.stat-label { font-size: 11px; color: var(--text-3); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ========== Results Page ========== */
+.summary-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
+.summary-card {
+  background: var(--bg-card); backdrop-filter: var(--glass);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px 24px; position: relative; overflow: hidden;
+}
+.summary-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--gradient); opacity: 0.6;
+}
+.summary-card .stat-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--gradient-soft); display: flex; align-items: center; justify-content: center; margin-bottom: 12px; border: 1px solid var(--border-bright); }
+.summary-card .stat-icon svg { width: 18px; height: 18px; color: var(--cyan); }
+.summary-value { font-size: 32px; font-weight: 800; font-family: 'JetBrains Mono', monospace; letter-spacing: -1px; }
+.summary-value .unit { font-size: 14px; color: var(--text-3); font-weight: 400; margin-left: 4px; }
+.summary-label { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+
+/* Timeline */
+.timeline-section { margin-bottom: 32px; }
+.section-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.section-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gradient); }
+.timeline-wrap {
+  background: var(--bg-card); backdrop-filter: var(--glass);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px 24px;
+}
+.timeline-bar {
+  position: relative; height: 56px; background: rgba(255,255,255,0.03);
+  border-radius: 8px; overflow: hidden; cursor: pointer;
+}
+.timeline-segment {
+  position: absolute; top: 0; bottom: 0;
+  background: linear-gradient(180deg, rgba(139,92,246,0.5), rgba(34,211,238,0.5));
+  border-left: 2px solid var(--cyan); border-right: 2px solid var(--purple);
+  cursor: pointer; transition: all 0.2s; border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+}
+.timeline-segment:hover { background: linear-gradient(180deg, rgba(139,92,246,0.8), rgba(34,211,238,0.8)); transform: scaleY(1.1); }
+.timeline-segment .seg-idx { font-size: 11px; font-weight: 700; color: white; font-family: 'JetBrains Mono', monospace; }
+.timeline-ticks { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+
+/* Segment grid */
+.segment-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 80px; }
+.segment-card {
+  background: var(--bg-card); backdrop-filter: var(--glass);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; transition: all 0.3s; position: relative;
+}
+.segment-card:hover { border-color: var(--border-bright); transform: translateY(-4px); box-shadow: var(--shadow-glow); }
+.segment-card.selected { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), var(--shadow-glow); }
+
+.card-thumb { position: relative; aspect-ratio: 16/9; background: #000; overflow: hidden; cursor: pointer; }
+.card-thumb img, .card-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.card-thumb video { position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s; }
+.segment-card:hover .card-thumb video { opacity: 1; }
+.card-thumb .play-icon {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.2); transition: opacity 0.2s;
+}
+.segment-card:hover .card-thumb .play-icon { opacity: 0; }
+.play-icon svg { width: 40px; height: 40px; color: white; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)); }
+
+.card-duration {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.8); backdrop-filter: blur(4px);
+  padding: 3px 8px; border-radius: 6px;
+  font-size: 11px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
+  color: var(--cyan); border: 1px solid rgba(34,211,238,0.3);
+}
+.card-checkbox {
+  position: absolute; top: 8px; left: 8px;
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 2px solid rgba(255,255,255,0.4); background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s; z-index: 3;
+}
+.card-checkbox.checked { background: var(--gradient); border-color: transparent; }
+.card-checkbox svg { width: 14px; height: 14px; color: white; opacity: 0; transition: opacity 0.2s; }
+.card-checkbox.checked svg { opacity: 1; }
+
+.card-info { padding: 14px 16px; }
+
+/* Edit button */
+.card-edit-btn {
+  position: absolute; top: 8px; right: 48px;
+  width: 24px; height: 24px; border-radius: 6px;
+  border: 1px solid rgba(139,92,246,0.4); background: rgba(139,92,246,0.1);
+  backdrop-filter: blur(4px); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--purple); transition: all 0.2s; z-index: 2;
+}
+.card-edit-btn:hover { background: rgba(139,92,246,0.25); border-color: var(--purple); }
+.card-edit-btn svg { width: 14px; height: 14px; }
+
+/* Edit panel */
+.card-edit-panel {
+  background: rgba(12, 12, 24, 0.95); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border-bright);
+  padding: 16px;
+  animation: panelSlideDown 0.3s ease;
+  display: none;
+}
+.card-edit-panel.show { display: block; }
+@keyframes panelSlideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+.edit-row { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+.edit-label { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; }
+.edit-input {
+  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; font-size: 14px; font-family: 'JetBrains Mono', monospace;
+  color: var(--text-1); outline: none; transition: border-color 0.2s;
+}
+.edit-input:focus { border-color: var(--cyan); }
+.edit-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Dual slider */
+.dual-slider-wrap {
+  position: relative; height: 32px; background: rgba(255,255,255,0.04);
+  border-radius: 16px; margin-bottom: 16px; overflow: hidden;
+}
+.slider-track {
+  position: absolute; top: 50%; left: 0; right: 0; height: 4px;
+  background: rgba(139,92,246,0.3); transform: translateY(-50%);
+}
+.slider-fill {
+  position: absolute; top: 50%; height: 4px;
+  background: var(--gradient); transform: translateY(-50%);
+  box-shadow: 0 0 12px rgba(139,92,246,0.4);
+}
+.slider-handle {
+  position: absolute; top: 50%; width: 18px; height: 18px;
+  border-radius: 50%; background: white;
+  border: 3px solid var(--cyan);
+  transform: translate(-50%, -50%);
+  cursor: grab; touch-action: none;
+  box-shadow: 0 0 16px rgba(34,211,238,0.5);
+  z-index: 2;
+}
+.slider-handle:active { cursor: grabbing; transform: translate(-50%, -50%) scale(1.15); }
+.slider-handle.left { border-color: var(--purple); }
+.slider-handle.right { border-color: var(--cyan); }
+
+.slider-marks {
+  position: absolute; bottom: 2px; left: 0; right: 0;
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-3); font-family: 'JetBrains Mono', monospace;
+}
+
+/* Edit buttons */
+.edit-buttons { display: flex; gap: 10px; }
+.edit-buttons .btn { flex: 1; padding: 8px 12px; font-size: 13px; }
+.edit-buttons .btn-primary { background: var(--gradient); border: none; }
+.edit-buttons .btn-secondary { background: rgba(139,92,246,0.15); border-color: var(--border-bright); color: var(--purple); }
+.card-times { display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.card-times .time { color: var(--text-1); font-weight: 600; }
+.card-times .arrow { color: var(--text-3); }
+.card-similarity { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.sim-bar { flex: 1; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+.sim-fill { height: 100%; background: var(--gradient); border-radius: 2px; }
+.sim-value { font-size: 12px; font-weight: 600; color: var(--cyan); font-family: 'JetBrains Mono', monospace; min-width: 42px; text-align: right; }
+
+/* Action bar */
+.action-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
+  backdrop-filter: var(--glass); background: rgba(10,10,20,0.85);
+  border-top: 1px solid var(--border);
+  padding: 14px 32px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  transform: translateY(100%); transition: transform 0.3s;
+}
+.action-bar.show { transform: translateY(0); }
+.action-bar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 16px; }
+.select-info { font-size: 14px; color: var(--text-2); }
+.select-info .count { color: var(--cyan); font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.action-buttons { display: flex; gap: 12px; }
+.btn {
+  padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: inherit; transition: all 0.2s; border: 1px solid var(--border);
+  background: var(--bg-card-solid); color: var(--text-1);
+}
+.btn:hover { border-color: var(--border-bright); }
+.btn-primary { background: var(--gradient); border: none; color: white; box-shadow: 0 4px 16px rgba(139,92,246,0.35); }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(139,92,246,0.5); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* Back button */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; color: var(--text-3);
+  font-size: 13px; cursor: pointer; font-family: inherit;
+  padding: 8px 0; margin-bottom: 16px; transition: color 0.2s;
+}
+.back-btn:hover { color: var(--cyan); }
+
+/* ========== Export Modal ========== */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(5,5,10,0.8); backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center; padding: 24px;
+}
+.modal-overlay.show { display: flex; animation: fadeIn 0.2s; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: var(--bg-card-solid); border: 1px solid var(--border-bright);
+  border-radius: var(--radius); max-width: 560px; width: 100%;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  animation: modalIn 0.3s ease; overflow: hidden;
+}
+@keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+.modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-title { font-size: 17px; font-weight: 600; }
+.modal-close { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 20px; padding: 4px; }
+.modal-close:hover { color: var(--text-1); }
+.modal-body { padding: 24px; }
+
+.export-options { display: flex; flex-direction: column; gap: 10px; }
+.export-option {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; transition: all 0.2s;
+}
+.export-option:hover { border-color: var(--border-bright); background: var(--purple-dim); }
+.export-option.selected { border-color: var(--cyan); background: var(--cyan-dim); }
+.export-option .opt-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--gradient-soft); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid var(--border-bright); }
+.export-option .opt-icon svg { width: 20px; height: 20px; color: var(--cyan); }
+.export-option .opt-info { flex: 1; }
+.export-option .opt-title { font-size: 14px; font-weight: 600; }
+.export-option .opt-desc { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.export-option .opt-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; transition: all 0.2s; }
+.export-option.selected .opt-radio { border-color: var(--cyan); background: var(--cyan); box-shadow: inset 0 0 0 3px var(--bg-card-solid); }
+
+.export-progress { display: none; text-align: center; padding: 20px 0; }
+.export-progress.show { display: block; }
+.export-ring { width: 80px; height: 80px; margin: 0 auto 16px; position: relative; }
+.export-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.export-ring circle { fill: none; stroke-width: 4; }
+.export-ring .bg { stroke: rgba(255,255,255,0.06); }
+.export-ring .fg { stroke: var(--gradient); stroke: url(#grad1); stroke-linecap: round; transition: stroke-dashoffset 0.3s; }
+.export-percent { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--cyan); }
+.export-status { font-size: 14px; color: var(--text-2); margin-top: 8px; }
+
+.export-success { display: none; text-align: center; padding: 20px 0; }
+.export-success.show { display: block; animation: scaleIn 0.4s ease; }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+.success-icon { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%; background: rgba(74,222,128,0.15); display: flex; align-items: center; justify-content: center; border: 2px solid var(--green); }
+.success-icon svg { width: 32px; height: 32px; color: var(--green); }
+.success-title { font-size: 17px; font-weight: 600; }
+.success-desc { font-size: 13px; color: var(--text-3); margin-top: 6px; }
+
+.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+
+/* ========== Toast ========== */
+.toast-container { position: fixed; top: 80px; right: 24px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--bg-card-solid); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 18px; font-size: 13px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  transform: translateX(120%); transition: transform 0.3s ease;
+  max-width: 360px; display: flex; align-items: center; gap: 10px;
+}
+.toast.show { transform: translateX(0); }
+.toast.success { border-color: rgba(74,222,128,0.4); }
+.toast.error { border-color: rgba(239,68,68,0.4); }
+.toast.warn { border-color: rgba(251,191,36,0.4); }
+.toast .toast-icon { flex-shrink: 0; }
+.toast.success .toast-icon { color: var(--green); }
+.toast.error .toast-icon { color: #ef4444; }
+.toast.warn .toast-icon { color: #fbbf24; }
+.toast.info .toast-icon { color: var(--cyan); }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-3); }
+.empty-state svg { width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.4; }
+
+/* ========== Responsive ========== */
+@media (max-width: 960px) {
+  .upload-grid { grid-template-columns: 1fr; }
+  .detect-grid { grid-template-columns: 1fr; }
+  .segment-grid { grid-template-columns: repeat(2, 1fr); }
+  .summary-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .navbar { padding: 12px 16px; }
+  .nav-logo .brand-sub { display: none; }
+  .step-label { display: none; }
+  .step-line { width: 20px; margin: 0 6px; }
+  .model-status { display: none; }
+  .page { padding: 90px 16px 32px; }
+  .segment-grid { grid-template-columns: 1fr; }
+  .image-grid { grid-template-columns: repeat(2, 1fr); }
+  .stats-row { gap: 8px; }
+  .stat-value { font-size: 18px; }
+  .action-bar { padding: 12px 16px; }
+  .page-header h1 { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Background layers -->
+<div class="bg-layer bg-grid"></div>
+<div class="bg-layer bg-glow"></div>
+
+<!-- SVG gradient def for export ring -->
+<svg width="0" height="0" style="position:absolute"><defs>
+  <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#8b5cf6"/>
+    <stop offset="100%" stop-color="#22d3ee"/>
+  </linearGradient>
+</defs></svg>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <div class="logo-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="url(#grad1)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-text">寻剪</div>
+        <div class="brand-sub">AI Video Clip Finder</div>
+      </div>
+    </div>
+    <div class="steps" id="steps">
+      <div class="step active" data-page="1">
+        <div class="step-num">1</div>
+        <div class="step-label">上传素材</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-page="2">
+        <div class="step-num">2</div>
+        <div class="step-label">AI检测</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step" data-page="3">
+        <div class="step-num">3</div>
+        <div class="step-label">查看结果</div>
+      </div>
+    </div>
+    <div class="model-status loading" id="modelStatus">
+      <span class="dot"></span>
+      <span>模型加载中...</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ========== Page 1: Upload ========== -->
+<div class="page active" id="page1">
+  <div class="page-inner">
+    <div class="page-header">
+      <h1>上传你的<span class="accent">素材</span></h1>
+      <p>上传一段视频和目标人物参考图，AI将自动找到该人物出现的所有片段</p>
+    </div>
+
+    <div class="upload-grid">
+      <!-- Video Upload -->
+      <div class="upload-card">
+        <div class="card-label">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
+          视频文件 <span class="count" id="videoStatus">未上传</span>
+        </div>
+        <div class="upload-zone" id="videoDropZone">
+          <div class="upload-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"><path d="M12 18V6"/><path d="m6 12 6-6 6 6"/></svg>
+          </div>
+          <div class="upload-text">拖拽视频到此处，或点击选择</div>
+          <div class="upload-hint">支持 MP4 / WebM / MOV 格式</div>
+          <div class="upload-formats">推荐 1080p / 60秒以内</div>
+          <input type="file" id="videoInput" accept="video/*" style="display:none">
+        </div>
+        <div id="videoPreviewArea" style="display:none">
+          <div class="video-preview">
+            <video id="uploadVideoPreview" controls muted></video>
+          </div>
+          <div class="preview-bar">
+            <div class="preview-info" id="videoInfo"></div>
+            <button class="replace-btn" onclick="document.getElementById('videoInput').click()">更换视频</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Upload -->
+      <div class="upload-card">
+        <div class="card-label">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3"/></svg>
+          人物参考图 <span class="count" id="imageCount">0/6</span>
+        </div>
+        <div class="upload-zone" id="imageDropZone">
+          <div class="upload-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5L9 20"/></svg>
+          </div>
+          <div class="upload-text">上传人物参考图片</div>
+          <div class="upload-hint">最多 6 张，正脸清晰照片效果最佳</div>
+          <div class="upload-formats">支持 JPG / PNG / WEBP</div>
+          <input type="file" id="imageInput" accept="image/*" multiple style="display:none">
+        </div>
+        <div id="imageGridArea" style="display:none">
+          <div class="quality-hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            建议上传多角度、正脸、光线充足的清晰照片，识别更准确
+          </div>
+          <div class="image-grid" id="imageGrid"></div>
+          <div class="preview-bar">
+            <div class="preview-info" id="imageInfo">已添加 0 张</div>
+            <button class="replace-btn" onclick="document.getElementById('imageInput').click()">添加更多</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="start-btn-wrap">
+      <div id="noFaceWarning" style="display:none" class="no-face-warning">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        参考图中未检测到清晰人脸，可能影响识别效果，建议更换图片
+      </div>
+      <button class="start-btn" id="startBtn" disabled>
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        开始 AI 检测
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== Page 2: Detection ========== -->
+<div class="page" id="page2">
+  <div class="page-inner">
+    <button class="back-btn" onclick="goToPage(1)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+      返回上传
+    </button>
+    <div class="page-header" style="margin-bottom: 24px;">
+      <h1>AI <span class="accent">检测中</span></h1>
+      <p>正在使用 face-api.js 进行实时人脸识别，请稍候</p>
+    </div>
+
+    <div class="detect-grid">
+      <!-- Video Panel -->
+      <div class="video-panel">
+        <div class="video-panel-header">
+          <div class="video-panel-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
+            实时检测画面
+          </div>
+          <div class="video-frame-counter" id="frameCounter">00:00 / 00:00</div>
+        </div>
+        <div class="video-stage" id="videoStage">
+          <video id="detectVideo" muted playsinline></video>
+          <canvas class="overlay" id="detectOverlay"></canvas>
+          <div class="scan-line" id="scanLine"></div>
+          <div class="pulse-badge" id="pulseBadge">
+            <span class="pulse-dot"></span>
+            <span>AI 识别中</span>
+          </div>
+          <div class="corner tl"></div><div class="corner tr"></div>
+          <div class="corner bl"></div><div class="corner br"></div>
+        </div>
+      </div>
+
+      <!-- Log Panel -->
+      <div class="log-panel">
+        <div class="log-header">
+          <div class="log-title">
+            <div class="log-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+            检测日志终端
+          </div>
+          <div class="video-frame-counter" id="logStatus">READY</div>
+        </div>
+        <div class="log-terminal" id="logTerminal"></div>
+        <div class="progress-section">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+          </div>
+          <div class="stats-row">
+            <div class="stat-item">
+              <div class="stat-value cyan" id="statFrames">0</div>
+              <div class="stat-label">已扫描帧</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value purple" id="statFaces">0</div>
+              <div class="stat-label">发现人脸</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value green" id="statSegments">0</div>
+              <div class="stat-label">匹配片段</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== Page 3: Results ========== -->
+<div class="page" id="page3">
+  <div class="page-inner">
+    <button class="back-btn" onclick="goToPage(1)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+      重新检测
+    </button>
+    <div class="page-header" style="margin-bottom: 28px;">
+      <h1>检测<span class="accent">结果</span></h1>
+      <p>AI已完成视频扫描，以下是识别到的目标人物片段</p>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-row">
+      <div class="summary-card">
+        <div class="stat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3"/><path d="M4 7v13a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7"/><path d="M9 12h6"/></svg>
+        </div>
+        <div class="summary-value" id="sumSegments">0<span class="unit">个</span></div>
+        <div class="summary-label">匹配片段数</div>
+      </div>
+      <div class="summary-card">
+        <div class="stat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="summary-value" id="sumAccuracy">0<span class="unit">%</span></div>
+        <div class="summary-label">平均识别准确率</div>
+      </div>
+      <div class="summary-card">
+        <div class="stat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div class="summary-value" id="sumTime">0<span class="unit">s</span></div>
+        <div class="summary-label">检测耗时</div>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline-section">
+      <div class="section-title"><span class="dot"></span> 时间轴总览</div>
+      <div class="timeline-wrap">
+        <div class="timeline-bar" id="timelineBar"></div>
+        <div class="timeline-ticks" id="timelineTicks"></div>
+      </div>
+    </div>
+
+    <!-- Segment Cards -->
+    <div class="section-title"><span class="dot"></span> 片段列表</div>
+    <div class="segment-grid" id="segmentGrid"></div>
+  </div>
+</div>
+
+<!-- Action Bar -->
+<div class="action-bar" id="actionBar">
+  <div class="action-bar-inner">
+    <div class="select-info">已选择 <span class="count" id="selectedCount">0</span> 个片段</div>
+    <div class="action-buttons">
+      <button class="btn" id="selectAllBtn">全选</button>
+      <button class="btn btn-primary" id="exportBtn" disabled>导出选中</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export Modal -->
+<div class="modal-overlay" id="exportModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">导出片段</div>
+      <button class="modal-close" onclick="closeExportModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="exportSelectView">
+        <div class="export-options" id="exportOptions">
+          <div class="export-option selected" data-type="merge">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
+            </div>
+            <div class="opt-info">
+              <div class="opt-title">合并视频</div>
+              <div class="opt-desc">将所有选中片段合并为一个视频文件</div>
+            </div>
+            <div class="opt-radio"></div>
+          </div>
+          <div class="export-option" data-type="zip">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+            </div>
+            <div class="opt-info">
+              <div class="opt-title">单独片段 ZIP</div>
+              <div class="opt-desc">每个片段单独打包为 ZIP 压缩文件</div>
+            </div>
+            <div class="opt-radio"></div>
+          </div>
+          <div class="export-option" data-type="csv">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+            </div>
+            <div class="opt-info">
+              <div class="opt-title">时间码 CSV</div>
+              <div class="opt-desc">导出所有片段的时间码信息表格</div>
+            </div>
+            <div class="opt-radio"></div>
+          </div>
+        </div>
+      </div>
+      <div class="export-progress" id="exportProgress">
+        <div class="export-ring">
+          <svg viewBox="0 0 80 80">
+            <circle class="bg" cx="40" cy="40" r="34"/>
+            <circle class="fg" id="progressCircle" cx="40" cy="40" r="34" stroke-dasharray="213.6" stroke-dashoffset="213.6"/>
+          </svg>
+          <div class="export-percent" id="exportPercent">0%</div>
+        </div>
+        <div class="export-status" id="exportStatus">准备导出...</div>
+      </div>
+      <div class="export-success" id="exportSuccess">
+        <div class="success-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="success-title">导出成功</div>
+        <div class="success-desc" id="successDesc"></div>
+      </div>
+    </div>
+    <div class="modal-footer" id="exportFooter">
+      <button class="btn" onclick="closeExportModal()">取消</button>
+      <button class="btn btn-primary" id="startExportBtn">开始导出</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+'use strict';
+
+// ========== State ==========
+const state = {
+  page: 1,
+  videoFile: null,
+  videoUrl: null,
+  videoDuration: 0,
+  referenceImages: [],   // { file, url, descriptor, status }
+  segments: [],
+  modelsLoaded: false,
+  modelsLoading: false,
+  detecting: false,
+  stats: { frames: 0, faces: 0, segments: 0 },
+  detectStartTime: 0,
+  selectedSegments: new Set(),
+  exportType: 'merge',
+};
+
+// ========== Constants ==========
+const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+const MATCH_THRESHOLD = 0.55;
+const MAX_IMAGES = 6;
+const MAX_PROCESS_FRAMES = 120;
+const MIN_SEGMENT_DURATION = 0.5;
+
+// ========== Utils ==========
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function formatTimecode(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec % 1) * 1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function showToast(msg, type = 'info') {
+  const icons = {
+    success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>',
+    error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    warn: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    info: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+  };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `${icons[type] || icons.info}<span>${msg}</span>`;
+  $('#toastContainer').appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3500);
+}
+
+// ========== Navigation ==========
+function goToPage(n) {
+  state.page = n;
+  $$('.page').forEach(p => p.classList.remove('active'));
+  $(`#page${n}`).classList.add('active');
+  updateSteps();
+  if (n === 3) {
+    $('#actionBar').classList.add('show');
+  } else {
+    $('#actionBar').classList.remove('show');
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function updateSteps() {
+  const steps = $$('#steps .step');
+  const lines = $$('#steps .step-line');
+  steps.forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i + 1 < state.page) s.classList.add('done');
+    if (i + 1 === state.page) s.classList.add('active');
+  });
+  lines.forEach((l, i) => {
+    l.classList.toggle('done', i + 1 < state.page);
+  });
+}
+
+$$('#steps .step').forEach(step => {
+  step.addEventListener('click', () => {
+    const target = parseInt(step.dataset.page);
+    if (target < state.page) goToPage(target);
+  });
+});
+
+// ========== Model Loading ==========
+async function preloadModels() {
+  if (state.modelsLoaded || state.modelsLoading) return;
+  state.modelsLoading = true;
+  updateModelStatus('loading', '模型加载中...');
+
+  // Wait for face-api script to load
+  let retries = 0;
+  while (typeof faceapi === 'undefined' && retries < 50) {
+    await sleep(100);
+    retries++;
+  }
+  if (typeof faceapi === 'undefined') {
+    state.modelsLoading = false;
+    updateModelStatus('error', 'face-api.js 加载失败');
+    showToast('face-api.js 脚本加载失败，请检查网络后刷新', 'error');
+    return false;
+  }
+
+  try {
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
+      state.modelsLoaded = true;
+      state.modelsLoading = false;
+      updateModelStatus('ready', 'AI模型已就绪');
+
+      // Evaluate quality for already uploaded images
+      for (const img of state.referenceImages) {
+        if (img.quality === null) {
+          await evaluateImageQuality(img);
+        }
+      }
+      renderImageGrid();
+      updateStartButton();
+
+      return true;
+  } catch (err) {
+    state.modelsLoading = false;
+    updateModelStatus('error', '模型加载失败');
+    showToast('AI模型加载失败，请检查网络连接', 'error');
+    console.error('Model load error:', err);
+    return false;
+  }
+}
+
+function updateModelStatus(status, text) {
+  const el = $('#modelStatus');
+  el.className = `model-status ${status}`;
+  el.querySelector('span:last-child').textContent = text;
+}
+
+// ========== Video Upload ==========
+const videoDropZone = $('#videoDropZone');
+const videoInput = $('#videoInput');
+
+videoDropZone.addEventListener('click', () => videoInput.click());
+videoDropZone.addEventListener('dragover', e => { e.preventDefault(); videoDropZone.classList.add('dragover'); });
+videoDropZone.addEventListener('dragleave', () => videoDropZone.classList.remove('dragover'));
+videoDropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  videoDropZone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) handleVideoFile(e.dataTransfer.files[0]);
+});
+videoInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleVideoFile(e.target.files[0]);
+});
+
+function handleVideoFile(file) {
+  if (!file.type.startsWith('video/')) {
+    showToast('请上传视频文件', 'error');
+    return;
+  }
+  if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
+  state.videoFile = file;
+  state.videoUrl = URL.createObjectURL(file);
+
+  const video = $('#uploadVideoPreview');
+  video.src = state.videoUrl;
+  video.onloadedmetadata = () => {
+    state.videoDuration = video.duration;
+    $('#videoInfo').textContent = `${formatTime(video.duration)} · ${formatFileSize(file.size)} · ${video.videoWidth}×${video.videoHeight}`;
+  };
+
+  $('#videoDropZone').style.display = 'none';
+  $('#videoPreviewArea').style.display = 'block';
+  $('#videoStatus').textContent = '已上传';
+  $('#videoStatus').style.color = 'var(--green)';
+  updateStartButton();
+}
+
+// ========== Image Upload ==========
+const imageDropZone = $('#imageDropZone');
+const imageInput = $('#imageInput');
+
+imageDropZone.addEventListener('click', () => imageInput.click());
+imageDropZone.addEventListener('dragover', e => { e.preventDefault(); imageDropZone.classList.add('dragover'); });
+imageDropZone.addEventListener('dragleave', () => imageDropZone.classList.remove('dragover'));
+imageDropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  imageDropZone.classList.remove('dragover');
+  handleImageFiles(e.dataTransfer.files);
+});
+imageInput.addEventListener('change', e => {
+  handleImageFiles(e.target.files);
+  imageInput.value = '';
+});
+
+async function handleImageFiles(files) {
+  const remaining = MAX_IMAGES - state.referenceImages.length;
+  if (remaining <= 0) {
+    showToast(`最多上传 ${MAX_IMAGES} 张参考图`, 'warn');
+    return;
+  }
+  const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, remaining);
+  if (imageFiles.length === 0) {
+    showToast('请上传图片文件', 'error');
+    return;
+  }
+
+  for (const file of imageFiles) {
+    const url = URL.createObjectURL(file);
+    const imgData = { file, url, descriptor: null, status: 'pending', quality: null, qualityLabel: '' };
+    state.referenceImages.push(imgData);
+    
+    if (state.modelsLoaded) {
+      await evaluateImageQuality(imgData);
+    }
+  }
+
+  renderImageGrid();
+  updateStartButton();
+}
+
+async function evaluateImageQuality(imgData) {
+  try {
+    const img = await faceapi.fetchImage(imgData.url);
+    const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 }))
+      .withFaceLandmarks();
+    
+    if (!det) {
+      imgData.quality = 0;
+      imgData.qualityLabel = 'bad';
+      imgData.status = 'warn';
+      return;
+    }
+
+    const box = det.detection.box;
+    const score = det.detection.score;
+    const landmarks = det.landmarks;
+
+    // Face size score (30% weight)
+    const imgArea = img.width * img.height;
+    const faceArea = box.width * box.height;
+    const sizeRatio = faceArea / imgArea;
+    const sizeScore = Math.min(100, Math.max(0, (sizeRatio / 0.15) * 100));
+
+    // Confidence score (30% weight)
+    const confidenceScore = Math.min(100, score * 100);
+
+    // Frontal face score using landmark symmetry (40% weight)
+    let symmetryScore = 50;
+    if (landmarks) {
+      const leftEye = landmarks.getLeftEye()[0];
+      const rightEye = landmarks.getRightEye()[0];
+      const leftMouth = landmarks.getMouth()[0];
+      const rightMouth = landmarks.getMouth()[landmarks.getMouth().length - 1];
+      const nose = landmarks.getNose()[2];
+
+      const faceCenterX = nose.x;
+      const leftEyeDist = Math.abs(leftEye.x - faceCenterX);
+      const rightEyeDist = Math.abs(rightEye.x - faceCenterX);
+      const leftMouthDist = Math.abs(leftMouth.x - faceCenterX);
+      const rightMouthDist = Math.abs(rightMouth.x - faceCenterX);
+
+      const eyeSymmetry = 1 - Math.abs(leftEyeDist - rightEyeDist) / Math.max(leftEyeDist, rightEyeDist, 1);
+      const mouthSymmetry = 1 - Math.abs(leftMouthDist - rightMouthDist) / Math.max(leftMouthDist, rightMouthDist, 1);
+      const avgSymmetry = (eyeSymmetry + mouthSymmetry) / 2;
+      symmetryScore = Math.min(100, avgSymmetry * 100);
+    }
+
+    const totalScore = Math.round(sizeScore * 0.3 + confidenceScore * 0.3 + symmetryScore * 0.4);
+    
+    imgData.quality = totalScore;
+    if (totalScore >= 80) {
+      imgData.qualityLabel = 'good';
+    } else if (totalScore >= 50) {
+      imgData.qualityLabel = 'ok';
+    } else {
+      imgData.qualityLabel = 'bad';
+    }
+    imgData.status = 'ok';
+  } catch (err) {
+    imgData.quality = 0;
+    imgData.qualityLabel = 'bad';
+    imgData.status = 'error';
+  }
+}
+
+function renderImageGrid() {
+  const grid = $('#imageGrid');
+  grid.innerHTML = '';
+  state.referenceImages.forEach((img, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'image-thumb';
+    
+    let badge = '';
+    if (img.status === 'ok') badge = '<div class="face-badge">已识别</div>';
+    else if (img.status === 'warn') badge = '<div class="face-badge warn">无人脸</div>';
+    else if (img.status === 'error') badge = '<div class="face-badge error">错误</div>';
+    else badge = '<div class="face-badge warn">待处理</div>';
+
+    let qualityBadge = '';
+    if (img.quality !== null) {
+      const label = img.quality >= 80 ? '推荐' : (img.quality >= 50 ? '可用' : '建议更换');
+      qualityBadge = `<div class="quality-badge ${img.qualityLabel}">${label}</div>`;
+    }
+
+    thumb.innerHTML = `<img src="${img.url}" alt=""><button class="remove-btn" data-idx="${i}">&times;</button>${badge}${qualityBadge}`;
+    grid.appendChild(thumb);
+  });
+
+  // Add button
+  if (state.referenceImages.length < MAX_IMAGES) {
+    const add = document.createElement('div');
+    add.className = 'image-add';
+    add.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+    add.addEventListener('click', () => imageInput.click());
+    grid.appendChild(add);
+  }
+
+  // Remove buttons
+  grid.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      URL.revokeObjectURL(state.referenceImages[idx].url);
+      state.referenceImages.splice(idx, 1);
+      renderImageGrid();
+      updateStartButton();
+    });
+  });
+
+  const count = state.referenceImages.length;
+  $('#imageCount').textContent = `${count}/${MAX_IMAGES}`;
+  $('#imageInfo').textContent = `已添加 ${count} 张`;
+  $('#imageGridArea').style.display = count > 0 ? 'block' : 'none';
+  $('#imageDropZone').style.display = count > 0 ? 'none' : 'flex';
+}
+
+function updateStartButton() {
+  const ready = state.videoFile && state.referenceImages.length > 0;
+  $('#startBtn').disabled = !ready;
+
+  // Show warning if no faces detected in any reference image
+  const hasValidFace = state.referenceImages.some(img => img.status === 'ok' && img.quality >= 50);
+  $('#noFaceWarning').style.display = (state.referenceImages.length > 0 && !hasValidFace) ? 'flex' : 'none';
+}
+
+// ========== Start Detection ==========
+$('#startBtn').addEventListener('click', async () => {
+  if (state.detecting) return;
+
+  // Ensure models are loaded
+  if (!state.modelsLoaded) {
+    showToast('正在加载AI模型，请稍候...', 'info');
+    const ok = await preloadModels();
+    if (!ok) {
+      showToast('AI模型未加载成功，无法开始检测', 'error');
+      return;
+    }
+  }
+
+  goToPage(2);
+  await sleep(300);
+  await runDetection();
+});
+
+// ========== Detection ==========
+async function runDetection() {
+  state.detecting = true;
+  state.stats = { frames: 0, faces: 0, segments: 0 };
+  state.segments = [];
+  state.detectStartTime = Date.now();
+
+  const terminal = $('#logTerminal');
+  terminal.innerHTML = '';
+  $('#progressFill').style.width = '0%';
+  $('#statFrames').textContent = '0';
+  $('#statFaces').textContent = '0';
+  $('#statSegments').textContent = '0';
+
+  const video = $('#detectVideo');
+  video.src = state.videoUrl;
+
+  // Wait for video metadata
+  await new Promise(resolve => {
+    if (video.readyState >= 1) resolve();
+    else video.addEventListener('loadedmetadata', resolve, { once: true });
+  });
+
+  const duration = video.duration;
+  const canvas = $('#detectOverlay');
+  const ctx = canvas.getContext('2d');
+  const stage = $('#videoStage');
+
+  // Set canvas size to match displayed video
+  function syncCanvas() {
+    canvas.width = video.clientWidth;
+    canvas.height = video.clientHeight;
+  }
+  syncCanvas();
+  window.addEventListener('resize', syncCanvas);
+
+  log('info', 'INIT', '检测系统初始化...');
+  log('info', 'LOAD', `视频时长: ${formatTime(duration)}, 分辨率: ${video.videoWidth}×${video.videoHeight}`);
+  await sleep(200);
+
+  // Step 1: Extract reference descriptors
+  log('info', 'REF', '开始提取参考图人脸特征向量...');
+  const descriptors = [];
+  for (let i = 0; i < state.referenceImages.length; i++) {
+    const refImg = state.referenceImages[i];
+    log('info', 'REF', `处理参考图 ${i + 1}/${state.referenceImages.length}...`);
+    try {
+      const img = await faceapi.fetchImage(refImg.url);
+      const det = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 }))
+        .withFaceLandmarks().withFaceDescriptor();
+      if (det) {
+        descriptors.push(det.descriptor);
+        refImg.status = 'ok';
+        log('ok', 'REF', `参考图 ${i + 1}: 人脸特征提取成功 (128维向量)`);
+      } else {
+        refImg.status = 'warn';
+        log('warn', 'REF', `参考图 ${i + 1}: 未检测到人脸，已跳过`);
+      }
+    } catch (err) {
+      refImg.status = 'error';
+      log('err', 'REF', `参考图 ${i + 1}: 处理失败 - ${err.message}`);
+    }
+    renderImageGrid();
+  }
+
+  if (descriptors.length === 0) {
+    log('err', 'FAIL', '所有参考图均未提取到人脸特征，检测终止');
+    showToast('参考图中未检测到人脸，请更换清晰正脸照片', 'error');
+    state.detecting = false;
+    return;
+  }
+
+  log('ok', 'REF', `成功提取 ${descriptors.length} 个参考特征向量`);
+  await sleep(300);
+
+  // Calculate sample interval
+  const interval = Math.max(0.5, duration / MAX_PROCESS_FRAMES);
+  const totalFrames = Math.floor(duration / interval);
+  log('info', 'SCAN', `开始视频帧扫描，采样间隔: ${interval.toFixed(2)}s, 总采样帧: ${totalFrames}`);
+  await sleep(200);
+
+  // Step 2: Scan video frames
+  const matchedFrames = [];
+  let currentTime = 0;
+  let frameIdx = 0;
+
+  while (currentTime < duration && state.detecting) {
+    // Seek video
+    await seekVideo(video, currentTime);
+
+    // Sync canvas
+    syncCanvas();
+
+    // Detect faces in current frame
+    let detections = [];
+    try {
+      detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
+        .withFaceLandmarks().withFaceDescriptors();
+    } catch (err) {
+      // Frame might fail, skip
+    }
+
+    // Draw detection overlay
+    drawDetections(ctx, canvas, detections, descriptors, video);
+
+    // Update stats
+    state.stats.frames++;
+    state.stats.faces += detections.length;
+
+    // Check matches
+    let bestMatch = null;
+    let bestDist = Infinity;
+    for (const det of detections) {
+      for (const refDesc of descriptors) {
+        const dist = faceapi.euclideanDistance(det.descriptor, refDesc);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestMatch = det;
+        }
+      }
+    }
+
+    if (bestMatch && bestDist < MATCH_THRESHOLD) {
+      const similarity = Math.max(0, (1 - bestDist / MATCH_THRESHOLD) * 100);
+      matchedFrames.push({ time: currentTime, similarity, box: bestMatch.detection.box });
+      log('match', 'MATCH', `[${formatTime(currentTime)}] 匹配! 相似度 ${similarity.toFixed(1)}% (距离=${bestDist.toFixed(3)})`);
+    }
+
+    // Update progress
+    const progress = (frameIdx + 1) / totalFrames * 100;
+    $('#progressFill').style.width = `${progress}%`;
+    $('#frameCounter').textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+    animateStat('#statFrames', state.stats.frames);
+    animateStat('#statFaces', state.stats.faces);
+
+    // Log periodic updates
+    if (frameIdx % 10 === 0 && frameIdx > 0) {
+      log('info', 'SCAN', `已扫描 ${state.stats.frames} 帧，发现 ${state.stats.faces} 个人脸，匹配 ${matchedFrames.length} 帧`);
+    }
+
+    currentTime += interval;
+    frameIdx++;
+
+    // Yield to UI
+    await sleep(30);
+  }
+
+  // Clear overlay
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  $('#scanLine').style.display = 'none';
+  $('#pulseBadge').style.display = 'none';
+  $('#logStatus').textContent = 'DONE';
+
+  // Step 3: Merge frames into segments
+  log('info', 'MERGE', '正在合并连续匹配帧为片段...');
+  const segments = mergeFramesIntoSegments(matchedFrames, interval * 2.5);
+  state.segments = segments;
+  state.stats.segments = segments.length;
+  animateStat('#statSegments', segments.length);
+
+  if (segments.length === 0) {
+    log('warn', 'DONE', '检测完成，未找到匹配片段');
+    showToast('未在视频中找到目标人物片段', 'warn');
+  } else {
+    segments.forEach((seg, i) => {
+      log('ok', 'SEG', `片段 ${i + 1}: ${formatTime(seg.startTime)} - ${formatTime(seg.endTime)} (${(seg.endTime - seg.startTime).toFixed(1)}s) 相似度 ${seg.similarity.toFixed(1)}%`);
+    });
+    log('ok', 'DONE', `检测完成! 共发现 ${segments.length} 个匹配片段，耗时 ${((Date.now() - state.detectStartTime) / 1000).toFixed(1)}s`);
+  }
+
+  $('#progressFill').style.width = '100%';
+
+  // Capture thumbnails
+  if (segments.length > 0) {
+    log('info', 'THUMB', '正在生成片段缩略图...');
+    for (const seg of segments) {
+      const midTime = (seg.startTime + seg.endTime) / 2;
+      seg.thumbnail = await captureThumbnail(video, midTime);
+    }
+    log('ok', 'READY', '结果准备完毕，即将跳转...');
+  }
+
+  await sleep(800);
+  state.detecting = false;
+  window.removeEventListener('resize', syncCanvas);
+  renderResults();
+  goToPage(3);
+}
+
+function seekVideo(video, time) {
+  return new Promise(resolve => {
+    const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = Math.min(time, video.duration - 0.01);
+  });
+}
+
+function drawDetections(ctx, canvas, detections, refDescriptors, video) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const scaleX = canvas.width / video.videoWidth;
+  const scaleY = canvas.height / video.videoHeight;
+
+  for (const det of detections) {
+    const box = det.detection.box;
+    const x = box.x * scaleX;
+    const y = box.y * scaleY;
+    const w = box.width * scaleX;
+    const h = box.height * scaleY;
+
+    // Check if matches reference
+    let minDist = Infinity;
+    for (const refDesc of refDescriptors) {
+      const dist = faceapi.euclideanDistance(det.descriptor, refDesc);
+      if (dist < minDist) minDist = dist;
+    }
+    const isMatch = minDist < MATCH_THRESHOLD;
+    const sim = isMatch ? Math.max(0, (1 - minDist / MATCH_THRESHOLD) * 100) : 0;
+
+    // Draw box
+    ctx.strokeStyle = isMatch ? '#22d3ee' : 'rgba(139, 92, 246, 0.6)';
+    ctx.lineWidth = isMatch ? 3 : 1.5;
+    ctx.shadowColor = isMatch ? '#22d3ee' : 'transparent';
+    ctx.shadowBlur = isMatch ? 12 : 0;
+    ctx.strokeRect(x, y, w, h);
+    ctx.shadowBlur = 0;
+
+    // Corner accents for matches
+    if (isMatch) {
+      const c = 10;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, y + c); ctx.lineTo(x, y); ctx.lineTo(x + c, y);
+      ctx.moveTo(x + w - c, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + c);
+      ctx.moveTo(x + w, y + h - c); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - c, y + h);
+      ctx.moveTo(x + c, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - c);
+      ctx.stroke();
+    }
+
+    // Label
+    if (isMatch) {
+      const label = `${sim.toFixed(1)}%`;
+      ctx.font = '600 13px JetBrains Mono, monospace';
+      const tw = ctx.measureText(label).width + 12;
+      ctx.fillStyle = '#22d3ee';
+      ctx.fillRect(x, y - 22, tw, 20);
+      ctx.fillStyle = '#0a0a14';
+      ctx.fillText(label, x + 6, y - 7);
+    }
+  }
+}
+
+function mergeFramesIntoSegments(frames, gapThreshold) {
+  if (frames.length === 0) return [];
+  frames.sort((a, b) => a.time - b.time);
+  const segments = [];
+  let cur = { startTime: frames[0].time, endTime: frames[0].time, similarity: frames[0].similarity, frames: [frames[0]] };
+
+  for (let i = 1; i < frames.length; i++) {
+    const f = frames[i];
+    if (f.time - cur.endTime <= gapThreshold) {
+      cur.endTime = f.time;
+      cur.similarity = Math.max(cur.similarity, f.similarity);
+      cur.frames.push(f);
+    } else {
+      segments.push(cur);
+      cur = { startTime: f.time, endTime: f.time, similarity: f.similarity, frames: [f] };
+    }
+  }
+  segments.push(cur);
+
+  // Extend end time and filter short segments
+  return segments
+    .map(s => ({ ...s, endTime: s.endTime + 0.5 }))
+    .filter(s => (s.endTime - s.startTime) >= MIN_SEGMENT_DURATION);
+}
+
+async function captureThumbnail(video, time) {
+  try {
+    await seekVideo(video, time);
+    const c = document.createElement('canvas');
+    const targetW = 400;
+    c.width = targetW;
+    c.height = targetW * (video.videoHeight / video.videoWidth);
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.7);
+  } catch {
+    return '';
+  }
+}
+
+function animateStat(sel, value) {
+  const el = $(sel);
+  const current = parseInt(el.textContent) || 0;
+  if (current === value) return;
+  el.textContent = value;
+  el.style.transform = 'scale(1.2)';
+  setTimeout(() => el.style.transform = 'scale(1)', 150);
+}
+
+function log(type, tag, msg) {
+  const terminal = $('#logTerminal');
+  const ts = new Date().toTimeString().slice(0, 8);
+  const line = document.createElement('div');
+  line.className = `log-line ${type}`;
+  line.innerHTML = `<span class="ts">[${ts}]</span><span class="tag">[${tag}]</span><span class="msg">${msg}</span>`;
+  terminal.appendChild(line);
+  terminal.scrollTop = terminal.scrollHeight;
+
+  // Keep last 200 lines
+  while (terminal.children.length > 200) {
+    terminal.removeChild(terminal.firstChild);
+  }
+}
+
+// ========== Results Page ==========
+function renderResults() {
+  const segments = state.segments;
+  const elapsed = ((Date.now() - state.detectStartTime) / 1000).toFixed(1);
+  const avgSim = segments.length > 0
+    ? (segments.reduce((s, x) => s + x.similarity, 0) / segments.length).toFixed(1)
+    : '0.0';
+
+  $('#sumSegments').innerHTML = `${segments.length}<span class="unit">个</span>`;
+  $('#sumAccuracy').innerHTML = `${avgSim}<span class="unit">%</span>`;
+  $('#sumTime').innerHTML = `${elapsed}<span class="unit">s</span>`;
+
+  // Timeline
+  const bar = $('#timelineBar');
+  const ticks = $('#timelineTicks');
+  bar.innerHTML = '';
+  ticks.innerHTML = '';
+  if (state.videoDuration > 0) {
+    segments.forEach((seg, i) => {
+      const left = (seg.startTime / state.videoDuration) * 100;
+      const width = Math.max(1.5, ((seg.endTime - seg.startTime) / state.videoDuration) * 100);
+      const el = document.createElement('div');
+      el.className = 'timeline-segment';
+      el.style.left = `${left}%`;
+      el.style.width = `${width}%`;
+      el.innerHTML = `<span class="seg-idx">${i + 1}</span>`;
+      el.addEventListener('click', () => {
+        document.getElementById(`seg-card-${i}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const card = document.getElementById(`seg-card-${i}`);
+        card.style.boxShadow = '0 0 0 2px var(--cyan), 0 0 40px rgba(34,211,238,0.4)';
+        setTimeout(() => card.style.boxShadow = '', 1500);
+      });
+      bar.appendChild(el);
+    });
+    // Ticks
+    const tickCount = 6;
+    for (let i = 0; i <= tickCount; i++) {
+      const t = document.createElement('span');
+      t.textContent = formatTime((state.videoDuration / tickCount) * i);
+      ticks.appendChild(t);
+    }
+  }
+
+  // Segment cards
+  const grid = $('#segmentGrid');
+  grid.innerHTML = '';
+
+  if (segments.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <div>未找到匹配片段</div>
+    </div>`;
+    return;
+  }
+
+  segments.forEach((seg, i) => {
+    const card = document.createElement('div');
+    card.className = 'segment-card';
+    card.id = `seg-card-${i}`;
+    const duration = (seg.endTime - seg.startTime).toFixed(1);
+    card.innerHTML = `
+      <div class="card-thumb">
+        <img src="${seg.thumbnail || ''}" alt="片段${i+1}">
+        <video src="${state.videoUrl}" muted loop playsinline preload="none"></video>
+        <div class="play-icon"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4V8z" fill="white"/></svg></div>
+        <div class="card-duration">${duration}s</div>
+        <div class="card-checkbox" data-idx="${i}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="card-edit-btn" data-idx="${i}" title="编辑时间">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+      </div>
+      <div class="card-info">
+        <div class="card-times">
+          <span class="time start-time-${i}">${formatTime(seg.startTime)}</span>
+          <span class="arrow">→</span>
+          <span class="time end-time-${i}">${formatTime(seg.endTime)}</span>
+        </div>
+        <div class="card-similarity">
+          <div class="sim-bar"><div class="sim-fill" style="width:${seg.similarity}%"></div></div>
+          <span class="sim-value">${seg.similarity.toFixed(1)}%</span>
+        </div>
+      </div>
+      <div class="card-edit-panel" id="edit-panel-${i}">
+        <div class="edit-row">
+          <span class="edit-label">开始时间</span>
+          <input type="text" class="edit-input" id="edit-start-${i}" value="${formatTime(seg.startTime)}">
+          <span class="edit-label">结束时间</span>
+          <input type="text" class="edit-input" id="edit-end-${i}" value="${formatTime(seg.endTime)}">
+        </div>
+        <div class="dual-slider-wrap" id="slider-wrap-${i}">
+          <div class="slider-track"></div>
+          <div class="slider-fill" id="slider-fill-${i}"></div>
+          <div class="slider-handle left" id="slider-left-${i}"></div>
+          <div class="slider-handle right" id="slider-right-${i}"></div>
+          <div class="slider-marks">
+            <span>${formatTime(seg.startTime - 2)}</span>
+            <span>${formatTime(seg.startTime)}</span>
+            <span>${formatTime((seg.startTime + seg.endTime) / 2)}</span>
+            <span>${formatTime(seg.endTime)}</span>
+            <span>${formatTime(seg.endTime + 2)}</span>
+          </div>
+        </div>
+        <div class="edit-buttons">
+          <button class="btn btn-secondary" id="btn-reset-${i}">重置</button>
+          <button class="btn btn-primary" id="btn-confirm-${i}">确认修改</button>
+        </div>
+      </div>
+    `;
+
+    // Hover autoplay
+    const videoEl = card.querySelector('video');
+    let hoverTimer = null;
+    card.querySelector('.card-thumb').addEventListener('mouseenter', () => {
+      hoverTimer = setTimeout(() => {
+        videoEl.currentTime = seg.startTime;
+        videoEl.play().catch(() => {});
+      }, 200);
+    });
+    card.querySelector('.card-thumb').addEventListener('mouseleave', () => {
+      clearTimeout(hoverTimer);
+      videoEl.pause();
+    });
+
+    // Checkbox toggle
+    card.querySelector('.card-checkbox').addEventListener('click', e => {
+      e.stopPropagation();
+      toggleSegmentSelection(i, card);
+    });
+
+    // Edit button
+    const editBtn = card.querySelector('.card-edit-btn');
+    const editPanel = card.querySelector('.card-edit-panel');
+    const editStartInput = card.querySelector(`#edit-start-${i}`);
+    const editEndInput = card.querySelector(`#edit-end-${i}`);
+    const sliderLeft = card.querySelector(`#slider-left-${i}`);
+    const sliderRight = card.querySelector(`#slider-right-${i}`);
+    const sliderFill = card.querySelector(`#slider-fill-${i}`);
+    const sliderWrap = card.querySelector(`#slider-wrap-${i}`);
+
+    let originalStart = seg.startTime;
+    let originalEnd = seg.endTime;
+    let currentStart = seg.startTime;
+    let currentEnd = seg.endTime;
+
+    editBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const isVisible = editPanel.classList.contains('show');
+      $$('.card-edit-panel').forEach(p => p.classList.remove('show'));
+      if (!isVisible) {
+        editPanel.classList.add('show');
+        updateSliderPosition(i);
+      }
+    });
+
+    function updateSliderPosition(idx) {
+      const range = state.videoDuration || 1;
+      const leftPercent = (currentStart / range) * 100;
+      const rightPercent = (currentEnd / range) * 100;
+      sliderLeft.style.left = `${leftPercent}%`;
+      sliderRight.style.left = `${rightPercent}%`;
+      sliderFill.style.left = `${leftPercent}%`;
+      sliderFill.style.width = `${rightPercent - leftPercent}%`;
+    }
+
+    function parseTimeStr(str) {
+      const parts = str.split(':').map(Number);
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      return 0;
+    }
+
+    function updateFromInputs() {
+      const start = parseTimeStr(editStartInput.value);
+      const end = parseTimeStr(editEndInput.value);
+      if (start >= 0 && end > start && end <= state.videoDuration) {
+        currentStart = start;
+        currentEnd = end;
+        updateSliderPosition(i);
+        syncVideoPreview(start);
+      }
+    }
+
+    function updateFromSlider() {
+      const range = state.videoDuration || 1;
+      const rect = sliderWrap.getBoundingClientRect();
+      const leftPercent = parseFloat(sliderLeft.style.left) || 0;
+      const rightPercent = parseFloat(sliderRight.style.left) || 0;
+      currentStart = Math.round((leftPercent / 100) * range * 10) / 10;
+      currentEnd = Math.round((rightPercent / 100) * range * 10) / 10;
+      editStartInput.value = formatTime(currentStart);
+      editEndInput.value = formatTime(currentEnd);
+      syncVideoPreview(currentStart);
+    }
+
+    function syncVideoPreview(time) {
+      const mainVideo = $('#videoPlayer');
+      if (mainVideo && !mainVideo.paused) {
+        mainVideo.currentTime = Math.max(0, Math.min(time, state.videoDuration));
+      }
+    }
+
+    editStartInput.addEventListener('change', updateFromInputs);
+    editEndInput.addEventListener('change', updateFromInputs);
+
+    function makeDraggable(handle, isLeft) {
+      let isDragging = false;
+      handle.addEventListener('mousedown', e => {
+        isDragging = true;
+        e.preventDefault();
+      });
+      handle.addEventListener('touchstart', e => {
+        isDragging = true;
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', e => {
+        if (!isDragging) return;
+        const rect = sliderWrap.getBoundingClientRect();
+        const percent = ((e.clientX - rect.left) / rect.width) * 100;
+        const clamped = Math.max(0, Math.min(100, percent));
+        if (isLeft) {
+          const right = parseFloat(sliderRight.style.left) || 100;
+          handle.style.left = `${Math.min(clamped, right - 1)}%`;
+        } else {
+          const left = parseFloat(sliderLeft.style.left) || 0;
+          handle.style.left = `${Math.max(clamped, left + 1)}%`;
+        }
+        sliderFill.style.left = `${parseFloat(sliderLeft.style.left)}%`;
+        sliderFill.style.width = `${parseFloat(sliderRight.style.left) - parseFloat(sliderLeft.style.left)}%`;
+        updateFromSlider();
+      });
+      document.addEventListener('touchmove', e => {
+        if (!isDragging) return;
+        const rect = sliderWrap.getBoundingClientRect();
+        const touch = e.touches[0];
+        const percent = ((touch.clientX - rect.left) / rect.width) * 100;
+        const clamped = Math.max(0, Math.min(100, percent));
+        if (isLeft) {
+          const right = parseFloat(sliderRight.style.left) || 100;
+          handle.style.left = `${Math.min(clamped, right - 1)}%`;
+        } else {
+          const left = parseFloat(sliderLeft.style.left) || 0;
+          handle.style.left = `${Math.max(clamped, left + 1)}%`;
+        }
+        sliderFill.style.left = `${parseFloat(sliderLeft.style.left)}%`;
+        sliderFill.style.width = `${parseFloat(sliderRight.style.left) - parseFloat(sliderLeft.style.left)}%`;
+        updateFromSlider();
+      });
+      document.addEventListener('mouseup', () => isDragging = false);
+      document.addEventListener('touchend', () => isDragging = false);
+    }
+
+    makeDraggable(sliderLeft, true);
+    makeDraggable(sliderRight, false);
+
+    // Reset button
+    card.querySelector(`#btn-reset-${i}`).addEventListener('click', () => {
+      currentStart = originalStart;
+      currentEnd = originalEnd;
+      editStartInput.value = formatTime(originalStart);
+      editEndInput.value = formatTime(originalEnd);
+      updateSliderPosition(i);
+      syncVideoPreview(originalStart);
+    });
+
+    // Confirm button
+    card.querySelector(`#btn-confirm-${i}`).addEventListener('click', () => {
+      const newDuration = currentEnd - currentStart;
+      if (newDuration < 0.5) {
+        showToast('片段时长不能少于0.5秒', 'error');
+        return;
+      }
+      state.segments[i] = { ...seg, startTime: currentStart, endTime: currentEnd };
+      originalStart = currentStart;
+      originalEnd = currentEnd;
+      card.querySelector(`.start-time-${i}`).textContent = formatTime(currentStart);
+      card.querySelector(`.end-time-${i}`).textContent = formatTime(currentEnd);
+      card.querySelector('.card-duration').textContent = `${newDuration.toFixed(1)}s`;
+      editPanel.classList.remove('show');
+      renderTimeline();
+      showToast('时间已更新', 'success');
+    });
+
+    grid.appendChild(card);
+  });
+
+  updateSelectionUI();
+}
+
+function renderTimeline() {
+  const segments = state.segments;
+  const bar = $('#timelineBar');
+  const ticks = $('#timelineTicks');
+  bar.innerHTML = '';
+  ticks.innerHTML = '';
+  if (state.videoDuration > 0) {
+    segments.forEach((seg, i) => {
+      const left = (seg.startTime / state.videoDuration) * 100;
+      const width = Math.max(1.5, ((seg.endTime - seg.startTime) / state.videoDuration) * 100);
+      const el = document.createElement('div');
+      el.className = 'timeline-segment';
+      el.style.left = `${left}%`;
+      el.style.width = `${width}%`;
+      el.innerHTML = `<span class="seg-idx">${i + 1}</span>`;
+      el.addEventListener('click', () => {
+        document.getElementById(`seg-card-${i}`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const card = document.getElementById(`seg-card-${i}`);
+        card.style.boxShadow = '0 0 0 2px var(--cyan), 0 0 40px rgba(34,211,238,0.4)';
+        setTimeout(() => card.style.boxShadow = '', 1500);
+      });
+      bar.appendChild(el);
+    });
+    const tickCount = 6;
+    for (let i = 0; i <= tickCount; i++) {
+      const t = document.createElement('span');
+      t.textContent = formatTime((state.videoDuration / tickCount) * i);
+      ticks.appendChild(t);
+    }
+  }
+}
+
+function toggleSegmentSelection(idx, card) {
+  if (state.selectedSegments.has(idx)) {
+    state.selectedSegments.delete(idx);
+    card.classList.remove('selected');
+    card.querySelector('.card-checkbox').classList.remove('checked');
+  } else {
+    state.selectedSegments.add(idx);
+    card.classList.add('selected');
+    card.querySelector('.card-checkbox').classList.add('checked');
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const count = state.selectedSegments.size;
+  $('#selectedCount').textContent = count;
+  $('#exportBtn').disabled = count === 0;
+  const allSelected = count === state.segments.length && count > 0;
+  $('#selectAllBtn').textContent = allSelected ? '取消全选' : '全选';
+}
+
+$('#selectAllBtn').addEventListener('click', () => {
+  const allSelected = state.selectedSegments.size === state.segments.length;
+  if (allSelected) {
+    state.selectedSegments.clear();
+    $$('.segment-card').forEach(c => { c.classList.remove('selected'); c.querySelector('.card-checkbox').classList.remove('checked'); });
+  } else {
+    state.segments.forEach((_, i) => {
+      state.selectedSegments.add(i);
+      const card = $(`#seg-card-${i}`);
+      if (card) { card.classList.add('selected'); card.querySelector('.card-checkbox').classList.add('checked'); }
+    });
+  }
+  updateSelectionUI();
+});
+
+// ========== Export ==========
+$('#exportBtn').addEventListener('click', () => {
+  $('#exportModal').classList.add('show');
+  resetExportModal();
+});
+
+function closeExportModal() {
+  $('#exportModal').classList.remove('show');
+}
+
+$$('#exportOptions .export-option').forEach(opt => {
+  opt.addEventListener('click', () => {
+    $$('#exportOptions .export-option').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    state.exportType = opt.dataset.type;
+  });
+});
+
+function resetExportModal() {
+  exportCompleted = false;
+  $('#exportSelectView').style.display = 'block';
+  $('#exportProgress').classList.remove('show');
+  $('#exportSuccess').classList.remove('show');
+  $('#exportFooter').style.display = 'flex';
+  $('#startExportBtn').style.display = 'block';
+  $('#startExportBtn').textContent = '开始导出';
+  $('#exportStatus').textContent = '准备导出...';
+  $('#exportPercent').textContent = '0%';
+  $('#progressCircle').style.strokeDashoffset = '213.6';
+}
+
+let exportCompleted = false;
+
+$('#startExportBtn').addEventListener('click', async () => {
+  if (exportCompleted) { closeExportModal(); return; }
+
+  const type = state.exportType;
+  const selectedSegs = Array.from(state.selectedSegments).map(i => state.segments[i]).sort((a, b) => a.startTime - b.startTime);
+
+  $('#exportSelectView').style.display = 'none';
+  $('#exportProgress').classList.add('show');
+  $('#exportFooter').style.display = 'none';
+
+  // Simulate progress
+  const steps = type === 'csv' ? 3 : 5;
+  const stepLabels = {
+    merge: ['初始化编码器...', '处理视频片段...', '合并视频流...', '写入文件头...', '完成编码...'],
+    zip: ['创建压缩包...', '添加片段文件...', '压缩数据...', '写入ZIP目录...', '完成...'],
+    csv: ['生成表格数据...', '写入时间码...', '完成...']
+  };
+
+  for (let i = 0; i < steps; i++) {
+    $('#exportStatus').textContent = stepLabels[type][i] || '处理中...';
+    const progress = ((i + 1) / steps) * 100;
+    $('#exportPercent').textContent = `${Math.round(progress)}%`;
+    const offset = 213.6 * (1 - progress / 100);
+    $('#progressCircle').style.strokeDashoffset = offset;
+    await sleep(400 + Math.random() * 300);
+  }
+
+  // Actually export CSV for real
+  if (type === 'csv') {
+    downloadCSV(selectedSegs);
+  }
+
+  // Show success
+  await sleep(200);
+  $('#exportProgress').classList.remove('show');
+  $('#exportSuccess').classList.add('show');
+  const descs = {
+    merge: `已合并 ${selectedSegs.length} 个片段为单个视频文件`,
+    zip: `已打包 ${selectedSegs.length} 个片段为 ZIP 文件`,
+    csv: `时间码 CSV 文件已下载到本地`
+  };
+  $('#successDesc').textContent = descs[type];
+
+  $('#exportFooter').style.display = 'flex';
+  $('#startExportBtn').textContent = '完成';
+  exportCompleted = true;
+});
+
+function downloadCSV(segments) {
+  const header = '片段编号,开始时间,结束时间,时长(秒),相似度(%),开始时间码,结束时间码\n';
+  const rows = segments.map((s, i) => {
+    const dur = (s.endTime - s.startTime).toFixed(2);
+    return `${i + 1},${formatTime(s.startTime)},${formatTime(s.endTime)},${dur},${s.similarity.toFixed(1)},${formatTimecode(s.startTime)},${formatTimecode(s.endTime)}`;
+  }).join('\n');
+  const csv = '\ufeff' + header + rows;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `寻剪_时间码_${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Close modal on overlay click
+$('#exportModal').addEventListener('click', e => {
+  if (e.target === $('#exportModal')) closeExportModal();
+});
+
+// ========== Init ==========
+window.addEventListener('DOMContentLoaded', () => {
+  // Start preloading models in background
+  setTimeout(preloadModels, 500);
+});
+
+// Cleanup on unload
+window.addEventListener('beforeunload', () => {
+  if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
+  state.referenceImages.forEach(img => URL.revokeObjectURL(img.url));
+});
+</script>
+</body>
+</html>

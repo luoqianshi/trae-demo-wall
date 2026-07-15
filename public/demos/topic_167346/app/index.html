@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DrinkPet · 饮水提醒 × 电子宠物</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<!-- ============================================================
+     Scene · 1280×720 场景画布（掌机 HUD 布局）
+     - 顶部 HUD · title + badges（dev-off 隐藏 badges）
+     - 达标 / 事件气泡（右上区域）
+     - 宠物 wrap + 脚下投影（站桌面深处）
+     - 台词框（宠物头顶对话气泡）
+     - KPI HUD（左下）
+     ============================================================ -->
+<div class="dp-scene" id="scene">
+
+  <!-- HUD Top -->
+  <header class="dp-hud-top">
+    <span class="dp-hud-top__title">DRINKPET</span>
+    <div class="dp-hud-top__badges">
+      <span class="dp-badge" id="badge-step">M2c step 5</span>
+      <span class="dp-badge" id="badge-ua">UA?</span>
+      <span class="dp-badge" id="badge-date">–</span>
+    </div>
+  </header>
+
+  <!-- Event Bubble · 达标 / +30ml 短提示 -->
+  <div class="dp-event-bubble" id="event-bubble"></div>
+
+  <!-- Pet · 站桌面深处 · 带脚下投影 -->
+  <div class="dp-pet-wrap">
+    <div class="dp-pet idle" id="pet">
+      <div class="dp-pet__sprite" id="pet-sprite"></div>
+      <div class="dp-fx-layer" id="fx-layer"></div>
+    </div>
+    <div class="dp-pet-shadow"></div>
+  </div>
+
+  <!-- 台词框 -->
+  <div class="dp-say" id="pet-say">&nbsp;</div>
+
+  <!-- KPI HUD -->
+  <aside class="dp-kpi">
+    <div class="dp-kpi__row">
+      <span class="dp-kpi__label">饮水</span>
+      <span class="dp-kpi__value" id="kpi-drink">0</span>
+      <span class="dp-kpi__unit">ml</span>
+    </div>
+    <div class="dp-kpi__row">
+      <span class="dp-kpi__label">加水</span>
+      <span class="dp-kpi__value" id="kpi-refill">0</span>
+      <span class="dp-kpi__unit">ml</span>
+    </div>
+    <div class="dp-progress">
+      <div class="dp-progress__bar" id="progress-bar"></div>
+      <div class="dp-progress__label" id="progress-label">0 / 1500 ml</div>
+    </div>
+  </aside>
+
+</div><!-- /.dp-scene -->
+
+<!-- ============================================================
+     Bridge Panel · 场景外底部（dev-off 隐藏）
+     ============================================================ -->
+<section class="dp-bridge">
+  <div class="dp-bridge__row">
+    <strong class="dp-bridge__label">DEVICE</strong>
+    <button id="btn-connect" class="dp-btn primary">Connect Serial</button>
+    <button id="btn-disconnect" class="dp-btn" disabled>Disconnect</button>
+    <span class="dp-bridge__status">serial: <span id="s-serial">idle</span></span>
+  </div>
+  <div class="dp-bridge__row">
+    <strong class="dp-bridge__label">MOCK</strong>
+    <button id="btn-mock" class="dp-btn">Load smoke</button>
+    <select id="speed" class="dp-select">
+      <option value="1">x1</option>
+      <option value="10" selected>x10</option>
+      <option value="100">x100</option>
+    </select>
+    <button id="btn-play" class="dp-btn accent" disabled>Play</button>
+    <button id="btn-stop" class="dp-btn" disabled>Stop</button>
+    <span class="dp-bridge__status">mock: <span id="s-mock">idle</span></span>
+  </div>
+  <div class="dp-empty" id="empty-hint">
+    <strong>未连接设备</strong><br>
+    点 <strong>Connect Serial</strong> 选择 ESP32 CP2102 端口，或点 <strong>Load smoke</strong> 加载脱机回放数据（不需要硬件）。
+  </div>
+</section>
+
+<!-- ============================================================
+     Dev Panel · 右侧浮层（dev-off 隐藏）
+     ============================================================ -->
+<aside class="dp-devpanel" id="devpanel">
+  <section>
+    <h2>Status</h2>
+    <div style="font-family:var(--dp-font-pixel);font-size:10px;line-height:1.8">
+      events: <span id="s-count">0</span><br>
+      last seq: <span id="s-seq">–</span><br>
+      boot: <span id="s-boot">–</span><br>
+      pet_state: <span id="s-pet">idle/default</span><br>
+      milestone_fired: <span id="s-milestone">false</span><br>
+      last_date: <span id="s-lastdate">–</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Debug · preset</h2>
+    <div class="row">
+      <input class="dp-input" type="number" id="dbg-preset" min="0" value="1499">
+      <button class="dp-btn" id="btn-preset">Set today_total</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Debug · inject</h2>
+    <div class="row">
+      <button class="dp-btn warn" id="btn-inject-drink">drink 30ml</button>
+      <button class="dp-btn warn" id="btn-inject-refill">refill 200ml</button>
+    </div>
+    <div class="row">
+      <button class="dp-btn" id="btn-inject-place">cup_placed</button>
+      <button class="dp-btn" id="btn-inject-lift">cup_lifted</button>
+      <button class="dp-btn" id="btn-inject-remove">cup_removed</button>
+      <button class="dp-btn" id="btn-inject-change">cup_changed</button>
+    </div>
+    <div class="row">
+      <button class="dp-btn" id="btn-force-thirsty">force thirsty</button>
+      <button class="dp-btn" id="btn-force-satisfied">force satisfied</button>
+    </div>
+    <div class="row">
+      <button class="dp-btn danger" id="btn-force-midnight">cross-midnight rollover</button>
+    </div>
+    <div class="row">
+      <button class="dp-btn" id="btn-clear-log">Clear log</button>
+      <button class="dp-btn danger" id="btn-reset-storage">Reset storage</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Event stream</h2>
+    <div class="dp-stream-wrap">
+      <div id="stream"></div>
+    </div>
+  </section>
+</aside>
+
+<button id="btn-toggle-dev" class="dp-btn dp-devpanel-toggle">Hide dev</button>
+
+<script type="module">
+import { EventBus } from './bridge/event-bus.js';
+import { WebSerialBridge } from './bridge/web-serial.js';
+import { MockReplay } from './bridge/mock-replay.js';
+import { Storage } from './storage.js';
+import { PetEngine, MILESTONE_ML } from './pet-engine.js';
+import { SpriteRenderer } from './sprite-renderer.js';
+import { WaterBg } from './water-bg.js';
+import { pickLine } from './lines.js';
+
+const $ = id => document.getElementById(id);
+const bus = new EventBus();
+
+/* ---------- badges ---------- */
+$('badge-ua').textContent = WebSerialBridge.isSupported() ? 'Web Serial ✓' : 'Web Serial ✗';
+$('badge-ua').classList.add(WebSerialBridge.isSupported() ? 'ok' : 'err');
+
+/* ---------- Storage ---------- */
+const storage = new Storage({
+  onRollover: ({ prevDate, prevTotal, newDate }) => {
+    // 首次同步 rollover 可能发生在 pushStream 之前（TDZ），用 try/catch 保护
+    try { pushStream({ type: 'system', _source: 'debug', ts: 0, seq: -1, message: `midnight rollover ${prevDate}→${newDate}, prev total ${prevTotal}ml→0` }); } catch (e) { console.log('[storage] rollover early:', prevDate, '→', newDate, 'prev', prevTotal, 'ml'); }
+    try { waterBg.reset(); } catch (e) { /* waterBg 也可能尚未初始化 */ }
+    try { renderKPI(); } catch (e) { /* renderKPI 也可能尚未初始化 */ }
+  }
+});
+$('badge-date').textContent = 'last_date: ' + storage.snapshot.last_date;
+$('s-lastdate').textContent = storage.snapshot.last_date;
+
+/* ---------- Water background layer (v0.5 · 挂到 .dp-scene) ---------- */
+const waterBg = new WaterBg({ targetEl: $('scene') });
+waterBg.preload();
+waterBg.update(storage.snapshot.today_total_ml);
+
+/* ---------- Pet visual layer ---------- */
+const petRoot = $('pet');
+const spriteEl = $('pet-sprite');
+const fxLayer = $('fx-layer');
+const sayEl = $('pet-say');
+const eventBubbleEl = $('event-bubble');
+
+let engineRef = null;
+const sprite = new SpriteRenderer({
+  petRoot,
+  spriteEl,
+  blinkEl: null,
+  fxParticlesEl: null,
+  onLoopEnd: (info) => { if (engineRef) engineRef.onSpriteLoopEnd(info); }
+});
+sprite.init().then(() => {
+  $('badge-step').textContent = sprite.fallbackMode
+    ? 'M2c step 5 (fallback)'
+    : 'M2c step 5 (sheet ✓)';
+});
+
+function showSay(group) {
+  const line = pickLine(group);
+  if (!line) { sayEl.textContent = '\u00A0'; sayEl.classList.remove('on'); return; }
+  sayEl.textContent = line;
+  sayEl.classList.add('on');
+  clearTimeout(showSay._t);
+  showSay._t = setTimeout(() => {
+    if (sayEl.textContent === line) sayEl.classList.remove('on');
+  }, 3500);
+}
+
+/* 场景右上角事件气泡（drink/refill/milestone 短提示） */
+function showEventBubble(text) {
+  eventBubbleEl.textContent = text;
+  eventBubbleEl.classList.add('on');
+  clearTimeout(showEventBubble._t);
+  showEventBubble._t = setTimeout(() => eventBubbleEl.classList.remove('on'), 1500);
+}
+
+/* 宠物头顶气泡（老 fx bubble · 保留兼容 · 与 event bubble 并存） */
+function showBubble(kind, meta) {
+  const bubble = document.createElement('div');
+  bubble.className = 'dp-bubble ' + kind + (meta && meta.symbol === '?' ? ' question' : '');
+  if (kind === 'drink') {
+    bubble.textContent = '+' + Math.round(meta.delta_ml) + ' ml';
+    bubble.classList.add('drink');
+  } else if (kind === 'refill') {
+    bubble.textContent = '♥ +' + Math.round(meta.added_ml) + ' ml';
+    bubble.classList.add('refill');
+  } else if (kind === 'sign') {
+    bubble.textContent = meta.symbol;
+    bubble.classList.add('sign');
+    if (meta.symbol === '?') bubble.classList.add('question');
+  }
+  fxLayer.appendChild(bubble);
+  setTimeout(() => bubble.remove(), 900);
+}
+
+function triggerParticles() { /* NOP · v0.4 方案 A 后粒子随 sheets.satisfied 一体化 */ }
+
+/* ---------- KPI ---------- */
+function renderKPI() {
+  const s = storage.snapshot;
+  $('kpi-drink').textContent = String(Math.round(s.today_total_ml));
+  $('kpi-refill').textContent = String(Math.round(s.today_refill_ml));
+  const pct = Math.min(100, (s.today_total_ml / MILESTONE_ML) * 100);
+  $('progress-bar').style.width = pct + '%';
+  $('progress-bar').classList.toggle('done', s.today_total_ml >= MILESTONE_ML);
+  $('progress-label').textContent = Math.round(s.today_total_ml) + ' / ' + MILESTONE_ML + ' ml';
+  $('kpi-drink').classList.toggle('success', s.today_total_ml >= MILESTONE_ML);
+  $('s-milestone').textContent = String(s.milestone_fired_today);
+  waterBg.update(s.today_total_ml);
+}
+renderKPI();
+
+/* ---------- Pet engine ---------- */
+const engine = new PetEngine({
+  storage,
+  onStateChange: ({ from, fromSub, to, toSub }) => {
+    sprite.setState(to, toSub);
+    $('s-pet').textContent = to + '/' + toSub;
+    pushStream({ type: 'engine', _source: 'debug', ts: 0, seq: -1, from: from + '/' + fromSub, to: to + '/' + toSub });
+    $('empty-hint').style.display = 'none';
+  },
+  onFxTrigger: (kind, meta = {}) => {
+    if (kind === 'milestone_particles') {
+      triggerParticles();
+      showEventBubble('🎉 达标 1500ml');
+    } else if (kind === 'drink_bubble') {
+      showBubble('drink', meta);
+      showEventBubble('+' + Math.round(meta.delta_ml || 0) + ' ml');
+    } else if (kind === 'refill_heart') {
+      showBubble('refill', { added_ml: meta.added_ml || 0 });
+      showEventBubble('♥ +' + Math.round(meta.added_ml || 0) + ' ml');
+    } else if (kind === 'cup_sign') {
+      showBubble('sign', meta);
+    }
+    renderKPI();
+  },
+  onSay: (group) => showSay(group),
+});
+engineRef = engine;
+$('s-pet').textContent = engine.snapshot().pet_state + '/' + engine.snapshot().substate;
+
+/* ---------- Event stream ---------- */
+let evtCount = 0;
+const stream = $('stream');
+const MAX_LINES = 200;
+function pushStream(evt) {
+  const div = document.createElement('div');
+  const src = evt._source || 'serial';
+  div.className = 'dp-evt ' + (evt.type || 'unknown');
+  const tsStr = String(evt.ts !== undefined ? evt.ts : '').padStart(5);
+  const skip = new Set(['type', 'ts', 'seq', '_source']);
+  const rest = Object.keys(evt).filter(k => !skip.has(k));
+  const kv = rest.map(k => k + '=' + JSON.stringify(evt[k])).join(' ');
+  div.innerHTML =
+    '<span class="src ' + src + '">' + src + '</span>' +
+    '<span class="ts">t=' + tsStr + '</span>' +
+    '<span class="type">' + (evt.type || '?') + '</span>' +
+    ' seq=' + (evt.seq !== undefined ? evt.seq : '?') +
+    ' ' + kv;
+  stream.appendChild(div);
+  if (stream.childElementCount > MAX_LINES) stream.firstChild.remove();
+  stream.scrollTop = stream.scrollHeight;
+  evtCount += 1;
+  $('s-count').textContent = evtCount;
+  if (typeof evt.seq === 'number' && evt.seq >= 0) $('s-seq').textContent = evt.seq;
+  if (evt.boot_count !== undefined) $('s-boot').textContent = evt.boot_count;
+}
+
+bus.on('*', (evt) => {
+  pushStream(evt);
+  engine.handle(evt);
+});
+
+/* ---------- Web Serial ---------- */
+const serial = new WebSerialBridge(bus, {
+  onStatus: (s) => {
+    $('s-serial').textContent = s;
+    $('btn-connect').disabled = (s === 'connected' || s === 'requesting-port');
+    $('btn-disconnect').disabled = (s !== 'connected');
+    document.body.classList.toggle('bridge-connected', s === 'connected');
+    if (s === 'connected') $('empty-hint').style.display = 'none';
+  }
+});
+$('btn-connect').addEventListener('click', async () => {
+  try { await serial.connect(); }
+  catch (e) { console.error(e); alert('connect failed: ' + e.message); }
+});
+$('btn-disconnect').addEventListener('click', () => serial.disconnect());
+
+/* ---------- Mock replay ---------- */
+const mock = new MockReplay(bus, {
+  onStatus: (s) => {
+    $('s-mock').textContent = s;
+    $('btn-play').disabled = !(s.startsWith('loaded') || s.startsWith('done') || s.startsWith('stopped'));
+    $('btn-stop').disabled = !s.startsWith('playing');
+  }
+});
+$('btn-mock').addEventListener('click', async () => {
+  try { await mock.load('../data/replay/smoke-drink-refill.events.jsonl'); }
+  catch (e) { console.error(e); alert('load failed: ' + e.message); }
+});
+$('btn-play').addEventListener('click', () => mock.play(Number($('speed').value)));
+$('btn-stop').addEventListener('click', () => mock.stop());
+
+/* ---------- Debug helpers ---------- */
+function injectMock(evt) {
+  bus.emit(Object.assign({ _source: 'debug', ts: 0, seq: -1 }, evt));
+}
+$('btn-preset').addEventListener('click', () => {
+  const v = Number($('dbg-preset').value) || 0;
+  storage.debugSet({ today_total_ml: v, milestone_fired_today: false });
+  renderKPI();
+  pushStream({ type: 'system', _source: 'debug', ts: 0, seq: -1, message: 'preset today_total_ml=' + v });
+});
+$('btn-inject-drink').addEventListener('click', () => injectMock({ type: 'drink', delta_ml: 30, today_total_ml: storage.snapshot.today_total_ml + 30 }));
+$('btn-inject-refill').addEventListener('click', () => injectMock({ type: 'refill', added_ml: 200 }));
+$('btn-inject-place').addEventListener('click', () => injectMock({ type: 'cup_placed', weight_ml: 300 }));
+$('btn-inject-lift').addEventListener('click', () => injectMock({ type: 'cup_lifted', before_ml: 300, held_for_ms: 5000 }));
+$('btn-inject-remove').addEventListener('click', () => injectMock({ type: 'cup_removed', absent_sec: 60 }));
+$('btn-inject-change').addEventListener('click', () => injectMock({ type: 'cup_changed', via: 'lifted_return' }));
+$('btn-force-thirsty').addEventListener('click', () => engine.debugForceTransition('thirsty', 'default'));
+$('btn-force-satisfied').addEventListener('click', () => { engine.debugForceSatisfied(); renderKPI(); });
+$('btn-force-midnight').addEventListener('click', () => {
+  storage.debugForceRollover();
+  renderKPI();
+  $('badge-date').textContent = 'last_date: ' + storage.snapshot.last_date;
+  $('s-lastdate').textContent = storage.snapshot.last_date;
+});
+$('btn-clear-log').addEventListener('click', () => {
+  stream.textContent = '';
+  evtCount = 0;
+  $('s-count').textContent = '0';
+});
+$('btn-reset-storage').addEventListener('click', () => {
+  if (!confirm('确定重置 LocalStorage？')) return;
+  localStorage.removeItem('drinkpet.state.v1');
+  location.reload();
+});
+
+/* ---------- Dev panel toggle ---------- */
+const devPanel = $('devpanel');
+const toggleBtn = $('btn-toggle-dev');
+function syncDevMode() {
+  const hidden = devPanel.classList.contains('hidden');
+  toggleBtn.textContent = hidden ? 'Show dev' : 'Hide dev';
+  document.body.classList.toggle('no-dev', hidden);
+}
+toggleBtn.addEventListener('click', () => {
+  devPanel.classList.toggle('hidden');
+  syncDevMode();
+});
+
+if (new URLSearchParams(location.search).get('dev') === '0') {
+  devPanel.classList.add('hidden');
+}
+syncDevMode();
+</script>
+</body>
+</html>

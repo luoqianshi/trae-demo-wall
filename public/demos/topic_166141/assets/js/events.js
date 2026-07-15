@@ -1,0 +1,168 @@
+// events.js - 宫廷随机事件数据(内联版)
+// 不依赖 fetch,9 个事件覆盖政务/后宫/祭祀三类
+
+const Events = (() => {
+  const data = [
+    { id: 'flood-1', category: '政务', shichen: ['巳','午','未','申','酉'],
+      title: '黄河决堤急报', description: '河南巡抚八百里加急:开封府段黄河决堤,三县受灾,请旨赈济。',
+      options: [
+        { id: 'go-relief', label: '拨银赈济', text: '速拨帑银三十万两,遣钦差前往督工', stat: { diligence: 2, benevolence: 3 } },
+        { id: 'go-military', label: '调兵弹压', text: '令九门提督派兵驻防,严防流民作乱', stat: { diligence: 1, indulgence: -1 } },
+        { id: 'dismiss', label: '留中不发', text: '此事容后再议,暂且搁置', stat: { indulgence: 1 } }
+      ]
+    },
+    { id: 'impeach-1', category: '政务', shichen: ['巳','午','未','申'],
+      title: '御史弹劾奏章', description: '御史钱沣弹劾山东巡抚国泰贪墨营私,证据确凿,请旨查办。',
+      options: [
+        { id: 'investigate', label: '钦差查办', text: '遣刑部侍郎前往查证,一旦属实严惩不贷', stat: { diligence: 3, benevolence: 1 } },
+        { id: 'reprimand', label: '申饬训诫', text: '传旨申饬,令其改过自新', stat: { diligence: 1, benevolence: 1 } },
+        { id: 'protect', label: '庇护留任', text: '国泰素有贤名,御史风闻奏事未必确凿', stat: { indulgence: 2 } }
+      ]
+    },
+    { id: 'border-1', category: '政务', shichen: ['巳','午','申','酉'],
+      title: '准噶尔边境军情', description: '定边将军急报:准噶尔部噶尔丹策零率兵扰边,敌情不明。',
+      options: [
+        { id: 'war', label: '调兵迎战', text: '命陕甘总督调集精兵,严阵以待', stat: { diligence: 2, indulgence: -1 } },
+        { id: 'diplomacy', label: '遣使议和', text: '派理藩院官员前往,晓以利害', stat: { diligence: 1, benevolence: 1 } },
+        { id: 'wait', label: '静观其变', text: '令各处加强巡防,暂不主动出击', stat: { indulgence: 1 } }
+      ]
+    },
+    { id: 'consort-1', category: '后宫', shichen: ['卯','辰','戌','亥'],
+      title: '贵妃请安问膳', description: '贵妃钮祜禄氏亲至养心殿,携亲手所制糕点请安,温柔婉约。',
+      options: [
+        { id: 'receive', label: '赐座闲叙', text: '赐其同坐,谈笑风生,赏赐蜀锦两匹', stat: { benevolence: 2, indulgence: 1 } },
+        { id: 'polite', label: '温言嘉奖', text: '嘉其贤淑,赐燕窝一盒', stat: { benevolence: 1 } },
+        { id: 'busy', label: '令其退下', text: '朕有政务要忙,你且退下', stat: { diligence: 1 } }
+      ]
+    },
+    { id: 'fete-1', category: '后宫', shichen: ['辰','戌'],
+      title: '中秋宫廷宴席', description: '内务府奏请:八月十五中秋佳节将至,请旨安排御花园家宴。',
+      options: [
+        { id: 'grand', label: '大办家宴', text: '命御膳房备办满汉全席,召诸皇子妃嫔同乐', stat: { indulgence: 3, benevolence: 1 } },
+        { id: 'modest', label: '小聚即可', text: '仅设家宴数桌,不必过于铺张', stat: { indulgence: 1, benevolence: 1 } },
+        { id: 'skip', label: '罢宴节俭', text: '国事为重,今年不必设宴', stat: { diligence: 2 } }
+      ]
+    },
+    { id: 'reward-1', category: '后宫', shichen: ['午','未','戌'],
+      title: '宫女奏请赏赐', description: '储秀宫总管太监奏:侍女小翠服侍恭谨,年满出宫,请旨赏赐银两。',
+      options: [
+        { id: 'generous', label: '厚赐银两', text: '赐银百两,准其衣锦还乡', stat: { benevolence: 3 } },
+        { id: 'normal', label: '照例赏赐', text: '依例赏银二十两即可', stat: { benevolence: 1 } },
+        { id: 'refuse', label: '驳回不允', text: '宫规如此,不得逾制', stat: { diligence: 1, indulgence: 1 } }
+      ]
+    },
+    { id: 'ancestor-1', category: '祭祀', shichen: ['卯','辰'],
+      title: '太庙时享大祭', description: '礼部奏请:四月初八太庙时享之期将届,请旨遣皇子前往行礼。',
+      options: [
+        { id: 'emperor', label: '亲诣行礼', text: '朕当亲率诸皇子赴太庙行大祭之礼', stat: { diligence: 2, benevolence: 1 } },
+        { id: 'prince', label: '遣皇长子', text: '令皇长子弘历代朕前往行礼', stat: { benevolence: 1 } },
+        { id: 'cancel', label: '暂停祭祀', text: '今年暂停,待来年再议', stat: { indulgence: 1 } }
+      ]
+    },
+    { id: 'buddha-1', category: '祭祀', shichen: ['卯','未','酉'],
+      title: '雍和宫礼佛', description: '章嘉活佛奏请:皇帝万寿圣节将至,恭请驾临雍和宫礼佛诵经。',
+      options: [
+        { id: 'attend', label: '亲临礼佛', text: '朕心甚慰,当亲往拈香礼佛', stat: { benevolence: 3 } },
+        { id: 'send', label: '遣使代礼', text: '遣内大臣代朕前往进香', stat: { benevolence: 1 } },
+        { id: 'refuse', label: '推辞不往', text: '朕近日政务繁忙,暂且不往', stat: { diligence: 1 } }
+      ]
+    },
+    { id: 'shaman-1', category: '祭祀', shichen: ['辰','巳'],
+      title: '堂子祭天', description: '钦天监奏:八月初一吉日,宜祭堂子,请旨遣官致祭。',
+      options: [
+        { id: 'go', label: '亲祭堂子', text: '率王公大臣亲往长安左门东堂子致祭', stat: { diligence: 2, benevolence: 1 } },
+        { id: 'entrust', label: '遣王致祭', text: '遣恭亲王代朕前往致祭', stat: { benevolence: 1 } }
+      ]
+    }
+  ];
+
+  let lastShownId = null;
+
+  function load() { return Promise.resolve(data); }
+  function getForShichen(shichen) {
+    return data.filter(e => e.shichen.includes(shichen) || e.shichen.includes(shichen.charAt(0)));
+  }
+  function pickRandom(shichen) {
+    if (Math.random() < 0.45) return null;
+    const pool = getForShichen(shichen).filter(e => e.id !== lastShownId);
+    if (pool.length === 0) return null;
+    const e = pool[Math.floor(Math.random() * pool.length)];
+    lastShownId = e.id;
+    return e;
+  }
+
+  function showModal(event) {
+    const modal = document.getElementById('event-modal');
+    if (!modal) return;
+    const titleEl = modal.querySelector('.event-title');
+    const descEl = modal.querySelector('.event-desc');
+    const optEl = modal.querySelector('.event-options');
+    const catEl = modal.querySelector('.event-category');
+    titleEl.textContent = event.title;
+    descEl.textContent = event.description;
+    catEl.textContent = event.category;
+    catEl.className = 'event-category inline-block px-2 py-0.5 rounded text-xs font-kai mb-2 ' +
+      (event.category === '政务' ? 'bg-red-900/60 text-red-100' :
+       event.category === '后宫' ? 'bg-pink-900/60 text-pink-100' :
+       'bg-amber-900/60 text-amber-100');
+    optEl.innerHTML = '';
+    event.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'w-full text-left p-3 mb-2 rounded border border-amber-300/40 bg-amber-50/10 hover:bg-amber-50/30 transition-all font-kai text-sm text-amber-50';
+      // 全部用 DOM 创建,避免 XSS(opt.label/opt.text 来自导入存档可能含 HTML)
+      const tag = document.createElement('span');
+      tag.className = 'text-amber-300 mr-2';
+      const verdict = ['准奏', '驳回', '容议'][i] || '议';
+      tag.textContent = '[' + verdict + ']';
+      btn.appendChild(tag);
+
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = ' ' + (opt.label || '') + ' - ';
+      btn.appendChild(labelSpan);
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'text-amber-200/70 text-xs';
+      textSpan.textContent = opt.text || '';
+      btn.appendChild(textSpan);
+
+      btn.addEventListener('click', () => {
+        Stats.addStat(opt.stat || {});
+        Audio.zhongming();
+        Tribute.showToast('📜 ' + event.category + '事件处置完毕,属性已更新');
+        modal.classList.add('hidden');
+        Stats.renderPanel();
+        Stats.renderMedals();
+        saveEventLog(event, opt);
+      });
+      optEl.appendChild(btn);
+    });
+    modal.classList.remove('hidden');
+    Audio.chuanzhi();
+  }
+
+  function saveEventLog(event, option) {
+    const log = Storage.get(Storage.KEYS.DIARY, { entries: [] });
+    if (!log.entries) log.entries = [];
+    const today = new Date().toISOString().slice(0, 10);
+    let dayEntry = log.entries.find(e => e.date === today);
+    if (!dayEntry) { dayEntry = { date: today, events: [], shichenRecords: [] }; log.entries.push(dayEntry); }
+    dayEntry.events.push({
+      eventId: event.id, title: event.title, category: event.category,
+      choice: option.label, statChange: option.stat, timestamp: new Date().toISOString()
+    });
+    Storage.set(Storage.KEYS.DIARY, log);
+  }
+
+  function tryShowForNow() {
+    const profile = Stats.getProfile();
+    if (!profile || !profile.createdAt) return;
+    const tz = profile.cityKey;
+    const { name } = Shichen.getShichen(new Date(), tz);
+    const evt = pickRandom(name);
+    if (evt) showModal(evt);
+  }
+
+  function getAll() { return data; }
+
+  return { load, getForShichen, pickRandom, showModal, tryShowForNow, getAll };
+})();

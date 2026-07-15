@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>文明养犬预警系统 - 保安端</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: rgba(20, 20, 20, 0.95);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .header-title { font-size: 15px; font-weight: 600; }
+        .header-status { display: flex; align-items: center; gap: 6px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #00ff88; animation: pulse 2s infinite; }
+        .status-text { font-size: 12px; color: #00ff88; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        @keyframes blink { 0%,100%{border-color:#ff4757} 50%{border-color:transparent} }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+            overflow: hidden;
+        }
+        
+        .video-section {
+            flex: 6;
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .video-feed {
+            flex: 1;
+            width: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .video-feed::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(0deg,transparent 24%,rgba(0,255,136,0.02) 25%,rgba(0,255,136,0.02) 26%,transparent 27%,transparent 74%,rgba(0,255,136,0.02) 75%,rgba(0,255,136,0.02) 76%,transparent 77%,transparent),
+                        linear-gradient(90deg,transparent 24%,rgba(0,255,136,0.02) 25%,rgba(0,255,136,0.02) 26%,transparent 27%,transparent 74%,rgba(0,255,136,0.02) 75%,rgba(0,255,136,0.02) 76%,transparent 77%,transparent);
+            background-size: 40px 40px;
+        }
+        #camera-video {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover; z-index: 0;
+            display: none;
+        }
+        #camera-video.active {
+            display: block;
+        }
+        .video-placeholder {
+            position: relative; z-index: 1; text-align: center;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            width: 100%; height: 100%;
+            cursor: pointer;
+        }
+        .video-placeholder.hidden { display: none; }
+        .video-icon { font-size: 50px; opacity: 0.2; margin-bottom: 8px; }
+        .video-text { font-size: 13px; opacity: 0.5; }
+        .camera-info {
+            position: absolute; top: 8px; left: 8px;
+            background: rgba(0,0,0,0.6); padding: 4px 10px;
+            border-radius: 6px; font-size: 11px;
+            backdrop-filter: blur(4px); z-index: 2;
+        }
+        .detection-canvas {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2; pointer-events: none;
+        }
+        .detection-box {
+            display: none;
+        }
+        .detection-label {
+            position: absolute; top: -20px; left: 0;
+            background: #ff4757; padding: 2px 6px;
+            border-radius: 3px; font-size: 9px;
+        }
+        .alert-badge {
+            position: absolute; top: 8px; right: 8px;
+            background: rgba(255,71,87,0.9); padding: 4px 10px;
+            border-radius: 6px; font-size: 11px; font-weight: 600;
+            z-index: 2; animation: pulse 1s infinite;
+        }
+        
+        .test-controls {
+            display: flex; gap: 6px; flex-wrap: wrap;
+            padding: 8px; background: rgba(20,20,20,0.95);
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .test-btn {
+            padding: 6px 12px; background: rgba(0,0,0,0.7);
+            border: 1px solid rgba(255,255,255,0.2); border-radius: 6px;
+            color: #fff; font-size: 11px; cursor: pointer;
+            backdrop-filter: blur(4px);
+            flex: 1; min-width: 70px;
+        }
+        .test-btn:active { background: rgba(0,255,136,0.2); border-color: #00ff88; }
+        
+        .bottom-row { flex: 4; display: flex; gap: 10px; min-height: 0; }
+        
+        .left-panel {
+            flex: 1; display: flex; flex-direction: column;
+            background: rgba(20,20,20,0.9); border-radius: 12px;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .panel-title { font-size: 13px; font-weight: 600; }
+        .panel-action { font-size: 11px; color: #00ff88; cursor: pointer; }
+        .search-box { padding: 8px 12px; display: flex; gap: 6px; }
+        .search-input {
+            flex: 1; padding: 7px 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px; color: #fff; font-size: 12px;
+        }
+        .search-input::placeholder { opacity: 0.5; }
+        .search-btn {
+            padding: 0 12px; background: #00ff88;
+            border: none; border-radius: 6px;
+            color: #000; font-size: 12px; font-weight: 600;
+            cursor: pointer;
+        }
+        .record-list { flex: 1; overflow-y: auto; padding: 6px; }
+        .record-item {
+            background: rgba(255,255,255,0.03); border-radius: 8px;
+            padding: 10px; margin-bottom: 6px; cursor: pointer;
+            transition: background 0.2s;
+        }
+        .record-item:active { background: rgba(255,255,255,0.08); }
+        .record-phone { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .record-info { font-size: 11px; opacity: 0.6; display: flex; justify-content: space-between; align-items: center; }
+        .record-level { padding: 2px 6px; border-radius: 3px; font-size: 9px; }
+        .level-red { background: #ff4757; }
+        .level-orange { background: #ffa502; color: #000; }
+        
+        .right-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+        
+        .snapshot-card {
+            flex: 1; background: rgba(20,20,20,0.9);
+            border-radius: 12px; overflow: hidden; position: relative;
+            cursor: pointer; min-height: 0;
+        }
+        .snapshot-img-box {
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            font-size: 11px;
+        }
+        .snapshot-img-box.large { background: linear-gradient(135deg, #2d1b3d, #1a0a2e); }
+        .snapshot-img-box.medium { background: linear-gradient(135deg, #3d2b1b, #2e1a0a); }
+        .snapshot-img-box.small { background: linear-gradient(135deg, #1b3d2d, #0a2e1a); }
+        .snapshot-icon { font-size: 32px; opacity: 0.4; margin-bottom: 6px; }
+        .snapshot-badge {
+            position: absolute; top: 6px; left: 6px;
+            background: #ff4757; padding: 2px 6px;
+            border-radius: 3px; font-size: 9px;
+        }
+        .live-time {
+            position: absolute; bottom: 6px; right: 6px;
+            background: rgba(0,0,0,0.7); padding: 3px 8px;
+            border-radius: 4px; font-size: 11px; font-weight: 500;
+        }
+        
+        .map-card {
+            flex: 1; background: rgba(20,20,20,0.9);
+            border-radius: 12px; overflow: hidden; position: relative;
+            min-height: 0;
+        }
+        .map-placeholder {
+            width: 100%; height: 100%; background: #1a1a1a;
+            display: flex; flex-direction: column;
+            padding: 8px;
+        }
+        .map-grid { flex: 1; width: 100%; position: relative; }
+        .grid-line-h { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.05); }
+        .grid-line-v { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.05); }
+        
+        .device-marker {
+            position: absolute; width: 24px; height: 24px;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: bold; cursor: pointer;
+            transition: transform 0.2s;
+            z-index: 10;
+        }
+        .device-marker.normal { background: #00ff88; color: #000; box-shadow: 0 2px 6px rgba(0,255,136,0.3); }
+        .device-marker.alert { background: #ffa502; color: #000; box-shadow: 0 2px 6px rgba(255,165,2,0.3); animation: pulse 1.5s infinite; }
+        .device-marker.alarm { background: #ff4757; color: #fff; box-shadow: 0 2px 6px rgba(255,71,87,0.4); animation: pulse 1s infinite; }
+        .device-marker.triangle {
+            width: 0; height: 0;
+            border-left: 14px solid transparent;
+            border-right: 14px solid transparent;
+            border-bottom: 26px solid #ffa502;
+            background: transparent;
+            border-radius: 0;
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 2px 6px rgba(255,165,2,0.3);
+        }
+        
+        .map-footer {
+            display: flex; flex-direction: column; align-items: center;
+            padding-top: 4px;
+        }
+        .map-location { font-size: 10px; opacity: 0.7; text-align: center; }
+        .navigate-btn {
+            width: 85%; padding: 8px 12px;
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000; border: none; border-radius: 8px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            margin-top: 6px; transition: opacity 0.2s;
+        }
+        .navigate-btn:active { opacity: 0.8; }
+        
+        .detail-modal {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.95); z-index: 200;
+            transform: translateX(100%); transition: transform 0.3s ease;
+            display: flex; flex-direction: column;
+        }
+        .detail-modal.show { transform: translateX(0); }
+        .detail-header { display: flex; align-items: center; padding: 12px 15px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .back-btn { font-size: 22px; margin-right: 10px; cursor: pointer; }
+        .detail-title { font-size: 15px; font-weight: 600; }
+        .detail-content { flex: 1; overflow-y: auto; padding: 15px; }
+        
+        .detail-image-box {
+            width: 100%; border-radius: 10px; aspect-ratio: 4/3;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            margin-bottom: 15px; font-size: 12px;
+        }
+        .detail-image-box.large { background: linear-gradient(135deg, #2d1b3d, #1a0a2e); }
+        .detail-image-box.medium { background: linear-gradient(135deg, #3d2b1b, #2e1a0a); }
+        .detail-image-box.small { background: linear-gradient(135deg, #1b3d2d, #0a2e1a); }
+        
+        .detail-info-row {
+            display: flex; justify-content: space-between;
+            padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 13px;
+        }
+        .detail-info-label { opacity: 0.6; }
+        .detail-info-value { font-weight: 500; }
+        
+        .disposal-form { margin-top: 20px; background: rgba(255,255,255,0.03); border-radius: 10px; padding: 15px; }
+        .form-title { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+        .form-group { margin-bottom: 14px; }
+        .form-label { font-size: 12px; opacity: 0.7; margin-bottom: 7px; display: block; }
+        .form-options { display: flex; flex-direction: column; gap: 7px; }
+        .form-option {
+            display: flex; align-items: center; padding: 10px;
+            background: rgba(255,255,255,0.03); border-radius: 7px;
+            cursor: pointer; border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .form-option.selected { background: rgba(0,255,136,0.08); border-color: #00ff88; }
+        .option-radio {
+            width: 18px; height: 18px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.3); margin-right: 10px;
+            position: relative;
+        }
+        .form-option.selected .option-radio { border-color: #00ff88; }
+        .form-option.selected .option-radio::after {
+            content: ''; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%,-50%); width: 8px; height: 8px;
+            background: #00ff88; border-radius: 50%;
+        }
+        .form-option-text { font-size: 13px; }
+        
+        .photo-upload-area {
+            width: 100%; height: 100px;
+            border: 2px dashed rgba(255,255,255,0.15);
+            border-radius: 7px; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 6px;
+            cursor: pointer; transition: border-color 0.2s;
+        }
+        .photo-upload-area:hover { border-color: #00ff88; }
+        .photo-upload-area.has-photo { border-style: solid; border-color: #00ff88; }
+        .photo-icon { font-size: 26px; opacity: 0.4; }
+        .photo-text { font-size: 11px; opacity: 0.5; }
+        
+        .form-textarea {
+            width: 100%; height: 70px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 7px; padding: 10px;
+            color: #fff; font-size: 13px; resize: none;
+        }
+        .form-textarea:focus { outline: none; border-color: #00ff88; }
+        
+        .submit-btn {
+            width: 100%; padding: 12px;
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000; border: none; border-radius: 10px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+            margin-top: 6px;
+        }
+        
+        .disposal-record {
+            margin-top: 15px; padding: 12px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px; font-size: 12px; opacity: 0.6;
+        }
+        
+        .toast {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%,-50%);
+            background: rgba(0,0,0,0.85); padding: 14px 20px;
+            border-radius: 8px; font-size: 13px; opacity: 0;
+            transition: opacity 0.3s; z-index: 300; pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+        
+        .admin-btn {
+            padding: 4px 10px; background: rgba(0,136,255,0.2);
+            border: 1px solid rgba(0,136,255,0.4); border-radius: 4px;
+            color: #0088ff; font-size: 11px; cursor: pointer;
+        }
+        .admin-btn:active { background: rgba(0,136,255,0.3); }
+        
+        .admin-modal {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: #0a0a0a; z-index: 200;
+            display: none; flex-direction: column;
+        }
+        .admin-modal.show { display: flex; }
+        
+        .admin-header {
+            padding: 12px 15px; background: rgba(20,20,20,0.95);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .admin-title { font-size: 15px; font-weight: 600; }
+        
+        .admin-tabs {
+            display: flex; background: rgba(15,15,15,0.9);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            overflow-x: auto;
+        }
+        .admin-tab {
+            flex: 1; padding: 10px 8px; text-align: center;
+            font-size: 11px; cursor: pointer; color: rgba(255,255,255,0.5);
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+        }
+        .admin-tab.active { color: #00ff88; border-color: #00ff88; }
+        
+        .admin-content {
+            flex: 1; overflow-y: auto; padding: 12px;
+        }
+        
+        .admin-section { display: none; }
+        .admin-section.active { display: block; }
+        
+        .admin-card {
+            background: rgba(20,20,20,0.9); border-radius: 12px;
+            padding: 14px; margin-bottom: 12px;
+        }
+        .admin-card-title {
+            font-size: 13px; font-weight: 600; margin-bottom: 12px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        
+        .param-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .param-label { font-size: 13px; opacity: 0.8; }
+        .param-value { font-size: 13px; font-weight: 500; color: #00ff88; }
+        
+        .param-slider {
+            width: 100%; height: 6px; background: rgba(255,255,255,0.1);
+            border-radius: 3px; margin: 10px 0; position: relative;
+        }
+        .param-slider-fill {
+            height: 100%; background: linear-gradient(90deg, #00ff88, #00cc6a);
+            border-radius: 3px;
+        }
+        .param-slider-thumb {
+            position: absolute; top: 50%; transform: translate(-50%,-50%);
+            width: 18px; height: 18px; background: #fff; border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        
+        .param-input {
+            width: 100%; padding: 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px; color: #fff; font-size: 13px;
+            margin-top: 8px;
+        }
+        
+        .param-toggle {
+            width: 44px; height: 24px; background: rgba(255,255,255,0.1);
+            border-radius: 12px; position: relative; cursor: pointer;
+            transition: background 0.3s;
+        }
+        .param-toggle.on { background: #00ff88; }
+        .param-toggle-thumb {
+            width: 20px; height: 20px; background: #fff;
+            border-radius: 50%; position: absolute; top: 2px; left: 2px;
+            transition: left 0.3s;
+        }
+        .param-toggle.on .param-toggle-thumb { left: 22px; }
+        
+        .stats-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+        .stats-card {
+            background: rgba(20,20,20,0.9); border-radius: 10px;
+            padding: 12px; text-align: center;
+        }
+        .stats-value { font-size: 24px; font-weight: 700; color: #00ff88; }
+        .stats-label { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+        
+        .stats-period { display: flex; gap: 6px; margin-bottom: 12px; }
+        .period-btn {
+            flex: 1; padding: 8px; text-align: center;
+            background: rgba(255,255,255,0.05); border-radius: 6px;
+            font-size: 11px; cursor: pointer; border: 1px solid transparent;
+        }
+        .period-btn.active { background: rgba(0,255,136,0.1); border-color: #00ff88; color: #00ff88; }
+        
+        .location-list {
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .location-item {
+            display: flex; align-items: center; padding: 10px;
+            background: rgba(255,255,255,0.03); border-radius: 8px;
+        }
+        .location-name { flex: 1; font-size: 12px; }
+        .location-count {
+            background: #ff4757; padding: 3px 8px; border-radius: 10px;
+            font-size: 11px; font-weight: 600;
+        }
+        
+        .device-list { display: flex; flex-direction: column; gap: 8px; }
+        .device-item {
+            display: flex; align-items: center; padding: 12px;
+            background: rgba(255,255,255,0.03); border-radius: 10px;
+            gap: 12px;
+        }
+        .device-status {
+            width: 10px; height: 10px; border-radius: 50%;
+        }
+        .device-status.online { background: #00ff88; }
+        .device-status.offline { background: #ff4757; }
+        .device-status.warning { background: #ffa502; }
+        .device-info { flex: 1; }
+        .device-name { font-size: 13px; font-weight: 500; }
+        .device-id { font-size: 11px; opacity: 0.5; }
+        .device-time { font-size: 11px; opacity: 0.4; }
+        
+        .evidence-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .evidence-item {
+            aspect-ratio: 1; background: rgba(255,255,255,0.03);
+            border-radius: 8px; overflow: hidden; position: relative;
+            cursor: pointer;
+        }
+        .evidence-img {
+            width: 100%; height: 100%; object-fit: cover;
+            opacity: 0.6;
+        }
+        .evidence-item:hover .evidence-img { opacity: 1; }
+        .evidence-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.7); padding: 4px;
+            font-size: 10px; text-align: center;
+        }
+        
+        .export-btn {
+            width: 100%; padding: 12px;
+            background: linear-gradient(135deg, #0088ff, #0066cc);
+            color: #fff; border: none; border-radius: 10px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            margin-top: 12px;
+        }
+        
+        .save-btn {
+            width: 100%; padding: 12px;
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000; border: none; border-radius: 10px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            margin-top: 15px;
+        }
+        
+        @media (min-width: 768px) {
+            body { max-width: 480px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.05); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="header-title">文明养犬预警</span>
+        <div class="header-status">
+            <span class="status-dot"></span>
+            <span class="status-text">监控中</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="video-section">
+            <div class="video-feed">
+                <video id="camera-video" autoplay playsinline muted></video>
+                <canvas id="simulation-canvas" class="detection-canvas" style="display:none;"></canvas>
+                <div class="video-placeholder" id="video-placeholder">
+                    <div class="video-icon">📹</div>
+                    <div class="video-text">点击开启摄像头</div>
+                </div>
+            </div>
+            <div class="camera-info" id="camera-info">📷 3号楼南门 | CAM-003</div>
+            <canvas id="detection-canvas" class="detection-canvas"></canvas>
+            <div class="alert-badge" id="alert-badge" style="display:none;">⚠️ 违规预警</div>
+            <div class="test-controls" id="test-controls">
+                <button class="test-btn" onclick="startSimulation('large-no-leash')">🐕 中大型犬未牵绳</button>
+                <button class="test-btn" onclick="startSimulation('large-with-leash')">🐕 中大型犬已牵绳</button>
+                <button class="test-btn" onclick="startSimulation('small-no-leash')">🦮 小型犬未牵绳</button>
+                <button class="test-btn" onclick="startSimulation('small-with-leash')">🦮 小型犬已牵绳</button>
+                <button class="test-btn" onclick="stopSimulation()">⏹️ 停止模拟</button>
+            </div>
+        </div>
+
+        <div class="bottom-row">
+            <div class="left-panel">
+                <div class="panel-header">
+                    <button class="admin-btn" onclick="openAdmin()">⚙️ 后台管理</button>
+                </div>
+                <div class="record-list" id="record-list"></div>
+            </div>
+
+            <div class="right-panel">
+                <div class="snapshot-card" onclick="showDetail(0)">
+                    <div class="snapshot-img-box large" id="current-snapshot">
+                        <span class="snapshot-icon">🐕</span>
+                        <span>大型犬未牵绳</span>
+                    </div>
+                    <span class="snapshot-badge">大型犬</span>
+                    <span class="live-time" id="live-time">00:00:00</span>
+                </div>
+
+                <div class="map-card">
+                    <div class="map-placeholder">
+                        <div class="map-grid">
+                            <div class="grid-line-h" style="top:25%"></div>
+                            <div class="grid-line-h" style="top:50%"></div>
+                            <div class="grid-line-h" style="top:75%"></div>
+                            <div class="grid-line-v" style="left:25%"></div>
+                            <div class="grid-line-v" style="left:50%"></div>
+                            <div class="grid-line-v" style="left:75%"></div>
+                            
+                            <div class="device-marker alarm" style="top:25%;left:45%" onclick="selectDevice(0)">3</div>
+                            <div class="device-marker alarm" style="top:50%;left:75%" onclick="selectDevice(1)">5</div>
+                            <div class="device-marker triangle" style="top:8%;left:18%" onclick="selectDevice(2)"></div>
+                            <div class="device-marker normal" style="top:65%;left:30%" onclick="selectDevice(3)">2</div>
+                            <div class="device-marker alarm" style="top:35%;left:80%" onclick="selectDevice(4)">4</div>
+                            <div class="device-marker normal" style="top:55%;left:55%" onclick="selectDevice(5)">6</div>
+                        </div>
+                        <div class="map-footer">
+                            <div class="map-location" id="map-location">📍 3号楼南门 | CAM-003 | 报警中</div>
+                            <button class="navigate-btn" onclick="openAmap()">🚶 前往此处</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="detail-modal" class="detail-modal">
+        <div class="detail-header">
+            <span class="back-btn" onclick="hideDetail()">←</span>
+            <span class="detail-title">违规详情</span>
+        </div>
+        <div class="detail-content" id="detail-content"></div>
+    </div>
+
+    <div id="admin-modal" class="admin-modal">
+        <div class="admin-header">
+            <span class="back-btn" onclick="closeAdmin()">←</span>
+            <span class="admin-title">⚙️ 后台管理</span>
+        </div>
+        <div class="admin-tabs">
+            <div class="admin-tab active" onclick="switchAdminTab('params')">参数设置</div>
+            <div class="admin-tab" onclick="switchAdminTab('stats')">统计分析</div>
+            <div class="admin-tab" onclick="switchAdminTab('devices')">设备监控</div>
+            <div class="admin-tab" onclick="switchAdminTab('evidence')">取证管理</div>
+            <div class="admin-tab" onclick="switchAdminTab('records')">违规记录</div>
+        </div>
+        <div class="admin-content" id="admin-content"></div>
+    </div>
+
+    <div id="toast" class="toast">操作成功</div>
+
+    <script>
+        const mockData = [
+            { id:1, phone:'13812345678', size:'大型犬', sizeClass:'large', level:'红色预警', location:'3号楼南门', time:'2026-07-07 18:32:15', cameraId:'CAM-003', status:'alarm' },
+            { id:2, phone:'13956781234', size:'中型犬', sizeClass:'medium', level:'红色预警', location:'5号楼东侧', time:'2026-07-07 17:45:30', cameraId:'CAM-005', status:'alarm' },
+            { id:3, phone:'13698763456', size:'小型犬', sizeClass:'small', level:'橙色预警', location:'儿童活动区', time:'2026-07-07 16:20:00', cameraId:'CAM-002', status:'alert' },
+            { id:5, phone:'13545676789', size:'中型犬', sizeClass:'medium', level:'红色预警', location:'4号楼北侧', time:'2026-07-07 14:30:20', cameraId:'CAM-004', status:'alarm' }
+        ];
+
+        const deviceData = [
+            { id:1, name:'3号楼南门', cameraId:'CAM-003', status:'alarm', sizeClass:'large', lat:30.5728, lng:104.0668 },
+            { id:2, name:'5号楼东侧', cameraId:'CAM-005', status:'alarm', sizeClass:'medium', lat:30.5732, lng:104.0675 },
+            { id:3, name:'儿童活动区', cameraId:'CAM-002', status:'alert', sizeClass:'small', lat:30.5722, lng:104.0662 },
+            { id:4, name:'2号楼门口', cameraId:'CAM-001', status:'normal', sizeClass:'', lat:30.5725, lng:104.0658 },
+            { id:5, name:'4号楼北侧', cameraId:'CAM-004', status:'alarm', sizeClass:'medium', lat:30.5730, lng:104.0655 },
+            { id:6, name:'6号楼西侧', cameraId:'CAM-006', status:'normal', sizeClass:'', lat:30.5720, lng:104.0670 }
+        ];
+
+        const dogIcons = { large:'🐕', medium:'🐩', small:'🦮' };
+        let currentDeviceIndex = 0;
+        let hasPhoto = false;
+
+        const statsData = {
+            daily: { total: 6, large: 2, medium: 2, small: 2 },
+            weekly: { total: 38, large: 12, medium: 14, small: 12 },
+            monthly: { total: 142, large: 45, medium: 52, small: 45 },
+            quarterly: { total: 425, large: 138, medium: 155, small: 132 }
+        };
+
+        const locationStats = [
+            { name: '3号楼南门', count: 12 },
+            { name: '5号楼东侧', count: 10 },
+            { name: '儿童活动区', count: 8 },
+            { name: '4号楼北侧', count: 7 },
+            { name: '2号楼门口', count: 4 },
+            { name: '6号楼西侧', count: 3 }
+        ];
+
+        const deviceStatusData = [
+            { id: 1, name: '3号楼南门', cameraId: 'CAM-003', status: 'online', lastOnline: '2026-07-08 14:30:00' },
+            { id: 2, name: '5号楼东侧', cameraId: 'CAM-005', status: 'online', lastOnline: '2026-07-08 14:28:00' },
+            { id: 3, name: '儿童活动区', cameraId: 'CAM-002', status: 'warning', lastOnline: '2026-07-08 14:15:00', warning: '信号弱' },
+            { id: 4, name: '2号楼门口', cameraId: 'CAM-001', status: 'offline', lastOnline: '2026-07-07 22:10:00' },
+            { id: 5, name: '4号楼北侧', cameraId: 'CAM-004', status: 'online', lastOnline: '2026-07-08 14:25:00' },
+            { id: 6, name: '6号楼西侧', cameraId: 'CAM-006', status: 'online', lastOnline: '2026-07-08 14:20:00' }
+        ];
+
+        const evidenceData = [
+            { id: 1, time: '2026-07-08 14:30', location: '3号楼南门', type: 'large' },
+            { id: 2, time: '2026-07-08 14:25', location: '5号楼东侧', type: 'medium' },
+            { id: 3, time: '2026-07-08 14:15', location: '儿童活动区', type: 'small' },
+            { id: 4, time: '2026-07-08 13:50', location: '4号楼北侧', type: 'large' },
+            { id: 5, time: '2026-07-08 13:40', location: '3号楼南门', type: 'medium' },
+            { id: 6, time: '2026-07-08 13:20', location: '儿童活动区', type: 'small' },
+            { id: 7, time: '2026-07-08 12:55', location: '5号楼东侧', type: 'large' },
+            { id: 8, time: '2026-07-08 12:30', location: '4号楼北侧', type: 'medium' },
+            { id: 9, time: '2026-07-08 11:45', location: '3号楼南门', type: 'small' }
+        ];
+
+        let adminConfig = {
+            shoulderHeightThreshold: 20,
+            warningVoice: '请牵好您的宠物犬，文明养犬，人人有责',
+            captureEnabled: true
+        };
+
+        let currentPeriod = 'daily';
+
+        function renderRecords(data) {
+            const list = document.getElementById('record-list');
+            list.innerHTML = data.map(item => `
+                <div class="record-item" onclick="showDetail(${mockData.indexOf(item)})">
+                    <div class="record-phone">${item.phone}</div>
+                    <div class="record-info">
+                        <span>${item.size} · ${item.location}</span>
+                        <span class="record-level ${item.level.includes('红色')?'level-red':'level-orange'}">${item.level.replace('预警','')}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        renderRecords(mockData);
+
+        function searchRecords() {
+            const keyword = document.getElementById('search-phone').value.trim();
+            if (!keyword) { renderRecords(mockData); return; }
+            const filtered = mockData.filter(item => item.phone.includes(keyword) || item.location.includes(keyword));
+            document.getElementById('record-list').innerHTML = filtered.length ? renderRecords(filtered) : '<div style="text-align:center;padding:20px;opacity:0.5;">未找到相关记录</div>';
+        }
+
+        function showDetail(index) {
+            const data = mockData[index];
+            const icon = dogIcons[data.sizeClass];
+            document.getElementById('detail-content').innerHTML = `
+                <div class="detail-image-box ${data.sizeClass}">
+                    <span class="snapshot-icon">${icon}</span>
+                    <span>${data.size}未牵绳</span>
+                </div>
+                <div class="detail-info-row"><span class="detail-info-label">犬主电话</span><span class="detail-info-value">${data.phone}</span></div>
+                <div class="detail-info-row"><span class="detail-info-label">犬只体型</span><span class="detail-info-value">${data.size}</span></div>
+                <div class="detail-info-row"><span class="detail-info-label">预警等级</span><span class="detail-info-value">${data.level}</span></div>
+                <div class="detail-info-row"><span class="detail-info-label">报警位置</span><span class="detail-info-value">${data.location}</span></div>
+                <div class="detail-info-row"><span class="detail-info-label">报警时间</span><span class="detail-info-value">${data.time}</span></div>
+                
+                <div class="disposal-form">
+                    <div class="form-title">📝 处置情况</div>
+                    <div class="form-group">
+                        <div class="form-label">处置结果</div>
+                        <div class="form-options">
+                            <div class="form-option" onclick="selectOption(this)"><div class="option-radio"></div><span class="form-option-text">劝导成功，犬主已牵绳</span></div>
+                            <div class="form-option" onclick="selectOption(this)"><div class="option-radio"></div><span class="form-option-text">拒不配合，已上报物业</span></div>
+                            <div class="form-option" onclick="selectOption(this)"><div class="option-radio"></div><span class="form-option-text">犬主不在场，已驱赶犬只</span></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="form-label">📷 拍照留证</div>
+                        <div class="photo-upload-area" id="photo-upload" onclick="takePhoto()">
+                            <span class="photo-icon">📷</span><span class="photo-text">点击拍照或上传照片</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="form-label">备注说明</div>
+                        <textarea class="form-textarea" id="disposal-remark" placeholder="请输入处置详情..."></textarea>
+                    </div>
+                    <button class="submit-btn" onclick="submitDisposal()">✅ 提交处置记录</button>
+                </div>
+                <div class="disposal-record" id="disposal-record">暂无处置记录</div>
+            `;
+            hasPhoto = false;
+            document.getElementById('detail-modal').classList.add('show');
+        }
+
+        function hideDetail() {
+            document.getElementById('detail-modal').classList.remove('show');
+            document.querySelectorAll('.form-option').forEach(opt => opt.classList.remove('selected'));
+            document.getElementById('disposal-remark').value = '';
+        }
+
+        function selectOption(element) {
+            document.querySelectorAll('.form-option').forEach(opt => opt.classList.remove('selected'));
+            element.classList.add('selected');
+        }
+
+        function takePhoto() {
+            hasPhoto = true;
+            const area = document.getElementById('photo-upload');
+            area.className = 'photo-upload-area has-photo';
+            area.innerHTML = '<div style="width:100%;height:100%;background:#1a1a1a;display:flex;align-items:center;justify-content:center;border-radius:5px;"><span style="font-size:18px;">✅ 拍照成功</span></div>';
+            showToast('拍照留证成功');
+        }
+
+        function submitDisposal() {
+            const selected = document.querySelector('.form-option.selected');
+            if (!selected) { showToast('请选择处置结果'); return; }
+            const result = selected.querySelector('.form-option-text').textContent;
+            const remark = document.getElementById('disposal-remark').value;
+            const record = document.getElementById('disposal-record');
+            record.innerHTML = `
+                <div style="font-weight:600;margin-bottom:4px;">✅ 已处置</div>
+                <div style="margin-bottom:4px;">结果：${result}</div>
+                ${hasPhoto?'<div style="margin-bottom:4px;">📷 已拍照留证</div>':''}
+                ${remark?'<div>备注：'+remark+'</div>':''}
+                <div style="font-size:11px;opacity:0.5;margin-top:6px;">处置时间：${new Date().toLocaleString()}</div>
+            `;
+            record.style.opacity = '1';
+            showToast('处置记录已提交');
+            setTimeout(hideDetail, 1500);
+        }
+
+        function selectDevice(index) {
+            const device = deviceData[index];
+            currentDeviceIndex = index;
+            
+            document.getElementById('camera-info').textContent = '📷 '+device.name+' | '+device.cameraId;
+            document.getElementById('map-location').textContent = '📍 '+device.name+' | '+device.cameraId+' | '+(device.status==='alarm'?'报警中':device.status==='alert'?'预警':'正常');
+            
+            document.querySelector('.video-text').textContent = device.name+'监控画面';
+            
+            const snap = document.getElementById('current-snapshot');
+            if (device.sizeClass) {
+                snap.className = 'snapshot-img-box '+device.sizeClass;
+                snap.innerHTML = '<span class="snapshot-icon">'+dogIcons[device.sizeClass]+'</span><span>'+device.name+'</span>';
+                const badge = document.querySelector('.snapshot-badge');
+                badge.textContent = device.sizeClass==='large'?'大型犬':device.sizeClass==='medium'?'中型犬':'小型犬';
+                badge.style.background = device.sizeClass==='small'?'#ffa502':'#ff4757';
+            } else {
+                snap.className = 'snapshot-img-box';
+                snap.style.background = '#1a1a2e';
+                snap.innerHTML = '<span class="snapshot-icon">📹</span><span>无违规抓拍</span>';
+                const badge = document.querySelector('.snapshot-badge');
+                badge.textContent = '安全';
+                badge.style.background = '#00ff88';
+                badge.style.color = '#000';
+            }
+            
+            const alertBadge = document.getElementById('alert-badge');
+            alertBadge.style.display = device.status === 'normal' ? 'none' : 'block';
+            
+            showToast('已切换至 '+device.name);
+        }
+
+        let detectionModel = null;
+        let detectionInterval = null;
+        let stableViolation = null;
+        let violationConsecutiveFrames = 0;
+        let frameHistory = [];
+        let hasTriggeredAlert = false;
+        let lastCaptureTime = 0;
+        
+        const CONFIDENCE_THRESHOLD = 0.15;
+        const VIOLATION_REQUIRED_FRAMES = 3;
+        const MAX_MISS_FRAMES = 5;
+        const SHOULDER_HEIGHT_THRESHOLD = 0.25;
+        const CAPTURE_INTERVAL = 5000;
+        
+        const INTERFERENCE_CLASSES = ['cat', 'bird', 'bicycle', 'car', 'motorcycle', 'bus', 'truck'];
+        
+        async function loadDetectionModel() {
+            showToast('正在加载识别模型...');
+            try {
+                detectionModel = await cocoSsd.load();
+                showToast('识别模型加载完成');
+                startDetection();
+            } catch (err) {
+                showToast('模型加载失败: '+err.message);
+            }
+        }
+
+        function startDetection() {
+            if (detectionInterval) clearInterval(detectionInterval);
+            detectionInterval = setInterval(detectDogs, 600);
+        }
+
+        function stopDetection() {
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+            frameHistory = [];
+            violationConsecutiveFrames = 0;
+            stableViolation = null;
+            hasTriggeredAlert = false;
+        }
+
+        function iou(box1, box2) {
+            const [x1, y1, w1, h1] = box1;
+            const [x2, y2, w2, h2] = box2;
+            const xA = Math.max(x1, x2);
+            const yA = Math.max(y1, y2);
+            const xB = Math.min(x1 + w1, x2 + w2);
+            const yB = Math.min(y1 + h1, y2 + h2);
+            const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+            const box1Area = w1 * h1;
+            const box2Area = w2 * h2;
+            return interArea / (box1Area + box2Area - interArea);
+        }
+
+        function hasInterference(predictions) {
+            for (const pred of predictions) {
+                if (INTERFERENCE_CLASSES.includes(pred.class) && pred.score >= 0.3) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function detectCollar(source, dogBox) {
+            const [x, y, w, h] = dogBox;
+            const neckY = y + h * 0.18;
+            const neckX = x + w * 0.35;
+            const neckW = w * 0.3;
+            const neckH = h * 0.06;
+            
+            const width = source.videoWidth || source.width;
+            const height = source.videoHeight || source.height;
+            
+            if (neckX + neckW > width || neckY + neckH > height) {
+                return false;
+            }
+            
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            tempCtx.drawImage(source, 0, 0);
+            
+            const imageData = tempCtx.getImageData(neckX, neckY, neckW, neckH);
+            const pixels = imageData.data;
+            
+            let highContrastCount = 0;
+            let colorVariance = 0;
+            let redPixelCount = 0;
+            
+            for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                
+                if (Math.abs(r - g) > 25 || Math.abs(r - b) > 25 || Math.abs(g - b) > 25) {
+                    highContrastCount++;
+                }
+                
+                if ((r > 180 || g > 180 || b > 180) && (r < 100 || g < 100 || b < 100)) {
+                    colorVariance++;
+                }
+                
+                if (r > 200 && g < 100 && b < 100) {
+                    redPixelCount++;
+                }
+            }
+            
+            const pixelCount = pixels.length / 4;
+            const contrastRatio = highContrastCount / pixelCount;
+            const varianceRatio = colorVariance / pixelCount;
+            const redRatio = redPixelCount / pixelCount;
+            
+            return contrastRatio > 0.12 || varianceRatio > 0.04 || redRatio > 0.02;
+        }
+
+        function detectLeash(source, dogBox) {
+            const [x, y, w, h] = dogBox;
+            const leashAreaX = x + w * 0.6;
+            const leashAreaY = y + h * 0.2;
+            const leashAreaW = w * 0.6;
+            const leashAreaH = h * 0.7;
+            
+            const width = source.videoWidth || source.width;
+            const height = source.videoHeight || source.height;
+            
+            if (leashAreaX + leashAreaW > width || leashAreaY + leashAreaH > height) {
+                return false;
+            }
+            
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            tempCtx.drawImage(source, 0, 0);
+            
+            const imageData = tempCtx.getImageData(leashAreaX, leashAreaY, leashAreaW, leashAreaH);
+            const pixels = imageData.data;
+            
+            let darkPixelCount = 0;
+            let edgeCount = 0;
+            let greenTextCount = 0;
+            
+            for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                const avg = (r + g + b) / 3;
+                
+                if (avg < 100) {
+                    darkPixelCount++;
+                }
+                
+                const nextI = i + 4;
+                if (nextI < pixels.length) {
+                    const nextAvg = (pixels[nextI] + pixels[nextI + 1] + pixels[nextI + 2]) / 3;
+                    if (Math.abs(avg - nextAvg) > 50) {
+                        edgeCount++;
+                    }
+                }
+                
+                if (g > 200 && r < 100 && b < 100) {
+                    greenTextCount++;
+                }
+            }
+            
+            const pixelCount = pixels.length / 4;
+            const darkRatio = darkPixelCount / pixelCount;
+            const edgeRatio = edgeCount / pixelCount;
+            const greenRatio = greenTextCount / pixelCount;
+            
+            return darkRatio > 0.06 || edgeRatio > 0.02 || greenRatio > 0.005;
+        }
+
+        function estimateShoulderHeight(dogBox, frameHeight) {
+            const [, , , height] = dogBox;
+            const heightRatio = height / frameHeight;
+            
+            let shoulderHeightCm = Math.round(heightRatio * 500);
+            let dogSize = '';
+            
+            if (shoulderHeightCm < 20) {
+                dogSize = '小型犬';
+            } else {
+                dogSize = '中/大型犬';
+            }
+            
+            return { shoulderHeightCm, dogSize, heightRatio };
+        }
+
+        function captureSnapshot() {
+            const video = document.getElementById('camera-video');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            
+            const snapBox = document.getElementById('current-snapshot');
+            snapBox.style.background = 'none';
+            snapBox.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+            
+            const badge = document.querySelector('.snapshot-badge');
+            badge.textContent = stableViolation ? 
+                (stableViolation.dogSize === '小型犬' ? '小型犬' : '大型犬') : '违规抓拍';
+            badge.style.background = stableViolation && stableViolation.dogSize === '小型犬' ? '#ffa502' : '#ff4757';
+            
+            showToast('📷 已抓拍违规照片');
+        }
+
+        function showAlertModal(dogSize, shoulderHeightCm) {
+            const isLarge = dogSize !== '小型犬';
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.9); z-index: 1000;
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                animation: fadeIn 0.3s;
+            `;
+            
+            modal.innerHTML = `
+                <div style="text-align:center;">
+                    <div style="font-size:60px;margin-bottom:20px;">${isLarge ? '🚨' : '⚠️'}</div>
+                    <div style="font-size:24px;font-weight:bold;margin-bottom:10px;color:${isLarge ? '#ff4757' : '#ffa502'};">
+                        ${isLarge ? '紧急预警' : '预警提醒'}
+                    </div>
+                    <div style="font-size:18px;margin-bottom:8px;">检测到${dogSize}未牵绳</div>
+                    <div style="font-size:14px;opacity:0.7;margin-bottom:20px;">肩高约 ${shoulderHeightCm}cm</div>
+                    <button onclick="this.parentElement.parentElement.remove()" 
+                        style="padding:12px 30px;background:${isLarge ? '#ff4757' : '#ffa502'};color:#000;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;">
+                        确认收到
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        async function detectDogs() {
+            const video = document.getElementById('camera-video');
+            const simulationCanvas = document.getElementById('simulation-canvas');
+            const canvas = document.getElementById('detection-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const hasSimulation = simulationCanvas.style.display !== 'none';
+            
+            if (!hasSimulation && (!video || !video.srcObject)) return;
+            if (!detectionModel) return;
+            
+            canvas.width = video.clientWidth;
+            canvas.height = video.clientHeight;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            try {
+                const inputSource = hasSimulation ? simulationCanvas : video;
+                const predictions = await detectionModel.detect(inputSource);
+                const dogPredictions = predictions.filter(p => p.class === 'dog' && p.score >= CONFIDENCE_THRESHOLD);
+                
+                if (dogPredictions.length > 0) {
+                    let bestPrediction = dogPredictions[0];
+                    for (const pred of dogPredictions) {
+                        if (pred.score > bestPrediction.score) {
+                            bestPrediction = pred;
+                        }
+                    }
+                    
+                    const dogBox = bestPrediction.bbox;
+                    const hasCollar = detectCollar(inputSource, dogBox);
+                    const hasLeash = detectLeash(inputSource, dogBox);
+                    const { shoulderHeightCm, dogSize, heightRatio } = estimateShoulderHeight(dogBox, canvas.height);
+                    
+                    const isViolation = !hasCollar && !hasLeash;
+                    
+                    const currentDetection = {
+                        ...bestPrediction,
+                        hasCollar,
+                        hasLeash,
+                        isViolation,
+                        shoulderHeightCm,
+                        dogSize,
+                        heightRatio,
+                        timestamp: Date.now()
+                    };
+                    
+                    frameHistory.push(currentDetection);
+                    if (frameHistory.length > VIOLATION_REQUIRED_FRAMES) {
+                        frameHistory.shift();
+                    }
+                    
+                    const stableViolations = frameHistory.filter(d => d.isViolation && 
+                        (!stableViolation || iou(d.bbox, stableViolation.bbox) > 0.3));
+                    
+                    if (stableViolations.length >= VIOLATION_REQUIRED_FRAMES) {
+                        violationConsecutiveFrames++;
+                        if (violationConsecutiveFrames >= VIOLATION_REQUIRED_FRAMES) {
+                            stableViolation = currentDetection;
+                            drawDetection(ctx, currentDetection);
+                            
+                            document.getElementById('alert-badge').style.display = 'block';
+                            
+                            const now = Date.now();
+                            if (!hasTriggeredAlert) {
+                                hasTriggeredAlert = true;
+                                if (dogSize !== '小型犬') {
+                                    showAlertModal(dogSize, shoulderHeightCm);
+                                } else {
+                                    showToast(`⚠️ 检测到小型犬未牵绳，肩高${shoulderHeightCm}cm`);
+                                }
+                            }
+                            
+                            if (now - lastCaptureTime > CAPTURE_INTERVAL) {
+                                captureSnapshot();
+                                lastCaptureTime = now;
+                            }
+                        }
+                    } else {
+                        violationConsecutiveFrames = 0;
+                        stableViolation = null;
+                        document.getElementById('alert-badge').style.display = 'none';
+                    }
+                } else {
+                    if (stableViolation) {
+                        violationConsecutiveFrames--;
+                        if (violationConsecutiveFrames >= -MAX_MISS_FRAMES) {
+                            drawDetection(ctx, stableViolation);
+                        } else {
+                            stableViolation = null;
+                            violationConsecutiveFrames = 0;
+                            frameHistory = [];
+                            hasTriggeredAlert = false;
+                            document.getElementById('alert-badge').style.display = 'none';
+                        }
+                    }
+                }
+            } catch (err) {
+                console.log('Detection error:', err);
+            }
+        }
+
+        function drawDetection(ctx, pred) {
+            const { bbox, score, hasCollar, hasLeash, isViolation, shoulderHeightCm, dogSize } = pred;
+            const [x, y, width, height] = bbox;
+            
+            const isSmallDog = dogSize === '小型犬';
+            const color = isSmallDog ? '#ffa502' : '#ff4757';
+            
+            if (isViolation) {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(x, y, width, height);
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = isSmallDog ? 'rgba(255,165,2,0.1)' : 'rgba(255,71,87,0.1)';
+                ctx.fillRect(x, y, width, height);
+                
+                ctx.fillStyle = color;
+                ctx.font = 'bold 12px sans-serif';
+                
+                let tagText = `🐕 ${dogSize} · 肩高${shoulderHeightCm}cm`;
+                if (!hasCollar && !hasLeash) {
+                    tagText += ' · ⚠️未牵绳';
+                } else if (!hasCollar) {
+                    tagText += ' · ⚠️无项圈';
+                } else if (!hasLeash) {
+                    tagText += ' · ⚠️无牵引绳';
+                }
+                
+                ctx.fillText(tagText, x, y - 8);
+                
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.font = '10px sans-serif';
+                ctx.fillText(`置信度: ${Math.round(score * 100)}%`, x, y + height + 14);
+                
+                const cornerSize = 10;
+                ctx.beginPath();
+                ctx.moveTo(x, y + cornerSize);
+                ctx.lineTo(x, y);
+                ctx.lineTo(x + cornerSize, y);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x + width - cornerSize, y);
+                ctx.lineTo(x + width, y);
+                ctx.lineTo(x + width, y + cornerSize);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x + width, y + height - cornerSize);
+                ctx.lineTo(x + width, y + height);
+                ctx.lineTo(x + width - cornerSize, y + height);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x + cornerSize, y + height);
+                ctx.lineTo(x, y + height);
+                ctx.lineTo(x, y + height - cornerSize);
+                ctx.stroke();
+                
+                if (hasCollar) {
+                    const neckY = y + height * 0.18;
+                    ctx.strokeStyle = '#00ff88';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(x + width * 0.5, neckY, width * 0.12, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                
+                if (hasLeash) {
+                    ctx.strokeStyle = '#00ff88';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x + width * 0.7, y + height * 0.3);
+                    ctx.lineTo(x + width * 1.2, y + height * 0.15);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        let simulationInterval = null;
+        let currentSimulationType = '';
+        
+        function drawDog(ctx, width, height, isLarge, hasCollar, hasLeash) {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.fillStyle = '#4a4a5a';
+            ctx.fillRect(0, height * 0.6, width, height * 0.4);
+            
+            const scale = isLarge ? 0.35 : 0.2;
+            const centerX = width / 2;
+            const centerY = height * 0.55;
+            
+            const bodyWidth = width * scale;
+            const bodyHeight = height * scale * 0.7;
+            const headRadius = width * scale * 0.35;
+            const legWidth = bodyWidth * 0.12;
+            const legHeight = bodyHeight * 0.4;
+            
+            const dogLeft = centerX - bodyWidth / 2 - headRadius;
+            const dogTop = centerY - bodyHeight / 2 - headRadius;
+            const dogRight = centerX + bodyWidth / 2 + bodyWidth * 0.1;
+            const dogBottom = centerY + bodyHeight / 2 + legHeight * 0.5;
+            
+            if (!hasCollar && !hasLeash) {
+                const boxColor = isLarge ? '#FF0000' : '#FFD700';
+                const boxPadding = 20;
+                const boxX = dogLeft - boxPadding;
+                const boxY = dogTop - boxPadding;
+                const boxW = dogRight - dogLeft + boxPadding * 2;
+                const boxH = dogBottom - dogTop + boxPadding * 2;
+                
+                ctx.strokeStyle = boxColor;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.rect(boxX, boxY, boxW, boxH);
+                ctx.stroke();
+                
+                const cornerSize = 15;
+                ctx.beginPath();
+                ctx.moveTo(boxX, boxY + cornerSize);
+                ctx.lineTo(boxX, boxY);
+                ctx.lineTo(boxX + cornerSize, boxY);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(boxX + boxW - cornerSize, boxY);
+                ctx.lineTo(boxX + boxW, boxY);
+                ctx.lineTo(boxX + boxW, boxY + cornerSize);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(boxX + boxW, boxY + boxH - cornerSize);
+                ctx.lineTo(boxX + boxW, boxY + boxH);
+                ctx.lineTo(boxX + boxW - cornerSize, boxY + boxH);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(boxX + cornerSize, boxY + boxH);
+                ctx.lineTo(boxX, boxY + boxH);
+                ctx.lineTo(boxX, boxY + boxH - cornerSize);
+                ctx.stroke();
+                
+                ctx.fillStyle = boxColor;
+                ctx.font = 'bold 16px sans-serif';
+                const labelText = isLarge ? '中大型犬未牵绳' : '小型犬未牵绳';
+                ctx.fillText(labelText, boxX + 8, boxY - 8);
+            }
+            
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(centerX - bodyWidth / 2 + headRadius, centerY - bodyHeight * 0.1, headRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.arc(centerX - bodyWidth / 2 + headRadius - headRadius * 0.2, centerY - bodyHeight * 0.15, headRadius * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(centerX - bodyWidth / 2 + headRadius + headRadius * 0.2, centerY - bodyHeight * 0.15, headRadius * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(centerX - bodyWidth / 2 + headRadius, centerY - bodyHeight * 0.1, headRadius * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(centerX - bodyWidth / 2 + bodyWidth * 0.2 - legWidth / 2, centerY + bodyHeight * 0.25, legWidth, legHeight);
+            ctx.fillRect(centerX - bodyWidth / 2 + bodyWidth * 0.4 - legWidth / 2, centerY + bodyHeight * 0.25, legWidth, legHeight);
+            ctx.fillRect(centerX + bodyWidth / 2 - bodyWidth * 0.4 - legWidth / 2, centerY + bodyHeight * 0.25, legWidth, legHeight);
+            ctx.fillRect(centerX + bodyWidth / 2 - bodyWidth * 0.2 - legWidth / 2, centerY + bodyHeight * 0.25, legWidth, legHeight);
+            
+            if (hasCollar) {
+                ctx.strokeStyle = '#FF0000';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(centerX - bodyWidth / 2 + headRadius, centerY - bodyHeight * 0.05, headRadius * 0.5, 0, Math.PI * 1.8);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#FF0000';
+                ctx.beginPath();
+                ctx.arc(centerX - bodyWidth / 2 + headRadius + headRadius * 0.5, centerY - bodyHeight * 0.05, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            if (hasLeash) {
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(centerX - bodyWidth / 2 + headRadius + headRadius * 0.5, centerY - bodyHeight * 0.05);
+                ctx.bezierCurveTo(
+                    centerX + bodyWidth * 0.3, centerY - bodyHeight * 0.3,
+                    centerX + bodyWidth * 0.6, centerY - bodyHeight * 0.5,
+                    centerX + bodyWidth * 0.8, centerY - bodyHeight * 0.4
+                );
+                ctx.stroke();
+                
+                ctx.fillStyle = '#00ff88';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.fillText('✓牵引绳', centerX + bodyWidth * 0.85, centerY - bodyHeight * 0.4);
+            }
+            
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.ellipse(centerX + bodyWidth / 2 - bodyWidth * 0.1, centerY - bodyHeight * 0.2, bodyWidth * 0.25, bodyHeight * 0.15, Math.PI / 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#3d7c3d';
+            for (let i = 0; i < 6; i++) {
+                for (let j = 0; j < 10; j++) {
+                    ctx.beginPath();
+                    ctx.ellipse(30 + j * 70, height * 0.75 + i * 15, 25 + Math.random() * 15, 12 + Math.random() * 8, Math.random() * 0.3 - 0.15, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            ctx.fillStyle = '#4a8c4a';
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 8; j++) {
+                    ctx.beginPath();
+                    ctx.ellipse(55 + j * 85, height * 0.82 + i * 12, 20 + Math.random() * 10, 10 + Math.random() * 6, Math.random() * 0.3 - 0.15, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+        
+        function startSimulation(type) {
+            stopSimulation();
+            currentSimulationType = type;
+            document.getElementById('video-placeholder').classList.add('hidden');
+            document.getElementById('camera-info').style.display = 'none';
+            
+            const canvas = document.getElementById('simulation-canvas');
+            const video = document.getElementById('camera-video');
+            
+            video.classList.remove('active');
+            video.style.display = 'none';
+            
+            canvas.width = video.parentElement.clientWidth;
+            canvas.height = video.parentElement.clientHeight;
+            canvas.style.display = 'block';
+            canvas.style.zIndex = '10';
+            
+            const ctx = canvas.getContext('2d');
+            
+            const configs = {
+                'large-no-leash': { isLarge: true, hasCollar: false, hasLeash: false },
+                'large-with-leash': { isLarge: true, hasCollar: true, hasLeash: true },
+                'small-no-leash': { isLarge: false, hasCollar: false, hasLeash: false },
+                'small-with-leash': { isLarge: false, hasCollar: true, hasLeash: true }
+            };
+            
+            const config = configs[type];
+            
+            simulationInterval = setInterval(() => {
+                drawDog(ctx, canvas.width, canvas.height, config.isLarge, config.hasCollar, config.hasLeash);
+            }, 100);
+            
+            showToast(`开始模拟: ${type === 'large-no-leash' ? '中大型犬未牵绳' : type === 'large-with-leash' ? '中大型犬已牵绳' : type === 'small-no-leash' ? '小型犬未牵绳' : '小型犬已牵绳'}`);
+            
+            const alertBadge = document.getElementById('alert-badge');
+            if (type === 'large-no-leash' || type === 'small-no-leash') {
+                alertBadge.style.display = 'block';
+            } else {
+                alertBadge.style.display = 'none';
+            }
+            
+            if (!detectionModel) {
+                loadDetectionModel();
+            }
+        }
+        
+        function stopSimulation() {
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                simulationInterval = null;
+            }
+            currentSimulationType = '';
+            document.getElementById('simulation-canvas').style.display = 'none';
+            document.getElementById('video-placeholder').classList.remove('hidden');
+            document.getElementById('camera-info').style.display = 'block';
+            document.getElementById('alert-badge').style.display = 'none';
+            
+            const ctx = document.getElementById('detection-canvas').getContext('2d');
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            
+            stableViolation = null;
+            violationConsecutiveFrames = 0;
+            frameHistory = [];
+            hasTriggeredAlert = false;
+            
+            showToast('模拟已停止');
+        }
+
+        function openAmap() {
+            const device = deviceData[currentDeviceIndex];
+            const url = `https://uri.amap.com/navigation?from=&to=${encodeURIComponent(device.name)}&lat=${device.lat}&lon=${device.lng}&mode=car&policy=1`;
+            showToast('正在打开高德地图...');
+            window.open(url, '_blank');
+        }
+
+        function updateLiveTime() {
+            const now = new Date();
+            document.getElementById('live-time').textContent = 
+                String(now.getHours()).padStart(2,'0')+':'+
+                String(now.getMinutes()).padStart(2,'0')+':'+
+                String(now.getSeconds()).padStart(2,'0');
+        }
+        updateLiveTime();
+        setInterval(updateLiveTime, 1000);
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(()=>t.classList.remove('show'), 2000);
+        }
+
+        const searchInput = document.getElementById('search-phone');
+        if (searchInput) {
+            searchInput.addEventListener('keyup', e => e.key==='Enter' && searchRecords());
+        }
+
+        async function startCamera() {
+            console.log('startCamera called');
+            try {
+                console.log('Requesting camera permission...');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: false
+                });
+                console.log('Camera stream obtained:', stream);
+                
+                const video = document.getElementById('camera-video');
+                video.srcObject = stream;
+                video.classList.add('active');
+                video.style.transform = 'scaleX(-1)';
+                document.getElementById('video-placeholder').classList.add('hidden');
+                
+                showToast('摄像头已开启');
+                console.log('Camera started successfully');
+                
+                if (!detectionModel) {
+                    loadDetectionModel();
+                } else {
+                    startDetection();
+                }
+            } catch (err) {
+                console.error('Camera error:', err);
+                showToast('无法开启摄像头: '+err.message);
+            }
+        }
+        
+        const placeholder = document.getElementById('video-placeholder');
+        if (placeholder) {
+            placeholder.addEventListener('click', startCamera);
+            console.log('Placeholder click listener added');
+        } else {
+            console.error('video-placeholder element not found');
+        }
+
+        function openAdmin() {
+            document.getElementById('admin-modal').classList.add('show');
+            switchAdminTab('params');
+        }
+
+        function closeAdmin() {
+            document.getElementById('admin-modal').classList.remove('show');
+        }
+
+        function switchAdminTab(tab) {
+            document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const content = document.getElementById('admin-content');
+            
+            switch(tab) {
+                case 'params':
+                    renderParamsTab(content);
+                    break;
+                case 'stats':
+                    renderStatsTab(content);
+                    break;
+                case 'devices':
+                    renderDevicesTab(content);
+                    break;
+                case 'evidence':
+                    renderEvidenceTab(content);
+                    break;
+                case 'records':
+                    renderRecordsTab(content);
+                    break;
+            }
+        }
+
+        function renderParamsTab(content) {
+            content.innerHTML = `
+                <div class="admin-card">
+                    <div class="admin-card-title">⚙️ 参数设置</div>
+                    
+                    <div class="param-row">
+                        <div>
+                            <div class="param-label">犬只肩高管控阈值</div>
+                            <div style="font-size:11px;opacity:0.5;margin-top:4px;">低于此高度判定为小型犬</div>
+                        </div>
+                        <div class="param-value">${adminConfig.shoulderHeightThreshold} cm</div>
+                    </div>
+                    <div class="param-slider" onclick="updateThreshold(event)">
+                        <div class="param-slider-fill" style="width:${(adminConfig.shoulderHeightThreshold/50)*100}%"></div>
+                        <div class="param-slider-thumb" style="left:${(adminConfig.shoulderHeightThreshold/50)*100}%"></div>
+                    </div>
+                    
+                    <div class="param-row">
+                        <div class="param-label">劝导语音内容</div>
+                    </div>
+                    <textarea class="param-input" id="voice-input" rows="3" placeholder="请输入劝导语音内容">${adminConfig.warningVoice}</textarea>
+                    
+                    <div class="param-row">
+                        <div class="param-label">抓拍功能</div>
+                        <div class="param-toggle ${adminConfig.captureEnabled?'on':''}" onclick="toggleCapture(this)">
+                            <div class="param-toggle-thumb"></div>
+                        </div>
+                    </div>
+                    
+                    <button class="save-btn" onclick="saveParams()">✅ 保存设置</button>
+                </div>
+            `;
+        }
+
+        function updateThreshold(event) {
+            const slider = event.currentTarget;
+            const rect = slider.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const percentage = Math.max(0, Math.min(1, x / rect.width));
+            const value = Math.round(percentage * 50);
+            adminConfig.shoulderHeightThreshold = value;
+            
+            const fill = slider.querySelector('.param-slider-fill');
+            const thumb = slider.querySelector('.param-slider-thumb');
+            fill.style.width = (value/50)*100 + '%';
+            thumb.style.left = (value/50)*100 + '%';
+            
+            const valueEl = slider.parentElement.querySelector('.param-value');
+            valueEl.textContent = value + ' cm';
+        }
+
+        function toggleCapture(toggle) {
+            toggle.classList.toggle('on');
+            adminConfig.captureEnabled = toggle.classList.contains('on');
+        }
+
+        function saveParams() {
+            adminConfig.warningVoice = document.getElementById('voice-input').value;
+            showToast('参数设置已保存');
+        }
+
+        function renderStatsTab(content) {
+            const stats = statsData[currentPeriod];
+            const periodLabels = { daily: '今日', weekly: '本周', monthly: '本月', quarterly: '本季度' };
+            
+            content.innerHTML = `
+                <div class="stats-period">
+                    <div class="period-btn ${currentPeriod==='daily'?'active':''}" onclick="switchPeriod('daily')">今日</div>
+                    <div class="period-btn ${currentPeriod==='weekly'?'active':''}" onclick="switchPeriod('weekly')">本周</div>
+                    <div class="period-btn ${currentPeriod==='monthly'?'active':''}" onclick="switchPeriod('monthly')">本月</div>
+                    <div class="period-btn ${currentPeriod==='quarterly'?'active':''}" onclick="switchPeriod('quarterly')">季度</div>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stats-card">
+                        <div class="stats-value">${stats.total}</div>
+                        <div class="stats-label">${periodLabels[currentPeriod]}违规总数</div>
+                    </div>
+                    <div class="stats-card" style="background:rgba(255,71,87,0.1);">
+                        <div class="stats-value" style="color:#ff4757;">${stats.large}</div>
+                        <div class="stats-label">中大型犬</div>
+                    </div>
+                    <div class="stats-card" style="background:rgba(255,165,2,0.1);">
+                        <div class="stats-value" style="color:#ffa502;">${stats.medium}</div>
+                        <div class="stats-label">中型犬</div>
+                    </div>
+                    <div class="stats-card" style="background:rgba(0,255,136,0.1);">
+                        <div class="stats-value" style="color:#00ff88;">${stats.small}</div>
+                        <div class="stats-label">小型犬</div>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <div class="admin-card-title">📍 高频违规点位</div>
+                    <div class="location-list">
+                        ${locationStats.map(loc => `
+                            <div class="location-item">
+                                <div class="location-name">${loc.name}</div>
+                                <div class="location-count">${loc.count}次</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function switchPeriod(period) {
+            currentPeriod = period;
+            renderStatsTab(document.getElementById('admin-content'));
+        }
+
+        function renderDevicesTab(content) {
+            const onlineCount = deviceStatusData.filter(d => d.status === 'online').length;
+            const offlineCount = deviceStatusData.filter(d => d.status === 'offline').length;
+            const warningCount = deviceStatusData.filter(d => d.status === 'warning').length;
+            
+            content.innerHTML = `
+                <div class="stats-grid" style="margin-bottom:12px;">
+                    <div class="stats-card" style="background:rgba(0,255,136,0.1);">
+                        <div class="stats-value" style="color:#00ff88;">${onlineCount}</div>
+                        <div class="stats-label">在线设备</div>
+                    </div>
+                    <div class="stats-card" style="background:rgba(255,71,87,0.1);">
+                        <div class="stats-value" style="color:#ff4757;">${offlineCount}</div>
+                        <div class="stats-label">离线设备</div>
+                    </div>
+                    <div class="stats-card" style="background:rgba(255,165,2,0.1);">
+                        <div class="stats-value" style="color:#ffa502;">${warningCount}</div>
+                        <div class="stats-label">故障提醒</div>
+                    </div>
+                </div>
+                
+                <div class="admin-card">
+                    <div class="admin-card-title">📡 设备状态列表</div>
+                    <div class="device-list">
+                        ${deviceStatusData.map(device => `
+                            <div class="device-item">
+                                <div class="device-status ${device.status}"></div>
+                                <div class="device-info">
+                                    <div class="device-name">${device.name}</div>
+                                    <div class="device-id">${device.cameraId}</div>
+                                </div>
+                                <div class="device-time">${device.lastOnline.split(' ')[1]}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderEvidenceTab(content) {
+            content.innerHTML = `
+                <div class="admin-card">
+                    <div class="admin-card-title">📷 取证素材管理</div>
+                    <div class="evidence-grid">
+                        ${evidenceData.map(ev => `
+                            <div class="evidence-item" onclick="viewEvidence(${ev.id})">
+                                <div style="width:100%;height:100%;background:linear-gradient(135deg, #2a2a2a, #1a1a1a);display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                                    <span style="font-size:24px;">${ev.type === 'large' ? '🐕' : ev.type === 'medium' ? '🐩' : '🦮'}</span>
+                                    <span style="font-size:10px;opacity:0.6;margin-top:4px;">${ev.location}</span>
+                                </div>
+                                <div class="evidence-label">${ev.time.split(' ')[1]}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button class="export-btn" onclick="exportEvidence()">📥 导出全部</button>
+                </div>
+            `;
+        }
+
+        function viewEvidence(id) {
+            const ev = evidenceData.find(e => e.id === id);
+            showToast(`查看证据: ${ev.location} - ${ev.time}`);
+        }
+
+        function exportEvidence() {
+            showToast('正在导出取证素材...');
+            setTimeout(() => showToast('导出完成'), 1500);
+        }
+
+        function renderRecordsTab(content) {
+            content.innerHTML = `
+                <div class="admin-card">
+                    <div class="admin-card-title">📋 违规记录查询</div>
+                    <div class="search-box">
+                        <input type="text" class="search-input" id="admin-search" placeholder="输入手机号或位置查询">
+                        <button class="search-btn" onclick="adminSearchRecords()">查询</button>
+                    </div>
+                    <div class="record-list" id="admin-record-list" style="max-height:300px;">
+                        ${mockData.map(item => `
+                            <div class="record-item" onclick="showDetail(${mockData.indexOf(item)})">
+                                <div class="record-phone">${item.phone}</div>
+                                <div class="record-info">
+                                    <span>${item.size} · ${item.location}</span>
+                                    <span class="record-level ${item.level.includes('红色')?'level-red':'level-orange'}">${item.level.replace('预警','')}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function adminSearchRecords() {
+            const keyword = document.getElementById('admin-search').value.trim();
+            const list = document.getElementById('admin-record-list');
+            
+            if (!keyword) {
+                list.innerHTML = mockData.map(item => `
+                    <div class="record-item" onclick="showDetail(${mockData.indexOf(item)})">
+                        <div class="record-phone">${item.phone}</div>
+                        <div class="record-info">
+                            <span>${item.size} · ${item.location}</span>
+                            <span class="record-level ${item.level.includes('红色')?'level-red':'level-orange'}">${item.level.replace('预警','')}</span>
+                        </div>
+                    </div>
+                `).join('');
+                return;
+            }
+            
+            const filtered = mockData.filter(item => item.phone.includes(keyword) || item.location.includes(keyword));
+            list.innerHTML = filtered.length ? filtered.map(item => `
+                <div class="record-item" onclick="showDetail(${mockData.indexOf(item)})">
+                    <div class="record-phone">${item.phone}</div>
+                    <div class="record-info">
+                        <span>${item.size} · ${item.location}</span>
+                        <span class="record-level ${item.level.includes('红色')?'level-red':'level-orange'}">${item.level.replace('预警','')}</span>
+                    </div>
+                </div>
+            `).join('') : '<div style="text-align:center;padding:20px;opacity:0.5;">未找到相关记录</div>';
+        }
+
+    </script>
+</body>
+</html>
